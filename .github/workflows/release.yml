@@ -95,14 +95,14 @@ jobs:
         if: matrix.platform != 'windows-latest'
         run: |
           mkdir -p upload
-          find crates/fastclaw-app/src-tauri/target/release/bundle -type f \( -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" \) -exec cp {} upload/ \;
+          find target/release/bundle -type f \( -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" \) -exec cp {} upload/ \;
 
       - name: Collect artifacts (Windows)
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path upload
-          Get-ChildItem -Recurse crates/fastclaw-app/src-tauri/target/release/bundle -Include *.exe,*.msi | Copy-Item -Destination upload
+          Get-ChildItem -Recurse target/release/bundle -Include *.exe,*.msi | Copy-Item -Destination upload
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
