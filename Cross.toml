@@ -1,0 +1,7 @@
+# cross 在容器内编译 aarch64，宿主机 apt 不会生效；需为目标 Debian 架构安装 OpenSSL 开发包。
+# 参考：https://github.com/cross-rs/cross/wiki/Recipes#openssl
+[target.aarch64-unknown-linux-gnu]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libssl-dev:$CROSS_DEB_ARCH",
+]
