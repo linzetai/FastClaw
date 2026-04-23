@@ -199,6 +199,11 @@ pub fn run() {
             commands::reload_mcp_servers,
             commands::add_mcp_server,
             commands::remove_mcp_server,
+            commands::cron_list_jobs,
+            commands::cron_get_job,
+            commands::cron_upsert_job,
+            commands::cron_delete_job,
+            commands::cron_list_runs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running FastClaw app");

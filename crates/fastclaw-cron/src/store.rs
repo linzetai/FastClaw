@@ -4,6 +4,7 @@ use sqlx::SqlitePool;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CronJob {
+    #[serde(default)]
     pub id: String,
     pub name: String,
     pub schedule: String,
@@ -11,9 +12,13 @@ pub struct CronJob {
     pub enabled: bool,
     pub last_run: Option<String>,
     pub next_run: Option<String>,
+    #[serde(default)]
     pub status: JobStatus,
+    #[serde(default)]
     pub created_at: String,
+    #[serde(default)]
     pub run_count: i64,
+    #[serde(default)]
     pub error_count: i64,
     pub last_error: Option<String>,
 }
@@ -41,9 +46,10 @@ pub enum JobAction {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum JobStatus {
+    #[default]
     Idle,
     Running,
     Failed,
@@ -72,6 +78,43 @@ impl JobStatus {
     }
 }
 
+/// A single execution record for a cron job.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CronJobRun {
+    pub id: i64,
+    pub job_id: String,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub status: String,
+    pub output: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct CronJobRunRow {
+    id: i64,
+    job_id: String,
+    started_at: String,
+    ended_at: Option<String>,
+    status: String,
+    output: Option<String>,
+    error: Option<String>,
+}
+
+impl From<CronJobRunRow> for CronJobRun {
+    fn from(r: CronJobRunRow) -> Self {
+        Self {
+            id: r.id,
+            job_id: r.job_id,
+            started_at: r.started_at,
+            ended_at: r.ended_at,
+            status: r.status,
+            output: r.output,
+            error: r.error,
+        }
+    }
+}
+
 pub struct CronJobStore {
     pool: SqlitePool,
 }
@@ -93,6 +136,26 @@ impl CronJobStore {
                 error_count INTEGER NOT NULL DEFAULT 0,
                 last_error TEXT
             )",
+        )
+        .execute(&pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS cron_job_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id TEXT NOT NULL REFERENCES cron_jobs(id) ON DELETE CASCADE,
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                status TEXT NOT NULL DEFAULT 'running',
+                output TEXT,
+                error TEXT
+            )",
+        )
+        .execute(&pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_cron_job_runs_job_id ON cron_job_runs(job_id, started_at DESC)",
         )
         .execute(&pool)
         .await?;
@@ -139,6 +202,28 @@ impl CronJobStore {
             .fetch_all(&self.pool)
             .await?;
         rows.into_iter().map(|r| r.into_job()).collect()
+    }
+
+    /// List jobs whose action contains a matching `agent_id` (AgentChat actions).
+    pub async fn list_by_agent(&self, agent_id: &str) -> anyhow::Result<Vec<CronJob>> {
+        let rows = sqlx::query_as::<_, CronJobRow>(
+            "SELECT * FROM cron_jobs WHERE json_extract(action, '$.agent_id') = ? ORDER BY created_at",
+        )
+        .bind(agent_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(|r| r.into_job()).collect()
+    }
+
+    /// Delete all jobs belonging to a specific agent.
+    pub async fn delete_by_agent(&self, agent_id: &str) -> anyhow::Result<u64> {
+        let result = sqlx::query(
+            "DELETE FROM cron_jobs WHERE json_extract(action, '$.agent_id') = ?",
+        )
+        .bind(agent_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
     }
 
     pub async fn get(&self, id: &str) -> anyhow::Result<Option<CronJob>> {
@@ -214,6 +299,76 @@ impl CronJobStore {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    // ─── Run log methods ───
+
+    /// Insert a new run record when a job starts. Returns the run id.
+    pub async fn insert_run(&self, job_id: &str) -> anyhow::Result<i64> {
+        let now = Utc::now().to_rfc3339();
+        let result = sqlx::query(
+            "INSERT INTO cron_job_runs (job_id, started_at, status) VALUES (?, ?, 'running')",
+        )
+        .bind(job_id)
+        .bind(&now)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Mark a run as completed with optional output text.
+    pub async fn complete_run(&self, run_id: i64, output: Option<&str>) -> anyhow::Result<()> {
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "UPDATE cron_job_runs SET status = 'ok', ended_at = ?, output = ? WHERE id = ?",
+        )
+        .bind(&now)
+        .bind(output)
+        .bind(run_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Mark a run as failed with error message.
+    pub async fn fail_run(&self, run_id: i64, error: &str) -> anyhow::Result<()> {
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "UPDATE cron_job_runs SET status = 'error', ended_at = ?, error = ? WHERE id = ?",
+        )
+        .bind(&now)
+        .bind(error)
+        .bind(run_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// List recent runs for a given job, newest first.
+    pub async fn list_runs(&self, job_id: &str, limit: i64) -> anyhow::Result<Vec<CronJobRun>> {
+        let rows = sqlx::query_as::<_, CronJobRunRow>(
+            "SELECT * FROM cron_job_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT ?",
+        )
+        .bind(job_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(CronJobRun::from).collect())
+    }
+
+    /// Delete old runs beyond a retention limit per job.
+    pub async fn prune_runs(&self, job_id: &str, keep: i64) -> anyhow::Result<u64> {
+        let result = sqlx::query(
+            "DELETE FROM cron_job_runs WHERE job_id = ? AND id NOT IN (
+                SELECT id FROM cron_job_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT ?
+            )",
+        )
+        .bind(job_id)
+        .bind(job_id)
+        .bind(keep)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
     }
 
     /// Reset stale `running` jobs back to `idle` after restart.
@@ -363,5 +518,99 @@ mod tests {
 
         let j = store.get("stale-1").await.unwrap().unwrap();
         assert_eq!(j.status, JobStatus::Idle);
+    }
+
+    fn make_agent_chat_job(id: &str, agent_id: &str, name: &str) -> CronJob {
+        CronJob {
+            id: id.into(),
+            name: name.into(),
+            schedule: "0 * * * * *".into(),
+            action: JobAction::AgentChat {
+                agent_id: agent_id.into(),
+                message: "hello".into(),
+                session_id: None,
+            },
+            enabled: true,
+            last_run: None,
+            next_run: None,
+            status: JobStatus::Idle,
+            created_at: Utc::now().to_rfc3339(),
+            run_count: 0,
+            error_count: 0,
+            last_error: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn list_by_agent_filters_correctly() {
+        let pool = test_pool().await;
+        let store = CronJobStore::open(pool).await.unwrap();
+
+        store.upsert(&make_agent_chat_job("j1", "agent-a", "Job A1")).await.unwrap();
+        store.upsert(&make_agent_chat_job("j2", "agent-a", "Job A2")).await.unwrap();
+        store.upsert(&make_agent_chat_job("j3", "agent-b", "Job B1")).await.unwrap();
+
+        let webhook_job = CronJob {
+            id: "j4".into(),
+            name: "Webhook".into(),
+            schedule: "0 * * * * *".into(),
+            action: JobAction::Webhook {
+                url: "http://example.com".into(),
+                method: None,
+                body: None,
+            },
+            enabled: true,
+            last_run: None,
+            next_run: None,
+            status: JobStatus::Idle,
+            created_at: Utc::now().to_rfc3339(),
+            run_count: 0,
+            error_count: 0,
+            last_error: None,
+        };
+        store.upsert(&webhook_job).await.unwrap();
+
+        let all = store.list().await.unwrap();
+        assert_eq!(all.len(), 4);
+
+        let agent_a = store.list_by_agent("agent-a").await.unwrap();
+        assert_eq!(agent_a.len(), 2);
+        assert!(agent_a.iter().all(|j| j.id == "j1" || j.id == "j2"));
+
+        let agent_b = store.list_by_agent("agent-b").await.unwrap();
+        assert_eq!(agent_b.len(), 1);
+        assert_eq!(agent_b[0].id, "j3");
+
+        let agent_c = store.list_by_agent("agent-c").await.unwrap();
+        assert_eq!(agent_c.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn delete_by_agent_removes_only_matching() {
+        let pool = test_pool().await;
+        let store = CronJobStore::open(pool).await.unwrap();
+
+        store.upsert(&make_agent_chat_job("j1", "agent-a", "Job A1")).await.unwrap();
+        store.upsert(&make_agent_chat_job("j2", "agent-a", "Job A2")).await.unwrap();
+        store.upsert(&make_agent_chat_job("j3", "agent-b", "Job B1")).await.unwrap();
+
+        let deleted = store.delete_by_agent("agent-a").await.unwrap();
+        assert_eq!(deleted, 2);
+
+        let remaining = store.list().await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, "j3");
+    }
+
+    #[tokio::test]
+    async fn delete_by_agent_no_match_returns_zero() {
+        let pool = test_pool().await;
+        let store = CronJobStore::open(pool).await.unwrap();
+
+        store.upsert(&make_agent_chat_job("j1", "agent-a", "Job A1")).await.unwrap();
+
+        let deleted = store.delete_by_agent("nonexistent").await.unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(store.list().await.unwrap().len(), 1);
     }
 }

@@ -363,6 +363,44 @@ export async function getIdentityFiles(agentId: string): Promise<IdentityFiles> 
   }
 }
 
+// ─── Cron jobs ───
+
+export type { CronJob, CronJobAction, CronJobRun } from "./transport";
+
+export async function listCronJobs(agentId?: string) {
+  try {
+    const resp = await transport.cronListJobs(agentId);
+    return resp.jobs;
+  } catch (e) {
+    console.warn("[api] listCronJobs error:", e);
+    return [];
+  }
+}
+
+export async function getCronJob(jobId: string) {
+  return transport.cronGetJob(jobId);
+}
+
+export async function upsertCronJob(
+  job: Parameters<typeof transport.cronUpsertJob>[0],
+) {
+  return transport.cronUpsertJob(job);
+}
+
+export async function deleteCronJob(jobId: string) {
+  return transport.cronDeleteJob(jobId);
+}
+
+export async function listCronRuns(jobId: string, limit?: number) {
+  try {
+    const resp = await transport.cronListRuns(jobId, limit);
+    return resp.runs;
+  } catch (e) {
+    console.warn("[api] listCronRuns error:", e);
+    return [];
+  }
+}
+
 // ─── File listing (via Tauri or fallback) ───
 
 export async function listFiles(dirPath: string): Promise<{ files: string[]; dirs: string[] }> {

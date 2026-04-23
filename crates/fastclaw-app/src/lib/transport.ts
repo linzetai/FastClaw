@@ -599,6 +599,89 @@ export async function removeMcpServer(
   }>;
 }
 
+// ─── Cron jobs ───
+
+export interface CronJobAction {
+  type: "agent_chat" | "dag_execute" | "webhook";
+  agent_id?: string;
+  message?: string;
+  session_id?: string;
+  url?: string;
+  method?: string;
+  body?: unknown;
+  dag?: unknown;
+  input?: unknown;
+}
+
+export interface CronJob {
+  id: string;
+  name: string;
+  schedule: string;
+  action: CronJobAction;
+  enabled: boolean;
+  last_run: string | null;
+  next_run: string | null;
+  status: "idle" | "running" | "failed" | "disabled";
+  created_at: string;
+  run_count: number;
+  error_count: number;
+  last_error: string | null;
+}
+
+export async function cronListJobs(
+  agentId?: string,
+): Promise<{ jobs: CronJob[]; count: number }> {
+  if (isTauri) {
+    return tauriInvoke("cron_list_jobs", { agentId: agentId ?? null });
+  }
+  throw new Error("cron IPC only available in Tauri mode");
+}
+
+export async function cronGetJob(jobId: string): Promise<CronJob> {
+  if (isTauri) {
+    return tauriInvoke("cron_get_job", { jobId });
+  }
+  throw new Error("cron IPC only available in Tauri mode");
+}
+
+export async function cronUpsertJob(
+  job: Partial<CronJob> & { schedule: string; action: CronJobAction },
+): Promise<{ id: string; ok: boolean }> {
+  if (isTauri) {
+    return tauriInvoke("cron_upsert_job", { job });
+  }
+  throw new Error("cron IPC only available in Tauri mode");
+}
+
+export async function cronDeleteJob(
+  jobId: string,
+): Promise<{ deleted: boolean }> {
+  if (isTauri) {
+    return tauriInvoke("cron_delete_job", { jobId });
+  }
+  throw new Error("cron IPC only available in Tauri mode");
+}
+
+export interface CronJobRun {
+  id: number;
+  job_id: string;
+  started_at: string;
+  ended_at: string | null;
+  status: string;
+  output: string | null;
+  error: string | null;
+}
+
+export async function cronListRuns(
+  jobId: string,
+  limit?: number,
+): Promise<{ runs: CronJobRun[]; count: number }> {
+  if (isTauri) {
+    return tauriInvoke("cron_list_runs", { jobId, limit: limit ?? null });
+  }
+  throw new Error("cron IPC only available in Tauri mode");
+}
+
 // ─── WebSocket passthrough (browser mode only) ───
 
 export function connectWs(url: string, token?: string): Promise<void> {

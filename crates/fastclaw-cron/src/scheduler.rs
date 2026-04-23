@@ -49,6 +49,21 @@ impl CronScheduler {
         }
     }
 
+    /// Create a scheduler sharing an external `Notify` so callers outside the
+    /// scheduler (e.g. IPC commands, agent tools) can wake it up.
+    pub fn with_wake(
+        store: Arc<CronJobStore>,
+        trigger: Arc<dyn JobTrigger>,
+        wake: Arc<Notify>,
+    ) -> Self {
+        Self {
+            store,
+            trigger,
+            tick_interval: Duration::from_secs(1),
+            wake,
+        }
+    }
+
     /// Notify the scheduler to check for due jobs immediately (e.g., after a new job is added).
     pub fn wake(&self) {
         self.wake.notify_one();
@@ -117,7 +132,9 @@ async fn execute_job(store: &CronJobStore, trigger: &dyn JobTrigger, job: CronJo
 
     tracing::info!(job = %job_id, name = %job.name, "cron: executing job");
 
-    let result = match &job.action {
+    let run_id = store.insert_run(&job_id).await.unwrap_or(-1);
+
+    let result: Result<Option<String>, anyhow::Error> = match &job.action {
         JobAction::AgentChat {
             agent_id,
             message,
@@ -125,32 +142,41 @@ async fn execute_job(store: &CronJobStore, trigger: &dyn JobTrigger, job: CronJo
         } => trigger
             .trigger_agent_chat(agent_id, message, session_id.as_deref())
             .await
-            .map(|_| ()),
+            .map(Some),
         JobAction::DagExecute { dag, input } => trigger
             .trigger_dag_execute(dag, input.as_ref())
             .await
-            .map(|_| ()),
-        JobAction::Webhook { url, method, body } => {
-            trigger
-                .trigger_webhook(url, method.as_deref(), body.as_ref())
-                .await
-        }
+            .map(|v| Some(v.to_string())),
+        JobAction::Webhook { url, method, body } => trigger
+            .trigger_webhook(url, method.as_deref(), body.as_ref())
+            .await
+            .map(|_| None),
     };
 
     let next = compute_next_run(&schedule);
     let next_ref = next.as_deref();
 
     match result {
-        Ok(()) => {
+        Ok(output) => {
             tracing::info!(job = %job_id, next = ?next_ref, "cron: job completed");
             let _ = store.mark_completed(&job_id, next_ref).await;
+            if run_id >= 0 {
+                let _ = store.complete_run(run_id, output.as_deref()).await;
+            }
         }
         Err(e) => {
             let err_msg = e.to_string();
             let safe_msg: String = err_msg.chars().take(500).collect();
             tracing::error!(job = %job_id, error = %safe_msg, "cron: job failed");
             let _ = store.mark_failed(&job_id, &safe_msg, next_ref).await;
+            if run_id >= 0 {
+                let _ = store.fail_run(run_id, &safe_msg).await;
+            }
         }
+    }
+
+    if run_id >= 0 {
+        let _ = store.prune_runs(&job_id, 50).await;
     }
 }
 

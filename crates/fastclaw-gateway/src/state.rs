@@ -585,6 +585,7 @@ impl StateBuilder {
             channel_registry: Arc::new(tokio::sync::RwLock::new(p5.phase2.phase4.channel_registry)),
             context_engine: Arc::new(p5.phase2.context_engine),
             cron_store: Arc::new(p5.cron_store),
+            cron_wake: Arc::new(tokio::sync::Notify::new()),
             budget_tracker: Arc::new(p5.budget_tracker),
             model_router: p5.model_router,
             ws_broadcast: p5.ws_broadcast,
@@ -604,6 +605,12 @@ impl StateBuilder {
             state.tool_registry.clone(),
         )));
         tracing::info!("registered manage_mcp_server tool");
+
+        state.tool_registry.register(Arc::new(crate::cron_tool::ManageCronTool::new(
+            state.cron_store.clone(),
+            state.cron_wake.clone(),
+        )));
+        tracing::info!("registered manage_cron tool");
 
         state.spawn_skill_evolution_tasks();
 
@@ -721,6 +728,7 @@ pub struct AppState {
     pub channel_registry: Arc<tokio::sync::RwLock<ChannelRegistry>>,
     pub context_engine: Arc<fastclaw_context::ContextEngine>,
     pub cron_store: Arc<CronJobStore>,
+    pub cron_wake: Arc<tokio::sync::Notify>,
     pub budget_tracker: Arc<BudgetTracker>,
     pub model_router: Option<Arc<fastclaw_model_router::ModelRouter>>,
     pub ws_broadcast: tokio::sync::broadcast::Sender<String>,
@@ -1995,6 +2003,7 @@ impl AppState {
             channel_registry: Arc::new(tokio::sync::RwLock::new(channel_registry)),
             context_engine: Arc::new(context_engine),
             cron_store: Arc::new(cron_store),
+            cron_wake: Arc::new(tokio::sync::Notify::new()),
             budget_tracker: Arc::new(budget_tracker),
             model_router: None,
             ws_broadcast,

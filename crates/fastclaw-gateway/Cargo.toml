@@ -45,6 +45,7 @@ tokio-util = "0.7.18"
 notify.workspace = true
 reqwest.workspace = true
 url = "2"
+cron = "0.12"
 
 [features]
 test-helpers = []

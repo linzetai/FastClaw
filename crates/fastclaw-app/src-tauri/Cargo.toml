@@ -35,10 +35,14 @@ dirs = { workspace = true }
 json5 = { workspace = true }
 chrono = { workspace = true }
 
+cron = "0.12"
+
 fastclaw-core = { path = "../../fastclaw-core" }
 fastclaw-gateway = { path = "../../fastclaw-gateway" }
 fastclaw-agent = { path = "../../fastclaw-agent" }
+fastclaw-cron = { path = "../../fastclaw-cron" }
 fastclaw-observe = { path = "../../fastclaw-observe" }
+fastclaw-security = { path = "../../fastclaw-security" }
 tauri-plugin-dialog = "2"
 tauri-plugin-mcp-bridge = "0.11"
 fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }

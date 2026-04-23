@@ -1,6 +1,7 @@
 pub mod error;
 pub mod extract;
 pub mod chat_pipeline;
+pub mod cron_tool;
 pub mod mcp_tool;
 mod memory_scope;
 pub mod routes;
@@ -241,16 +242,31 @@ fn spawn_cron_scheduler(state: AppState) {
             message: &str,
             session_id: Option<&str>,
         ) -> anyhow::Result<String> {
+            let sid = session_id
+                .map(String::from)
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+            let title_preview: String = message.chars().take(30).collect();
+            let title = format!("[定时] {title_preview}");
+            let _ = self
+                .state
+                .session_store
+                .create_session(&sid, agent_id, Some(&title))
+                .await;
+
+            let user_msg = fastclaw_core::types::ChatMessage {
+                role: fastclaw_core::types::Role::User,
+                content: Some(serde_json::Value::String(message.to_string())),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            };
+            let _ = self.state.session_store.append_message(&sid, &user_msg).await;
+
             let mut request = fastclaw_core::types::ChatRequest {
                 agent_id: Some(agent_id.to_string()),
-                session_id: session_id.map(String::from),
-                messages: vec![fastclaw_core::types::ChatMessage {
-                    role: fastclaw_core::types::Role::User,
-                    content: Some(serde_json::Value::String(message.to_string())),
-                    name: None,
-                    tool_calls: None,
-                    tool_call_id: None,
-                }],
+                session_id: Some(sid.clone()),
+                messages: vec![user_msg],
                 model: None,
                 stream: false,
                 max_tokens: None,
@@ -294,6 +310,16 @@ fn spawn_cron_scheduler(state: AppState) {
                 .first()
                 .and_then(|c| c.message.text_content())
                 .unwrap_or_default();
+
+            let assistant_msg = fastclaw_core::types::ChatMessage {
+                role: fastclaw_core::types::Role::Assistant,
+                content: Some(serde_json::Value::String(reply.clone())),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            };
+            let _ = self.state.session_store.append_message(&sid, &assistant_msg).await;
+
             Ok(reply)
         }
 
@@ -356,7 +382,9 @@ fn spawn_cron_scheduler(state: AppState) {
     let trigger = Arc::new(GatewayCronTrigger {
         state: state.clone(),
     });
-    let scheduler = fastclaw_cron::CronScheduler::new(state.cron_store.clone(), trigger);
+    let wake = state.cron_wake.clone();
+    let scheduler =
+        fastclaw_cron::CronScheduler::with_wake(state.cron_store.clone(), trigger, wake);
 
     tokio::spawn(async move {
         if let Err(e) = scheduler.run().await {
