@@ -21,6 +21,11 @@ export interface ChatMessageToolCall {
   duration?: number;
 }
 
+export interface ChatMessageImage {
+  url: string;
+  alt?: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
@@ -28,6 +33,7 @@ export interface ChatMessage {
   timestamp: Date;
   chatId: string;
   toolCalls?: ChatMessageToolCall[];
+  images?: ChatMessageImage[];
 }
 
 export type StreamItem = { type: "message"; data: ChatMessage };
@@ -490,15 +496,34 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               result: tc.output as string | undefined,
             }));
           }
+          let content: string;
+          let images: ChatMessageImage[] | undefined;
+          if (Array.isArray(m.content)) {
+            const textParts: string[] = [];
+            const imgParts: ChatMessageImage[] = [];
+            for (const part of m.content as Array<Record<string, unknown>>) {
+              if (part.type === "text" && typeof part.text === "string") {
+                textParts.push(part.text);
+              } else if (part.type === "image_url") {
+                const iu = part.image_url as Record<string, string> | undefined;
+                if (iu?.url) imgParts.push({ url: iu.url });
+              }
+            }
+            content = textParts.join("\n");
+            if (imgParts.length > 0) images = imgParts;
+          } else {
+            content = typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
+          }
           return {
             type: "message" as const,
             data: {
               role: m.role as "user" | "assistant" | "system",
-              content: typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""),
+              content,
               id: nextId++,
               timestamp: new Date(m.createdAt),
               chatId,
               toolCalls,
+              images,
             },
           };
         });

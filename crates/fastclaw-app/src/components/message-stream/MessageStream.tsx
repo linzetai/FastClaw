@@ -40,6 +40,7 @@ interface AttachedFile {
   size: number;
   type: string;
   file: File;
+  previewUrl?: string;
 }
 
 function formatSize(bytes: number) {
@@ -49,11 +50,37 @@ function formatSize(bytes: number) {
 }
 
 function FilePill({ file, onRemove }: { file: AttachedFile; onRemove: () => void }) {
-  const icon = file.type.startsWith("image/")
+  const isImage = file.type.startsWith("image/");
+  const icon = isImage
     ? <ImageIcon size={12} strokeWidth={1.5} />
     : file.type.includes("pdf")
       ? <FileText size={12} strokeWidth={1.5} />
       : <Paperclip size={12} strokeWidth={1.5} />;
+
+  if (isImage && file.previewUrl) {
+    return (
+      <div
+        className="relative inline-block rounded-lg overflow-hidden"
+        style={{
+          border: `0.5px solid var(--separator)`,
+          animation: "pop 0.2s ease-out",
+        }}
+      >
+        <img
+          src={file.previewUrl}
+          alt={file.name}
+          className="block max-h-[80px] max-w-[120px] object-cover"
+        />
+        <button
+          onClick={onRemove}
+          className="absolute top-0.5 right-0.5 flex h-4 w-4 cursor-pointer items-center justify-center rounded-full transition-colors duration-100"
+          style={{ background: "rgba(0,0,0,0.5)", color: "#fff" }}
+        >
+          <X size={8} strokeWidth={2.5} />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -328,6 +355,24 @@ function UserBubble({ msg }: { msg: ChatMessage }) {
           }}
         >
           {text}
+          {msg.images && msg.images.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {msg.images.map((img, i) => (
+                <img
+                  key={i}
+                  src={img.url}
+                  alt={img.alt || "attached image"}
+                  className="rounded-md object-cover"
+                  style={{
+                    maxHeight: 200,
+                    maxWidth: "100%",
+                    border: "0.5px solid rgba(255,255,255,0.2)",
+                  }}
+                  loading="lazy"
+                />
+              ))}
+            </div>
+          )}
           {tags.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {tags.map((tag, ti) =>
@@ -879,6 +924,7 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
       size: f.size,
       type: f.type,
       file: f,
+      previewUrl: f.type.startsWith("image/") ? URL.createObjectURL(f) : undefined,
     }));
     setAttachedFiles((prev) => [...prev, ...newFiles]);
   }, []);
@@ -894,16 +940,42 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
   }, [processFiles]);
 
   const removeFile = useCallback((index: number) => {
-    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
+    setAttachedFiles((prev) => {
+      const removed = prev[index];
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      return prev.filter((_, i) => i !== index);
+    });
   }, []);
 
   const sendWithContent = async (txt: string, mentions: InlineMention[]) => {
     const mentionDesc = mentions.length > 0
       ? `\n\n[引用: ${mentions.map((m) => `@${m.label} (${m.type})`).join(", ")}]`
       : "";
-    const fileDesc = attachedFiles.length > 0
-      ? `\n\n[附件: ${attachedFiles.map((f) => f.name).join(", ")}]`
+    const nonImageFiles = attachedFiles.filter((f) => !f.type.startsWith("image/"));
+    const imageFiles = attachedFiles.filter((f) => f.type.startsWith("image/"));
+    const fileDesc = nonImageFiles.length > 0
+      ? `\n\n[附件: ${nonImageFiles.map((f) => f.name).join(", ")}]`
       : "";
+
+    const imageDataUrls: Array<{ url: string; alt?: string }> = [];
+    if (imageFiles.length > 0) {
+      await Promise.all(
+        imageFiles.map(
+          (af) =>
+            new Promise<void>((resolve) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                if (typeof reader.result === "string") {
+                  imageDataUrls.push({ url: reader.result, alt: af.name });
+                }
+                resolve();
+              };
+              reader.onerror = () => resolve();
+              reader.readAsDataURL(af.file);
+            }),
+        ),
+      );
+    }
 
     const currentState = useAgentStore.getState();
     const capturedAgentId = currentState.activeAgentId;
@@ -911,7 +983,12 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
     const currentActiveChat = currentAc?.chatList.find((c) => c.id === currentAc.activeChatId);
     const capturedChatId = currentActiveChat?.id ?? "temp";
 
-    addMessage(capturedAgentId, { role: "user", content: txt + mentionDesc + fileDesc, timestamp: new Date() }, capturedChatId);
+    addMessage(capturedAgentId, {
+      role: "user",
+      content: txt + mentionDesc + fileDesc,
+      timestamp: new Date(),
+      images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
+    }, capturedChatId);
     atBottomRef.current = true;
     setStreaming(true);
     requestBottomScroll("auto");
@@ -942,9 +1019,22 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
       }
     };
 
+    let messageContent: string | unknown[];
+    if (imageDataUrls.length > 0) {
+      const parts: unknown[] = [];
+      const textBody = txt + mentionDesc + fileDesc;
+      if (textBody) parts.push({ type: "text", text: textBody });
+      for (const img of imageDataUrls) {
+        parts.push({ type: "image_url", image_url: { url: img.url } });
+      }
+      messageContent = parts;
+    } else {
+      messageContent = txt + mentionDesc + fileDesc;
+    }
+
     const { promise: chatPromise, cleanup } = transport.chatStream(
       {
-        messages: [{ role: "user", content: txt + mentionDesc + fileDesc }],
+        messages: [{ role: "user", content: messageContent }],
         agentId: capturedAgentId,
         sessionId: capturedChatId,
         workDir: currentActiveChat?.workDir ?? undefined,
@@ -1113,7 +1203,10 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
     (txt: string, _mentions: InlineMention[]) => {
       if (!txt.trim() || streamingRef.current) return;
       mentionInputRef.current?.clear();
-      setAttachedFiles([]);
+      setAttachedFiles((prev) => {
+        prev.forEach((f) => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
+        return [];
+      });
       sendRef.current(txt.trim(), _mentions);
     },
     [],
@@ -1542,7 +1635,7 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
             onSend={handleMentionSend}
             onNewTopic={handleNewTopic}
             onAttach={() => fileInputRef.current?.click()}
-
+            onPasteFiles={processFiles}
           />
 
           {/* Bottom action bar */}

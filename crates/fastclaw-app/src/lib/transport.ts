@@ -402,7 +402,7 @@ export interface ChatStreamEvent {
 type ChatEventHandler = (event: ChatStreamEvent) => void;
 
 export interface ChatStreamParams {
-  messages: Array<{ role: string; content: string }>;
+  messages: Array<{ role: string; content: string | unknown[] }>;
   agentId?: string;
   sessionId?: string;
   model?: string;

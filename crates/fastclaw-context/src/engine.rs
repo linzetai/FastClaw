@@ -148,9 +148,31 @@ pub fn assemble_context(budget: &ContextBudget, layers: &ContextLayers) -> Assem
 
     let current_trimmed = layers.current_input.as_ref().map(|m| {
         let mut m = m.clone();
-        if let Some(t) = m.text_content() {
-            let trimmed = truncate_to_token_budget(&t, lim.current, cpt);
-            m.content = Some(serde_json::Value::String(trimmed));
+        match &m.content {
+            Some(serde_json::Value::Array(arr)) => {
+                let new_parts: Vec<serde_json::Value> = arr
+                    .iter()
+                    .map(|part| {
+                        if part.get("type").and_then(|v| v.as_str()) == Some("text") {
+                            if let Some(t) = part.get("text").and_then(|v| v.as_str()) {
+                                let trimmed = truncate_to_token_budget(t, lim.current, cpt);
+                                serde_json::json!({"type": "text", "text": trimmed})
+                            } else {
+                                part.clone()
+                            }
+                        } else {
+                            part.clone()
+                        }
+                    })
+                    .collect();
+                m.content = Some(serde_json::Value::Array(new_parts));
+            }
+            _ => {
+                if let Some(t) = m.text_content() {
+                    let trimmed = truncate_to_token_budget(&t, lim.current, cpt);
+                    m.content = Some(serde_json::Value::String(trimmed));
+                }
+            }
         }
         m
     });

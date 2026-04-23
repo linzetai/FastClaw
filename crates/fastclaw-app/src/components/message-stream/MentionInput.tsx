@@ -43,6 +43,7 @@ interface MentionInputProps {
   onSend: (text: string, mentions: InlineMention[]) => void;
   onNewTopic: () => void;
   onAttach: () => void;
+  onPasteFiles?: (files: File[]) => void;
   extraKeyHandler?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
 }
 
@@ -181,7 +182,7 @@ function HighlightOverlay({ text, mentions }: { text: string; mentions: InlineMe
 /* ─── MentionInput ─── */
 export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
   function MentionInput(
-    { disabled, placeholder, options, onSend, onNewTopic, onAttach, extraKeyHandler },
+    { disabled, placeholder, options, onSend, onNewTopic, onAttach, onPasteFiles, extraKeyHandler },
     ref,
   ) {
     const [text, setText] = useState("");
@@ -459,6 +460,21 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             onInput={autoGrow}
+            onPaste={(e) => {
+              const items = e.clipboardData?.items;
+              if (!items || !onPasteFiles) return;
+              const imageFiles: File[] = [];
+              for (const item of items) {
+                if (item.type.startsWith("image/")) {
+                  const file = item.getAsFile();
+                  if (file) imageFiles.push(file);
+                }
+              }
+              if (imageFiles.length > 0) {
+                e.preventDefault();
+                onPasteFiles(imageFiles);
+              }
+            }}
             placeholder={placeholder}
             rows={2}
             disabled={disabled}

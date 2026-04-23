@@ -667,12 +667,50 @@ impl AnthropicProvider {
                     }
                 }
                 fastclaw_core::types::Role::User => {
+                    let content = match &msg.content {
+                        Some(serde_json::Value::Array(arr)) => {
+                            let converted: Vec<serde_json::Value> = arr
+                                .iter()
+                                .filter_map(|part| {
+                                    let ptype = part.get("type").and_then(|v| v.as_str())?;
+                                    match ptype {
+                                        "text" => Some(part.clone()),
+                                        "image_url" => {
+                                            let url = part
+                                                .get("image_url")
+                                                .and_then(|iu| iu.get("url"))
+                                                .and_then(|u| u.as_str())?;
+                                            if let Some(rest) = url.strip_prefix("data:") {
+                                                let (header, data) = rest.split_once(";base64,")?;
+                                                Some(serde_json::json!({
+                                                    "type": "image",
+                                                    "source": {
+                                                        "type": "base64",
+                                                        "media_type": header,
+                                                        "data": data,
+                                                    }
+                                                }))
+                                            } else {
+                                                Some(serde_json::json!({
+                                                    "type": "image",
+                                                    "source": {
+                                                        "type": "url",
+                                                        "url": url,
+                                                    }
+                                                }))
+                                            }
+                                        }
+                                        _ => Some(part.clone()),
+                                    }
+                                })
+                                .collect();
+                            serde_json::Value::Array(converted)
+                        }
+                        other => other.clone().unwrap_or(serde_json::Value::String(String::new())),
+                    };
                     result.push(AnthropicMessage {
                         role: "user".to_string(),
-                        content: msg
-                            .content
-                            .clone()
-                            .unwrap_or(serde_json::Value::String(String::new())),
+                        content,
                     });
                 }
                 fastclaw_core::types::Role::Assistant => {
