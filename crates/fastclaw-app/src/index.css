@@ -26,6 +26,7 @@
   --tint: #1d1d1f;
   --tint-bg: rgba(0, 0, 0, 0.04);
   --tint-subtle: rgba(0, 0, 0, 0.02);
+  --selection-bg: rgba(0, 122, 255, 0.25);
 
   --separator: rgba(60, 60, 67, 0.12);
   --separator-opaque: #c6c6c8;
@@ -74,6 +75,7 @@
   --tint: #e5e5ea;
   --tint-bg: rgba(255, 255, 255, 0.06);
   --tint-subtle: rgba(255, 255, 255, 0.03);
+  --selection-bg: rgba(56, 132, 255, 0.35);
 
   --separator: rgba(84, 84, 88, 0.36);
   --separator-opaque: #38383a;
@@ -138,7 +140,7 @@
   }
   ::-webkit-scrollbar-thumb:hover { background: var(--fill-tertiary); background-clip: content-box; }
 
-  ::selection { background: var(--tint-bg); }
+  ::selection { background: var(--selection-bg); }
 
   :focus-visible {
     outline: 3px solid var(--tint);

@@ -1310,7 +1310,7 @@ pub async fn chat_stream(
                     let saved_tool_calls: Option<Vec<fastclaw_core::types::ToolCall>> = if accumulated_tool_calls.is_empty() {
                         None
                     } else {
-                        Some(accumulated_tool_calls.iter().map(|(cid, tname, args, _output, _success)| {
+                        Some(accumulated_tool_calls.iter().map(|(cid, tname, args, output, success)| {
                             fastclaw_core::types::ToolCall {
                                 id: cid.clone(),
                                 call_type: "function".to_string(),
@@ -1318,6 +1318,9 @@ pub async fn chat_stream(
                                     name: tname.clone(),
                                     arguments: args.clone().unwrap_or_default(),
                                 },
+                                output: output.clone(),
+                                success: Some(*success),
+                                duration_ms: None,
                             }
                         }).collect())
                     };
@@ -1373,8 +1376,8 @@ pub async fn chat_stream(
                 if !assistant_content.is_empty() {
                     let _ = app.session_store.remove_partial_assistant(&session_id).await;
                     let err_tc = if accumulated_tool_calls.is_empty() { None } else {
-                        Some(accumulated_tool_calls.iter().map(|(cid, tname, args, _o, _s)| {
-                            fastclaw_core::types::ToolCall { id: cid.clone(), call_type: "function".into(), function: fastclaw_core::types::FunctionCall { name: tname.clone(), arguments: args.clone().unwrap_or_default() } }
+                        Some(accumulated_tool_calls.iter().map(|(cid, tname, args, o, s)| {
+                            fastclaw_core::types::ToolCall { id: cid.clone(), call_type: "function".into(), function: fastclaw_core::types::FunctionCall { name: tname.clone(), arguments: args.clone().unwrap_or_default() }, output: o.clone(), success: Some(*s), duration_ms: None }
                         }).collect())
                     };
                     let assistant_msg = ChatMessage {
@@ -1407,8 +1410,8 @@ pub async fn chat_stream(
 
     let build_tc_for_persist = || -> Option<Vec<fastclaw_core::types::ToolCall>> {
         if accumulated_tool_calls.is_empty() { return None; }
-        Some(accumulated_tool_calls.iter().map(|(cid, tname, args, _o, _s)| {
-            fastclaw_core::types::ToolCall { id: cid.clone(), call_type: "function".into(), function: fastclaw_core::types::FunctionCall { name: tname.clone(), arguments: args.clone().unwrap_or_default() } }
+        Some(accumulated_tool_calls.iter().map(|(cid, tname, args, o, s)| {
+            fastclaw_core::types::ToolCall { id: cid.clone(), call_type: "function".into(), function: fastclaw_core::types::FunctionCall { name: tname.clone(), arguments: args.clone().unwrap_or_default() }, output: o.clone(), success: Some(*s), duration_ms: None }
         }).collect())
     };
 

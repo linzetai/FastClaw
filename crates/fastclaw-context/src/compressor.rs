@@ -936,6 +936,9 @@ mod tests {
                         name: "x".into(),
                         arguments: "{}".into(),
                     },
+                    output: None,
+                    success: None,
+                    duration_ms: None,
                 }]),
                 tool_call_id: None,
             }

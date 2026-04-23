@@ -482,11 +482,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         .map((m) => {
           let toolCalls: ChatMessageToolCall[] | undefined;
           if (m.toolCallsJson && Array.isArray(m.toolCallsJson) && m.toolCallsJson.length > 0) {
-            toolCalls = m.toolCallsJson.map((tc) => ({
-              id: tc.id,
-              name: tc.function?.name ?? "unknown",
-              status: "success" as const,
-              args: tc.function?.arguments,
+            toolCalls = m.toolCallsJson.map((tc: Record<string, unknown>) => ({
+              id: tc.id as string,
+              name: (tc.function as Record<string, string>)?.name ?? "unknown",
+              status: (tc.success === false ? "error" : "success") as "success" | "error",
+              args: (tc.function as Record<string, string>)?.arguments,
+              result: tc.output as string | undefined,
             }));
           }
           return {

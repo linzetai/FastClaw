@@ -173,6 +173,9 @@ fn make_tool_call(id: &str, name: &str, args: &str) -> ToolCall {
             name: name.into(),
             arguments: args.into(),
         },
+        output: None,
+        success: None,
+        duration_ms: None,
     }
 }
 

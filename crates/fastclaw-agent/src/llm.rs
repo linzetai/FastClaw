@@ -747,6 +747,9 @@ impl AnthropicProvider {
                             name: name.clone(),
                             arguments: serde_json::to_string(input).unwrap_or_default(),
                         },
+                        output: None,
+                        success: None,
+                        duration_ms: None,
                     });
                 }
             }

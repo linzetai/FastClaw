@@ -1247,6 +1247,9 @@ impl ToolCallAccumulator {
                 name: self.name.clone(),
                 arguments: self.arguments.clone(),
             },
+            output: None,
+            success: None,
+            duration_ms: None,
         }
     }
 }
