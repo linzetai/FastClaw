@@ -359,7 +359,7 @@ async fn e2e_memory_lifecycle() {
 
     // Store a fact via the upsert endpoint (agent_id is a query param)
     let fact: Value = client
-        .post(srv.url("/api/v1/memory/facts?agent_id=default"))
+        .post(srv.url("/api/v1/memory/facts?agent_id=main"))
         .json(&json!({
             "id": "fact-001",
             "category": "technology",
@@ -381,7 +381,7 @@ async fn e2e_memory_lifecycle() {
 
     // List facts
     let facts: Value = client
-        .get(srv.url("/api/v1/memory/facts?agent_id=default"))
+        .get(srv.url("/api/v1/memory/facts?agent_id=main"))
         .send()
         .await
         .unwrap()
@@ -398,7 +398,7 @@ async fn e2e_memory_lifecycle() {
 
     // Search facts
     let search: Value = client
-        .get(srv.url("/api/v1/memory/facts/search?agent_id=default&q=Rust"))
+        .get(srv.url("/api/v1/memory/facts/search?agent_id=main&q=Rust"))
         .send()
         .await
         .unwrap()
@@ -433,7 +433,7 @@ async fn e2e_memory_lifecycle() {
     // List episodes — they may or may not be auto-recorded depending on content
     // length thresholds, but the endpoint should be functional.
     let episodes_resp = client
-        .get(srv.url("/api/v1/memory/episodes?agent_id=default"))
+        .get(srv.url("/api/v1/memory/episodes?agent_id=main"))
         .send()
         .await
         .unwrap();
@@ -446,7 +446,7 @@ async fn e2e_memory_lifecycle() {
 
     // Search episodes endpoint should also work
     let search_resp = client
-        .get(srv.url("/api/v1/memory/episodes/search?agent_id=default&q=memory"))
+        .get(srv.url("/api/v1/memory/episodes/search?agent_id=main&q=memory"))
         .send()
         .await
         .unwrap();
@@ -466,7 +466,7 @@ async fn e2e_evolution_feedback_loop() {
     let fb_resp = client
         .post(srv.url("/api/v1/evolution/feedback"))
         .json(&json!({
-            "agent_id": "default",
+            "agent_id": "main",
             "session_id": "test-session-1",
             "kind": "thumbs_up",
             "comment": "Great answer about Rust!"
@@ -480,7 +480,7 @@ async fn e2e_evolution_feedback_loop() {
     let fb_resp = client
         .post(srv.url("/api/v1/evolution/feedback"))
         .json(&json!({
-            "agent_id": "default",
+            "agent_id": "main",
             "session_id": "test-session-2",
             "kind": "thumbs_down",
             "comment": "Inaccurate response"
@@ -492,7 +492,7 @@ async fn e2e_evolution_feedback_loop() {
 
     // Retrieve feedback for agent
     let fb_list: Value = client
-        .get(srv.url("/api/v1/evolution/feedback/default"))
+        .get(srv.url("/api/v1/evolution/feedback/main"))
         .send()
         .await
         .unwrap()
@@ -511,7 +511,7 @@ async fn e2e_evolution_feedback_loop() {
 
     // Evaluate agent performance
     let eval: Value = client
-        .get(srv.url("/api/v1/evolution/evaluate/default"))
+        .get(srv.url("/api/v1/evolution/evaluate/main"))
         .send()
         .await
         .unwrap()
@@ -525,7 +525,7 @@ async fn e2e_evolution_feedback_loop() {
 
     // Trigger prompt distillation
     let distill: Value = client
-        .post(srv.url("/api/v1/evolution/distill/default"))
+        .post(srv.url("/api/v1/evolution/distill/main"))
         .json(&json!({}))
         .send()
         .await
@@ -540,7 +540,7 @@ async fn e2e_evolution_feedback_loop() {
 
     // List candidates
     let candidates: Value = client
-        .get(srv.url("/api/v1/evolution/candidates/default"))
+        .get(srv.url("/api/v1/evolution/candidates/main"))
         .send()
         .await
         .unwrap()
@@ -931,7 +931,7 @@ async fn e2e_agent_tools_registry() {
         .unwrap();
     let agent_list = agents["agents"].as_array().unwrap();
     assert!(!agent_list.is_empty(), "should have at least one agent");
-    assert_eq!(agent_list[0]["agentId"], "default");
+    assert_eq!(agent_list[0]["agentId"], "main");
 
     let tools: Value = client
         .get(srv.url("/api/v1/tools"))
@@ -988,7 +988,7 @@ async fn e2e_dynamic_routes_lifecycle() {
     let created: Value = client
         .post(srv.url("/api/v1/routes"))
         .json(&json!({
-            "agentId": "default",
+            "agentId": "main",
             "match": {"channel": "slack"}
         }))
         .send()
@@ -1003,7 +1003,7 @@ async fn e2e_dynamic_routes_lifecycle() {
     let updated: Value = client
         .put(srv.url(&format!("/api/v1/routes/{route_id}")))
         .json(&json!({
-            "agentId": "default",
+            "agentId": "main",
             "match": {"channel": "telegram"}
         }))
         .send()
@@ -1069,7 +1069,7 @@ async fn memory_episode_record_and_keyword_search() {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     let search: Value = client
-        .get(srv.url("/api/v1/memory/episodes/search?agent_id=default&q=dark%20mode"))
+        .get(srv.url("/api/v1/memory/episodes/search?agent_id=main&q=dark%20mode"))
         .send()
         .await
         .unwrap()
@@ -1090,7 +1090,7 @@ async fn memory_fact_crud_cycle() {
     let client = reqwest::Client::new();
 
     let upsert: Value = client
-        .post(srv.url("/api/v1/memory/facts?agent_id=default"))
+        .post(srv.url("/api/v1/memory/facts?agent_id=main"))
         .json(&json!({
             "id": "fact-crud-test",
             "category": "preference",
@@ -1108,7 +1108,7 @@ async fn memory_fact_crud_cycle() {
     assert!(upsert.get("ok").is_some(), "fact upsert: {upsert}");
 
     let search: Value = client
-        .get(srv.url("/api/v1/memory/facts/search?agent_id=default&q=TypeScript"))
+        .get(srv.url("/api/v1/memory/facts/search?agent_id=main&q=TypeScript"))
         .send()
         .await
         .unwrap()
@@ -1122,7 +1122,7 @@ async fn memory_fact_crud_cycle() {
     );
 
     let del: Value = client
-        .delete(srv.url("/api/v1/memory/facts/fact-crud-test?agent_id=default"))
+        .delete(srv.url("/api/v1/memory/facts/fact-crud-test?agent_id=main"))
         .send()
         .await
         .unwrap()
@@ -1132,7 +1132,7 @@ async fn memory_fact_crud_cycle() {
     assert!(del.get("ok").is_some() || del.get("deleted").is_some(), "fact delete: {del}");
 
     let search_after: Value = client
-        .get(srv.url("/api/v1/memory/facts/search?agent_id=default&q=TypeScript"))
+        .get(srv.url("/api/v1/memory/facts/search?agent_id=main&q=TypeScript"))
         .send()
         .await
         .unwrap()
@@ -1156,7 +1156,7 @@ async fn memory_auto_episode_from_chat() {
     let client = reqwest::Client::new();
 
     let episodes_before: Value = client
-        .get(srv.url("/api/v1/memory/episodes?agent_id=default"))
+        .get(srv.url("/api/v1/memory/episodes?agent_id=main"))
         .send()
         .await
         .unwrap()
@@ -1183,7 +1183,7 @@ async fn memory_auto_episode_from_chat() {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     let episodes_after: Value = client
-        .get(srv.url("/api/v1/memory/episodes?agent_id=default"))
+        .get(srv.url("/api/v1/memory/episodes?agent_id=main"))
         .send()
         .await
         .unwrap()
@@ -1209,7 +1209,7 @@ async fn memory_recall_injects_relevant_memories() {
     let client = reqwest::Client::new();
 
     let _: Value = client
-        .post(srv.url("/api/v1/memory/facts?agent_id=default"))
+        .post(srv.url("/api/v1/memory/facts?agent_id=main"))
         .json(&json!({
             "id": "recall-test-fact",
             "category": "technology",
@@ -1230,7 +1230,7 @@ async fn memory_recall_injects_relevant_memories() {
         .json(&json!({
             "messages": [{"role": "user", "content": "What database does FastClaw use for storage?"}],
             "stream": false,
-            "agent_id": "default"
+            "agent_id": "main"
         }))
         .send()
         .await
@@ -1279,7 +1279,7 @@ async fn memory_multi_turn_episode_accumulation() {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     let episodes: Value = client
-        .get(srv.url("/api/v1/memory/episodes?agent_id=default"))
+        .get(srv.url("/api/v1/memory/episodes?agent_id=main"))
         .send()
         .await
         .unwrap()
@@ -1334,5 +1334,266 @@ async fn e2e_global_mcp_config_round_trip() {
     assert!(
         default_config.mcp_servers.is_empty(),
         "mcpServers should default to empty vec"
+    );
+}
+
+// ===================================================================
+// Scenario: sessions.claim allows cross-connection resume
+// ===================================================================
+
+#[tokio::test]
+async fn e2e_session_claim_allows_resume() {
+    let provider = ScriptedProvider::new(vec![
+        ScriptedResponse {
+            content: Some("Hello from claimed session.".into()),
+            tool_calls: None,
+        },
+        ScriptedResponse {
+            content: Some("Second turn in claimed session.".into()),
+            tool_calls: None,
+        },
+    ]);
+
+    let srv = E2eServer::start(Box::new(provider)).await;
+
+    // Connection 1: create a session via chat
+    let (ws1, _) = connect_async(&srv.ws_url()).await.expect("ws1 connect");
+    let (mut tx1, mut rx1) = ws1.split();
+    let _ = ws_recv_json(&mut rx1).await; // consume welcome
+
+    let (session_id, _) =
+        ws_chat_to_completion(&mut tx1, &mut rx1, "c1", "Create session", None).await;
+    assert!(!session_id.is_empty());
+
+    // Connection 2: fresh connection, claim the session
+    let (ws2, _) = connect_async(&srv.ws_url()).await.expect("ws2 connect");
+    let (mut tx2, mut rx2) = ws2.split();
+    let _ = ws_recv_json(&mut rx2).await; // consume welcome
+
+    // Claim the session
+    ws_send_json(
+        &mut tx2,
+        json!({"id": "claim1", "method": "sessions.claim", "params": {"sessionId": &session_id}}),
+    )
+    .await;
+    let claim_resp = ws_recv_json(&mut rx2).await;
+    assert_eq!(claim_resp["type"], "sessions.claim");
+    assert_eq!(claim_resp["data"]["claimed"], true);
+    assert_eq!(claim_resp["data"]["sessionId"], session_id);
+
+    // Now sessions.messages should work on connection 2
+    ws_send_json(
+        &mut tx2,
+        json!({"id": "sm1", "method": "sessions.messages", "params": {"sessionId": &session_id}}),
+    )
+    .await;
+    let msgs_resp = ws_recv_json(&mut rx2).await;
+    assert_eq!(msgs_resp["type"], "sessions.messages");
+    let messages = msgs_resp["data"]["messages"].as_array().unwrap();
+    assert!(
+        messages.len() >= 2,
+        "should have messages from first connection, got {}",
+        messages.len()
+    );
+
+    // Chat on the claimed session from connection 2
+    let (sid2, events) = ws_chat_to_completion(
+        &mut tx2,
+        &mut rx2,
+        "c2",
+        "Continue on connection 2",
+        Some(&session_id),
+    )
+    .await;
+    assert_eq!(sid2, session_id);
+    assert!(events.contains(&"chat.complete".to_string()));
+}
+
+// ===================================================================
+// Scenario: sessions.claim rejects non-existent session
+// ===================================================================
+
+#[tokio::test]
+async fn e2e_session_claim_rejects_missing() {
+    let srv = E2eServer::start(simple_provider()).await;
+    let (ws, _) = connect_async(&srv.ws_url()).await.expect("ws connect");
+    let (mut tx, mut rx) = ws.split();
+    let _ = ws_recv_json(&mut rx).await;
+
+    ws_send_json(
+        &mut tx,
+        json!({
+            "id": "c1",
+            "method": "sessions.claim",
+            "params": {"sessionId": "nonexistent-session-id"}
+        }),
+    )
+    .await;
+    let resp = ws_recv_json(&mut rx).await;
+    assert_eq!(resp["type"], "error");
+    assert_eq!(resp["error"]["code"], 404);
+}
+
+// ===================================================================
+// Scenario: chat.cancel via WS
+// ===================================================================
+
+#[tokio::test]
+async fn e2e_chat_cancel_via_ws() {
+    let srv = E2eServer::start(simple_provider()).await;
+    let (ws, _) = connect_async(&srv.ws_url()).await.expect("ws connect");
+    let (mut tx, mut rx) = ws.split();
+    let _ = ws_recv_json(&mut rx).await;
+
+    // Cancel a non-existent request ID
+    ws_send_json(
+        &mut tx,
+        json!({"id": "cancel1", "method": "chat.cancel", "params": {"requestId": "fake-id"}}),
+    )
+    .await;
+    let resp = ws_recv_json(&mut rx).await;
+    assert_eq!(resp["type"], "chat.cancel");
+    assert_eq!(resp["data"]["cancelled"], false, "non-existent request should not cancel");
+
+    // Cancel without requestId
+    ws_send_json(
+        &mut tx,
+        json!({"id": "cancel2", "method": "chat.cancel", "params": {}}),
+    )
+    .await;
+    let resp = ws_recv_json(&mut rx).await;
+    assert_eq!(resp["type"], "error");
+}
+
+// ===================================================================
+// Scenario: chat.complete includes elapsed time and token estimates
+// ===================================================================
+
+#[tokio::test]
+async fn e2e_chat_complete_includes_usage_stats() {
+    let srv = E2eServer::start(simple_provider()).await;
+    let (ws, _) = connect_async(&srv.ws_url()).await.expect("ws connect");
+    let (mut tx, mut rx) = ws.split();
+    let _ = ws_recv_json(&mut rx).await;
+
+    ws_send_json(
+        &mut tx,
+        json!({
+            "id": "stats1",
+            "method": "chat",
+            "params": {
+                "messages": [{"role": "user", "content": "Hello"}]
+            }
+        }),
+    )
+    .await;
+
+    let complete_data: Option<Value>;
+    loop {
+        let msg = ws_recv_json(&mut rx).await;
+        let ty = msg["type"].as_str().unwrap_or("");
+        if ty == "chat.complete" {
+            complete_data = msg.get("data").cloned();
+            break;
+        }
+        if ty == "chat.error" {
+            panic!("chat failed: {:?}", msg["error"]);
+        }
+    }
+
+    let data = complete_data.expect("should have chat.complete data");
+    assert!(
+        data.get("elapsedMs").is_some(),
+        "chat.complete should include elapsedMs"
+    );
+    assert!(
+        data.get("inputTokensEstimate").is_some(),
+        "chat.complete should include inputTokensEstimate"
+    );
+    assert!(
+        data.get("outputTokensEstimate").is_some(),
+        "chat.complete should include outputTokensEstimate"
+    );
+    let elapsed = data["elapsedMs"].as_u64().unwrap();
+    assert!(elapsed > 0, "elapsed should be positive");
+}
+
+// ===================================================================
+// Scenario: WS methods list includes new methods
+// ===================================================================
+
+#[tokio::test]
+async fn e2e_connected_advertises_all_methods() {
+    let srv = E2eServer::start(simple_provider()).await;
+    let (ws, _) = connect_async(&srv.ws_url()).await.expect("ws connect");
+    let (_tx, mut rx) = ws.split();
+
+    let welcome = ws_recv_json(&mut rx).await;
+    assert_eq!(welcome["type"], "connected");
+
+    let methods = welcome["data"]["methods"]
+        .as_array()
+        .expect("methods array");
+    let method_strs: Vec<&str> = methods.iter().filter_map(|v| v.as_str()).collect();
+
+    for expected in &[
+        "sessions.claim",
+        "chat.cancel",
+        "chat.answer",
+        "mcp.status",
+        "mcp.reload",
+        "mcp.add",
+        "mcp.remove",
+        "models.list",
+        "config.get",
+        "config.set",
+    ] {
+        assert!(
+            method_strs.contains(expected),
+            "connected methods should include '{expected}', got: {method_strs:?}"
+        );
+    }
+}
+
+// ===================================================================
+// Scenario: models.list returns model data
+// ===================================================================
+
+#[tokio::test]
+async fn e2e_models_list_via_ws() {
+    let srv = E2eServer::start(simple_provider()).await;
+    let (ws, _) = connect_async(&srv.ws_url()).await.expect("ws connect");
+    let (mut tx, mut rx) = ws.split();
+    let _ = ws_recv_json(&mut rx).await;
+
+    ws_send_json(&mut tx, json!({"id": "ml1", "method": "models.list"})).await;
+    let resp = ws_recv_json(&mut rx).await;
+    assert_eq!(resp["type"], "models.list");
+    assert!(resp["data"]["models"].is_array());
+}
+
+// ===================================================================
+// Scenario: unknown WS method returns error
+// ===================================================================
+
+#[tokio::test]
+async fn e2e_unknown_ws_method_returns_error() {
+    let srv = E2eServer::start(simple_provider()).await;
+    let (ws, _) = connect_async(&srv.ws_url()).await.expect("ws connect");
+    let (mut tx, mut rx) = ws.split();
+    let _ = ws_recv_json(&mut rx).await;
+
+    ws_send_json(
+        &mut tx,
+        json!({"id": "unk1", "method": "nonexistent.method"}),
+    )
+    .await;
+    let resp = ws_recv_json(&mut rx).await;
+    assert_eq!(resp["type"], "error");
+    assert!(
+        resp["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("unknown method"),
     );
 }

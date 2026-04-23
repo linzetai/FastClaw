@@ -1804,6 +1804,7 @@ dependencies = [
  "fastclaw-core",
  "fastclaw-gateway",
  "fastclaw-observe",
+ "fastclaw-security",
  "fix-path-env",
  "futures",
  "json5",
