@@ -380,9 +380,14 @@ fn ensure_executable_if_local_path(command: &str) -> anyhow::Result<()> {
 }
 
 async fn validate_command_available(command: &str) -> bool {
-    Command::new(command)
-        .arg("--version")
-        .output()
+    let mut cmd = Command::new(command);
+    cmd.arg("--version");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    cmd.output()
         .await
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -427,11 +432,16 @@ struct PersistentLspSession {
 
 impl PersistentLspSession {
     async fn spawn(command: &str, workspace_root: &str) -> anyhow::Result<Self> {
-        let mut child = Command::new(command)
-            .stdin(std::process::Stdio::piped())
+        let mut cmd = Command::new(command);
+        cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()?;
+            .stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        let mut child = cmd.spawn()?;
         let stdin = child
             .stdin
             .take()

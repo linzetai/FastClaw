@@ -73,8 +73,10 @@ impl Tool for ShellTool {
 
         #[cfg(windows)]
         let mut cmd = {
+            use std::os::windows::process::CommandExt;
             let mut c = tokio::process::Command::new("cmd.exe");
             c.args(["/C", command]);
+            c.creation_flags(0x08000000); // CREATE_NO_WINDOW
             c
         };
         #[cfg(not(windows))]
@@ -410,8 +412,10 @@ impl Tool for SandboxedShellTool {
         } else {
             #[cfg(windows)]
             {
+                use std::os::windows::process::CommandExt;
                 let mut c = tokio::process::Command::new("cmd.exe");
                 c.args(["/C", command]);
+                c.creation_flags(0x08000000); // CREATE_NO_WINDOW
                 c
             }
             #[cfg(not(windows))]

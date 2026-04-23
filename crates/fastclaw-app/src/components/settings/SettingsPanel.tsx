@@ -62,6 +62,7 @@ function GeneralTab() {
   const [notifications, setNotifications] = useState(true);
   const [sounds, setSounds] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [autostart, setAutostart] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -75,11 +76,30 @@ function GeneralTab() {
       }
       setLoaded(true);
     }).catch(() => setLoaded(true));
+
+    if (transport.isTauri) {
+      import("@tauri-apps/plugin-autostart").then(({ isEnabled }) => {
+        isEnabled().then(setAutostart).catch(() => {});
+      }).catch(() => {});
+    }
   }, []);
 
   const persist = useCallback((key: string, value: boolean) => {
     api.setConfig("session", { [key]: value }).catch(() => {});
   }, []);
+
+  const toggleAutostart = useCallback(async () => {
+    try {
+      const { enable, disable } = await import("@tauri-apps/plugin-autostart");
+      if (autostart) {
+        await disable();
+        setAutostart(false);
+      } else {
+        await enable();
+        setAutostart(true);
+      }
+    } catch { /* not available outside Tauri */ }
+  }, [autostart]);
 
   const themeOptions: { value: ThemeMode; label: string }[] = [
     { value: "light", label: "浅色" }, { value: "dark", label: "深色" }, { value: "system", label: "跟随系统" },
@@ -120,6 +140,16 @@ function GeneralTab() {
           </SettingRow>
         </div>
       </div>
+      {transport.isTauri && (
+        <div>
+          <SectionTitle>系统</SectionTitle>
+          <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
+            <SettingRow label="开机自启动" description="系统启动时自动运行 FastClaw，定时任务将正常执行" isLast>
+              <Toggle enabled={autostart} onChange={toggleAutostart} />
+            </SettingRow>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

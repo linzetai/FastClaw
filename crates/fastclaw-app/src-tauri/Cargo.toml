@@ -54,3 +54,6 @@ tempfile = "3"
 tokio = { workspace = true, features = ["test-util", "macros"] }
 async-trait = "0.1"
 futures = "0.3"
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-autostart = "2.5.1"
