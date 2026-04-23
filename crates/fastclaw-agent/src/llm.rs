@@ -464,8 +464,8 @@ pub fn create_provider_with_credentials(
     max_concurrent_requests: Option<u32>,
 ) -> anyhow::Result<Box<dyn LlmProvider>> {
     match provider_name {
-        "openai" | "azure" | "compatible" | "dashscope" | "deepseek" | "together" | "groq"
-        | "ollama" | "lmstudio" | "vllm" | "google" | "gemini" => {
+        "openai" | "openai_compatible" | "azure" | "compatible" | "dashscope" | "deepseek"
+        | "together" | "groq" | "ollama" | "lmstudio" | "vllm" | "google" | "gemini" => {
             let default_base = provider_default_base_url(provider_name);
             let base = base_url
                 .map(String::from)
@@ -520,7 +520,37 @@ pub fn create_provider_with_credentials(
                 max_concurrent_requests,
             )))
         }
-        other => anyhow::bail!("unsupported LLM provider: {other}"),
+        other => {
+            let base = base_url
+                .map(String::from)
+                .or_else(|| {
+                    credentials
+                        .and_then(|c| c.get_base_url(other))
+                        .map(String::from)
+                })
+                .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+            let key = api_key
+                .map(String::from)
+                .or_else(|| {
+                    credentials
+                        .and_then(|c| c.get_api_key(other))
+                        .map(String::from)
+                })
+                .unwrap_or_default();
+            tracing::warn!(
+                provider = other,
+                base_url = %base,
+                api_key_len = key.len(),
+                "unknown provider id, using OpenAI-compatible transport"
+            );
+            Ok(Box::new(OpenAiProvider::with_options(
+                &base,
+                &key,
+                TimeoutConfig::default(),
+                RetryConfig::default(),
+                max_concurrent_requests,
+            )))
+        }
     }
 }
 
@@ -534,6 +564,7 @@ fn provider_default_base_url(name: &str) -> &'static str {
         "lmstudio" => "http://localhost:1234/v1",
         "vllm" => "http://localhost:8000/v1",
         "google" | "gemini" => "https://generativelanguage.googleapis.com/v1beta/openai",
+        "openai_compatible" => "https://api.openai.com/v1",
         _ => "https://api.openai.com/v1",
     }
 }
@@ -1167,6 +1198,7 @@ pub fn create_provider_chain(
 #[cfg(test)]
 mod semaphore_tests {
     use super::*;
+    use fastclaw_core::config::{CredentialsConfig, ProviderCredential};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[tokio::test]
@@ -1196,5 +1228,20 @@ mod semaphore_tests {
             peak.load(Ordering::SeqCst) <= 3,
             "same acquire pattern as OpenAiProvider chat_completion"
         );
+    }
+
+    #[test]
+    fn create_provider_supports_custom_openai_compatible_key() {
+        let mut creds = CredentialsConfig::default();
+        creds.providers.insert(
+            "my_openai".to_string(),
+            ProviderCredential {
+                api_key: Some("sk-test".to_string()),
+                base_url: Some("https://api.openai.com/v1".to_string()),
+            },
+        );
+
+        let provider = create_provider_with_credentials("my_openai", None, None, Some(&creds), None);
+        assert!(provider.is_ok(), "custom provider key should be accepted");
     }
 }

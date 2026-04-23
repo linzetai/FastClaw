@@ -772,16 +772,28 @@ pub fn load_config(dev: bool, profile: Option<&str>) -> FastClawResult<FastClawC
             continue;
         }
         tracing::info!(path = %path.display(), "loading legacy config (fallback)");
-        let text = std::fs::read_to_string(path)?;
-        let raw: serde_json::Value = json5::from_str(&text).map_err(FastClawError::json5)?;
-        let strict_includes = raw
-            .get("strictIncludes")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let merged = process_includes(raw, path.parent(), strict_includes)?;
-        warn_unknown_keys(&merged);
-        let config: FastClawConfig = serde_json::from_value(merged)?;
-        return Ok(config);
+        let loaded = (|| -> FastClawResult<FastClawConfig> {
+            let text = std::fs::read_to_string(path)?;
+            let raw: serde_json::Value = json5::from_str(&text).map_err(FastClawError::json5)?;
+            let strict_includes = raw
+                .get("strictIncludes")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let merged = process_includes(raw, path.parent(), strict_includes)?;
+            warn_unknown_keys(&merged);
+            let config: FastClawConfig = serde_json::from_value(merged)?;
+            Ok(config)
+        })();
+        match loaded {
+            Ok(config) => return Ok(config),
+            Err(e) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "legacy config ignored because it is incompatible with FastClaw schema"
+                );
+            }
+        }
     }
 
     tracing::info!("no config file found, using built-in defaults");

@@ -593,6 +593,13 @@ function CollapsibleList<T>({ items, renderItem, emptyText }: {
 /* ━━━ Config Tab ━━━ */
 
 function ConfigTab() {
+  const encodeModelOption = (provider: string, model: string) => `${provider}::${model}`;
+  const decodeModelOption = (value: string) => {
+    const sep = value.indexOf("::");
+    if (sep < 0) return { provider: null as string | null, model: value };
+    return { provider: value.slice(0, sep), model: value.slice(sep + 2) };
+  };
+
   const activeAgentId = useAgentStore((s) => s.activeAgentId);
   const agents = useAgentStore((s) => s.agents);
   const agent = agents.find((a) => a.id === activeAgentId) ?? agents[0];
@@ -601,6 +608,7 @@ function ConfigTab() {
 
   const [name, setName] = useState(agent?.name ?? "");
   const [selectedModel, setSelectedModel] = useState(agent?.model ?? "");
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const [fileAccessMode, setFileAccessMode] = useState<api.FileAccessMode>("workspace");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
@@ -625,12 +633,23 @@ function ConfigTab() {
     api.getSkillsDenyList().then(setSkillsDeny).catch(() => {});
   }, [activeAgentId]);
 
-  useEffect(() => {
+  const loadModels = useCallback(() => {
     if (!gatewayReady) return;
     api.listModels().then(setModels).catch(() => {});
+  }, [gatewayReady]);
+
+  useEffect(() => {
+    if (!gatewayReady) return;
+    loadModels();
     api.listAgentTools(activeAgentId).then(setAgentTools).catch(() => {});
     reloadSkillsList();
-  }, [activeAgentId, gatewayReady]);
+  }, [activeAgentId, gatewayReady, loadModels, reloadSkillsList]);
+
+  useEffect(() => {
+    const onModelsUpdated = () => loadModels();
+    window.addEventListener("fastclaw:models-updated", onModelsUpdated);
+    return () => window.removeEventListener("fastclaw:models-updated", onModelsUpdated);
+  }, [loadModels]);
 
   const [backendAgent, setBackendAgent] = useState<api.BackendAgent | null>(null);
   useEffect(() => {
@@ -638,8 +657,13 @@ function ConfigTab() {
     api.getAgent(activeAgentId).then((a) => {
       if (a) {
         setBackendAgent(a);
-        const modelName = typeof a.model === "string" ? a.model : a.model?.model;
-        if (modelName) setSelectedModel(modelName);
+        if (typeof a.model === "string") {
+          setSelectedModel(a.model);
+          setSelectedProvider(null);
+        } else if (a.model) {
+          setSelectedModel(a.model.model);
+          setSelectedProvider(a.model.provider);
+        }
         setFileAccessMode(a.behavior?.fileAccess ?? "workspace");
       }
     }).catch(() => {});
@@ -651,12 +675,15 @@ function ConfigTab() {
     const currentModel = backendAgent?.model;
     const currentModelObj =
       currentModel && typeof currentModel === "object" ? currentModel : null;
-    const selectedModelMeta = models.find((m) => m.model === selectedModel);
+    const selectedModelMeta = models.find((m) =>
+      m.model === selectedModel && (!selectedProvider || m.provider === selectedProvider),
+    );
     const modelConfig: api.AgentModelConfig = {
       provider:
+        selectedProvider ??
         selectedModelMeta?.provider ??
         currentModelObj?.provider ??
-        "openai_compatible",
+        "openai",
       model: selectedModel,
       temperature: currentModelObj?.temperature ?? 0,
       maxTokens: currentModelObj?.maxTokens,
@@ -685,7 +712,7 @@ function ConfigTab() {
     setSaving(false);
     setSaveMsg(ok ? "已保存" : "保存失败");
     setTimeout(() => setSaveMsg(""), 2000);
-  }, [activeAgentId, name, selectedModel, backendAgent, fileAccessMode, models]);
+  }, [activeAgentId, name, selectedModel, selectedProvider, backendAgent, fileAccessMode, models]);
 
   const handleToolToggle = useCallback(async (toolId: string, newEnabled: boolean) => {
     setTogglingTool(toolId);
@@ -780,6 +807,9 @@ function ConfigTab() {
   if (!agent) return null;
 
   const effectiveModel = (typeof backendAgent?.model === "string" ? backendAgent.model : backendAgent?.model?.model) ?? agent.model;
+  const effectiveProvider = typeof backendAgent?.model === "object" ? backendAgent.model.provider : (selectedProvider ?? "");
+  const selectedModelValue = selectedProvider ? encodeModelOption(selectedProvider, selectedModel) : selectedModel;
+  const effectiveOptionValue = effectiveProvider ? encodeModelOption(effectiveProvider, effectiveModel) : effectiveModel;
   const isLastAgent = agents.length <= 1;
 
   return (
@@ -801,16 +831,22 @@ function ConfigTab() {
         <SectionHeader>模型</SectionHeader>
         <div className="relative">
           <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
+            value={selectedModelValue}
+            onChange={(e) => {
+              const parsed = decodeModelOption(e.target.value);
+              setSelectedModel(parsed.model);
+              setSelectedProvider(parsed.provider);
+            }}
             className="w-full cursor-pointer rounded-[var(--radius-sm)] px-3 py-2.5 pr-8 text-[13px] outline-none transition-colors duration-150 focus:ring-1 focus:ring-[var(--fill-quaternary)]"
             style={{ background: "var(--bg-elevated)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)", WebkitAppearance: "none", MozAppearance: "none", appearance: "none" }}
           >
             {models.map((m) => (
-              <option key={`${m.provider}/${m.model}`} value={m.model}>{m.model} ({m.provider})</option>
+              <option key={`${m.provider}/${m.model}`} value={encodeModelOption(m.provider, m.model)}>{m.model} ({m.provider})</option>
             ))}
-            {!models.some((m) => m.model === effectiveModel) && (
-              <option value={effectiveModel}>{effectiveModel}</option>
+            {!models.some((m) => encodeModelOption(m.provider, m.model) === effectiveOptionValue) && (
+              <option value={effectiveOptionValue}>
+                {effectiveProvider ? `${effectiveModel} (${effectiveProvider})` : effectiveModel}
+              </option>
             )}
           </select>
           <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />

@@ -22,6 +22,7 @@ fn collect_available_models(app: &AppState) -> Vec<serde_json::Value> {
         for (key, cfg) in models_obj {
             let model = cfg
                 .get("model")
+                .or_else(|| cfg.get("defaultModel"))
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
@@ -414,6 +415,15 @@ pub async fn set_config(
             *live = cfg_value;
         }
         tracing::info!(key = key.as_str(), "config.set: persisted and updated in-memory");
+        if top_key == "credentials" || top_key == "models" {
+            if let Err(e) = app.reload_agents().await {
+                tracing::warn!(
+                    key = key.as_str(),
+                    error = %e,
+                    "config.set: updated config but failed to refresh runtime providers"
+                );
+            }
+        }
     }
 
     Ok(json!({

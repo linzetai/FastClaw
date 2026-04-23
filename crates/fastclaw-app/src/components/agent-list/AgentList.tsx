@@ -26,27 +26,41 @@ export function AgentList() {
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const newInputRef = useRef<HTMLInputElement>(null);
 
+  const refreshModels = useCallback(async () => {
+    if (!gatewayReady) return;
+    try {
+      const m = await api.listModels();
+      setModels(m);
+      setNewModel((prev) => {
+        if (m.length === 0) return "";
+        if (!prev || !m.some((item) => item.model === prev)) return m[0].model;
+        return prev;
+      });
+    } catch {
+      setModels([]);
+      setNewModel("");
+    }
+  }, [gatewayReady]);
+
   useEffect(() => {
     if (showNewForm) {
       newInputRef.current?.focus();
       if (gatewayReady) {
         setModelsLoading(true);
-        api.listModels().then((m) => {
-          setModels(m);
-          setNewModel((prev) => {
-            if (m.length === 0) return "";
-            if (!prev || !m.some((item) => item.model === prev)) return m[0].model;
-            return prev;
-          });
-        }).catch(() => {
-          setModels([]);
-          setNewModel("");
-        }).finally(() => {
+        refreshModels().finally(() => {
           setModelsLoading(false);
         });
       }
     }
-  }, [showNewForm, gatewayReady]);
+  }, [showNewForm, gatewayReady, refreshModels]);
+
+  useEffect(() => {
+    const onModelsUpdated = () => {
+      void refreshModels();
+    };
+    window.addEventListener("fastclaw:models-updated", onModelsUpdated);
+    return () => window.removeEventListener("fastclaw:models-updated", onModelsUpdated);
+  }, [refreshModels]);
 
   const pickAvatar = useCallback(async () => {
     if (!transport.isTauri) return;

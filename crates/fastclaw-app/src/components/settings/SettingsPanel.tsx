@@ -428,11 +428,12 @@ function ModelsTab() {
   const handleSave = async (entry: ModelConfigEntry, cred: CredentialEntry) => {
     setSaving(true);
     try {
+      const targetKey = entry.key;
       const newModels = { ...modelsConfig };
       if (editing && editing !== entry.key) {
         delete newModels[editing];
       }
-      newModels[entry.key] = {
+      newModels[targetKey] = {
         provider: entry.provider,
         model: entry.model,
         baseUrl: entry.baseUrl,
@@ -442,15 +443,31 @@ function ModelsTab() {
       };
       await api.setConfig("models", newModels);
 
-      if (cred.apiKey && !cred.apiKey.startsWith("***")) {
+      const existingCred = credentials[targetKey] ?? { apiKey: "", baseUrl: "" };
+      const nextCred: CredentialEntry = { ...existingCred };
+      const normalizedApiKey = (cred.apiKey ?? "").trim();
+      const normalizedBaseUrl = (entry.baseUrl || cred.baseUrl || existingCred.baseUrl || "").trim();
+      let credentialChanged = false;
+
+      if (normalizedApiKey && !normalizedApiKey.startsWith("***") && normalizedApiKey !== existingCred.apiKey) {
+        nextCred.apiKey = normalizedApiKey;
+        credentialChanged = true;
+      }
+      if (normalizedBaseUrl && normalizedBaseUrl !== existingCred.baseUrl) {
+        nextCred.baseUrl = normalizedBaseUrl;
+        credentialChanged = true;
+      }
+
+      if (credentialChanged) {
         const newCreds = { ...credentials };
-        newCreds[entry.key] = cred;
+        newCreds[targetKey] = nextCred;
         await api.setConfig("credentials", newCreds);
       }
 
       setEditing(null);
       setAdding(false);
       loadData();
+      window.dispatchEvent(new CustomEvent("fastclaw:models-updated"));
       showToast("模型配置已保存", "ok");
     } catch {
       showToast("保存失败", "err");
@@ -467,6 +484,7 @@ function ModelsTab() {
       await api.setConfig("models", newModels);
       setEditing(null);
       loadData();
+      window.dispatchEvent(new CustomEvent("fastclaw:models-updated"));
       showToast(`已删除「${key}」`, "ok");
     } catch {
       showToast("删除失败", "err");
@@ -917,7 +935,9 @@ function McpToolsList() {
   useEffect(() => {
     (async () => {
       try {
-        const agentId = "main";
+        const agents = await transport.listAgents();
+        const agentId = agents[0]?.agentId;
+        if (!agentId) return;
         const tools = await api.listAgentTools(agentId);
         const mcpTools = tools.filter((t) => t.name.startsWith("mcp_"));
         const grouped: Record<string, McpToolDef[]> = {};

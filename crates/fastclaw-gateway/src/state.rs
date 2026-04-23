@@ -5,7 +5,7 @@ use fastclaw_agent::{
     create_provider, create_provider_chain, create_provider_with_credentials, AgentRuntime,
     FallbackProvider,
 };
-use fastclaw_core::agent_config::{self, AgentConfig};
+use fastclaw_core::agent_config::{self, AgentConfig, AgentModelConfig};
 use fastclaw_core::bus::MessageBus;
 use fastclaw_core::channel::{ChannelPlugin, ChannelRegistry};
 use fastclaw_core::config::FastClawConfig;
@@ -138,8 +138,8 @@ impl StateBuilder {
         config: &FastClawConfig,
         p1: BuildPhase1,
     ) -> anyhow::Result<BuildPhase3> {
-        let creds = &config.credentials;
-        let runtime = AppState::build_runtime(&p1.agents, creds)?;
+        let creds = merge_model_base_urls_into_credentials(&config.credentials, &config.models);
+        let runtime = AppState::build_runtime(&p1.agents, &creds)?;
         let router = AgentRouter::new(p1.agents.clone());
         let tool_registry = AppState::build_tools_core(config).await?;
 
@@ -1612,11 +1612,12 @@ impl AppState {
 
     fn refresh_runtime_agent_providers(&self, agents: &[AgentConfig]) {
         self.runtime.clear_registered_providers();
+        let credentials = self.current_credentials_snapshot();
 
         let mut registered = 0usize;
         let mut failed = 0usize;
         for agent in agents {
-            match create_provider_chain(&agent.model, Some(&self.config.credentials)) {
+            match create_provider_chain(&agent.model, Some(&credentials)) {
                 Ok(provider) => {
                     self.runtime
                         .register_provider(&agent.agent_id, Arc::from(provider));
@@ -1639,6 +1640,59 @@ impl AppState {
             "agent hot-reload: refreshed runtime provider map"
         );
     }
+
+    fn current_credentials_snapshot(&self) -> fastclaw_core::config::CredentialsConfig {
+        let live = self.config_live.read().ok();
+        let credentials = live
+            .as_ref()
+            .and_then(|cfg| cfg.get("credentials").cloned())
+            .and_then(|v| serde_json::from_value::<fastclaw_core::config::CredentialsConfig>(v).ok())
+            .unwrap_or_else(|| self.config.credentials.clone());
+
+        let models_value = live
+            .as_ref()
+            .and_then(|cfg| cfg.get("models").cloned())
+            .unwrap_or_else(|| serde_json::to_value(&self.config.models).unwrap_or_default());
+        let models: std::collections::HashMap<String, fastclaw_core::config::ModelProviderConfig> =
+            serde_json::from_value(models_value).unwrap_or_default();
+
+        merge_model_base_urls_into_credentials(&credentials, &models)
+    }
+}
+
+/// Merge `models.<key>.baseUrl` into `credentials.<key>.baseUrl` when the
+/// credential entry is missing or has an empty `base_url`.  This ensures the
+/// runtime LLM provider uses the endpoint shown in settings even when the user
+/// only filled in `baseUrl` on the model form.
+fn merge_model_base_urls_into_credentials(
+    credentials: &fastclaw_core::config::CredentialsConfig,
+    models: &std::collections::HashMap<String, fastclaw_core::config::ModelProviderConfig>,
+) -> fastclaw_core::config::CredentialsConfig {
+    let mut merged = credentials.clone();
+
+    for (key, model_cfg) in models {
+        let base_url = model_cfg
+            .base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let Some(base_url) = base_url else {
+            continue;
+        };
+
+        let entry = merged.providers.entry(key.clone()).or_default();
+        let has_base = entry
+            .base_url
+            .as_deref()
+            .map(str::trim)
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        if !has_base {
+            entry.base_url = Some(base_url.to_string());
+        }
+    }
+
+    merged
 }
 
 async fn open_memory_pool_at(db_path: &std::path::Path) -> anyhow::Result<sqlx::SqlitePool> {
@@ -1681,10 +1735,19 @@ fn resolve_db_path(paths_cfg: &fastclaw_core::config::PathsConfig) -> anyhow::Re
 fn load_agents(config: &FastClawConfig) -> anyhow::Result<Vec<AgentConfig>> {
     let config_dir = resolve_agents_dir(&config.paths);
     if config_dir.exists() {
-        agent_config::load_agent_configs(&config_dir)
+        let agents = agent_config::load_agent_configs(&config_dir)?;
+        if agents.is_empty() {
+            tracing::warn!(
+                dir = %config_dir.display(),
+                "agents config directory is empty, using built-in default"
+            );
+            Ok(vec![builtin_default_agent(config)])
+        } else {
+            Ok(agents)
+        }
     } else {
         tracing::warn!(dir = %config_dir.display(), "agents config directory not found, using built-in default");
-        Ok(vec![builtin_default_agent()])
+        Ok(vec![builtin_default_agent(config)])
     }
 }
 
@@ -1692,12 +1755,12 @@ fn resolve_agents_dir(paths_cfg: &fastclaw_core::config::PathsConfig) -> PathBuf
     fastclaw_core::paths::resolve_agents_dir_from(Some(paths_cfg))
 }
 
-fn builtin_default_agent() -> AgentConfig {
+fn builtin_default_agent(config: &FastClawConfig) -> AgentConfig {
     AgentConfig {
-        agent_id: "default".to_string(),
-        name: Some("Default Agent".to_string()),
+        agent_id: "main".to_string(),
+        name: Some("Main Agent".to_string()),
         description: Some("Built-in default assistant".to_string()),
-        model: Default::default(),
+        model: builtin_default_model(config),
         // Omit system_prompt so `AgentRuntime::build_messages` uses
         // `fastclaw_core::workspace::default_runtime_system_prompt_for_agent`.
         system_prompt: None,
@@ -1709,6 +1772,34 @@ fn builtin_default_agent() -> AgentConfig {
         avatar: None,
         channels: std::collections::HashMap::new(),
     }
+}
+
+fn builtin_default_model(config: &FastClawConfig) -> AgentModelConfig {
+    let mut model = AgentModelConfig::default();
+    let default_ref = config
+        .agents
+        .defaults
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    if let Some(model_ref) = default_ref {
+        if let Some((provider, model_name)) = model_ref.split_once('/') {
+            let provider = provider.trim();
+            let model_name = model_name.trim();
+            if !provider.is_empty() && !model_name.is_empty() {
+                model.provider = provider.to_string();
+                model.model = model_name.to_string();
+                return model;
+            }
+        }
+        model.model = model_ref.to_string();
+        if let Some((provider_key, _)) = config.models.iter().find(|(_, cfg)| cfg.model == model.model) {
+            model.provider = provider_key.clone();
+        }
+    }
+    model
 }
 
 fn resolve_plugins_dir(paths_cfg: &fastclaw_core::config::PathsConfig) -> PathBuf {
@@ -1767,7 +1858,7 @@ impl AppState {
     ) -> anyhow::Result<Self> {
         let mut config = FastClawConfig::default();
         config.memory.enabled = true;
-        let agents = vec![builtin_default_agent()];
+        let agents = vec![builtin_default_agent(&config)];
         let last_good_agents_init = agents.clone();
         let router = AgentRouter::new(agents.clone());
 
@@ -1837,8 +1928,8 @@ impl AppState {
         let test_sem = SemanticMemory::open(mem_pool).await?;
         let mut test_ep_map = std::collections::HashMap::new();
         let mut test_sem_map = std::collections::HashMap::new();
-        test_ep_map.insert("default".to_string(), Arc::new(test_ep));
-        test_sem_map.insert("default".to_string(), Arc::new(test_sem));
+        test_ep_map.insert("main".to_string(), Arc::new(test_ep));
+        test_sem_map.insert("main".to_string(), Arc::new(test_sem));
 
         let wasm_host = fastclaw_plugin::WasmHost::new(Default::default())?;
         let plugin_registry = PluginRegistry::new(wasm_host);
@@ -1945,6 +2036,7 @@ fn persist_skills_deny_cleanup(cleaned_deny: &[String]) -> anyhow::Result<()> {
 mod reload_tests {
     use super::*;
     use fastclaw_agent::{CompletionParams, LlmProvider};
+    use fastclaw_core::config::FastClawConfig;
     use fastclaw_core::types::{ChatChoice, ChatMessage, ChatRequest, ChatResponse, Role, StreamDelta};
 
     struct StubProvider;
@@ -1990,10 +2082,50 @@ mod reload_tests {
 
     #[test]
     fn validate_rejects_duplicate_ids() {
-        let a = builtin_default_agent();
+        let a = builtin_default_agent(&FastClawConfig::default());
         let mut b = a.clone();
         b.name = Some("other".into());
         assert!(validate_agents_for_reload(&[a, b]).is_err());
+    }
+
+    #[test]
+    fn load_agents_uses_builtin_default_when_agents_dir_empty() {
+        let tmp = std::env::temp_dir().join(format!(
+            "fcgw_load_agents_empty_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let mut cfg = FastClawConfig::default();
+        cfg.paths.agents_dir = Some(tmp.to_string_lossy().to_string());
+
+        let agents = load_agents(&cfg).expect("load_agents should succeed");
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].agent_id, "main");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn load_agents_builtin_default_inherits_agents_default_model() {
+        let tmp = std::env::temp_dir().join(format!(
+            "fcgw_load_agents_default_model_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let mut cfg = FastClawConfig::default();
+        cfg.paths.agents_dir = Some(tmp.to_string_lossy().to_string());
+        cfg.agents.defaults.model = Some("dashscope/qwen3.5-plus".to_string());
+
+        let agents = load_agents(&cfg).expect("load_agents should succeed");
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].model.provider, "dashscope");
+        assert_eq!(agents[0].model.model, "qwen3.5-plus");
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[tokio::test]
@@ -2009,7 +2141,7 @@ mod reload_tests {
         let state = AppState::for_test(provider, &tmp).await.unwrap();
 
         let req = ChatRequest {
-            agent_id: Some("default".into()),
+            agent_id: Some("main".into()),
             session_id: None,
             messages: vec![],
             model: None,

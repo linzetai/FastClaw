@@ -99,6 +99,7 @@ export interface BackendMessage {
 
 let nextId = 1;
 const STORAGE_KEY = "fastclaw:ui-state";
+const DEFAULT_AGENT_ID = "main";
 
 interface PersistedUIState {
   activeAgentId: string;
@@ -135,8 +136,8 @@ function saveUIState(state: AgentState) {
 
 const INITIAL_AGENTS: Agent[] = [
   {
-    id: "main", name: "Main Agent", initial: "M", color: "var(--tint)",
-    tagline: "通用智能助手", online: true, model: "claude-sonnet-4-20250514",
+    id: DEFAULT_AGENT_ID, name: "Main Agent", initial: "M", color: "var(--tint)",
+    tagline: "通用智能助手", online: true, model: "qwen3.5-plus",
   },
 ];
 
@@ -157,7 +158,7 @@ function createChat(workDir?: string): Chat {
 function initAgentChats(): Record<string, AgentChats> {
   const result: Record<string, AgentChats> = {};
   const mainChat = createChat();
-  result["main"] = {
+  result[DEFAULT_AGENT_ID] = {
     chatList: [mainChat],
     activeChatId: mainChat.id,
     unread: 0,
@@ -177,10 +178,14 @@ function formatTime(d: Date): string {
 }
 
 const _persisted = loadUIState();
+const initialActiveAgentId =
+  _persisted?.activeAgentId === "default"
+    ? DEFAULT_AGENT_ID
+    : (_persisted?.activeAgentId ?? DEFAULT_AGENT_ID);
 
 export const useAgentStore = create<AgentState>((set, get) => ({
   agents: INITIAL_AGENTS,
-  activeAgentId: _persisted?.activeAgentId ?? "main",
+  activeAgentId: initialActiveAgentId,
   agentChats: initAgentChats(),
   detailOpen: false,
 

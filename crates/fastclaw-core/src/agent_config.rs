@@ -93,10 +93,10 @@ pub struct FallbackModelConfig {
 }
 
 fn default_provider() -> String {
-    "openai".to_string()
+    "bailian".to_string()
 }
 fn default_model() -> String {
-    "bailian/qwen3.5-plus".to_string()
+    "qwen3.5-plus".to_string()
 }
 fn default_temperature() -> f32 {
     0.7

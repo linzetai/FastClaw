@@ -445,17 +445,33 @@ function chatStreamTauri(
     channel.onmessage = (event) => {
       if (!cancelled) onEvent(event);
     };
-    await _invoke!("chat_stream", {
-      requestId,
-      channel,
-      messages: params.messages,
-      agentId: params.agentId ?? null,
-      sessionId: params.sessionId ?? null,
-      model: params.model ?? null,
-      temperature: params.temperature ?? null,
-      maxTokens: params.maxTokens ?? null,
-      workDir: params.workDir ?? null,
-    });
+    try {
+      await _invoke!("chat_stream", {
+        requestId,
+        channel,
+        messages: params.messages,
+        agentId: params.agentId ?? null,
+        sessionId: params.sessionId ?? null,
+        model: params.model ?? null,
+        temperature: params.temperature ?? null,
+        maxTokens: params.maxTokens ?? null,
+        workDir: params.workDir ?? null,
+      });
+    } catch (err) {
+      const message =
+        typeof err === "string"
+          ? err
+          : err instanceof Error
+            ? err.message
+            : "chat stream failed to start";
+      if (!cancelled) {
+        onEvent({
+          type: "chat.error",
+          error: { message },
+        });
+      }
+      throw err;
+    }
   })();
 
   return { promise, cleanup };

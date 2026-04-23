@@ -1262,6 +1262,7 @@ async fn handle_models_list(
         for (key, cfg) in models_obj {
             let model = cfg
                 .get("model")
+                .or_else(|| cfg.get("defaultModel"))
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
