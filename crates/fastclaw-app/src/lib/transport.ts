@@ -544,7 +544,7 @@ export async function getMcpStatus(): Promise<McpServerStatus[]> {
   if (isTauri) {
     return tauriInvoke<McpServerStatus[]>("get_mcp_status");
   }
-  const resp = await wsClient.request("mcp.status");
+  const resp = await wsClient.send("mcp.status");
   return (resp as { servers?: McpServerStatus[] }).servers ?? [];
 }
 
@@ -552,7 +552,7 @@ export async function reloadMcpServers(): Promise<McpServerStatus[]> {
   if (isTauri) {
     return tauriInvoke<McpServerStatus[]>("reload_mcp_servers");
   }
-  const resp = await wsClient.request("mcp.reload");
+  const resp = await wsClient.send("mcp.reload");
   return (resp as { servers?: McpServerStatus[] }).servers ?? [];
 }
 
@@ -564,7 +564,7 @@ export async function addMcpServer(
   if (isTauri) {
     return tauriInvoke("add_mcp_server", { id, command, args: args ?? [] });
   }
-  return wsClient.request("mcp.add", { id, command, args: args ?? [] }) as Promise<{
+  return wsClient.send("mcp.add", { id, command, args: args ?? [] }) as Promise<{
     ok: boolean;
     id: string;
     status?: McpServerStatus;
@@ -577,7 +577,7 @@ export async function removeMcpServer(
   if (isTauri) {
     return tauriInvoke("remove_mcp_server", { id });
   }
-  return wsClient.request("mcp.remove", { id }) as Promise<{
+  return wsClient.send("mcp.remove", { id }) as Promise<{
     ok: boolean;
     id: string;
   }>;
