@@ -41,7 +41,7 @@ export function AppLayout() {
   const [onboardingChecked, setOnboardingChecked] = useState(false);
 
   useEffect(() => {
-    if (mode === "connecting" || (!connected && mode !== "tauri")) return;
+    if (mode === "connecting" || (!connected && mode !== "embedded")) return;
     let cancelled = false;
     (async () => {
       try {
