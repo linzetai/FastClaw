@@ -316,6 +316,10 @@ async fn dispatch(
         "models.list" => handle_models_list(sender, state, id).await,
         "config.get" => handle_config_get(sender, state, id, req.params).await,
         "config.set" => handle_config_set(sender, state, id, req.params).await,
+        "mcp.status" => handle_mcp_status(sender, state, id).await,
+        "mcp.reload" => handle_mcp_reload(sender, state, id).await,
+        "mcp.add" => handle_mcp_add(sender, state, id, req.params).await,
+        "mcp.remove" => handle_mcp_remove(sender, state, id, req.params).await,
         "subscribe" => {
             let events: Vec<String> = req
                 .params
@@ -1494,6 +1498,187 @@ fn persist_config_key(key: &str, value: &serde_json::Value) -> anyhow::Result<()
     }
     std::fs::write(&cfg_path, serde_json::to_string_pretty(&cfg_value)?)?;
     Ok(())
+}
+
+// ─── MCP WS handlers ───
+
+async fn handle_mcp_status(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    state: &AppState,
+    req_id: Option<String>,
+) {
+    let status = state
+        .mcp_status
+        .read()
+        .map(|g| g.values().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    send_resp(
+        sender,
+        &WsResponse {
+            id: req_id,
+            msg_type: "mcp.status".into(),
+            data: Some(json!({"servers": status})),
+            error: None,
+        },
+    )
+    .await;
+}
+
+async fn handle_mcp_reload(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    state: &AppState,
+    req_id: Option<String>,
+) {
+    match state.reload_mcp_servers().await {
+        Ok(()) => {
+            let status = state
+                .mcp_status
+                .read()
+                .map(|g| g.values().cloned().collect::<Vec<_>>())
+                .unwrap_or_default();
+            send_resp(
+                sender,
+                &WsResponse {
+                    id: req_id,
+                    msg_type: "mcp.reload".into(),
+                    data: Some(json!({"ok": true, "servers": status})),
+                    error: None,
+                },
+            )
+            .await;
+        }
+        Err(e) => {
+            send_resp(
+                sender,
+                &WsResponse {
+                    id: req_id,
+                    msg_type: "error".into(),
+                    data: None,
+                    error: Some(json!({"message": format!("{e}")})),
+                },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_mcp_add(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    state: &AppState,
+    req_id: Option<String>,
+    params: serde_json::Value,
+) {
+    let id = match params.get("id").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => {
+            send_resp(sender, &WsResponse {
+                id: req_id, msg_type: "error".into(), data: None,
+                error: Some(json!({"code": -32602, "message": "id required"})),
+            }).await;
+            return;
+        }
+    };
+    let command = match params.get("command").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => {
+            send_resp(sender, &WsResponse {
+                id: req_id, msg_type: "error".into(), data: None,
+                error: Some(json!({"code": -32602, "message": "command required"})),
+            }).await;
+            return;
+        }
+    };
+    let args: Vec<String> = params
+        .get("args")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    let new_server = fastclaw_core::agent_config::McpServerConfig {
+        id: id.clone(),
+        command,
+        args,
+        enabled: Some(true),
+        env: Default::default(),
+    };
+
+    {
+        if let Ok(mut live) = state.config_live.write() {
+            let server_val = serde_json::to_value(&new_server).unwrap_or_default();
+            if let Some(arr) = live.get_mut("mcpServers").and_then(|v| v.as_array_mut()) {
+                arr.retain(|v| v.get("id").and_then(|i| i.as_str()) != Some(&id));
+                arr.push(server_val);
+            } else {
+                live["mcpServers"] = json!([server_val]);
+            }
+        }
+    }
+
+    if let Ok(live) = state.config_live.read() {
+        let mcp_val = live.get("mcpServers").cloned().unwrap_or(json!([]));
+        let _ = persist_config_key("mcpServers", &mcp_val);
+    }
+
+    match state.reload_mcp_servers().await {
+        Ok(()) => {
+            let status = state.mcp_status.read().ok().and_then(|g| g.get(&id).cloned());
+            send_resp(sender, &WsResponse {
+                id: req_id, msg_type: "mcp.add".into(),
+                data: Some(json!({"ok": true, "id": id, "status": status})),
+                error: None,
+            }).await;
+        }
+        Err(e) => {
+            send_resp(sender, &WsResponse {
+                id: req_id, msg_type: "error".into(), data: None,
+                error: Some(json!({"message": format!("{e}")})),
+            }).await;
+        }
+    }
+}
+
+async fn handle_mcp_remove(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    state: &AppState,
+    req_id: Option<String>,
+    params: serde_json::Value,
+) {
+    let id = match params.get("id").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => {
+            send_resp(sender, &WsResponse {
+                id: req_id, msg_type: "error".into(), data: None,
+                error: Some(json!({"code": -32602, "message": "id required"})),
+            }).await;
+            return;
+        }
+    };
+
+    if let Ok(mut live) = state.config_live.write() {
+        if let Some(arr) = live.get_mut("mcpServers").and_then(|v| v.as_array_mut()) {
+            arr.retain(|v| v.get("id").and_then(|i| i.as_str()) != Some(&id));
+        }
+    }
+
+    if let Ok(live) = state.config_live.read() {
+        let mcp_val = live.get("mcpServers").cloned().unwrap_or(json!([]));
+        let _ = persist_config_key("mcpServers", &mcp_val);
+    }
+
+    match state.reload_mcp_servers().await {
+        Ok(()) => {
+            send_resp(sender, &WsResponse {
+                id: req_id, msg_type: "mcp.remove".into(),
+                data: Some(json!({"ok": true, "id": id})),
+                error: None,
+            }).await;
+        }
+        Err(e) => {
+            send_resp(sender, &WsResponse {
+                id: req_id, msg_type: "error".into(), data: None,
+                error: Some(json!({"message": format!("{e}")})),
+            }).await;
+        }
+    }
 }
 
 #[cfg(test)]

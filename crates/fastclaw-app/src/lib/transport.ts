@@ -530,6 +530,59 @@ export async function onSessionChanged(
   });
 }
 
+// ─── MCP server management ───
+
+export interface McpServerStatus {
+  id: string;
+  status: "connecting" | "connected" | "failed" | "disabled";
+  error?: string | null;
+  toolCount: number;
+  connectedAt?: string | null;
+}
+
+export async function getMcpStatus(): Promise<McpServerStatus[]> {
+  if (isTauri) {
+    return tauriInvoke<McpServerStatus[]>("get_mcp_status");
+  }
+  const resp = await wsClient.request("mcp.status");
+  return (resp as { servers?: McpServerStatus[] }).servers ?? [];
+}
+
+export async function reloadMcpServers(): Promise<McpServerStatus[]> {
+  if (isTauri) {
+    return tauriInvoke<McpServerStatus[]>("reload_mcp_servers");
+  }
+  const resp = await wsClient.request("mcp.reload");
+  return (resp as { servers?: McpServerStatus[] }).servers ?? [];
+}
+
+export async function addMcpServer(
+  id: string,
+  command: string,
+  args?: string[],
+): Promise<{ ok: boolean; id: string; status?: McpServerStatus }> {
+  if (isTauri) {
+    return tauriInvoke("add_mcp_server", { id, command, args: args ?? [] });
+  }
+  return wsClient.request("mcp.add", { id, command, args: args ?? [] }) as Promise<{
+    ok: boolean;
+    id: string;
+    status?: McpServerStatus;
+  }>;
+}
+
+export async function removeMcpServer(
+  id: string,
+): Promise<{ ok: boolean; id: string }> {
+  if (isTauri) {
+    return tauriInvoke("remove_mcp_server", { id });
+  }
+  return wsClient.request("mcp.remove", { id }) as Promise<{
+    ok: boolean;
+    id: string;
+  }>;
+}
+
 // ─── WebSocket passthrough (browser mode only) ───
 
 export function connectWs(url: string, token?: string): Promise<void> {

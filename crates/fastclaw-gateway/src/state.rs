@@ -84,6 +84,8 @@ struct BuildPhase4 {
     base_skill_registry: Arc<SkillRegistry>,
     stream_event_tx: Arc<tokio::sync::Mutex<std::collections::HashMap<String, tokio::sync::mpsc::Sender<fastclaw_core::types::StreamEvent>>>>,
     ask_question_pending: Arc<tokio::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<String>>>>,
+    mcp_status_init: std::collections::HashMap<String, fastclaw_core::types::McpServerStatus>,
+    mcp_handles_init: std::collections::HashMap<String, fastclaw_collab::mcp::SharedMcpClient>,
 }
 
 struct BuildPhase2Memory {
@@ -139,7 +141,7 @@ impl StateBuilder {
         let creds = &config.credentials;
         let runtime = AppState::build_runtime(&p1.agents, creds)?;
         let router = AgentRouter::new(p1.agents.clone());
-        let mut tool_registry = AppState::build_tools_core(config).await?;
+        let tool_registry = AppState::build_tools_core(config).await?;
 
         let paths_cfg = &config.paths;
         let wasm_host = fastclaw_plugin::WasmHost::new(Default::default())?;
@@ -158,7 +160,7 @@ impl StateBuilder {
         );
 
         let plugin_arc = Arc::new(plugin_registry);
-        fastclaw_plugin::bridge::bridge_plugins(&plugin_arc, &mut tool_registry);
+        fastclaw_plugin::bridge::bridge_plugins(&plugin_arc, &tool_registry);
         let bridged_count = plugin_arc.plugin_count();
         if bridged_count > 0 {
             tracing::info!(
@@ -309,22 +311,22 @@ impl StateBuilder {
     /// Phase 4: MCP + subagent tools, channel plugins, hub + skill tools.
     async fn phase4_channels_mcp(
         config: &FastClawConfig,
-        mut p3: BuildPhase3,
+        p3: BuildPhase3,
     ) -> anyhow::Result<BuildPhase4> {
-        AppState::register_mcp_and_subagent_tools(
+        let (mcp_status_init, mcp_handles_init) = AppState::register_mcp_and_subagent_tools(
             &p3.phase1.agents,
             &config.mcp_servers,
             p3.runtime.clone(),
-            &mut p3.tool_registry,
+            &p3.tool_registry,
         )
         .await?;
 
         let (channel_registry, _inbound_tx, inbound_rx) =
-            AppState::build_channels(config, &mut p3.tool_registry).await?;
+            AppState::build_channels(config, &p3.tool_registry).await?;
 
         let hub_client = fastclaw_core::hub::HubClient::with_defaults();
         let hub = Arc::new(tokio::sync::Mutex::new(hub_client));
-        fastclaw_agent::builtin_tools::register_hub_tools(&mut p3.tool_registry, hub);
+        fastclaw_agent::builtin_tools::register_hub_tools(&p3.tool_registry, hub);
         tracing::info!("registered hub_search and hub_install tools");
 
         let base_skill_registry = Arc::new(p3.base_skill_registry.filtered(
@@ -339,7 +341,7 @@ impl StateBuilder {
         ) {
             if let Some((_, ws)) = p3.workspaces.iter().next() {
                 fastclaw_agent::builtin_tools::register_skill_tools_full(
-                    &mut p3.tool_registry,
+                    &p3.tool_registry,
                     base_skill_registry.clone(),
                     Arc::new(ws.clone()),
                 );
@@ -349,7 +351,7 @@ impl StateBuilder {
                 );
             } else {
                 fastclaw_agent::builtin_tools::register_skill_tools(
-                    &mut p3.tool_registry,
+                    &p3.tool_registry,
                     base_skill_registry.clone(),
                 );
                 tracing::info!(
@@ -361,7 +363,7 @@ impl StateBuilder {
 
         for (agent_id, ws) in &p3.workspaces {
             fastclaw_agent::builtin_tools::register_identity_tools(
-                &mut p3.tool_registry,
+                &p3.tool_registry,
                 Arc::new(ws.clone()),
             );
             tracing::info!(agent_id = %agent_id, "registered get_identity / set_identity tools");
@@ -385,20 +387,22 @@ impl StateBuilder {
             base_skill_registry,
             stream_event_tx,
             ask_question_pending,
+            mcp_status_init,
+            mcp_handles_init,
         })
     }
 
     /// Phase 2: per-agent memory + evolution stores + context engine hooks.
     async fn phase2_memory_evolution(
         config: &FastClawConfig,
-        mut p4: BuildPhase4,
+        p4: BuildPhase4,
     ) -> anyhow::Result<BuildPhase2Memory> {
         let creds = &config.credentials;
         let (agent_episodic_map, agent_semantic_map, embedding_provider) = AppState::build_memory(
             config,
             creds,
             &p4.phase3.workspaces,
-            &mut p4.phase3.tool_registry,
+            &p4.phase3.tool_registry,
         )
         .await?;
 
@@ -413,7 +417,7 @@ impl StateBuilder {
             });
         }
         fastclaw_agent::builtin_tools::register_session_tools(
-            &mut p4.phase3.tool_registry,
+            &p4.phase3.tool_registry,
             p4.phase3.phase1.session_store.clone(),
             message_bus.clone(),
         );
@@ -589,7 +593,17 @@ impl StateBuilder {
             last_good_agents: Arc::new(tokio::sync::RwLock::new(initial_agents)),
             stream_event_tx: p5.phase2.phase4.stream_event_tx,
             ask_question_pending: p5.phase2.phase4.ask_question_pending,
+            mcp_status: Arc::new(std::sync::RwLock::new(p5.phase2.phase4.mcp_status_init)),
+            mcp_handles: Arc::new(tokio::sync::Mutex::new(p5.phase2.phase4.mcp_handles_init)),
         };
+
+        state.tool_registry.register(Arc::new(crate::mcp_tool::ManageMcpServerTool::new(
+            state.config_live.clone(),
+            state.mcp_status.clone(),
+            state.mcp_handles.clone(),
+            state.tool_registry.clone(),
+        )));
+        tracing::info!("registered manage_mcp_server tool");
 
         state.spawn_skill_evolution_tasks();
 
@@ -719,9 +733,128 @@ pub struct AppState {
     pub stream_event_tx: Arc<tokio::sync::Mutex<std::collections::HashMap<String, tokio::sync::mpsc::Sender<fastclaw_core::types::StreamEvent>>>>,
     /// Pending ask_question requests waiting for user answers.
     pub ask_question_pending: Arc<tokio::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<String>>>>,
+    /// Runtime status of each MCP server (id -> status).
+    pub mcp_status: Arc<std::sync::RwLock<std::collections::HashMap<String, fastclaw_core::types::McpServerStatus>>>,
+    /// Handles to running MCP client processes, keyed by server id.
+    pub mcp_handles: Arc<tokio::sync::Mutex<std::collections::HashMap<String, fastclaw_collab::mcp::SharedMcpClient>>>,
 }
 
 impl AppState {
+    /// Hot-reload all MCP servers: compare `config_live` with running handles,
+    /// stop removed/changed servers, start new/changed ones, update status map.
+    pub async fn reload_mcp_servers(&self) -> anyhow::Result<()> {
+        use fastclaw_core::agent_config::McpServerConfig;
+        use fastclaw_core::types::{McpServerStatus, McpStatus};
+
+        let desired: Vec<McpServerConfig> = {
+            let live = self.config_live.read().map_err(|e| anyhow::anyhow!("{e}"))?;
+            let mcp_val = live.get("mcpServers").cloned().unwrap_or(serde_json::Value::Array(vec![]));
+            serde_json::from_value(mcp_val).unwrap_or_default()
+        };
+
+        let desired_map: std::collections::HashMap<String, &McpServerConfig> =
+            desired.iter().map(|c| (c.id.clone(), c)).collect();
+
+        let mut handles = self.mcp_handles.lock().await;
+
+        let current_ids: std::collections::HashSet<String> = handles.keys().cloned().collect();
+        let desired_ids: std::collections::HashSet<String> = desired_map.keys().cloned().collect();
+
+        let to_remove: Vec<String> = current_ids.difference(&desired_ids).cloned().collect();
+        for id in &to_remove {
+            let prefix = format!("mcp_{}_", id);
+            let removed = self.tool_registry.unregister_by_prefix(&prefix);
+            tracing::info!(mcp_id = %id, tools_removed = removed, "stopped MCP server (removed from config)");
+            handles.remove(id);
+        }
+
+        let mut new_status: std::collections::HashMap<String, McpServerStatus> =
+            std::collections::HashMap::new();
+
+        for cfg in &desired {
+            if cfg.enabled == Some(false) {
+                if handles.contains_key(&cfg.id) {
+                    let prefix = format!("mcp_{}_", cfg.id);
+                    self.tool_registry.unregister_by_prefix(&prefix);
+                    handles.remove(&cfg.id);
+                    tracing::info!(mcp_id = %cfg.id, "stopped MCP server (disabled)");
+                }
+                new_status.insert(
+                    cfg.id.clone(),
+                    McpServerStatus {
+                        id: cfg.id.clone(),
+                        status: McpStatus::Disabled,
+                        error: None,
+                        tool_count: 0,
+                        connected_at: None,
+                    },
+                );
+                continue;
+            }
+
+            if handles.contains_key(&cfg.id) {
+                let prefix = format!("mcp_{}_", cfg.id);
+                self.tool_registry.unregister_by_prefix(&prefix);
+                handles.remove(&cfg.id);
+                tracing::info!(mcp_id = %cfg.id, "restarting MCP server");
+            }
+
+            let args_ref: Vec<&str> = cfg.args.iter().map(|s| s.as_str()).collect();
+            let prefix = format!("mcp_{}_", cfg.id);
+            let tool_count_before = self.tool_registry.len();
+            match fastclaw_collab::mcp::register_mcp_tools(
+                &cfg.command,
+                &args_ref,
+                &self.tool_registry,
+                &prefix,
+                &cfg.env,
+            )
+            .await
+            {
+                Ok(handle) => {
+                    let tool_count = self.tool_registry.len() - tool_count_before;
+                    let now = chrono::Utc::now().to_rfc3339();
+                    tracing::info!(mcp_id = %cfg.id, tool_count, "MCP server connected (hot reload)");
+                    new_status.insert(
+                        cfg.id.clone(),
+                        McpServerStatus {
+                            id: cfg.id.clone(),
+                            status: McpStatus::Connected,
+                            error: None,
+                            tool_count,
+                            connected_at: Some(now),
+                        },
+                    );
+                    handles.insert(cfg.id.clone(), handle);
+                }
+                Err(e) => {
+                    tracing::warn!(mcp_id = %cfg.id, error = %e, "MCP server failed to connect (hot reload)");
+                    new_status.insert(
+                        cfg.id.clone(),
+                        McpServerStatus {
+                            id: cfg.id.clone(),
+                            status: McpStatus::Failed,
+                            error: Some(e.to_string()),
+                            tool_count: 0,
+                            connected_at: None,
+                        },
+                    );
+                }
+            }
+        }
+
+        for id in &to_remove {
+            new_status.remove(id);
+        }
+
+        {
+            let mut status = self.mcp_status.write().map_err(|e| anyhow::anyhow!("{e}"))?;
+            *status = new_status;
+        }
+
+        Ok(())
+    }
+
     /// Periodic skill maintenance and background extraction from trajectories.
     fn spawn_skill_evolution_tasks(&self) {
         let skill_store = self.skill_store.clone();
@@ -872,7 +1005,7 @@ impl AppState {
     /// Register channel plugins and return the registry plus the inbound message pipe.
     async fn build_channels(
         config: &FastClawConfig,
-        tool_registry: &mut ToolRegistry,
+        tool_registry: &ToolRegistry,
     ) -> anyhow::Result<(
         ChannelRegistry,
         tokio::sync::mpsc::UnboundedSender<fastclaw_core::channel::InboundMessage>,
@@ -1006,8 +1139,8 @@ impl AppState {
     /// Built-ins and web/media tools (no MCP, no subagent).
     async fn build_tools_core(config: &FastClawConfig) -> anyhow::Result<ToolRegistry> {
         let creds = &config.credentials;
-        let mut tool_registry = ToolRegistry::new();
-        fastclaw_agent::builtin_tools::register_builtin_tools(&mut tool_registry);
+        let tool_registry = ToolRegistry::new();
+        fastclaw_agent::builtin_tools::register_builtin_tools(&tool_registry);
 
         let ws_cfg = &config.web_search;
         let search_backend = match ws_cfg.backend.as_str() {
@@ -1035,9 +1168,9 @@ impl AppState {
             }
             _ => fastclaw_agent::WebSearchBackend::DuckDuckGo,
         };
-        fastclaw_agent::builtin_tools::register_web_tools(&mut tool_registry, search_backend);
+        fastclaw_agent::builtin_tools::register_web_tools(&tool_registry, search_backend);
 
-        fastclaw_agent::builtin_tools::register_browser_tool(&mut tool_registry);
+        fastclaw_agent::builtin_tools::register_browser_tool(&tool_registry);
         tracing::info!("registered browser tool (headless Chrome)");
 
         if let Some(openai_key) = creds.get_api_key("openai") {
@@ -1045,7 +1178,7 @@ impl AppState {
                 .get_base_url("openai")
                 .unwrap_or("https://api.openai.com/v1");
             fastclaw_agent::builtin_tools::register_media_tools(
-                &mut tool_registry,
+                &tool_registry,
                 openai_base,
                 openai_key,
             );
@@ -1059,13 +1192,23 @@ impl AppState {
     ///
     /// Global MCP servers are registered first; per-agent servers with the same `id`
     /// are skipped to avoid duplicate subprocesses.
+    ///
+    /// Returns `(status_map, handles_map)` for populating `AppState` fields.
     async fn register_mcp_and_subagent_tools(
         agents: &[AgentConfig],
         global_mcp: &[fastclaw_core::agent_config::McpServerConfig],
         runtime: Arc<AgentRuntime>,
-        tool_registry: &mut ToolRegistry,
-    ) -> anyhow::Result<()> {
-        let mut _mcp_handles: Vec<fastclaw_collab::mcp::SharedMcpClient> = Vec::new();
+        tool_registry: &ToolRegistry,
+    ) -> anyhow::Result<(
+        std::collections::HashMap<String, fastclaw_core::types::McpServerStatus>,
+        std::collections::HashMap<String, fastclaw_collab::mcp::SharedMcpClient>,
+    )> {
+        use fastclaw_core::types::{McpServerStatus, McpStatus};
+
+        let mut status_map: std::collections::HashMap<String, McpServerStatus> =
+            std::collections::HashMap::new();
+        let mut handles_map: std::collections::HashMap<String, fastclaw_collab::mcp::SharedMcpClient> =
+            std::collections::HashMap::new();
         let mut registered_ids = std::collections::HashSet::new();
 
         tracing::info!(
@@ -1075,79 +1218,87 @@ impl AppState {
             "register_mcp_and_subagent_tools: starting"
         );
 
-        for mcp_cfg in global_mcp {
+        let all_mcp_configs: Vec<(&fastclaw_core::agent_config::McpServerConfig, &str)> = global_mcp
+            .iter()
+            .map(|c| (c, "global"))
+            .chain(agents.iter().flat_map(|a| {
+                a.mcp_servers.iter().map(move |c| (c, a.agent_id.as_str()))
+            }))
+            .collect();
+
+        for (mcp_cfg, scope) in &all_mcp_configs {
             if mcp_cfg.enabled == Some(false) {
+                status_map.insert(
+                    mcp_cfg.id.clone(),
+                    McpServerStatus {
+                        id: mcp_cfg.id.clone(),
+                        status: McpStatus::Disabled,
+                        error: None,
+                        tool_count: 0,
+                        connected_at: None,
+                    },
+                );
+                continue;
+            }
+            if registered_ids.contains(&mcp_cfg.id) {
+                tracing::debug!(
+                    mcp_id = %mcp_cfg.id,
+                    scope = %scope,
+                    "skipping MCP server already registered"
+                );
                 continue;
             }
             let args_ref: Vec<&str> = mcp_cfg.args.iter().map(|s| s.as_str()).collect();
             let prefix = format!("mcp_{}_", mcp_cfg.id);
+            let tool_count_before = tool_registry.len();
             match fastclaw_collab::mcp::register_mcp_tools(
                 &mcp_cfg.command,
                 &args_ref,
                 tool_registry,
                 &prefix,
+                &mcp_cfg.env,
             )
             .await
             {
                 Ok(handle) => {
+                    let tool_count = tool_registry.len() - tool_count_before;
                     tracing::info!(
                         mcp_id = %mcp_cfg.id,
-                        scope = "global",
+                        scope = %scope,
+                        tool_count,
                         "MCP client connected"
                     );
                     registered_ids.insert(mcp_cfg.id.clone());
-                    _mcp_handles.push(handle);
+                    let now = chrono::Utc::now().to_rfc3339();
+                    status_map.insert(
+                        mcp_cfg.id.clone(),
+                        McpServerStatus {
+                            id: mcp_cfg.id.clone(),
+                            status: McpStatus::Connected,
+                            error: None,
+                            tool_count,
+                            connected_at: Some(now),
+                        },
+                    );
+                    handles_map.insert(mcp_cfg.id.clone(), handle);
                 }
                 Err(e) => {
                     tracing::warn!(
                         mcp_id = %mcp_cfg.id,
-                        scope = "global",
+                        scope = %scope,
                         error = %e,
                         "failed to connect MCP server, skipping"
                     );
-                }
-            }
-        }
-
-        for agent in agents {
-            for mcp_cfg in &agent.mcp_servers {
-                if mcp_cfg.enabled == Some(false) {
-                    continue;
-                }
-                if registered_ids.contains(&mcp_cfg.id) {
-                    tracing::debug!(
-                        mcp_id = %mcp_cfg.id,
-                        agent_id = %agent.agent_id,
-                        "skipping per-agent MCP server already registered globally"
+                    status_map.insert(
+                        mcp_cfg.id.clone(),
+                        McpServerStatus {
+                            id: mcp_cfg.id.clone(),
+                            status: McpStatus::Failed,
+                            error: Some(e.to_string()),
+                            tool_count: 0,
+                            connected_at: None,
+                        },
                     );
-                    continue;
-                }
-                let args_ref: Vec<&str> = mcp_cfg.args.iter().map(|s| s.as_str()).collect();
-                let prefix = format!("mcp_{}_", mcp_cfg.id);
-                match fastclaw_collab::mcp::register_mcp_tools(
-                    &mcp_cfg.command,
-                    &args_ref,
-                    tool_registry,
-                    &prefix,
-                )
-                .await
-                {
-                    Ok(handle) => {
-                        tracing::info!(
-                            mcp_id = %mcp_cfg.id,
-                            agent_id = %agent.agent_id,
-                            "MCP client connected"
-                        );
-                        registered_ids.insert(mcp_cfg.id.clone());
-                        _mcp_handles.push(handle);
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            mcp_id = %mcp_cfg.id,
-                            error = %e,
-                            "failed to connect MCP server, skipping"
-                        );
-                    }
                 }
             }
         }
@@ -1167,7 +1318,7 @@ impl AppState {
         );
         tool_registry.register(Arc::new(subagent_tool));
 
-        Ok(())
+        Ok((status_map, handles_map))
     }
 
     /// Per-workspace SQLite memory, optional embeddings, and memory tools on `tool_registry`.
@@ -1175,7 +1326,7 @@ impl AppState {
         config: &FastClawConfig,
         creds: &fastclaw_core::config::CredentialsConfig,
         workspaces: &std::collections::HashMap<String, AgentWorkspace>,
-        tool_registry: &mut ToolRegistry,
+        tool_registry: &ToolRegistry,
     ) -> anyhow::Result<(
         std::collections::HashMap<String, Arc<EpisodicMemory>>,
         std::collections::HashMap<String, Arc<SemanticMemory>>,
@@ -1643,8 +1794,8 @@ impl AppState {
                 .with_trajectory_store(trajectory_store.clone()),
         );
 
-        let mut tool_registry = ToolRegistry::new();
-        fastclaw_agent::builtin_tools::register_builtin_tools(&mut tool_registry);
+        let tool_registry = ToolRegistry::new();
+        fastclaw_agent::builtin_tools::register_builtin_tools(&tool_registry);
 
         let subagent_tool = fastclaw_agent::SubAgentTool::new(
             runtime.clone(),
@@ -1665,7 +1816,7 @@ impl AppState {
             });
         }
         fastclaw_agent::builtin_tools::register_session_tools(
-            &mut tool_registry,
+            &tool_registry,
             session_store.clone(),
             message_bus.clone(),
         );
@@ -1749,6 +1900,8 @@ impl AppState {
             last_good_agents: Arc::new(tokio::sync::RwLock::new(last_good_agents_init)),
             stream_event_tx: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             ask_question_pending: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            mcp_status: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            mcp_handles: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         })
     }
 }

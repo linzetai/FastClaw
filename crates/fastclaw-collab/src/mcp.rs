@@ -403,14 +403,60 @@ pub struct McpClient {
 
 impl McpClient {
     /// Spawn an MCP server subprocess and connect via stdio.
-    pub async fn connect_stdio(command: &str, args: &[&str]) -> anyhow::Result<Self> {
+    ///
+    /// `extra_env` is merged into the inherited environment before spawning.
+    /// On Windows, if the direct spawn fails (e.g. `npx` resolves to `npx.cmd`),
+    /// automatically retries via `cmd.exe /C` so that `.cmd`/`.bat` wrappers are found.
+    pub async fn connect_stdio(
+        command: &str,
+        args: &[&str],
+        extra_env: &std::collections::HashMap<String, String>,
+    ) -> anyhow::Result<Self> {
         tracing::info!(command, ?args, "spawning MCP server subprocess");
-        let mut process = tokio::process::Command::new(command)
-            .args(args)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
+
+        let spawn_direct = || {
+            let mut cmd = tokio::process::Command::new(command);
+            cmd.args(args)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+            for (k, v) in extra_env {
+                cmd.env(k, v);
+            }
+            cmd.spawn()
+        };
+
+        #[cfg(windows)]
+        let mut process = match spawn_direct() {
+            Ok(p) => p,
+            Err(direct_err) if direct_err.kind() == std::io::ErrorKind::NotFound => {
+                tracing::warn!(
+                    command,
+                    %direct_err,
+                    "direct spawn failed, retrying via cmd.exe /C"
+                );
+                let mut shell_args: Vec<&str> = vec!["/C", command];
+                shell_args.extend(args);
+                let mut cmd = tokio::process::Command::new("cmd.exe");
+                cmd.args(&shell_args)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped());
+                for (k, v) in extra_env {
+                    cmd.env(k, v);
+                }
+                cmd.spawn()
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "failed to spawn '{command}' both directly ({direct_err}) and via cmd.exe ({e})"
+                        )
+                    })?
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        #[cfg(not(windows))]
+        let mut process = spawn_direct()?;
 
         let stdin = process
             .stdin
@@ -880,10 +926,11 @@ impl fastclaw_core::tool::Tool for McpToolBridge {
 pub async fn register_mcp_tools(
     command: &str,
     args: &[&str],
-    registry: &mut fastclaw_core::tool::ToolRegistry,
+    registry: &fastclaw_core::tool::ToolRegistry,
     server_prefix: &str,
+    extra_env: &std::collections::HashMap<String, String>,
 ) -> anyhow::Result<SharedMcpClient> {
-    let client = McpClient::connect_stdio(command, args).await?;
+    let client = McpClient::connect_stdio(command, args, extra_env).await?;
     let tools = client.tools().to_vec();
     let shared = Arc::new(Mutex::new(client));
 

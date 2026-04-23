@@ -46,12 +46,12 @@ pub use utility::{CalculatorTool, CurrentTimeTool};
 pub use browser::{register_browser_tool, BrowserTool};
 
 /// Register all built-in tools into a registry.
-pub fn register_builtin_tools(registry: &mut ToolRegistry) {
+pub fn register_builtin_tools(registry: &ToolRegistry) {
     register_builtin_tools_with_sandbox(registry, true);
 }
 
 /// Register built-in tools, optionally with sandbox enforcement on shell_exec.
-pub fn register_builtin_tools_with_sandbox(registry: &mut ToolRegistry, sandboxed: bool) {
+pub fn register_builtin_tools_with_sandbox(registry: &ToolRegistry, sandboxed: bool) {
     registry.register(Arc::new(CurrentTimeTool));
     registry.register(Arc::new(CalculatorTool));
     registry.register(Arc::new(HttpFetchTool::new()));
@@ -76,26 +76,26 @@ pub fn register_builtin_tools_with_sandbox(registry: &mut ToolRegistry, sandboxe
 }
 
 /// Register web tools with a specific search backend configuration.
-pub fn register_web_tools(registry: &mut ToolRegistry, backend: WebSearchBackend) {
+pub fn register_web_tools(registry: &ToolRegistry, backend: WebSearchBackend) {
     registry.register(Arc::new(WebSearchTool::new(backend)));
     registry.register(Arc::new(WebFetchTool::with_defaults()));
 }
 
 /// Register media generation tools (requires API credentials).
-pub fn register_media_tools(registry: &mut ToolRegistry, base_url: &str, api_key: &str) {
+pub fn register_media_tools(registry: &ToolRegistry, base_url: &str, api_key: &str) {
     registry.register(Arc::new(ImageGenerateTool::new(base_url, api_key)));
     registry.register(Arc::new(TtsTool::new(base_url, api_key)));
 }
 
 /// Register skill-related tools (list_skills, read_skill).
-pub fn register_skill_tools(registry: &mut ToolRegistry, skill_registry: Arc<SkillRegistry>) {
+pub fn register_skill_tools(registry: &ToolRegistry, skill_registry: Arc<SkillRegistry>) {
     registry.register(Arc::new(ListSkillsTool::new(skill_registry.clone())));
     registry.register(Arc::new(ReadSkillTool::new(skill_registry)));
 }
 
 /// Register skill tools plus the write_skill tool (requires agent workspace).
 pub fn register_skill_tools_full(
-    registry: &mut ToolRegistry,
+    registry: &ToolRegistry,
     skill_registry: Arc<SkillRegistry>,
     workspace: Arc<AgentWorkspace>,
 ) {
@@ -106,7 +106,7 @@ pub fn register_skill_tools_full(
 
 /// Register ClawHub marketplace tools.
 pub fn register_hub_tools(
-    registry: &mut ToolRegistry,
+    registry: &ToolRegistry,
     hub: Arc<tokio::sync::Mutex<fastclaw_core::hub::HubClient>>,
 ) {
     registry.register(Arc::new(HubSearchTool::new(hub.clone())));
@@ -114,13 +114,13 @@ pub fn register_hub_tools(
 }
 
 /// Register identity tools (get_identity, set_identity) for reading/writing SOUL.md, USER.md, AGENTS.md.
-pub fn register_identity_tools(registry: &mut ToolRegistry, workspace: Arc<AgentWorkspace>) {
+pub fn register_identity_tools(registry: &ToolRegistry, workspace: Arc<AgentWorkspace>) {
     registry.register(Arc::new(GetIdentityTool::new(workspace.clone())));
     registry.register(Arc::new(SetIdentityTool::new(workspace)));
 }
 
 pub fn register_session_tools(
-    registry: &mut ToolRegistry,
+    registry: &ToolRegistry,
     sessions: Arc<SessionStore>,
     bus: Arc<MessageBus>,
 ) {

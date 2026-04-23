@@ -444,9 +444,9 @@ mod skill_tool_tests {
     #[test]
     fn register_adds_both_tools() {
         let reg = build_registry();
-        let mut tool_reg = ToolRegistry::new();
+        let tool_reg = ToolRegistry::new();
 
-        register_skill_tools(&mut tool_reg, reg);
+        register_skill_tools(&tool_reg, reg);
 
         let defs = tool_reg.definitions();
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
@@ -462,9 +462,9 @@ mod skill_tool_tests {
             tmp.path(),
             "test-agent",
         ));
-        let mut tool_reg = ToolRegistry::new();
+        let tool_reg = ToolRegistry::new();
 
-        register_skill_tools_full(&mut tool_reg, reg, ws);
+        register_skill_tools_full(&tool_reg, reg, ws);
 
         let defs = tool_reg.definitions();
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();

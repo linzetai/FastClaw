@@ -184,7 +184,7 @@ impl Tool for SubAgentTool {
 
         // Build a child tool registry without the subagent tool itself
         // to prevent infinite recursion while still allowing other tools.
-        let mut child_registry = ToolRegistry::new();
+        let child_registry = ToolRegistry::new();
         for def in self.tool_registry.definitions() {
             if def.function.name != "spawn_subagent" {
                 if let Some(tool) = self.tool_registry.get(&def.function.name) {

@@ -76,48 +76,77 @@ pub trait Tool: Send + Sync {
 }
 
 /// Registry holding all available tools.
-#[derive(Clone)]
+///
+/// Uses interior `RwLock` so tools can be dynamically registered/unregistered
+/// through a shared `Arc<ToolRegistry>` without external mutability.
 pub struct ToolRegistry {
-    tools: HashMap<String, Arc<dyn Tool>>,
+    tools: std::sync::RwLock<HashMap<String, Arc<dyn Tool>>>,
+}
+
+impl Clone for ToolRegistry {
+    fn clone(&self) -> Self {
+        let guard = self.tools.read().expect("ToolRegistry poisoned");
+        Self {
+            tools: std::sync::RwLock::new(guard.clone()),
+        }
+    }
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
-            tools: HashMap::new(),
+            tools: std::sync::RwLock::new(HashMap::new()),
         }
     }
 
-    pub fn register(&mut self, tool: Arc<dyn Tool>) {
+    pub fn register(&self, tool: Arc<dyn Tool>) {
         let name = tool.name().to_string();
-        if self.tools.contains_key(&name) {
+        let mut guard = self.tools.write().expect("ToolRegistry poisoned");
+        if guard.contains_key(&name) {
             tracing::warn!(tool = %name, "duplicate tool name – overwriting previous registration");
         }
-        self.tools.insert(name, tool);
+        guard.insert(name, tool);
     }
 
-    pub fn get(&self, name: &str) -> Option<&Arc<dyn Tool>> {
-        self.tools.get(name)
+    /// Remove all tools whose name starts with `prefix`. Returns the number removed.
+    pub fn unregister_by_prefix(&self, prefix: &str) -> usize {
+        let mut guard = self.tools.write().expect("ToolRegistry poisoned");
+        let before = guard.len();
+        guard.retain(|name, _| !name.starts_with(prefix));
+        before - guard.len()
+    }
+
+    pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
+        let guard = self.tools.read().expect("ToolRegistry poisoned");
+        guard.get(name).cloned()
     }
 
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        self.tools.values().map(|t| t.to_definition()).collect()
+        let guard = self.tools.read().expect("ToolRegistry poisoned");
+        guard.values().map(|t| t.to_definition()).collect()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.tools.is_empty()
+        let guard = self.tools.read().expect("ToolRegistry poisoned");
+        guard.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        let guard = self.tools.read().expect("ToolRegistry poisoned");
+        guard.len()
     }
 
     /// Execute a registered tool by name.
     ///
-    /// Returns [`FastClawError::ToolNotFound`] when the name is missing. The tool body still
-    /// returns a [`ToolResult`] (success bit + output string); map that to [`FastClawError`]
-    /// at the call site if you need `Err` on logical failures.
+    /// Returns [`FastClawError::ToolNotFound`] when the name is missing.
     pub async fn execute_named(&self, name: &str, arguments: &str) -> FastClawResult<ToolResult> {
-        let tool = self
-            .tools
-            .get(name)
-            .ok_or_else(|| FastClawError::ToolNotFound(name.to_string()))?;
+        let tool = {
+            let guard = self.tools.read().expect("ToolRegistry poisoned");
+            guard
+                .get(name)
+                .cloned()
+                .ok_or_else(|| FastClawError::ToolNotFound(name.to_string()))?
+        };
         Ok(tool.execute(arguments).await)
     }
 }

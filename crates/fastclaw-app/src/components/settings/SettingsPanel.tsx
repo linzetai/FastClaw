@@ -982,12 +982,29 @@ function McpToolsList() {
   );
 }
 
+function StatusDot({ status }: { status: string }) {
+  const color =
+    status === "connected" ? "var(--green)" :
+    status === "failed" ? "var(--red)" :
+    status === "connecting" ? "var(--yellow, #f59e0b)" :
+    "var(--fill-quaternary)";
+  return (
+    <span
+      className="inline-block h-2 w-2 shrink-0 rounded-full"
+      style={{ background: color, boxShadow: status === "connected" ? `0 0 4px ${color}` : undefined }}
+      title={status}
+    />
+  );
+}
+
 function McpTab() {
   const [servers, setServers] = useState<McpServerEntry[]>([]);
+  const [statusMap, setStatusMap] = useState<Record<string, transport.McpServerStatus>>({});
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [draft, setDraft] = useState<McpServerEntry>({ id: "", command: "", args: [], enabled: true });
 
   const loadServers = useCallback(async () => {
@@ -1007,13 +1024,45 @@ function McpTab() {
     }
   }, []);
 
-  useEffect(() => { loadServers(); }, [loadServers]);
+  const loadStatus = useCallback(async () => {
+    try {
+      const statuses = await transport.getMcpStatus();
+      const map: Record<string, transport.McpServerStatus> = {};
+      for (const s of statuses) map[s.id] = s;
+      setStatusMap(map);
+    } catch (e) {
+      console.warn("[McpTab] failed to load MCP status:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadServers().then(loadStatus);
+  }, [loadServers, loadStatus]);
+
+  const handleReload = async () => {
+    setReloading(true);
+    try {
+      const statuses = await transport.reloadMcpServers();
+      const map: Record<string, transport.McpServerStatus> = {};
+      for (const s of statuses) map[s.id] = s;
+      setStatusMap(map);
+    } catch (e) {
+      console.warn("[McpTab] reload failed:", e);
+    } finally {
+      setReloading(false);
+    }
+  };
 
   const persist = async (updated: McpServerEntry[]) => {
     setSaving(true);
     try {
       await api.setConfig("mcpServers", updated);
       setServers(updated);
+      // hot reload after save
+      const statuses = await transport.reloadMcpServers();
+      const map: Record<string, transport.McpServerStatus> = {};
+      for (const s of statuses) map[s.id] = s;
+      setStatusMap(map);
     } catch (e) {
       console.warn("[McpTab] failed to save mcpServers:", e);
     } finally {
@@ -1107,11 +1156,22 @@ function McpTab() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <SectionTitle>全局 MCP 服务器</SectionTitle>
-        {!adding && !editingId && (
-          <button onClick={startAdd} className="flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-xs)] px-2.5 py-1 text-[12px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)]" style={{ color: "var(--accent)" }}>
-            <Plus size={13} strokeWidth={2} /> 添加
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleReload}
+            disabled={reloading}
+            className="flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-xs)] px-2.5 py-1 text-[12px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-50"
+            style={{ color: "var(--fill-secondary)" }}
+            title="刷新 MCP 连接"
+          >
+            <RefreshCw size={13} strokeWidth={1.5} className={reloading ? "animate-spin" : ""} /> 刷新
           </button>
-        )}
+          {!adding && !editingId && (
+            <button onClick={startAdd} className="flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-xs)] px-2.5 py-1 text-[12px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)]" style={{ color: "var(--accent)" }}>
+              <Plus size={13} strokeWidth={2} /> 添加
+            </button>
+          )}
+        </div>
       </div>
 
       {adding && renderForm()}
@@ -1122,35 +1182,55 @@ function McpTab() {
         </div>
       )}
 
-      {servers.map((srv) => (
-        editingId === srv.id ? (
+      {servers.map((srv) => {
+        const st = statusMap[srv.id];
+        const statusLabel = st?.status === "connected" ? "已连接" : st?.status === "failed" ? "连接失败" : st?.status === "connecting" ? "连接中" : st?.status === "disabled" ? "已禁用" : "未知";
+        return editingId === srv.id ? (
           <div key={srv.id}>{renderForm()}</div>
         ) : (
-          <div key={srv.id} className="flex items-center gap-3 rounded-[var(--radius-sm)] px-4 py-3" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)", opacity: srv.enabled ? 1 : 0.55 }}>
-            <Plug size={16} strokeWidth={1.5} style={{ color: srv.enabled ? "var(--accent)" : "var(--fill-quaternary)", flexShrink: 0 }} />
-            <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-semibold font-mono" style={{ color: "var(--fill-primary)" }}>{srv.id}</div>
-              <div className="mt-0.5 truncate text-[11px] font-mono" style={{ color: "var(--fill-tertiary)" }} title={[srv.command, ...srv.args].join(" ")}>{srv.command} {srv.args.join(" ")}</div>
+          <div key={srv.id} className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)", opacity: srv.enabled ? 1 : 0.55 }}>
+            <div className="flex items-center gap-3 px-4 py-3">
+              <StatusDot status={st?.status ?? (srv.enabled ? "connecting" : "disabled")} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] font-semibold font-mono" style={{ color: "var(--fill-primary)" }}>{srv.id}</span>
+                  <span className="text-[10px] font-medium" style={{ color: st?.status === "connected" ? "var(--green)" : st?.status === "failed" ? "var(--red)" : "var(--fill-quaternary)" }}>
+                    {statusLabel}
+                    {st?.toolCount ? ` · ${st.toolCount} 工具` : ""}
+                  </span>
+                </div>
+                <div className="mt-0.5 truncate text-[11px] font-mono" style={{ color: "var(--fill-tertiary)" }} title={[srv.command, ...srv.args].join(" ")}>{srv.command} {srv.args.join(" ")}</div>
+              </div>
+              <div className="flex items-center gap-1">
+                {st?.status === "failed" && (
+                  <button onClick={handleReload} className="flex h-7 cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-1.5 text-[11px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)]" style={{ color: "var(--red)" }} title="重试连接">
+                    <RefreshCw size={12} strokeWidth={1.5} /> 重试
+                  </button>
+                )}
+                <button onClick={() => handleToggle(srv.id)} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" title={srv.enabled ? "禁用" : "启用"}>
+                  {srv.enabled ? <ToggleRight size={16} strokeWidth={1.5} style={{ color: "var(--green)" }} /> : <ToggleLeft size={16} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />}
+                </button>
+                <button onClick={() => startEdit(srv)} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" title="编辑">
+                  <Pencil size={13} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                </button>
+                <button onClick={() => handleDelete(srv.id)} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" title="删除">
+                  <Trash2 size={13} strokeWidth={1.5} style={{ color: "var(--red)" }} />
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-1">
-              <button onClick={() => handleToggle(srv.id)} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" title={srv.enabled ? "禁用" : "启用"}>
-                {srv.enabled ? <ToggleRight size={16} strokeWidth={1.5} style={{ color: "var(--green)" }} /> : <ToggleLeft size={16} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />}
-              </button>
-              <button onClick={() => startEdit(srv)} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" title="编辑">
-                <Pencil size={13} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
-              </button>
-              <button onClick={() => handleDelete(srv.id)} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" title="删除">
-                <Trash2 size={13} strokeWidth={1.5} style={{ color: "var(--red)" }} />
-              </button>
-            </div>
+            {st?.status === "failed" && st.error && (
+              <div className="border-t px-4 py-2 text-[11px]" style={{ borderColor: "var(--separator)", color: "var(--red)", background: "color-mix(in srgb, var(--red) 5%, transparent)" }}>
+                {st.error.length > 200 ? st.error.slice(0, 200) + "…" : st.error}
+              </div>
+            )}
           </div>
-        )
-      ))}
+        );
+      })}
 
       {saving && <div className="text-center text-[11px]" style={{ color: "var(--fill-tertiary)" }}>保存中…</div>}
 
       <p className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-        MCP 服务器配置变更需重启网关后生效
+        保存配置后自动热重载，无需重启网关
       </p>
 
       <McpToolsList />

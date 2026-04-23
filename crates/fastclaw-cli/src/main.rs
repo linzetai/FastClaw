@@ -606,8 +606,8 @@ async fn cmd_doctor(dev: bool, profile: Option<&str>, as_json: bool) -> anyhow::
         format!("{agent_count} agent(s) found"),
     ));
 
-    let mut tools = fastclaw_core::tool::ToolRegistry::new();
-    fastclaw_agent::builtin_tools::register_builtin_tools(&mut tools);
+    let tools = fastclaw_core::tool::ToolRegistry::new();
+    fastclaw_agent::builtin_tools::register_builtin_tools(&tools);
     checks.push((
         "tools",
         true,
@@ -1097,8 +1097,8 @@ fn cmd_agents(action: AgentAction, as_json: bool) -> anyhow::Result<()> {
 fn cmd_tools(action: ToolAction, as_json: bool) -> anyhow::Result<()> {
     match action {
         ToolAction::List => {
-            let mut registry = fastclaw_core::tool::ToolRegistry::new();
-            fastclaw_agent::builtin_tools::register_builtin_tools(&mut registry);
+            let registry = fastclaw_core::tool::ToolRegistry::new();
+            fastclaw_agent::builtin_tools::register_builtin_tools(&registry);
             let tools = registry.definitions();
             if as_json {
                 let items: Vec<_> = tools
@@ -1340,8 +1340,8 @@ fn cmd_onboard(dev: bool, profile: Option<&str>) -> anyhow::Result<()> {
 // --- MCP Server ---
 
 async fn cmd_mcp_server() -> anyhow::Result<()> {
-    let mut registry = fastclaw_core::tool::ToolRegistry::new();
-    fastclaw_agent::builtin_tools::register_builtin_tools(&mut registry);
+    let registry = fastclaw_core::tool::ToolRegistry::new();
+    fastclaw_agent::builtin_tools::register_builtin_tools(&registry);
 
     let tool_registry = std::sync::Arc::new(registry);
     let server = fastclaw_collab::create_fastclaw_mcp_server(tool_registry);

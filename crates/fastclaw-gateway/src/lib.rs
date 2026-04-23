@@ -1,6 +1,7 @@
 pub mod error;
 pub mod extract;
 pub mod chat_pipeline;
+pub mod mcp_tool;
 mod memory_scope;
 pub mod routes;
 mod scoped_tool;

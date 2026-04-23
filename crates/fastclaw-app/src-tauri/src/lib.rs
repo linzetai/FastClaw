@@ -195,6 +195,10 @@ pub fn run() {
             commands::chat_stream,
             commands::cancel_chat_stream,
             commands::submit_tool_answer,
+            commands::get_mcp_status,
+            commands::reload_mcp_servers,
+            commands::add_mcp_server,
+            commands::remove_mcp_server,
         ])
         .run(tauri::generate_context!())
         .expect("error while running FastClaw app");

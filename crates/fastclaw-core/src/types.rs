@@ -183,6 +183,29 @@ pub struct StreamFunctionDelta {
     pub arguments: Option<String>,
 }
 
+/// Status of an MCP server connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum McpStatus {
+    Connecting,
+    Connected,
+    Failed,
+    Disabled,
+}
+
+/// Runtime status information for an MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerStatus {
+    pub id: String,
+    pub status: McpStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub tool_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connected_at: Option<String>,
+}
+
 /// A single option presented to the user by `ask_question`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AskQuestionOption {

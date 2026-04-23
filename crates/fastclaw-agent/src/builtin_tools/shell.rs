@@ -21,13 +21,12 @@ impl Tool for ShellTool {
     }
 
     fn description(&self) -> &str {
-        "Run one shell snippet via sh -c and return JSON {exit_code, stdout, stderr}. This is the escape hatch for builds (cargo test, npm run), git, package managers, ripgrep/grep, and short glue scripts when no narrower builtin fits. \
-         Prefer read_file, write_file, and list_directory for direct file reads, writes, and one-level directory listings—shell_exec is the most powerful builtin and the easiest to misuse: wrong working_dir, fragile quoting (nested quotes in JSON), accidental destructive commands, or unintended network or secret exfiltration. \
-         The child inherits the gateway environment and current working directory unless you set working_dir explicitly; never assume sudo, rm -rf on precious paths, credential-bearing env vars, or outbound network access are allowed without explicit user or operator approval. \
-         Each call has a hard wall-clock timeout; stdin is not interactive—commands that prompt for passwords will hang until timeout unless you pass non-interactive flags or files. stdout and stderr are truncated around 8192 bytes per stream with a trailing total-byte suffix to protect model context—if output is truncated, rerun with quieter flags, narrower paths, or pipe through head/tail. \
-         Non-zero exit_code is returned as a tool error, but the error string still embeds the same JSON payload—read stderr first for the primary compiler/test/git message, then stdout, then fix flags, cwd, missing dependencies, or tests before retrying. \
-         Anti-pattern: cat-ing huge logs or binaries—use head/tail, rg with a path, or write_file + read_file for bounded slices. \
-         Example when the repo root matters: {\"command\": \"cargo check -p fastclaw-agent\", \"working_dir\": \"/home/you/workspace/FastClaw\"}."
+        "Run one shell snippet and return JSON {exit_code, stdout, stderr}. Uses cmd.exe /C on Windows and sh -c on Unix. This is the escape hatch for builds (cargo test, npm run), git, package managers, environment inspection (node --version, where/which), and short glue scripts when no narrower builtin fits. \
+         Use this tool to diagnose environment issues (check PATH, installed tool versions, npm/node configuration) before giving up on other tool failures. \
+         The child inherits the gateway environment and current working directory unless you set working_dir explicitly. \
+         Each call has a hard wall-clock timeout; stdin is not interactive. stdout and stderr are truncated around 8192 bytes per stream. \
+         Non-zero exit_code is returned as a tool error, but the error string still embeds the same JSON payload—read stderr first for the primary error message. \
+         Example: {\"command\": \"node --version\", \"working_dir\": \"D:\\\\FastClaw\"}."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -36,7 +35,7 @@ impl Tool for ShellTool {
             "command".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Single string passed to sh -c (pipes, &&, ; allowed). Examples: 'cargo test -p fastclaw-agent', 'rg -n pattern crates/', 'git status --short', 'npm test -- --runTestsByPath src/foo.test.ts'. Keep commands short; do not embed megabyte payloads—use write_file for large inputs. If stdout/stderr grow too large, add '| tail -n 80', quieter flags, or narrower paths."
+                "description": "Single string passed to cmd.exe /C (Windows) or sh -c (Unix). On Windows use & or && to chain commands; on Unix use pipes |, &&, ;. Examples: 'node --version', 'cargo test -p fastclaw-agent', 'where npx' (Win) / 'which npx' (Unix), 'npm cache clean --force'. Keep commands short; do not embed megabyte payloads."
             }),
         );
         props.insert(
@@ -72,8 +71,18 @@ impl Tool for ShellTool {
             ),
         };
 
-        let mut cmd = tokio::process::Command::new("sh");
-        cmd.arg("-c").arg(command);
+        #[cfg(windows)]
+        let mut cmd = {
+            let mut c = tokio::process::Command::new("cmd.exe");
+            c.args(["/C", command]);
+            c
+        };
+        #[cfg(not(windows))]
+        let mut cmd = {
+            let mut c = tokio::process::Command::new("sh");
+            c.arg("-c").arg(command);
+            c
+        };
 
         if let Some(dir) = args.get("working_dir").and_then(|v| v.as_str()) {
             cmd.current_dir(dir);
@@ -399,9 +408,18 @@ impl Tool for SandboxedShellTool {
             c.args(["--mount", "--pid", "--fork", "--", "sh", "-c", command]);
             c
         } else {
-            let mut c = tokio::process::Command::new("sh");
-            c.arg("-c").arg(command);
-            c
+            #[cfg(windows)]
+            {
+                let mut c = tokio::process::Command::new("cmd.exe");
+                c.args(["/C", command]);
+                c
+            }
+            #[cfg(not(windows))]
+            {
+                let mut c = tokio::process::Command::new("sh");
+                c.arg("-c").arg(command);
+                c
+            }
         };
 
         if let Some(dir) = args.get("working_dir").and_then(|v| v.as_str()) {

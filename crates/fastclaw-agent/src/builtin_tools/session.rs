@@ -353,10 +353,10 @@ mod session_tools_tests {
 
     #[tokio::test]
     async fn register_session_tools_adds_definitions() {
-        let mut reg = ToolRegistry::new();
+        let reg = ToolRegistry::new();
         let store = Arc::new(SessionStore::open_memory().await.unwrap());
         let bus = Arc::new(MessageBus::new(8));
-        register_session_tools(&mut reg, store, bus);
+        register_session_tools(&reg, store, bus);
         let defs = reg.definitions();
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"sessions_spawn"));

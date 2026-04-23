@@ -326,7 +326,7 @@ impl Tool for BrowserTool {
     }
 }
 
-pub fn register_browser_tool(registry: &mut ToolRegistry) {
+pub fn register_browser_tool(registry: &ToolRegistry) {
     registry.register(Arc::new(BrowserTool::new()));
 }
 
@@ -399,8 +399,8 @@ mod tests {
 
     #[test]
     fn register_browser_tool_adds_to_registry() {
-        let mut registry = ToolRegistry::new();
-        register_browser_tool(&mut registry);
+        let registry = ToolRegistry::new();
+        register_browser_tool(&registry);
         assert!(registry.get("browser").is_some());
     }
 }

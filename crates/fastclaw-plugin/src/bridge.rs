@@ -75,7 +75,7 @@ impl Tool for PluginTool {
 }
 
 /// Register all capabilities from a WasmPluginRegistry into a ToolRegistry.
-pub fn bridge_plugins(plugin_registry: &Arc<WasmPluginRegistry>, tool_registry: &mut ToolRegistry) {
+pub fn bridge_plugins(plugin_registry: &Arc<WasmPluginRegistry>, tool_registry: &ToolRegistry) {
     for manifest in plugin_registry.list_plugins() {
         for cap in &manifest.capabilities {
             let tool = PluginTool::new(manifest.id.clone(), cap.clone(), plugin_registry.clone());
