@@ -18,6 +18,7 @@ pub const CONFIG_READABLE_KEYS: &[&str] = &[
     "modelRouter",
     "evolution",
     "mcpServers",
+    "onboarding",
 ];
 
 /// Keys that may be written through remote/interactive APIs.
@@ -34,6 +35,7 @@ pub const CONFIG_WRITABLE_KEYS: &[&str] = &[
     "channels",
     "bindings",
     "mcpServers",
+    "onboarding",
 ];
 
 pub fn filter_config_for_read(full: &serde_json::Value) -> serde_json::Value {

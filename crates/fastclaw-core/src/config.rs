@@ -85,6 +85,8 @@ pub struct FastClawConfig {
     /// Global MCP servers available to all agents.
     #[serde(default, rename = "mcpServers")]
     pub mcp_servers: Vec<crate::agent_config::McpServerConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub onboarding: Option<serde_json::Value>,
 }
 
 /// Intervals for gateway-hosted evolution background tasks ([`FastClawConfig::evolution`]).
