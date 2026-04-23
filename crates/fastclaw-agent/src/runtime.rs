@@ -895,13 +895,13 @@ impl AgentRuntime {
                     }
                 };
 
-                let out = truncate_tool_result_output(&result.output);
+                let llm_out = truncate_tool_result_output(&result.output);
                 let _ = send_stream_event(
                     &tx,
                     StreamEvent::ToolResult {
                         tool_name: tc.function.name.clone(),
                         call_id: tc.id.clone(),
-                        output: out.clone(),
+                        output: result.output.clone(),
                         success: result.success,
                     },
                     false,
@@ -918,7 +918,7 @@ impl AgentRuntime {
 
                 messages.push(ChatMessage {
                     role: Role::Tool,
-                    content: Some(serde_json::Value::String(out)),
+                    content: Some(serde_json::Value::String(llm_out)),
                     name: Some(tc.function.name.clone()),
                     tool_calls: None,
                     tool_call_id: Some(tc.id.clone()),

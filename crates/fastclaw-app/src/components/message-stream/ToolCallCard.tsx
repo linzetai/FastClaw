@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 import {
   FileText, PenLine, Search, Terminal, Globe, Download, Monitor,
   Brain, Database, Image, Volume2, PackageSearch, PackagePlus,
   TableProperties, Play, Wrench, Check, X as XIcon, ChevronRight, Plug,
+  Copy, Maximize2,
 } from "lucide-react";
 
 export interface ToolCall {
@@ -99,6 +100,88 @@ function tryPrettyJson(text: string): string {
   }
 }
 
+function ImageViewer({ src }: { src: string }) {
+  const [lightbox, setLightbox] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const resp = await fetch(src);
+      const blob = await resp.blob();
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard API may not be available */ }
+  }, [src]);
+
+  return (
+    <>
+      <div className="group relative overflow-hidden rounded-md" style={{ border: "0.5px solid var(--separator)" }}>
+        <img
+          src={src}
+          alt="Tool output"
+          className="block max-h-[400px] w-full cursor-pointer object-contain"
+          style={{ background: "var(--bg-primary)" }}
+          onClick={() => setLightbox(true)}
+        />
+        <div
+          className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+        >
+          <button
+            onClick={handleCopy}
+            className="flex h-7 w-7 items-center justify-center rounded-md backdrop-blur-sm transition-colors"
+            style={{ background: "rgba(0,0,0,0.5)", color: copied ? "#68D391" : "#fff" }}
+            title={copied ? "已复制" : "复制图片"}
+          >
+            {copied ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={1.5} />}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setLightbox(true); }}
+            className="flex h-7 w-7 items-center justify-center rounded-md backdrop-blur-sm transition-colors"
+            style={{ background: "rgba(0,0,0,0.5)", color: "#fff" }}
+            title="查看大图"
+          >
+            <Maximize2 size={14} strokeWidth={1.5} />
+          </button>
+        </div>
+      </div>
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.85)" }}
+          onClick={() => setLightbox(false)}
+        >
+          <div className="absolute right-4 top-4 flex gap-2">
+            <button
+              onClick={handleCopy}
+              className="flex h-9 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-colors"
+              style={{ background: "rgba(255,255,255,0.15)", color: copied ? "#68D391" : "#fff" }}
+            >
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+              {copied ? "已复制" : "复制"}
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setLightbox(false); }}
+              className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors"
+              style={{ background: "rgba(255,255,255,0.15)", color: "#fff" }}
+            >
+              <XIcon size={18} strokeWidth={2} />
+            </button>
+          </div>
+          <img
+            src={src}
+            alt="Tool output (full)"
+            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
 const MAX_OUTPUT_LINES = 16;
 const MAX_OUTPUT_CHARS = 1200;
 
@@ -126,14 +209,7 @@ function OutputBlock({ content, error }: { content: string; error?: boolean }) {
   return (
     <div className="mt-1.5 space-y-2">
       {images.map((src, i) => (
-        <div key={i} className="overflow-hidden rounded-md" style={{ border: "0.5px solid var(--separator)" }}>
-          <img
-            src={src}
-            alt="Tool output"
-            className="block max-h-[400px] w-full object-contain"
-            style={{ background: "var(--bg-primary)" }}
-          />
-        </div>
+        <ImageViewer key={i} src={src} />
       ))}
       {formatted && (
         <>
@@ -176,6 +252,8 @@ export function ToolCallCard({ tool }: { tool: ToolCall }) {
 
   const isRunning = tool.status === "running";
   const isError = tool.status === "error";
+
+  const resultImages = tool.result ? extractImages(tool.result).images : [];
 
   return (
     <div
@@ -246,6 +324,15 @@ export function ToolCallCard({ tool }: { tool: ToolCall }) {
           />
         )}
       </button>
+
+      {/* Auto-display images from tool results without needing to expand */}
+      {resultImages.length > 0 && (
+        <div className="px-3 pb-2 space-y-2">
+          {resultImages.map((src, i) => (
+            <ImageViewer key={i} src={src} />
+          ))}
+        </div>
+      )}
 
       {/* Expanded details */}
       {expanded && hasDetails && (
