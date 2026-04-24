@@ -1156,7 +1156,7 @@ impl AppState {
     /// Register channel plugins and return the registry plus the inbound message pipe.
     async fn build_channels(
         config: &FastClawConfig,
-        tool_registry: &ToolRegistry,
+        _tool_registry: &ToolRegistry,
     ) -> anyhow::Result<(
         ChannelRegistry,
         tokio::sync::mpsc::UnboundedSender<fastclaw_core::channel::InboundMessage>,
@@ -1175,15 +1175,12 @@ impl AppState {
         });
         if let Some(feishu_plugin) = feishu_config.map(fastclaw_feishu::FeishuPlugin::new) {
             let feishu_plugin = Arc::new(feishu_plugin);
-            for t in feishu_plugin.tools() {
-                tool_registry.register(t);
-            }
             let mode = feishu_plugin.connection_mode().to_string();
             if let Err(e) = feishu_plugin.start(inbound_tx.clone()).await {
                 tracing::error!(error = %e, "failed to start Feishu channel plugin");
             }
             channel_registry.register(feishu_plugin);
-            tracing::info!(mode, "Feishu channel plugin registered with tools");
+            tracing::info!(mode, "Feishu channel plugin registered (tools not exposed as system tools)");
         } else {
             tracing::debug!("feishu channel not configured, plugin not loaded");
         }
@@ -1824,7 +1821,6 @@ impl AppState {
             "feishu" => {
                 if let Some(cfg) = fastclaw_feishu::FeishuPluginConfig::from_channel_config(ch) {
                     let plugin = Arc::new(fastclaw_feishu::FeishuPlugin::new(cfg));
-                    for t in plugin.tools() { self.tool_registry.register(t); }
                     plugin.start(tx).await?;
                     self.channel_registry.write().await.register(plugin);
                     tracing::info!("feishu channel hot-reloaded");

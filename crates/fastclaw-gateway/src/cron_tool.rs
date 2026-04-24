@@ -50,7 +50,7 @@ impl Tool for ManageCronTool {
             "agent_id".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "The agent ID that owns the cron jobs. Required for list/create."
+                "description": "The agent ID that owns the cron jobs. Defaults to 'main' if omitted."
             }),
         );
         props.insert(
@@ -158,10 +158,10 @@ impl Tool for ManageCronTool {
 
 impl ManageCronTool {
     async fn handle_list(&self, args: &serde_json::Value) -> ToolResult {
-        let agent_id = match args.get("agent_id").and_then(|v| v.as_str()) {
-            Some(id) => id,
-            None => return ToolResult::err("'agent_id' is required for list".to_string()),
-        };
+        let agent_id = args
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("main");
         match self.store.list_by_agent(agent_id).await {
             Ok(jobs) => {
                 let result = serde_json::json!({ "jobs": jobs, "count": jobs.len() });
@@ -172,10 +172,11 @@ impl ManageCronTool {
     }
 
     async fn handle_create(&self, args: &serde_json::Value) -> ToolResult {
-        let agent_id = match args.get("agent_id").and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => return ToolResult::err("'agent_id' is required for create".to_string()),
-        };
+        let agent_id = args
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("main")
+            .to_string();
         let name = match args.get("name").and_then(|v| v.as_str()) {
             Some(n) => n.to_string(),
             None => return ToolResult::err("'name' is required for create".to_string()),
