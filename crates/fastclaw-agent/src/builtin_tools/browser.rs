@@ -9,6 +9,8 @@ use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolRegistry, ToolResult};
 use super::network::{strip_html_tags, truncate_text};
 
 const DEFAULT_ELEMENT_TIMEOUT: Duration = Duration::from_secs(10);
+const BROWSER_LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
+const ACTION_TIMEOUT: Duration = Duration::from_secs(60);
 
 struct BrowserState {
     browser: headless_chrome::Browser,
@@ -61,6 +63,7 @@ impl BrowserTool {
             let headless = Self::is_headless();
             let profile = Self::profile_dir();
             std::fs::create_dir_all(&profile).ok();
+            Self::remove_stale_lock(&profile);
             let launch_options = headless_chrome::LaunchOptions::default_builder()
                 .headless(headless)
                 .sandbox(false)
@@ -73,18 +76,43 @@ impl BrowserTool {
                          What to do next: check headless_chrome defaults and OS limits; ask the operator if custom flags are required."
                     )
                 })?;
-            let browser = headless_chrome::Browser::new(launch_options).map_err(|e| {
-                format!(
-                    "browser: could not start Chrome/Chromium: {e}. \
-                     What to do next: ensure google-chrome or chromium is installed and on PATH, the gateway user may launch browsers, and no sandbox policy blocks it; see operator docs for FASTCLAW_BROWSER dependencies."
-                )
-            })?;
+
+            let (tx, rx) = std::sync::mpsc::channel();
+            let opts = launch_options;
+            std::thread::spawn(move || {
+                let _ = tx.send(headless_chrome::Browser::new(opts));
+            });
+            let browser = rx
+                .recv_timeout(BROWSER_LAUNCH_TIMEOUT)
+                .map_err(|_| {
+                    "browser: Chrome launch timed out (30s). \
+                     What to do next: ensure Chrome/Chromium is installed and on PATH; \
+                     check that no other process holds the profile lock at the FASTCLAW_BROWSER_PROFILE directory."
+                        .to_string()
+                })?
+                .map_err(|e| {
+                    format!(
+                        "browser: could not start Chrome/Chromium: {e}. \
+                         What to do next: ensure google-chrome or chromium is installed and on PATH, the gateway user may launch browsers, and no sandbox policy blocks it; see operator docs for FASTCLAW_BROWSER dependencies."
+                    )
+                })?;
             *guard = Some(BrowserState {
                 browser,
                 persistent_tab: None,
             });
         }
         Ok(())
+    }
+
+    fn remove_stale_lock(profile: &std::path::Path) {
+        let lock = profile.join("SingletonLock");
+        if lock.exists() {
+            std::fs::remove_file(&lock).ok();
+        }
+        let lock_socket = profile.join("SingletonSocket");
+        if lock_socket.exists() {
+            std::fs::remove_file(&lock_socket).ok();
+        }
     }
 
     /// Returns the persistent tab, creating one if needed or if the old one died.
@@ -105,6 +133,7 @@ impl BrowserTool {
                  What to do next: retry; if Chrome is unstable, restart the gateway browser pool."
             )
         })?;
+        tab.set_default_timeout(Duration::from_secs(30));
         state.persistent_tab = Some(tab.clone());
         Ok(tab)
     }
@@ -218,8 +247,6 @@ impl BrowserTool {
         action: &str,
         args: &serde_json::Value,
     ) -> Result<String, String> {
-        use headless_chrome::protocol::cdp::{Network, Page};
-
         let mut guard = inner.lock().map_err(|e| {
             format!(
                 "browser: mutex lock failed while running action '{action}': {e}. \
@@ -231,6 +258,41 @@ impl BrowserTool {
              What to do next: retry the tool once; if it persists, restart the gateway and report a bug."
                 .to_string()
         })?;
+
+        if Self::is_browser_dead(state) {
+            drop(guard);
+            Self::reset_and_relaunch(inner)?;
+            let mut guard = inner.lock().map_err(|e| format!("browser: re-lock failed: {e}"))?;
+            let state = guard.as_mut().ok_or("browser: state empty after relaunch")?;
+            return Self::dispatch_action(state, action, args);
+        }
+
+        Self::dispatch_action(state, action, args)
+    }
+
+    fn is_browser_dead(state: &BrowserState) -> bool {
+        state
+            .persistent_tab
+            .as_ref()
+            .map(|t| t.get_url().is_empty() && t.get_title().is_err())
+            .unwrap_or(false)
+            || state.browser.get_tabs().lock().map(|tabs| tabs.is_empty()).unwrap_or(true)
+    }
+
+    fn reset_and_relaunch(inner: &Mutex<Option<BrowserState>>) -> Result<(), String> {
+        {
+            let mut guard = inner.lock().map_err(|e| format!("browser: lock failed during reset: {e}"))?;
+            *guard = None;
+        }
+        Self::ensure_browser(inner)
+    }
+
+    fn dispatch_action(
+        state: &mut BrowserState,
+        action: &str,
+        args: &serde_json::Value,
+    ) -> Result<String, String> {
+        use headless_chrome::protocol::cdp::{Network, Page};
 
         match action {
             "navigate" => {
@@ -968,20 +1030,28 @@ impl Tool for BrowserTool {
 
         let inner = self.inner.clone();
 
-        let result = tokio::task::spawn_blocking(move || {
-            Self::ensure_browser(&inner)?;
-            Self::run_action(&inner, &action, &args)
-        })
+        let result = tokio::time::timeout(
+            ACTION_TIMEOUT,
+            tokio::task::spawn_blocking(move || {
+                Self::ensure_browser(&inner)?;
+                Self::run_action(&inner, &action, &args)
+            }),
+        )
         .await;
 
         match result {
-            Ok(Ok(v)) => ToolResult::ok(v),
-            Ok(Err(e)) => ToolResult::err(e),
-            Err(e) => ToolResult::err(format!(
+            Ok(Ok(Ok(v))) => ToolResult::ok(v),
+            Ok(Ok(Err(e))) => ToolResult::err(e),
+            Ok(Err(e)) => ToolResult::err(format!(
                 "browser: the blocking worker task panicked or failed to join: {e}. \
                  What went wrong: spawn_blocking did not return a normal tool result (worker crash or runtime shutdown). \
                  What to do next: retry once with a smaller action; if it repeats, restart the gateway browser worker and report the panic to the operator."
             )),
+            Err(_) => ToolResult::err(
+                "browser: action timed out after 60 seconds. \
+                 What to do next: the page or Chrome may be unresponsive; retry with a simpler page, or check that Chrome is installed and responsive."
+                    .to_string(),
+            ),
         }
     }
 }
@@ -1258,5 +1328,18 @@ mod tests {
         let registry = ToolRegistry::new();
         register_browser_tool(&registry);
         assert!(registry.get("browser").is_some());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn browser_smoke_navigate() {
+        let tool = BrowserTool::new();
+        let result = tool
+            .execute(r#"{"action":"navigate","url":"https://example.com"}"#)
+            .await;
+        eprintln!("result.success = {}", result.success);
+        eprintln!("result.output (first 500 chars) = {}", &result.output[..result.output.len().min(500)]);
+        assert!(result.success, "navigate failed: {}", result.output);
+        assert!(result.output.contains("example.com") || result.output.contains("Example Domain"));
     }
 }
