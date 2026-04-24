@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use base64::Engine as _;
 use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolRegistry, ToolResult};
 
 use super::network::{strip_html_tags, truncate_text};
+
+const DEFAULT_ELEMENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct BrowserState {
     browser: headless_chrome::Browser,
@@ -104,6 +107,110 @@ impl BrowserTool {
         })?;
         state.persistent_tab = Some(tab.clone());
         Ok(tab)
+    }
+
+    /// Pre-validate required parameters before launching Chrome.
+    fn validate_args(action: &str, args: &serde_json::Value) -> Result<(), String> {
+        match action {
+            "navigate" => {
+                if args.get("url").and_then(|v| v.as_str()).is_none() {
+                    return Err(
+                        "browser navigate: missing string field 'url'. \
+                         Example: {\"action\": \"navigate\", \"url\": \"https://example.com\"}."
+                            .to_string(),
+                    );
+                }
+            }
+            "evaluate" => {
+                if args.get("script").and_then(|v| v.as_str()).is_none() {
+                    return Err(
+                        "browser evaluate: missing string field 'script'. \
+                         Example: {\"action\": \"evaluate\", \"script\": \"document.title\"}."
+                            .to_string(),
+                    );
+                }
+            }
+            "click" | "hover" | "select" | "wait_for" => {
+                if args.get("selector").and_then(|v| v.as_str()).is_none() {
+                    return Err(format!(
+                        "browser {action}: missing string field 'selector'. \
+                         Example: {{\"action\": \"{action}\", \"selector\": \"button.submit\"}}."
+                    ));
+                }
+            }
+            "type" => {
+                if args.get("selector").and_then(|v| v.as_str()).is_none() {
+                    return Err(
+                        "browser type: missing string field 'selector'. \
+                         Example: {\"action\": \"type\", \"selector\": \"input#email\", \"text\": \"user@example.com\"}."
+                            .to_string(),
+                    );
+                }
+                if args.get("text").and_then(|v| v.as_str()).is_none() {
+                    return Err(
+                        "browser type: missing string field 'text'. \
+                         Example: {\"action\": \"type\", \"selector\": \"input#email\", \"text\": \"user@example.com\"}."
+                            .to_string(),
+                    );
+                }
+            }
+            "press_key" => {
+                if args.get("key").and_then(|v| v.as_str()).is_none() {
+                    return Err(
+                        "browser press_key: missing string field 'key'. \
+                         Example: {\"action\": \"press_key\", \"key\": \"Enter\"}."
+                            .to_string(),
+                    );
+                }
+            }
+            "cookies" => {
+                let op = args.get("operation").and_then(|v| v.as_str()).unwrap_or("get");
+                if (op == "set" || op == "delete")
+                    && args.get("cookie_name").and_then(|v| v.as_str()).is_none()
+                {
+                    return Err(format!(
+                        "browser cookies {op}: missing string field 'cookie_name'. \
+                         Example: {{\"action\": \"cookies\", \"operation\": \"{op}\", \"cookie_name\": \"token\"}}."
+                    ));
+                }
+            }
+            "pdf" => {
+                if args.get("output_path").and_then(|v| v.as_str()).is_none() {
+                    return Err(
+                        "browser pdf: missing string field 'output_path'. \
+                         Example: {\"action\": \"pdf\", \"output_path\": \"page.pdf\"}."
+                            .to_string(),
+                    );
+                }
+            }
+            "screenshot" | "scroll" | "interact" | "get_content"
+            | "go_back" | "go_forward" | "reload" => {}
+            other => {
+                return Err(format!(
+                    "browser: unknown action '{other}'. \
+                     Valid actions: navigate, screenshot, evaluate, click, type, press_key, hover, select, wait_for, scroll, go_back, go_forward, reload, cookies, pdf, interact, get_content."
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_timeout(args: &serde_json::Value) -> Duration {
+        args.get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .map(Duration::from_millis)
+            .unwrap_or(DEFAULT_ELEMENT_TIMEOUT)
+    }
+
+    fn require_selector<'a>(args: &'a serde_json::Value, action: &str) -> Result<&'a str, String> {
+        args.get("selector")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                format!(
+                    "browser {action}: missing string field 'selector'. \
+                     Example: {{\"action\": \"{action}\", \"selector\": \"button.submit\"}}."
+                )
+            })
     }
 
     fn run_action(
@@ -439,6 +546,10 @@ impl Tool for BrowserTool {
             }
         };
 
+        if let Err(e) = Self::validate_args(&action, &args) {
+            return ToolResult::err(e);
+        }
+
         let inner = self.inner.clone();
 
         let result = tokio::task::spawn_blocking(move || {
@@ -481,6 +592,38 @@ mod tests {
         assert!(schema.properties.contains_key("output_path"));
         assert!(schema.properties.contains_key("wait_seconds"));
         assert!(schema.required.contains(&"action".to_string()));
+    }
+
+    #[test]
+    fn parse_timeout_defaults() {
+        let args = serde_json::json!({});
+        assert_eq!(BrowserTool::parse_timeout(&args), DEFAULT_ELEMENT_TIMEOUT);
+    }
+
+    #[test]
+    fn parse_timeout_custom() {
+        let args = serde_json::json!({"timeout_ms": 5000});
+        assert_eq!(
+            BrowserTool::parse_timeout(&args),
+            Duration::from_millis(5000)
+        );
+    }
+
+    #[test]
+    fn require_selector_present() {
+        let args = serde_json::json!({"selector": "#main"});
+        assert_eq!(
+            BrowserTool::require_selector(&args, "click").unwrap(),
+            "#main"
+        );
+    }
+
+    #[test]
+    fn require_selector_missing() {
+        let args = serde_json::json!({});
+        let err = BrowserTool::require_selector(&args, "click").unwrap_err();
+        assert!(err.contains("missing"));
+        assert!(err.contains("selector"));
     }
 
     #[test]
@@ -563,6 +706,121 @@ mod tests {
             .await;
         assert!(!result.success);
         assert!(result.output.contains("missing"));
+    }
+
+    #[tokio::test]
+    async fn browser_click_missing_selector() {
+        let tool = BrowserTool::new();
+        let result = tool.execute(r#"{"action":"click"}"#).await;
+        assert!(!result.success);
+        assert!(result.output.contains("selector"));
+    }
+
+    #[tokio::test]
+    async fn browser_type_missing_selector() {
+        let tool = BrowserTool::new();
+        let result = tool
+            .execute(r#"{"action":"type","text":"hello"}"#)
+            .await;
+        assert!(!result.success);
+        assert!(result.output.contains("selector"));
+    }
+
+    #[tokio::test]
+    async fn browser_type_missing_text() {
+        let tool = BrowserTool::new();
+        let result = tool
+            .execute(r#"{"action":"type","selector":"input"}"#)
+            .await;
+        assert!(!result.success);
+        assert!(result.output.contains("text"));
+    }
+
+    #[tokio::test]
+    async fn browser_press_key_missing_key() {
+        let tool = BrowserTool::new();
+        let result = tool.execute(r#"{"action":"press_key"}"#).await;
+        assert!(!result.success);
+        assert!(result.output.contains("key"));
+    }
+
+    #[tokio::test]
+    async fn browser_hover_missing_selector() {
+        let tool = BrowserTool::new();
+        let result = tool.execute(r#"{"action":"hover"}"#).await;
+        assert!(!result.success);
+        assert!(result.output.contains("selector"));
+    }
+
+    #[tokio::test]
+    async fn browser_select_missing_selector() {
+        let tool = BrowserTool::new();
+        let result = tool.execute(r#"{"action":"select"}"#).await;
+        assert!(!result.success);
+        assert!(result.output.contains("selector"));
+    }
+
+    #[tokio::test]
+    async fn browser_wait_for_missing_selector() {
+        let tool = BrowserTool::new();
+        let result = tool.execute(r#"{"action":"wait_for"}"#).await;
+        assert!(!result.success);
+        assert!(result.output.contains("selector"));
+    }
+
+    #[tokio::test]
+    async fn browser_cookies_set_missing_name() {
+        let tool = BrowserTool::new();
+        let result = tool
+            .execute(r#"{"action":"cookies","operation":"set"}"#)
+            .await;
+        assert!(!result.success);
+        assert!(result.output.contains("cookie_name"));
+    }
+
+    #[tokio::test]
+    async fn browser_cookies_delete_missing_name() {
+        let tool = BrowserTool::new();
+        let result = tool
+            .execute(r#"{"action":"cookies","operation":"delete"}"#)
+            .await;
+        assert!(!result.success);
+        assert!(result.output.contains("cookie_name"));
+    }
+
+    #[tokio::test]
+    async fn browser_pdf_missing_output_path() {
+        let tool = BrowserTool::new();
+        let result = tool.execute(r#"{"action":"pdf"}"#).await;
+        assert!(!result.success);
+        assert!(result.output.contains("output_path"));
+    }
+
+    #[tokio::test]
+    async fn browser_validate_rejects_unknown_action() {
+        let args = serde_json::json!({"action": "explode"});
+        let err = BrowserTool::validate_args("explode", &args).unwrap_err();
+        assert!(err.contains("unknown action"));
+    }
+
+    #[test]
+    fn browser_validate_passes_simple_actions() {
+        let args = serde_json::json!({});
+        assert!(BrowserTool::validate_args("go_back", &args).is_ok());
+        assert!(BrowserTool::validate_args("go_forward", &args).is_ok());
+        assert!(BrowserTool::validate_args("reload", &args).is_ok());
+        assert!(BrowserTool::validate_args("scroll", &args).is_ok());
+        assert!(BrowserTool::validate_args("interact", &args).is_ok());
+        assert!(BrowserTool::validate_args("get_content", &args).is_ok());
+        assert!(BrowserTool::validate_args("screenshot", &args).is_ok());
+    }
+
+    #[test]
+    fn browser_validate_cookies_get_needs_no_name() {
+        let args = serde_json::json!({"operation": "get"});
+        assert!(BrowserTool::validate_args("cookies", &args).is_ok());
+        let args = serde_json::json!({"operation": "clear"});
+        assert!(BrowserTool::validate_args("cookies", &args).is_ok());
     }
 
     #[test]
