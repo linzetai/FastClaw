@@ -631,7 +631,7 @@ fn default_dreaming_interval_secs() -> u64 {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             embedding: EmbeddingConfig::default(),
             dreaming_interval_secs: default_dreaming_interval_secs(),
         }
