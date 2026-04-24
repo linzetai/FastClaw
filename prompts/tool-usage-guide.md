@@ -14,7 +14,7 @@
 ## Web
 - **web_search**: Search the web for current information. Requires backend config (Tavily API key or SearXNG instance); unconfigured returns a setup prompt.
 - **web_fetch**: Fetch and extract readable text/markdown from an HTTP(S) document. Best for long HTML pages, docs, READMEs.
-- **http_fetch**: HTTP GET a URL and return raw response text (≤4 KB). Best for small JSON APIs, health checks, version probes. SSRF policy blocks private/localhost URLs.
+- **http_fetch**: HTTP request (GET/POST/PUT/DELETE/PATCH/HEAD; default GET) with optional `headers` and `body` (POST/PUT/PATCH), returns `{ status, body }` with raw text truncated (~4 KB). Best for small JSON APIs, health checks, REST calls. SSRF policy blocks private/localhost URLs.
 
 ## Code Intelligence
 - **workspace_symbols**: Search symbols by name across workspace.
@@ -50,29 +50,9 @@ Persistent long-term memory. Use actively.
 ## Utilities
 - **get_current_time**: Current date and time.
 - **calculator**: Evaluate math expressions.
-- **browser**: Chrome automation via CDP. Launches a visible Chrome window by default; persistent tab preserves session/cookies across calls. Requires `feature = "browser"` at compile time and Chrome/Chromium installed at runtime. Set `FASTCLAW_BROWSER_HEADLESS=true` for CI/server.
-
-  **Navigation:** `navigate` (url, optional wait_for selector for SPAs) · `go_back` · `go_forward` · `reload` (optional ignore_cache)
-
-  **DOM interaction:** `click` (selector) · `type` (selector + text, optional clear) · `press_key` (key name: Enter, Tab, Escape, etc.) · `hover` (selector)
-
-  **DOM query:** `select` (selector, optional attribute) · `wait_for` (selector, timeout_ms) · `get_content` (optional selector for element-specific)
-
-  **Visual:** `screenshot` (optional url, optional selector for element-level, optional output_path) · `scroll` (selector to scroll into view, or direction + pixels)
-
-  **Data:** `cookies` (operation: get/set/delete/clear, cookie_name, cookie_value) · `pdf` (output_path)
-
-  **Advanced:** `evaluate` (script, optional url — returns JSON) · `interact` (url, wait_seconds — hand browser to user for login/CAPTCHA)
-
-  Typical form flow: `navigate` → `wait_for` → `type` → `click` → `wait_for` result.
-  Login flow: `navigate` → `interact` (user logs in) → `cookies get` → `navigate` to protected page.
+- **browser**: Chrome via CDP (visible window by default; one persistent tab keeps cookies). Requires `feature = "browser"` and a local Chrome/Chromium; use `FASTCLAW_BROWSER_HEADLESS=true` in CI. **Actions (JSON `action` field):** `navigate`, `go_back`, `go_forward`, `reload`; `screenshot` / `pdf`; `evaluate` (optional `url`); `click`, `type`, `hover`, `select`, `wait_for`, `press_key`, `scroll` (direction up/down, amount in px); `cookies` (get, set, delete, clear; set/delete use `cookie_name` / `cookie_value` as needed); `interact` (user login/CAPTCHA, optional `wait_seconds`); `get_content` (read current page). Form flow: `navigate` → `wait_for` → `type` → `click` → `wait_for`. Login: `navigate` → `interact` → `cookies` get if needed → `navigate` to a protected page.
 - **image_generate**: Generate images from text.
 - **text_to_speech**: Convert text to audio.
-
-## Agent Discovery
-- **spawn_subagent**: Launch a sub-agent to handle a task in a separate session.
-- **list_agents**: List all configured agents with their IDs and descriptions.
-- **get_agent_info**: Get detailed info about a specific agent by ID.
 
 ## MCP Extensions
 

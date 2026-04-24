@@ -218,7 +218,7 @@ impl BrowserTool {
         action: &str,
         args: &serde_json::Value,
     ) -> Result<String, String> {
-        use headless_chrome::protocol::cdp::Page;
+        use headless_chrome::protocol::cdp::{Network, Page};
 
         let mut guard = inner.lock().map_err(|e| {
             format!(
@@ -451,9 +451,352 @@ impl BrowserTool {
                     "content_length": truncated.len(),
                 }).to_string())
             }
+            "click" => {
+                let tab = Self::get_or_create_tab(state)?;
+                let selector = Self::require_selector(args, "click")?;
+                let el = tab.find_element(selector).map_err(|e| {
+                    format!(
+                        "browser click: no element matched selector '{selector}': {e}. \
+                         What to do next: correct the CSS selector, call wait_for until the control exists, or navigate to the right page first."
+                    )
+                })?;
+                el.click().map_err(|e| {
+                    format!(
+                        "browser click: could not perform click on selector '{selector}': {e}. \
+                         What to do next: dismiss modals, try hover then click, or use evaluate to run the same handler in JavaScript if the control is not reachable."
+                    )
+                })?;
+                Ok(serde_json::json!({ "ok": true, "selector": selector }).to_string())
+            }
+            "type" => {
+                let tab = Self::get_or_create_tab(state)?;
+                let selector = Self::require_selector(args, "type")?;
+                let text = args
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        "browser type: missing string field 'text'. \
+                         Example: {\"action\": \"type\", \"selector\": \"input#email\", \"text\": \"user@example.com\"}."
+                            .to_string()
+                    })?;
+                let el = tab.find_element(selector).map_err(|e| {
+                    format!(
+                        "browser type: no element matched selector '{selector}': {e}. \
+                         What to do next: fix the selector or use wait_for before typing."
+                    )
+                })?;
+                el.type_into(text).map_err(|e| {
+                    format!(
+                        "browser type: could not type into selector '{selector}': {e}. \
+                         What to do next: click focus manually with evaluate, clear the field, or try press_key to submit after filling."
+                    )
+                })?;
+                Ok(serde_json::json!({ "ok": true, "selector": selector, "text": text }).to_string())
+            }
+            "hover" => {
+                let tab = Self::get_or_create_tab(state)?;
+                let selector = Self::require_selector(args, "hover")?;
+                let el = tab.find_element(selector).map_err(|e| {
+                    format!(
+                        "browser hover: no element matched selector '{selector}': {e}. \
+                         What to do next: fix the CSS selector and ensure the page finished rendering."
+                    )
+                })?;
+                el.call_js_fn(
+                    "function() { this.dispatchEvent(new MouseEvent('mouseover', {bubbles: true})); }",
+                    vec![],
+                    false,
+                )
+                .map_err(|e| {
+                    format!(
+                        "browser hover: could not emit mouseover on selector '{selector}': {e}. \
+                         What to do next: use evaluate to trigger a custom event or call an exposed JS hook if the element is virtualized."
+                    )
+                })?;
+                Ok(serde_json::json!({ "ok": true, "selector": selector }).to_string())
+            }
+            "select" => {
+                let tab = Self::get_or_create_tab(state)?;
+                let selector = Self::require_selector(args, "select")?;
+                let value = args
+                    .get("value")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        "browser select: missing string field 'value' (the option value). \
+                         Example: {\"action\": \"select\", \"selector\": \"select#country\", \"value\": \"US\"}."
+                            .to_string()
+                    })?;
+                let sel_lit = serde_json::to_string(selector).map_err(|e| {
+                    format!(
+                        "browser select: could not encode selector: {e}. \
+                         What to do next: use a short ASCII selector, then retry."
+                    )
+                })?;
+                let val_lit = serde_json::to_string(value).map_err(|e| {
+                    format!(
+                        "browser select: could not encode value: {e}. \
+                         What to do next: pass a string option value that matches a real <option> in the list."
+                    )
+                })?;
+                let script = format!(
+                    "(() => {{ const el = document.querySelector({sel_lit}); if (!el) throw new Error('not found'); el.value = {val_lit}; el.dispatchEvent(new Event('input', {{bubbles: true}})); el.dispatchEvent(new Event('change', {{bubbles: true}})); }})()",
+                );
+                tab.evaluate(&script, false).map_err(|e| {
+                    format!(
+                        "browser select: could not set value on selector '{selector}': {e}. \
+                         What to do next: ensure the target is a <select> and the value matches an <option> value, then retry."
+                    )
+                })?;
+                Ok(serde_json::json!({ "ok": true, "selector": selector, "value": value }).to_string())
+            }
+            "wait_for" => {
+                let tab = Self::get_or_create_tab(state)?;
+                let selector = Self::require_selector(args, "wait_for")?;
+                let timeout = Self::parse_timeout(args);
+                tab.wait_for_element_with_custom_timeout(selector, timeout)
+                    .map_err(|e| {
+                        format!(
+                            "browser wait_for: element '{selector}' did not appear before timeout: {e}. \
+                             What to do next: increase timeout_ms, check navigation or SPA delays, or relax the CSS selector so it matches a stable node."
+                        )
+                    })?;
+                Ok(serde_json::json!({ "ok": true, "selector": selector, "found": true }).to_string())
+            }
+            "press_key" => {
+                let tab = Self::get_or_create_tab(state)?;
+                let key = args
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        "browser press_key: missing string field 'key'. \
+                         Example: {\"action\": \"press_key\", \"key\": \"Enter\"}."
+                            .to_string()
+                    })?;
+                tab.press_key(key).map_err(|e| {
+                    format!(
+                        "browser press_key: could not send key '{key}': {e}. \
+                         What to do next: use a name from the puppeteer key map (e.g. Enter, Tab, Escape) or use evaluate to call keyboard handlers directly."
+                    )
+                })?;
+                Ok(serde_json::json!({ "ok": true, "key": key }).to_string())
+            }
+            "scroll" => {
+                let tab = Self::get_or_create_tab(state)?;
+                let direction = args
+                    .get("direction")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("down");
+                if direction != "up" && direction != "down" {
+                    return Err(format!(
+                        "browser scroll: 'direction' must be \"up\" or \"down\", got '{direction}'. \
+                         What to do next: pass direction explicitly or omit it to scroll down, then retry."
+                    ));
+                }
+                let amount = args.get("amount").and_then(|v| v.as_i64()).unwrap_or(300);
+                let delta = if direction == "up" {
+                    -amount.abs()
+                } else {
+                    amount.abs()
+                };
+                let script = format!("window.scrollBy(0, {delta})");
+                tab.evaluate(&script, false).map_err(|e| {
+                    format!(
+                        "browser scroll: could not run window.scrollBy: {e}. \
+                         What to do next: navigate to a page with a real document, then retry."
+                    )
+                })?;
+                Ok(serde_json::json!({ "ok": true, "direction": direction, "amount": amount.abs() as u64 }).to_string())
+            }
+            "go_back" => {
+                let tab = Self::get_or_create_tab(state)?;
+                tab.evaluate("history.back()", false).map_err(|e| {
+                    format!(
+                        "browser go_back: history.back() failed: {e}. \
+                         What to do next: wait after navigation, ensure there is history to return to, or use navigate with a known URL."
+                    )
+                })?;
+                Ok(serde_json::json!({ "ok": true }).to_string())
+            }
+            "go_forward" => {
+                let tab = Self::get_or_create_tab(state)?;
+                tab.evaluate("history.forward()", false).map_err(|e| {
+                    format!(
+                        "browser go_forward: history.forward() failed: {e}. \
+                         What to do next: go_back first, wait for the load, then try forward again."
+                    )
+                })?;
+                Ok(serde_json::json!({ "ok": true }).to_string())
+            }
+            "reload" => {
+                let tab = Self::get_or_create_tab(state)?;
+                tab.reload(false, None).map_err(|e| {
+                    format!(
+                        "browser reload: Page.reload failed: {e}. \
+                         What to do next: wait until navigation settles, or navigate explicitly to the same URL to refresh."
+                    )
+                })?;
+                Ok(serde_json::json!({ "ok": true }).to_string())
+            }
+            "cookies" => {
+                let tab = Self::get_or_create_tab(state)?;
+                let op = args
+                    .get("operation")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("get");
+                match op {
+                    "get" => {
+                        let cookies = tab.get_cookies().map_err(|e| {
+                            format!(
+                                "browser cookies get: Network.getCookies failed: {e}. \
+                                 What to do next: open an http(s) page first, then reread—about: or empty tabs may not expose cookies the same way."
+                            )
+                        })?;
+                        let list = serde_json::to_value(&cookies).map_err(|e| {
+                            format!(
+                                "browser cookies get: could not encode cookies: {e}. \
+                                 What to do next: retry; if the error repeats, report a bug with a minimal repro."
+                            )
+                        })?;
+                        Ok(serde_json::json!({ "ok": true, "cookies": list }).to_string())
+                    }
+                    "set" => {
+                        let name = args
+                            .get("cookie_name")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| {
+                                "browser cookies set: missing string field 'cookie_name'. \
+                                 Example: {\"action\": \"cookies\", \"operation\": \"set\", \"cookie_name\": \"token\", \"cookie_value\": \"abc\"}."
+                                    .to_string()
+                            })?;
+                        let value = args
+                            .get("cookie_value")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| {
+                                "browser cookies set: missing string field 'cookie_value'. \
+                                 Example: {\"action\": \"cookies\", \"operation\": \"set\", \"cookie_name\": \"token\", \"cookie_value\": \"abc\"}."
+                                    .to_string()
+                            })?;
+                        tab.set_cookies(vec![Network::CookieParam {
+                            name: name.to_string(),
+                            value: value.to_string(),
+                            url: None,
+                            domain: None,
+                            path: None,
+                            secure: None,
+                            http_only: None,
+                            same_site: None,
+                            expires: None,
+                            priority: None,
+                            same_party: None,
+                            source_scheme: None,
+                            source_port: None,
+                            partition_key: None,
+                        }])
+                        .map_err(|e| {
+                            format!(
+                                "browser cookies set: could not set cookie '{name}': {e}. \
+                                 What to do next: load a normal http(s) page on the right origin first, then set the value again."
+                            )
+                        })?;
+                        Ok(serde_json::json!({
+                            "ok": true,
+                            "operation": "set",
+                            "cookie_name": name,
+                            "cookie_value": value
+                        })
+                        .to_string())
+                    }
+                    "delete" => {
+                        let name = args
+                            .get("cookie_name")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| {
+                                "browser cookies delete: missing string field 'cookie_name'. \
+                                 Example: {\"action\": \"cookies\", \"operation\": \"delete\", \"cookie_name\": \"token\"}."
+                                    .to_string()
+                            })?;
+                        tab.delete_cookies(vec![Network::DeleteCookies {
+                            name: name.to_string(),
+                            url: None,
+                            domain: None,
+                            path: None,
+                            partition_key: None,
+                        }])
+                        .map_err(|e| {
+                            format!(
+                                "browser cookies delete: could not delete cookie '{name}': {e}. \
+                                 What to do next: open the site that set the cookie, match name/domain, then retry; some HttpOnly flags require host cookies."
+                            )
+                        })?;
+                        Ok(serde_json::json!({
+                            "ok": true,
+                            "operation": "delete",
+                            "cookie_name": name
+                        })
+                        .to_string())
+                    }
+                    "clear" => {
+                        let cookies = tab.get_cookies().map_err(|e| {
+                            format!(
+                                "browser cookies clear: could not list cookies: {e}. \
+                                 What to do next: open an http(s) page, then run clear on that tab so the right jar is targeted."
+                            )
+                        })?;
+                        let n = cookies.len();
+                        if n > 0 {
+                            let dels: Vec<Network::DeleteCookies> = cookies
+                                .into_iter()
+                                .map(|c| Network::DeleteCookies {
+                                    name: c.name,
+                                    url: None,
+                                    domain: Some(c.domain),
+                                    path: Some(c.path),
+                                    partition_key: c.partition_key,
+                                })
+                                .collect();
+                            tab.delete_cookies(dels).map_err(|e| {
+                                format!(
+                                    "browser cookies clear: delete_cookies failed: {e}. \
+                                     What to do next: try deleting a single cookie by name, or clear from Chrome manually if a protected cookie blocks removal."
+                                )
+                            })?;
+                        }
+                        Ok(serde_json::json!({ "ok": true, "operation": "clear", "deleted": n }).to_string())
+                    }
+                    other => Err(format!(
+                        "browser cookies: unknown operation '{other}'. \
+                         What to do next: use one of get, set, delete, or clear, then retry."
+                    )),
+                }
+            }
+            "pdf" => {
+                let tab = Self::get_or_create_tab(state)?;
+                let path = args
+                    .get("output_path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        "browser pdf: missing string field 'output_path'. \
+                         Example: {\"action\": \"pdf\", \"output_path\": \"page.pdf\"}."
+                            .to_string()
+                    })?;
+                let bytes = tab.print_to_pdf(None).map_err(|e| {
+                    format!(
+                        "browser pdf: print_to_pdf failed: {e}. \
+                         What to do next: wait for the page to finish painting, or pass print settings through the operator if the site is huge."
+                    )
+                })?;
+                let n = bytes.len();
+                std::fs::write(path, &bytes).map_err(|e| {
+                    format!(
+                        "browser pdf: could not write PDF to '{path}': {e}. \
+                         What to do next: pick a writable path with enough free disk, then retry."
+                    )
+                })?;
+                Ok(serde_json::json!({ "ok": true, "path": path, "bytes": n }).to_string())
+            }
             other => Err(format!(
                 "browser: unknown action '{other}'. \
-                 Use exactly 'navigate', 'screenshot', 'evaluate', 'interact', or 'get_content' (see tool schema), then retry with the required fields for that action."
+                 Use exactly 'navigate', 'screenshot', 'evaluate', 'click', 'type', 'press_key', 'hover', 'select', 'wait_for', 'scroll', 'go_back', 'go_forward', 'reload', 'cookies', 'pdf', 'interact', or 'get_content' (see tool schema), then retry with the required fields for that action."
             )),
         }
     }
@@ -466,17 +809,17 @@ impl Tool for BrowserTool {
     }
 
     fn description(&self) -> &str {
-        "Control a visible Chrome window via CDP—supports login, CAPTCHAs, and interactive flows. \
-         The browser launches **non-headless** by default (set FASTCLAW_BROWSER_HEADLESS=true for CI). \
-         A single persistent tab is reused across calls so cookies and login state carry over. \
-         Actions: \
-         navigate + url → {url, title, content, content_length}; content is tag-stripped text ≤16KiB. \
-         screenshot (optional url, optional output_path) → PNG of the current or navigated page. \
-         evaluate + script (optional url) → run JS on the current page; wrap with JSON.stringify for clean output. \
-         interact (optional url, optional wait_seconds default 60) → open a page for the user to interact with (login, CAPTCHA); polls until the URL changes or timeout, then returns page content. \
-         get_content → read the current page's URL, title, and text without navigating. \
-         Prefer web_fetch for static HTML/APIs; use browser for JS-heavy pages, login-gated content, or visual tasks. \
-         Example: {\"action\": \"interact\", \"url\": \"https://accounts.google.com\", \"wait_seconds\": 120}."
+        "Control a visible Chrome window via CDP—login, CAPTCHAs, and JS-heavy pages. \
+         Non-headless by default (FASTCLAW_BROWSER_HEADLESS=true for CI). \
+         One persistent tab keeps session/cookies across calls. \
+         navigate / go_back / go_forward / reload — history and full loads. \
+         screenshot, pdf — image/PDF output (paths optional for screenshot). \
+         evaluate — run JS. \
+         click, type, hover, select, wait_for, press_key, scroll — DOM automation. \
+         cookies (get, set, delete, clear) — cookie jar. \
+         interact — user-driven login/CAPTCHA (optional url, wait_seconds). \
+         get_content — current URL, title, text without navigating. \
+         Prefer web_fetch for static HTML/APIs. Example: {\"action\": \"interact\", \"url\": \"https://accounts.google.com\"}."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -485,36 +828,109 @@ impl Tool for BrowserTool {
             "action".to_string(),
             serde_json::json!({
                 "type": "string",
-                "enum": ["navigate", "screenshot", "evaluate", "interact", "get_content"],
-                "description": "navigate: load url, return text. screenshot: PNG of current/navigated page. evaluate: run JS. interact: open page for user interaction (login etc.), wait for URL change or timeout. get_content: read current page without navigating."
+                "enum": [
+                    "navigate", "screenshot", "evaluate", "click", "type", "press_key", "hover", "select",
+                    "wait_for", "scroll", "go_back", "go_forward", "reload", "cookies", "pdf", "interact", "get_content"
+                ],
+                "description": "What to do: navigate, screenshot, evaluate, DOM actions (click/type/hover/select/wait_for/press_key/scroll), history (go_back/forward/reload), cookies, pdf, interact (user login), or get_content (read current page text)."
             }),
         );
         props.insert(
             "url".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "HTTP(S) page to load. Required for navigate. Optional for screenshot (screenshots current page if omitted), evaluate, and interact."
+                "description": "HTTP(S) page to load. Required for navigate. Optional for screenshot, evaluate, and interact (uses current page if omitted)."
             }),
         );
         props.insert(
             "script".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "JavaScript expression for evaluate action only. Returned value is Debug-formatted—use JSON.stringify in script for clean text."
+                "description": "JavaScript for evaluate. Return value is Debug-formatted; use JSON.stringify in script for clean text."
             }),
         );
         props.insert(
             "output_path".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Filesystem path for screenshot PNG. Defaults to OS temp directory when omitted."
+                "description": "Filesystem path: screenshot PNG or pdf (pdf action) output."
             }),
         );
         props.insert(
             "wait_seconds".to_string(),
             serde_json::json!({
                 "type": "integer",
-                "description": "For interact action: max seconds to wait for user interaction (default 60). The tool returns early if the page URL changes (e.g. after login redirect)."
+                "description": "For interact: max seconds to wait (default 60). Returns early if the page URL changes."
+            }),
+        );
+        props.insert(
+            "selector".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "CSS selector for click, type, hover, select, and wait_for."
+            }),
+        );
+        props.insert(
+            "text".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Text to type (type action)."
+            }),
+        );
+        props.insert(
+            "key".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Key name for press_key (e.g. Enter, Tab, Escape) per Chromium key table."
+            }),
+        );
+        props.insert(
+            "value".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Option value to select (select action)."
+            }),
+        );
+        props.insert(
+            "direction".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "scroll: \"up\" or \"down\" (default down)."
+            }),
+        );
+        props.insert(
+            "amount".to_string(),
+            serde_json::json!({
+                "type": "integer",
+                "description": "scroll: vertical pixels to scroll (default 300)."
+            }),
+        );
+        props.insert(
+            "timeout_ms".to_string(),
+            serde_json::json!({
+                "type": "integer",
+                "description": "wait_for: max time to wait for the selector in milliseconds (default 10000)."
+            }),
+        );
+        props.insert(
+            "operation".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "cookies: get (list), set (needs cookie_name + cookie_value), delete (cookie_name), or clear (all in tab)."
+            }),
+        );
+        props.insert(
+            "cookie_name".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Cookie name for cookies set and delete."
+            }),
+        );
+        props.insert(
+            "cookie_value".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Cookie value for cookies set."
             }),
         );
         ToolParameterSchema {
@@ -591,6 +1007,8 @@ mod tests {
         assert!(schema.properties.contains_key("script"));
         assert!(schema.properties.contains_key("output_path"));
         assert!(schema.properties.contains_key("wait_seconds"));
+        assert!(schema.properties.contains_key("selector"));
+        assert!(schema.properties.contains_key("timeout_ms"));
         assert!(schema.required.contains(&"action".to_string()));
     }
 
@@ -642,21 +1060,33 @@ mod tests {
         let action_prop = &schema.properties["action"];
         let enum_vals = action_prop["enum"].as_array().unwrap();
         let actions: Vec<&str> = enum_vals.iter().map(|v| v.as_str().unwrap()).collect();
-        assert!(actions.contains(&"navigate"));
-        assert!(actions.contains(&"screenshot"));
-        assert!(actions.contains(&"evaluate"));
-        assert!(actions.contains(&"interact"));
-        assert!(actions.contains(&"get_content"));
+        for a in [
+            "navigate",
+            "screenshot",
+            "evaluate",
+            "click",
+            "type",
+            "press_key",
+            "hover",
+            "select",
+            "wait_for",
+            "scroll",
+            "go_back",
+            "go_forward",
+            "reload",
+            "cookies",
+            "pdf",
+            "interact",
+            "get_content",
+        ] {
+            assert!(actions.contains(&a), "enum missing action: {a}");
+        }
     }
 
     #[test]
-    fn is_headless_defaults_to_false() {
+    fn is_headless_env_var() {
         std::env::remove_var("FASTCLAW_BROWSER_HEADLESS");
         assert!(!BrowserTool::is_headless());
-    }
-
-    #[test]
-    fn is_headless_respects_env() {
         std::env::set_var("FASTCLAW_BROWSER_HEADLESS", "true");
         assert!(BrowserTool::is_headless());
         std::env::set_var("FASTCLAW_BROWSER_HEADLESS", "1");

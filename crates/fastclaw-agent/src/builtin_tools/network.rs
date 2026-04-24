@@ -1,13 +1,50 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolResult};
 use fastclaw_security::ssrf::{ssrf_check_url, ssrf_safe_redirect_policy};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
-/// HTTP fetch tool — retrieves content from a URL.
+/// HTTP fetch tool — performs one HTTP request to a URL.
 pub struct HttpFetchTool {
     client: reqwest::Client,
+}
+
+fn parse_http_fetch_method(
+    v: Option<&serde_json::Value>,
+) -> std::result::Result<reqwest::Method, String> {
+    let s = match v {
+        None | Some(serde_json::Value::Null) => {
+            return Ok(reqwest::Method::GET);
+        }
+        Some(serde_json::Value::String(s)) => s.as_str(),
+        _ => {
+            return Err(
+                "http_fetch: 'method' must be a string, or omitted. \
+                 What to do next: use \"GET\", \"POST\", etc., e.g. {\"url\": \"https://api.example.com/v1/r\", \"method\": \"POST\"}."
+                    .to_string(),
+            );
+        }
+    };
+    let t = s.trim();
+    if t.is_empty() {
+        return Ok(reqwest::Method::GET);
+    }
+    match t.to_uppercase().as_str() {
+        "GET" => Ok(reqwest::Method::GET),
+        "POST" => Ok(reqwest::Method::POST),
+        "PUT" => Ok(reqwest::Method::PUT),
+        "DELETE" => Ok(reqwest::Method::DELETE),
+        "PATCH" => Ok(reqwest::Method::PATCH),
+        "HEAD" => Ok(reqwest::Method::HEAD),
+        _ => Err(
+            "http_fetch: 'method' must be one of GET, POST, PUT, DELETE, PATCH, or HEAD, or omitted (defaults to GET). \
+             What to do next: set \"method\" to a supported token (uppercase in schema; matching is case-insensitive) or omit it."
+                .to_string(),
+        ),
+    }
 }
 
 impl HttpFetchTool {
@@ -29,14 +66,14 @@ impl Tool for HttpFetchTool {
     }
 
     fn description(&self) -> &str {
-        "HTTP GET one absolute URL and return JSON {status, body} with raw response text (no HTML cleanup). Ideal for small JSON APIs, health checks, version probes, or any machine-readable endpoint when you already have the URL. \
+        "HTTP request to one absolute URL: supports GET, POST, PUT, DELETE, PATCH, and HEAD, returning JSON {status, body} (raw response text, no HTML cleanup). Omitted or empty method defaults to GET. Use GET to read a resource, HEAD to retrieve only the status line (body is always empty for HEAD in the tool output), POST to create or trigger actions, PUT to replace a whole resource, PATCH for partial updates, and DELETE to remove. Send optional raw body text on POST, PUT, or PATCH (e.g. JSON you serialized yourself) and set Content-Type / Authorization / Accept in headers when the API needs them. \
          For long HTML articles or docs you want to read, use web_fetch with extract_mode \"text\"—it strips tags and allows a larger text budget than http_fetch's ~4KB body truncation. \
          When you only have a question or keywords, use web_search first, pick trustworthy URLs, then http_fetch for compact JSON or web_fetch for prose. \
          SSRF rules block localhost, private RFC1918 ranges, link-local addresses, file://, and unsafe redirects; only vetted public http(s) URLs succeed. \
-         Responses truncate near 4096 bytes with a total-size suffix; client timeout is 10s—narrow the endpoint, add query limits, or move to web_fetch if you routinely hit limits. \
+         Responses truncate near 4096 bytes (except HEAD, which has no body) with a total-size suffix; client timeout is 10s—narrow the endpoint, add query limits, or move to web_fetch if you routinely hit limits. \
          Non-2xx HTTP statuses still return JSON with the status field—treat them as logical failures for automation. \
          Anti-pattern: pulling huge HTML landing pages through http_fetch expecting readable text. \
-         Example: {\"url\": \"https://api.github.com/zen\"}."
+         Example GET: {\"url\": \"https://api.github.com/zen\"}. Example POST: {\"url\": \"https://api.example.com/v1/items\", \"method\": \"POST\", \"headers\": {\"Content-Type\": \"application/json\"}, \"body\": \"{}\"}."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -46,6 +83,29 @@ impl Tool for HttpFetchTool {
             serde_json::json!({
                 "type": "string",
                 "description": "Full http(s) URL including scheme and host, e.g. 'https://api.github.com/repos/org/repo'. Relative paths ('/v1/status') are invalid. Must pass SSRF policy (no localhost/private/file). If DNS or TLS fails, fix the hostname or trust chain before retrying."
+            }),
+        );
+        props.insert(
+            "method".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"],
+                "default": "GET",
+                "description": "HTTP method. GET: fetch a representation (default when omitted). HEAD: like GET but the tool does not return a response body—only {status, body: \"\"}—use to check existence, ETag, or status without payload size. POST: submit a body to create a resource or run an action. PUT: replace a resource with the given body. PATCH: apply a partial change with a body. DELETE: request deletion (body is not sent even if 'body' is set). Use case-insensitive values if your stack requires; the schema lists uppercase for clarity."
+            }),
+        );
+        props.insert(
+            "headers".to_string(),
+            serde_json::json!({
+                "type": "object",
+                "description": "Optional string-to-string map of request headers, e.g. {\"Content-Type\": \"application/json\", \"Authorization\": \"Bearer <token>\", \"Accept\": \"application/json\"}. Values must be strings (not numbers). Set Content-Type when you send a JSON or form body; set Authorization for bearer tokens, API keys in headers, or basic auth. Omit for simple GET/HEAD. Invalid header names or values are rejected; prefer documented API names."
+            }),
+        );
+        props.insert(
+            "body".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Optional raw request body for POST, PUT, or PATCH only. You serialize JSON, form strings, or plain text yourself (e.g. \"{\\\"ok\\\":true}\", or \"name=a&b=c\" for x-www-form-urlencoded with matching Content-Type). Ignored for GET, HEAD, and DELETE. Leave unset for empty bodies when the method allows."
             }),
         );
         ToolParameterSchema {
@@ -60,7 +120,7 @@ impl Tool for HttpFetchTool {
             Ok(v) => v,
             Err(e) => return ToolResult::err(format!(
                 "http_fetch arguments are not valid JSON: {e}. \
-                 Pass {{\"url\": \"https://example.com/path\"}} with a string URL, then retry."
+                 Pass {{\"url\": \"https://example.com/path\"}} with a string URL; optional \"method\", \"headers\", and \"body\" as needed, then retry."
             )),
         };
 
@@ -74,6 +134,61 @@ impl Tool for HttpFetchTool {
             ),
         };
 
+        let method = match parse_http_fetch_method(args.get("method")) {
+            Ok(m) => m,
+            Err(e) => return ToolResult::err(e),
+        };
+
+        let mut request_headers = HeaderMap::new();
+        match args.get("headers") {
+            None | Some(serde_json::Value::Null) => {}
+            Some(serde_json::Value::Object(map)) => {
+                for (k, v) in map {
+                    let val = match v.as_str() {
+                        Some(s) => s,
+                        None => {
+                            return ToolResult::err(
+                                "http_fetch: 'headers' values must be strings. \
+                                 What to do next: use only string values, e.g. {\"Content-Type\": \"application/json\"}."
+                                    .to_string(),
+                            );
+                        }
+                    };
+                    let name = match HeaderName::from_str(k) {
+                        Ok(n) => n,
+                        Err(e) => {
+                            return ToolResult::err(format!(
+                                "http_fetch: invalid header name '{k}': {e}. \
+                                 What to do next: use a valid header field name, or remove the key."
+                            ));
+                        }
+                    };
+                    let value = match HeaderValue::from_str(val) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return ToolResult::err(format!(
+                                "http_fetch: invalid header value for '{k}': {e}. \
+                                 What to do next: use ASCII-only header values or encodings the API documents (e.g. base64 in Authorization)."
+                            ));
+                        }
+                    };
+                    if request_headers.insert(name, value).is_some() {
+                        return ToolResult::err(format!(
+                            "http_fetch: duplicate header '{k}'. \
+                             What to do next: send each header name once, or merge values per RFC if the API allows."
+                        ));
+                    }
+                }
+            }
+            _ => {
+                return ToolResult::err(
+                    "http_fetch: 'headers' must be a JSON object or omitted. \
+                     What to do next: use {{\"Content-Type\": \"application/json\"}} with string values, or omit 'headers'."
+                        .to_string(),
+                );
+            }
+        }
+
         if let Err(e) = ssrf_check_url(url) {
             return ToolResult::err(format!(
                 "http_fetch URL was rejected before the HTTP request: {e}. \
@@ -82,9 +197,39 @@ impl Tool for HttpFetchTool {
             ));
         }
 
-        match self.client.get(url).send().await {
+        let method_name = method.to_string();
+        let is_head = method == reqwest::Method::HEAD;
+        let with_body = method == reqwest::Method::POST
+            || method == reqwest::Method::PUT
+            || method == reqwest::Method::PATCH;
+        let mut request = self.client.request(method, url);
+        if !request_headers.is_empty() {
+            request = request.headers(request_headers);
+        }
+        if with_body {
+            match args.get("body") {
+                None | Some(serde_json::Value::Null) => {}
+                Some(serde_json::Value::String(s)) => {
+                    request = request.body(s.clone());
+                }
+                _ => {
+                    return ToolResult::err(
+                        "http_fetch: 'body' must be a string, or omitted. \
+                         What to do next: pass raw text (JSON you stringify yourself) as a string, e.g. \"body\": \"{}\" or omit 'body'."
+                            .to_string(),
+                    );
+                }
+            }
+        }
+
+        match request.send().await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
+                if is_head {
+                    return ToolResult::ok(
+                        serde_json::json!({ "status": status, "body": "" }).to_string(),
+                    );
+                }
                 match resp.text().await {
                     Ok(body) => {
                         let truncated = if body.len() > 4096 {
@@ -103,24 +248,19 @@ impl Tool for HttpFetchTool {
                             body
                         };
                         ToolResult::ok(
-                            serde_json::json!({
-                                "status": status,
-                                "body": truncated,
-                            })
-                            .to_string(),
+                            serde_json::json!({ "status": status, "body": truncated })
+                                .to_string(),
                         )
                     }
                     Err(e) => ToolResult::err(format!(
-                        "http_fetch got HTTP {status} from '{url}' but failed while reading the response body: {e}. \
+                        "http_fetch: failed while reading the response body after HTTP {status} from '{url}': {e}. \
                          What to do next: retry once for transient transport errors; if the payload is HTML or huge, use web_fetch with extract_mode \"text\" or \"raw\"; if the server streams indefinitely, add Range headers only if the API supports them, or use a smaller endpoint.",
-                        status = status,
-                        url = url,
                     )),
                 }
             }
             Err(e) => ToolResult::err(format!(
-                "http_fetch could not complete HTTP GET to '{url}' before a response arrived: {e}. \
-                 Verify DNS resolves, TLS certificates are valid for the host, the URL is reachable from this environment, and outbound HTTPS is allowed. \
+                "http_fetch: could not complete HTTP {method_name} to '{url}' before a response arrived: {e}. \
+                 What to do next: verify DNS resolves, TLS certificates are valid for the host, the URL is reachable from this environment, and outbound HTTPS is allowed. \
                  If the site blocks bots, try a documented API URL or ask the user for a mirror."
             )),
         }
@@ -1331,6 +1471,9 @@ mod tests {
         assert_eq!(tool.name(), "http_fetch");
         let schema = tool.parameters_schema();
         assert!(schema.properties.contains_key("url"));
+        assert!(schema.properties.contains_key("method"));
+        assert!(schema.properties.contains_key("headers"));
+        assert!(schema.properties.contains_key("body"));
     }
 
     #[tokio::test]

@@ -359,13 +359,35 @@ impl StateBuilder {
             }
         }
 
+        let multi_agent_identity = p3.workspaces.len() > 1;
         for (agent_id, ws) in &p3.workspaces {
-            fastclaw_agent::builtin_tools::register_identity_tools(
-                &p3.tool_registry,
-                Arc::new(ws.clone()),
-            );
-            tracing::info!(agent_id = %agent_id, "registered get_identity / set_identity tools");
-            break;
+            let ws_arc = Arc::new(ws.clone());
+            if multi_agent_identity {
+                let sfx = memory_tool_agent_suffix(agent_id);
+                let get_inner = Arc::new(fastclaw_agent::builtin_tools::GetIdentityTool::new(ws_arc.clone()));
+                let set_inner = Arc::new(fastclaw_agent::builtin_tools::SetIdentityTool::new(ws_arc));
+                let get_name = format!("get_identity__{sfx}");
+                let set_name = format!("set_identity__{sfx}");
+                let get_desc = format!("{} (agent `{}`)", get_inner.description(), agent_id);
+                let set_desc = format!("{} (agent `{}`)", set_inner.description(), agent_id);
+                p3.tool_registry.register(Arc::new(RenamedTool::new(
+                    get_name,
+                    get_desc,
+                    get_inner as Arc<dyn fastclaw_core::tool::Tool + Send + Sync>,
+                )));
+                p3.tool_registry.register(Arc::new(RenamedTool::new(
+                    set_name,
+                    set_desc,
+                    set_inner as Arc<dyn fastclaw_core::tool::Tool + Send + Sync>,
+                )));
+                tracing::info!(agent_id = %agent_id, "registered scoped get_identity / set_identity tools");
+            } else {
+                fastclaw_agent::builtin_tools::register_identity_tools(
+                    &p3.tool_registry,
+                    ws_arc,
+                );
+                tracing::info!(agent_id = %agent_id, "registered get_identity / set_identity tools");
+            }
         }
 
         let stream_event_tx = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));

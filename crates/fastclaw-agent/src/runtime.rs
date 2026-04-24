@@ -69,16 +69,17 @@ fn append_subagent_prompt_to_system(messages: &mut [ChatMessage], block: &str) {
     }
 }
 
-fn memory_tool_visible_for_agent(name: &str, agent_id: &str) -> bool {
+fn scoped_tool_visible_for_agent(name: &str, agent_id: &str) -> bool {
     let sfx = memory_tool_suffix(agent_id);
-    if let Some(rest) = name.strip_prefix("memory_search__") {
-        return rest == sfx;
-    }
-    if let Some(rest) = name.strip_prefix("memory_store__") {
-        return rest == sfx;
-    }
-    if name == "memory_search" || name == "memory_store" {
-        return true;
+    for prefix in &[
+        "memory_search__",
+        "memory_store__",
+        "get_identity__",
+        "set_identity__",
+    ] {
+        if let Some(rest) = name.strip_prefix(prefix) {
+            return rest == sfx;
+        }
     }
     true
 }
@@ -127,7 +128,7 @@ fn filter_tool_definitions(
         .iter()
         .filter(|td| {
             let name = &td.function.name;
-            if !memory_tool_visible_for_agent(name, &config.agent_id) {
+            if !scoped_tool_visible_for_agent(name, &config.agent_id) {
                 return false;
             }
             if !config.behavior.tools_deny.is_empty()
