@@ -331,6 +331,7 @@ impl StateBuilder {
             &config.skills.deny,
             None,
         ));
+        fastclaw_core::workspace::set_skill_prompt_mode(config.skills.prompt_mode.clone());
         if matches!(
             config.skills.prompt_mode,
             fastclaw_core::config::SkillPromptMode::Compact

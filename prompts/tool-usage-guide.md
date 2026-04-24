@@ -42,6 +42,7 @@ Persistent long-term memory. Use actively.
 
 ## Skills
 - **list_skills** / **read_skill** / **write_skill**: Manage agent skills.
+  > Only available when `skills.prompt_mode` is `"compact"` or `"lazy"`. In `"full"` mode (default), skill content is injected directly into the system prompt and these tools are not registered. `write_skill` additionally requires an active AgentWorkspace.
 
 ## Identity
 - **get_identity** / **set_identity**: Read/update agent persona files (SOUL.md, USER.md).
@@ -49,7 +50,7 @@ Persistent long-term memory. Use actively.
 ## Utilities
 - **get_current_time**: Current date and time.
 - **calculator**: Evaluate math expressions.
-- **browser**: Browser automation (navigate, click, type, screenshot).
+- **browser**: Chrome automation via CDP (navigate, click, type, press_key, hover, select, wait_for, scroll, screenshot, evaluate, interact, get_content). Launches a visible Chrome window by default—supports login flows and CAPTCHAs. Use `selector` param to target DOM elements.
 - **image_generate**: Generate images from text.
 - **text_to_speech**: Convert text to audio.
 

@@ -330,6 +330,7 @@ fn prompts_dir_candidates() -> Vec<PathBuf> {
 
 static CACHED_BASE_PROMPTS: OnceLock<Option<String>> = OnceLock::new();
 static CACHED_ROLE_PROMPTS: OnceLock<RwLock<HashMap<String, Option<String>>>> = OnceLock::new();
+static SKILL_PROMPT_MODE: OnceLock<crate::config::SkillPromptMode> = OnceLock::new();
 
 fn role_prompt_cache() -> &'static RwLock<HashMap<String, Option<String>>> {
     CACHED_ROLE_PROMPTS.get_or_init(|| RwLock::new(HashMap::new()))
@@ -418,20 +419,65 @@ pub fn resolve_agent_role_prompt(agent_id: &str) -> Option<String> {
     result
 }
 
+/// Set the global skill prompt mode so that [`default_runtime_system_prompt`] can strip
+/// the `## Skills` section from the tool usage guide when skill tools are not registered
+/// (i.e. when `prompt_mode` is `Full`). Call once during gateway/runtime initialisation.
+pub fn set_skill_prompt_mode(mode: crate::config::SkillPromptMode) {
+    let _ = SKILL_PROMPT_MODE.set(mode);
+}
+
+/// Strip a Markdown `## <heading>` section (including its body, up to the next `## ` or EOF).
+fn strip_md_section(text: &str, heading: &str) -> String {
+    let marker = format!("## {heading}");
+    let Some(start) = text.find(&marker) else {
+        return text.to_string();
+    };
+    let after_marker = start + marker.len();
+    let end = text[after_marker..]
+        .find("\n## ")
+        .map(|offset| after_marker + offset)
+        .unwrap_or(text.len());
+    let mut out = text[..start].trim_end().to_string();
+    let tail = text[end..].trim_start_matches('\n');
+    if !tail.is_empty() {
+        out.push_str("\n\n");
+        out.push_str(tail);
+    }
+    out
+}
+
+/// Apply prompt-mode filtering to the tool usage guide text.
+fn filter_tool_guide(guide: &str) -> String {
+    let mode = SKILL_PROMPT_MODE
+        .get()
+        .unwrap_or(&crate::config::SkillPromptMode::Full);
+    match mode {
+        crate::config::SkillPromptMode::Full => strip_md_section(guide, "Skills"),
+        _ => guide.to_string(),
+    }
+}
+
 /// Default system message when an agent has no `systemPrompt` in config: base + tool guide.
 /// Cached after first load to avoid repeated filesystem reads.
+/// When skill prompt mode is `Full`, the `## Skills` section in the tool guide is stripped
+/// because those tools are not registered (skill content is injected directly).
 pub fn default_runtime_system_prompt() -> String {
     let cached = CACHED_BASE_PROMPTS.get_or_init(|| {
-        try_load_prompts_from_filesystem()
-            .map(|(base, tools)| format!("{}\n\n{}", base.trim_end(), tools.trim_end()))
+        try_load_prompts_from_filesystem().map(|(base, tools)| {
+            let filtered = filter_tool_guide(&tools);
+            format!("{}\n\n{}", base.trim_end(), filtered.trim_end())
+        })
     });
     match cached {
         Some(s) => s.clone(),
-        None => format!(
-            "{}\n\n{}",
-            EMBEDDED_SYSTEM_BASE_PROMPT.trim_end(),
-            EMBEDDED_TOOL_USAGE_GUIDE.trim_end()
-        ),
+        None => {
+            let filtered = filter_tool_guide(EMBEDDED_TOOL_USAGE_GUIDE);
+            format!(
+                "{}\n\n{}",
+                EMBEDDED_SYSTEM_BASE_PROMPT.trim_end(),
+                filtered.trim_end()
+            )
+        }
     }
 }
 
