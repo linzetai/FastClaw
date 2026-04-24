@@ -12,6 +12,7 @@ mod health;
 mod memory;
 mod plugin;
 mod session;
+mod traces;
 
 use axum::routing::{delete, get, post, put};
 use axum::Router;
@@ -127,4 +128,11 @@ pub fn api_routes() -> Router<AppState> {
         )
         .route("/api/v1/routes/:id", put(dynamic_routes::update_route))
         .route("/webhook/:channel_id", post(channel::channel_webhook))
+        .route("/api/v1/openapi.json", get(health::openapi_spec))
+        .route("/api/v1/traces", get(traces::list_traces))
+        .route("/api/v1/traces/:trace_id", get(traces::get_trace))
+        .route(
+            "/api/v1/traces/:trace_id",
+            delete(traces::delete_trace),
+        )
 }

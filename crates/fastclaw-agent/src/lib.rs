@@ -12,7 +12,7 @@ pub use builtin_tools::{
 };
 pub use llm::{
     create_provider, create_provider_chain, create_provider_with_credentials, AnthropicProvider,
-    CompletionParams, FallbackProvider, LlmProvider, OpenAiProvider,
+    CircuitBreaker, CircuitState, CompletionParams, FallbackProvider, LlmProvider, OpenAiProvider,
 };
 pub use runtime::{AgentRuntime, ExecutionResult};
 pub use subagent::SubAgentTool;

@@ -81,6 +81,21 @@ impl Tool for ManageMcpServerTool {
                 "description": "Arguments to the command (optional for add). e.g. ['-y', '@anthropic-ai/chrome-devtools-mcp@latest']."
             }),
         );
+        props.insert(
+            "url".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "SSE URL for HTTP-based MCP servers (use with transport='sse'). e.g. 'http://localhost:3000/sse'."
+            }),
+        );
+        props.insert(
+            "transport".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "enum": ["stdio", "sse"],
+                "description": "Transport type: 'stdio' (default, uses command+args) or 'sse' (uses url)."
+            }),
+        );
         ToolParameterSchema {
             schema_type: "object".to_string(),
             properties: props,
@@ -109,15 +124,20 @@ impl Tool for ManageMcpServerTool {
                     Some(s) => s.to_string(),
                     None => return ToolResult::err("'add' requires 'id' field".to_string()),
                 };
-                let command = match args.get("command").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => return ToolResult::err("'add' requires 'command' field".to_string()),
-                };
+                let transport = args.get("transport").and_then(|v| v.as_str()).unwrap_or("stdio").to_string();
+                let url = args.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if transport == "sse" && url.is_none() {
+                    return ToolResult::err("'add' with transport='sse' requires 'url' field".to_string());
+                }
+                if transport == "stdio" && command.is_empty() {
+                    return ToolResult::err("'add' with transport='stdio' requires 'command' field".to_string());
+                }
                 let cmd_args: Vec<String> = args
                     .get("args")
                     .and_then(|v| serde_json::from_value(v.clone()).ok())
                     .unwrap_or_default();
-                self.add_server(id, command, cmd_args).await
+                self.add_server(id, command, cmd_args, transport, url).await
             }
             "remove" => {
                 let id = match args.get("id").and_then(|v| v.as_str()) {
@@ -208,10 +228,16 @@ impl ManageMcpServerTool {
                 handles.remove(&cfg.id);
             }
 
-            let args_ref: Vec<&str> = cfg.args.iter().map(|s| s.as_str()).collect();
             let prefix = format!("mcp_{}_", cfg.id);
             let tc_before = self.tool_registry.len();
-            match fastclaw_collab::mcp::register_mcp_tools(&cfg.command, &args_ref, &self.tool_registry, &prefix, &cfg.env).await {
+            let connect_result = if cfg.transport == "sse" {
+                let url = cfg.url.as_deref().unwrap_or("");
+                fastclaw_collab::mcp::register_mcp_tools_sse(url, &self.tool_registry, &prefix).await
+            } else {
+                let args_ref: Vec<&str> = cfg.args.iter().map(|s| s.as_str()).collect();
+                fastclaw_collab::mcp::register_mcp_tools(&cfg.command, &args_ref, &self.tool_registry, &prefix, &cfg.env).await
+            };
+            match connect_result {
                 Ok(handle) => {
                     let tool_count = self.tool_registry.len() - tc_before;
                     let now = chrono::Utc::now().to_rfc3339();
@@ -256,11 +282,11 @@ impl ManageMcpServerTool {
         }
     }
 
-    async fn add_server(&self, id: String, command: String, args: Vec<String>) -> ToolResult {
+    async fn add_server(&self, id: String, command: String, args: Vec<String>, transport: String, url: Option<String>) -> ToolResult {
         let cmd_name = command.clone();
         let new_server = McpServerConfig {
             id: id.clone(), command, args, enabled: Some(true),
-            env: Default::default(),
+            env: Default::default(), url, transport,
         };
 
         {

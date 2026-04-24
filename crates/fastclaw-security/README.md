@@ -21,3 +21,11 @@ pub use auth::{ApiKeyAuth, AuthConfig};
 pub use rate_limit::RateLimiter;
 pub use prompt_guard::{PromptGuard, PromptGuardResult, RiskLevel};
 ```
+
+## Testing
+
+```bash
+cargo test -p fastclaw-security
+```
+
+Coverage includes multi-dimension rate limiting (per-IP, per-API-key, per-agent), token bucket refill windows, prompt injection detection, SSRF blocking, and dangerous-ops policy enforcement.

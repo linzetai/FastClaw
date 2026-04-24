@@ -105,6 +105,9 @@ tokio-tungstenite = "0.24"
 # Protobuf
 prost = "0.13"
 
+# OpenAPI
+utoipa = { version = "5", features = ["axum_extras"] }
+
 # Testing
 insta = "1"
 proptest = "1"

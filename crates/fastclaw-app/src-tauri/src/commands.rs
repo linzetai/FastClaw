@@ -1632,6 +1632,8 @@ pub async fn add_mcp_server(
         args: args.unwrap_or_default(),
         enabled: Some(true),
         env: Default::default(),
+        url: None,
+        transport: "stdio".to_string(),
     };
 
     {

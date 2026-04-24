@@ -76,8 +76,8 @@
 - 🧩 **Context assembly & window management** — **Six-layer** prompt assembly, rolling compression, **user profile** integration, and **per-model context window enforcement** with automatic compaction (importance-based → sliding-window fallback) before the LLM call. Context usage (`ctx 10.2k / 128k`) streams to clients in real time.  
   *六层上下文拼装、滚动压缩、用户画像、按模型上下文窗口自动裁剪（重要性优先 → 滑动窗口兜底），上下文用量实时推送至客户端。*
 
-- ✅ **Quality bar** — **448** workspace tests, **zero** `cargo` warnings in CI-clean builds.  
-  *工作区 448 项测试、干净构建零告警。*
+- ✅ **Quality bar** — **665+** workspace tests, **zero** `cargo` warnings in CI-clean builds.  
+  *工作区 665+ 项测试、干净构建零告警。*
 
 ## Architecture
 
@@ -177,7 +177,7 @@ flowchart TB
 | Code intelligence | Tree-sitter graph, **LSP** (symbols/def/refs), tests, patch engine, rename | Exec / patch tools in docs | Optional |
 | Human-in-the-loop | Built-in `ask_question` with timeout + streaming | N/A | Ad hoc |
 | Observability | Prometheus + tracing + `/ready` | Metrics/logging patterns | Depends on host |
-| Test / warning discipline | **448** tests, **0** warnings target | Upstream project norms | N/A |
+| Test / warning discipline | **665+** tests, **0** warnings target | Upstream project norms | N/A |
 
 ## Quick Start
 

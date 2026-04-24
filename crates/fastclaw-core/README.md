@@ -27,3 +27,11 @@ pub use error::{FastClawError, FastClawResult};
 pub use routing::Router;
 pub use complexity::ComplexityTier;
 ```
+
+## Testing
+
+```bash
+cargo test -p fastclaw-core
+```
+
+Coverage includes `MigrationRunner` (in-memory SQLite: creation, idempotent reruns, custom table names), config deserialization, and path utilities.

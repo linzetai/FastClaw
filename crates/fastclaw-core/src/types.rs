@@ -336,3 +336,72 @@ pub enum StreamEvent {
     },
     Error(String),
 }
+
+// ---------------------------------------------------------------------------
+// Conversation trace types (harness / eval / debugging)
+// ---------------------------------------------------------------------------
+
+/// Record of a single tool call within a traced turn.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceToolCall {
+    pub tool_name: String,
+    pub call_id: String,
+    pub arguments: serde_json::Value,
+    pub output: String,
+    pub success: bool,
+    pub latency_ms: u64,
+}
+
+/// Captured LLM request metadata (inputs sent to the provider).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceLlmRequest {
+    pub model: String,
+    pub message_count: u32,
+    pub estimated_tokens: u32,
+}
+
+/// Captured LLM response metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceLlmResponse {
+    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+    pub finish_reason: Option<String>,
+    pub latency_ms: u64,
+}
+
+/// A single request-response turn inside a traced conversation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceTurn {
+    pub turn_index: u32,
+    pub user_message: ChatMessage,
+    pub assistant_message: ChatMessage,
+    pub tool_calls: Vec<TraceToolCall>,
+    pub llm_request: TraceLlmRequest,
+    pub llm_response: TraceLlmResponse,
+    pub context_tokens: u32,
+    pub latency_ms: u64,
+    pub compaction_applied: bool,
+}
+
+/// Complete trace of a conversation session, suitable for replay and eval.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationTrace {
+    pub trace_id: String,
+    pub session_id: String,
+    pub agent_id: String,
+    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
+    pub started_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<String>,
+    pub turns: Vec<TraceTurn>,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub metadata: serde_json::Map<String, serde_json::Value>,
+}

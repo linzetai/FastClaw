@@ -673,6 +673,7 @@ impl StateBuilder {
                 Arc::new(pg)
             },
             channel_inbound_tx: p5.phase2.phase4.channel_inbound_tx,
+            metrics_collector: Arc::new(fastclaw_observe::MetricsCollector::new()),
         };
 
         state.tool_registry.register(Arc::new(crate::mcp_tool::ManageMcpServerTool::new(
@@ -843,6 +844,7 @@ pub struct AppState {
     pub prompt_guard: Arc<fastclaw_security::PromptGuard>,
     /// Sender for channel inbound messages — kept for hot-reloading new channels.
     pub channel_inbound_tx: tokio::sync::mpsc::UnboundedSender<fastclaw_core::channel::InboundMessage>,
+    pub metrics_collector: Arc<fastclaw_observe::MetricsCollector>,
 }
 
 impl AppState {
@@ -1954,7 +1956,8 @@ async fn open_memory_pool_at(db_path: &std::path::Path) -> anyhow::Result<sqlx::
         .filename(db_path)
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
-        .foreign_keys(true);
+        .foreign_keys(true)
+        .busy_timeout(std::time::Duration::from_secs(5));
     let pool = SqlitePoolOptions::new()
         .max_connections(3)
         .connect_with(options)
@@ -1974,7 +1977,8 @@ async fn open_memory_pool_named(
         .filename(&target_db)
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
-        .foreign_keys(true);
+        .foreign_keys(true)
+        .busy_timeout(std::time::Duration::from_secs(5));
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(options)
@@ -2086,7 +2090,7 @@ fn load_plugins_from_dir(plugin_registry: &mut PluginRegistry, dir: &std::path::
         if !path.is_dir() {
             continue;
         }
-        if !path.join("manifest.json").exists() || !path.join("plugin.wasm").exists() {
+        if !path.join("fastclaw.plugin.json").exists() || !path.join("plugin.wasm").exists() {
             continue;
         }
         match plugin_registry.load_from_dir(&path) {
@@ -2256,6 +2260,7 @@ impl AppState {
                 let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
                 tx
             },
+            metrics_collector: Arc::new(fastclaw_observe::MetricsCollector::new()),
         })
     }
 }

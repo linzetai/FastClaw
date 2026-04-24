@@ -15,3 +15,11 @@
 pub use init::init_observability;
 pub use metrics::{render_metrics, MetricsCollector, default_metrics_collector};
 ```
+
+## Testing
+
+```bash
+cargo test -p fastclaw-observe
+```
+
+Coverage includes `MetricsCollector` counters and histograms, per-provider/per-model metric isolation, p50/p95/p99 percentile calculations, and Prometheus text exposition format.

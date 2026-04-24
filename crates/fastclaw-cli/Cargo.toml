@@ -14,6 +14,7 @@ fastclaw-observe = { path = "../fastclaw-observe" }
 fastclaw-session = { path = "../fastclaw-session" }
 fastclaw-agent = { path = "../fastclaw-agent" }
 fastclaw-collab = { path = "../fastclaw-collab" }
+fastclaw-eval = { path = "../fastclaw-eval" }
 
 clap.workspace = true
 clap_complete.workspace = true
@@ -30,3 +31,4 @@ ratatui.workspace = true
 crossterm.workspace = true
 tokio-tungstenite.workspace = true
 chrono.workspace = true
+sqlx.workspace = true

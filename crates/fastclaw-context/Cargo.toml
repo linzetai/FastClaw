@@ -15,3 +15,10 @@ async-trait.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 regex.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "token_estimation"
+harness = false

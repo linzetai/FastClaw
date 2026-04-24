@@ -1,7 +1,12 @@
 //! Mini evaluation harness for FastClaw agent behavior.
 //!
 //! Drive cases with [`EvalAgentDriver`] — use [`MockEvalAgent`] for deterministic runs
-//! without a live LLM, or plug in a real runtime-backed driver later.
+//! without a live LLM, [`ReplayDriver`] for trace replay, or [`GatewayEvalDriver`] for
+//! live gateway integration.
+
+pub mod gateway_driver;
+pub mod replay;
+pub mod report;
 
 use std::fmt;
 use std::path::Path;
@@ -15,6 +20,9 @@ use serde::Deserialize;
 // Re-export workspace crates for downstream eval binaries/tests.
 pub use fastclaw_agent;
 pub use fastclaw_core;
+pub use gateway_driver::GatewayEvalDriver;
+pub use replay::{ReplayDriver, ReplayResult, TurnDiff};
+pub use report::EvalReport;
 
 /// A single evaluation case.
 pub struct EvalCase {
@@ -25,6 +33,8 @@ pub struct EvalCase {
     pub expected_behaviors: Vec<ExpectedBehavior>,
     pub max_turns: u32,
     pub timeout_secs: u64,
+    /// Target agent ID (used by GatewayEvalDriver to route the request).
+    pub agent_id: Option<String>,
 }
 
 /// What we expect the agent to do.
@@ -37,6 +47,12 @@ pub enum ExpectedBehavior {
     DoesNotUseTool(String),
     /// Agent completes within N tool calls (inclusive).
     CompletesWithinToolCalls(u32),
+    /// Pass rate (0..=1) must be above threshold (used in multi-run scoring).
+    ScoreAbove(f64),
+    /// Total latency must be below this threshold (ms).
+    LatencyBelow(u64),
+    /// Total token usage must be below this threshold.
+    TokensBelow(u64),
     /// Custom validator function.
     Custom(Box<dyn Fn(&EvalResult) -> bool + Send + Sync>),
 }
@@ -54,6 +70,9 @@ impl fmt::Debug for ExpectedBehavior {
             ExpectedBehavior::CompletesWithinToolCalls(n) => {
                 f.debug_tuple("CompletesWithinToolCalls").field(n).finish()
             }
+            ExpectedBehavior::ScoreAbove(v) => f.debug_tuple("ScoreAbove").field(v).finish(),
+            ExpectedBehavior::LatencyBelow(v) => f.debug_tuple("LatencyBelow").field(v).finish(),
+            ExpectedBehavior::TokensBelow(v) => f.debug_tuple("TokensBelow").field(v).finish(),
             ExpectedBehavior::Custom(_) => f.write_str("Custom(<fn>)"),
         }
     }
@@ -65,6 +84,10 @@ pub struct EvalRunArtifacts {
     pub tool_calls_made: Vec<String>,
     pub total_turns: u32,
     pub final_response: Option<String>,
+    /// Total latency in ms (populated by live drivers).
+    pub latency_ms: u64,
+    /// Total token usage (populated by live drivers).
+    pub total_tokens: u64,
 }
 
 /// Result of running one eval case.
@@ -149,6 +172,25 @@ pub async fn run_eval_case(
                     ));
                 }
             }
+            ExpectedBehavior::ScoreAbove(_) => {
+                // ScoreAbove is evaluated at suite level, not per-case
+            }
+            ExpectedBehavior::LatencyBelow(max_ms) => {
+                if run.latency_ms > *max_ms {
+                    failure_reasons.push(format!(
+                        "expected latency <= {max_ms}ms, got {}ms",
+                        run.latency_ms
+                    ));
+                }
+            }
+            ExpectedBehavior::TokensBelow(max_tokens) => {
+                if run.total_tokens > *max_tokens {
+                    failure_reasons.push(format!(
+                        "expected <= {max_tokens} tokens, got {}",
+                        run.total_tokens
+                    ));
+                }
+            }
             ExpectedBehavior::Custom(_) => {}
         }
     }
@@ -213,6 +255,8 @@ struct EvalCaseFile {
     expected_behaviors: Vec<ExpectedBehaviorFile>,
     max_turns: u32,
     timeout_secs: u64,
+    #[serde(default)]
+    agent_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -222,6 +266,9 @@ enum ExpectedBehaviorFile {
     ResponseContains { text: String },
     DoesNotUseTool { tool: String },
     CompletesWithinToolCalls { max: u32 },
+    ScoreAbove { threshold: f64 },
+    LatencyBelow { ms: u64 },
+    TokensBelow { max: u64 },
 }
 
 impl TryFrom<EvalCaseFile> for EvalCase {
@@ -241,6 +288,15 @@ impl TryFrom<EvalCaseFile> for EvalCase {
                 ExpectedBehaviorFile::CompletesWithinToolCalls { max } => {
                     ExpectedBehavior::CompletesWithinToolCalls(max)
                 }
+                ExpectedBehaviorFile::ScoreAbove { threshold } => {
+                    ExpectedBehavior::ScoreAbove(threshold)
+                }
+                ExpectedBehaviorFile::LatencyBelow { ms } => {
+                    ExpectedBehavior::LatencyBelow(ms)
+                }
+                ExpectedBehaviorFile::TokensBelow { max } => {
+                    ExpectedBehavior::TokensBelow(max)
+                }
             });
         }
         Ok(EvalCase {
@@ -251,6 +307,7 @@ impl TryFrom<EvalCaseFile> for EvalCase {
             expected_behaviors,
             max_turns: f.max_turns,
             timeout_secs: f.timeout_secs,
+            agent_id: f.agent_id,
         })
     }
 }
@@ -296,94 +353,66 @@ impl MockEvalAgent {
     /// Built-in outcomes aligned with `eval/cases/*.json` for smoke testing without an LLM.
     pub fn builtin_suite_defaults() -> Self {
         let mut m = std::collections::HashMap::new();
-        m.insert(
-            "basic-001".into(),
-            EvalRunArtifacts {
-                tool_calls_made: vec!["calculator".into()],
-                total_turns: 2,
-                final_response: Some("The product is 391.".into()),
-            },
-        );
-        m.insert(
-            "basic-002".into(),
-            EvalRunArtifacts {
-                tool_calls_made: vec!["get_current_time".into()],
-                total_turns: 2,
-                final_response: Some(r#"{"utc": "2026-04-20T12:00:00Z"} — current UTC per gateway."#.into()),
-            },
-        );
-        m.insert(
-            "basic-003".into(),
-            EvalRunArtifacts {
-                tool_calls_made: vec!["read_file".into()],
-                total_turns: 2,
-                final_response: Some("Top of Cargo.toml shows `[workspace]`.".into()),
-            },
-        );
-        m.insert(
-            "tool-001".into(),
-            EvalRunArtifacts {
-                tool_calls_made: vec!["web_search".into()],
-                total_turns: 2,
-                final_response: Some("web_search snippets mention Rust eval patterns.".into()),
-            },
-        );
-        m.insert(
-            "tool-002".into(),
-            EvalRunArtifacts {
-                tool_calls_made: vec!["memory_store".into(), "memory_search".into()],
-                total_turns: 3,
-                final_response: Some("Stored preference color=blue; memory_search recalled it.".into()),
-            },
-        );
-        m.insert(
-            "reason-001".into(),
-            EvalRunArtifacts {
-                tool_calls_made: vec![],
-                total_turns: 1,
-                final_response: Some("After giving away 2 of 5 apples, Alice has 3 left.".into()),
-            },
-        );
-        m.insert(
-            "reason-002".into(),
-            EvalRunArtifacts {
-                tool_calls_made: vec!["read_file".into()],
-                total_turns: 2,
-                final_response: Some("The file declares `name = \"fastclaw-eval\"` as the package.".into()),
-            },
-        );
-        m.insert(
-            "error-001".into(),
-            EvalRunArtifacts {
-                tool_calls_made: vec!["read_file".into()],
-                total_turns: 2,
-                final_response: Some(
-                    "read_file failed: ENOENT (not found) for that path; I will not retry blindly."
-                        .into(),
-                ),
-            },
-        );
-        m.insert(
-            "error-002".into(),
-            EvalRunArtifacts {
-                tool_calls_made: vec!["calculator".into(), "calculator".into()],
-                total_turns: 3,
-                final_response: Some(
-                    "First expression was invalid; retried with 17*23 and got 391.".into(),
-                ),
-            },
-        );
-        m.insert(
-            "meta-001".into(),
-            EvalRunArtifacts {
-                tool_calls_made: vec![],
-                total_turns: 1,
-                final_response: Some(
-                    "I am a FastClaw agent with tools such as read_file, calculator, and web_search."
-                        .into(),
-                ),
-            },
-        );
+        m.insert("basic-001".into(), EvalRunArtifacts {
+            tool_calls_made: vec!["calculator".into()],
+            total_turns: 2,
+            final_response: Some("The product is 391.".into()),
+            ..Default::default()
+        });
+        m.insert("basic-002".into(), EvalRunArtifacts {
+            tool_calls_made: vec!["get_current_time".into()],
+            total_turns: 2,
+            final_response: Some(r#"{"utc": "2026-04-20T12:00:00Z"} — current UTC per gateway."#.into()),
+            ..Default::default()
+        });
+        m.insert("basic-003".into(), EvalRunArtifacts {
+            tool_calls_made: vec!["read_file".into()],
+            total_turns: 2,
+            final_response: Some("Top of Cargo.toml shows `[workspace]`.".into()),
+            ..Default::default()
+        });
+        m.insert("tool-001".into(), EvalRunArtifacts {
+            tool_calls_made: vec!["web_search".into()],
+            total_turns: 2,
+            final_response: Some("web_search snippets mention Rust eval patterns.".into()),
+            ..Default::default()
+        });
+        m.insert("tool-002".into(), EvalRunArtifacts {
+            tool_calls_made: vec!["memory_store".into(), "memory_search".into()],
+            total_turns: 3,
+            final_response: Some("Stored preference color=blue; memory_search recalled it.".into()),
+            ..Default::default()
+        });
+        m.insert("reason-001".into(), EvalRunArtifacts {
+            tool_calls_made: vec![],
+            total_turns: 1,
+            final_response: Some("After giving away 2 of 5 apples, Alice has 3 left.".into()),
+            ..Default::default()
+        });
+        m.insert("reason-002".into(), EvalRunArtifacts {
+            tool_calls_made: vec!["read_file".into()],
+            total_turns: 2,
+            final_response: Some("The file declares `name = \"fastclaw-eval\"` as the package.".into()),
+            ..Default::default()
+        });
+        m.insert("error-001".into(), EvalRunArtifacts {
+            tool_calls_made: vec!["read_file".into()],
+            total_turns: 2,
+            final_response: Some("read_file failed: ENOENT (not found) for that path; I will not retry blindly.".into()),
+            ..Default::default()
+        });
+        m.insert("error-002".into(), EvalRunArtifacts {
+            tool_calls_made: vec!["calculator".into(), "calculator".into()],
+            total_turns: 3,
+            final_response: Some("First expression was invalid; retried with 17*23 and got 391.".into()),
+            ..Default::default()
+        });
+        m.insert("meta-001".into(), EvalRunArtifacts {
+            tool_calls_made: vec![],
+            total_turns: 1,
+            final_response: Some("I am a FastClaw agent with tools such as read_file, calculator, and web_search.".into()),
+            ..Default::default()
+        });
         Self::new(m)
     }
 }
@@ -422,6 +451,7 @@ mod tests {
             expected_behaviors: vec![ExpectedBehavior::UsesTool("calculator".into())],
             max_turns: 5,
             timeout_secs: 5,
+            agent_id: None,
         };
         let mut map = std::collections::HashMap::new();
         map.insert(
@@ -430,6 +460,7 @@ mod tests {
                 tool_calls_made: vec![],
                 total_turns: 1,
                 final_response: Some("no tools".into()),
+                ..Default::default()
             },
         );
         let agent = MockEvalAgent::new(map);
@@ -447,6 +478,7 @@ mod tests {
             expected_behaviors: vec![ExpectedBehavior::CompletesWithinToolCalls(2)],
             max_turns: 5,
             timeout_secs: 5,
+            agent_id: None,
         };
         let mut map = std::collections::HashMap::new();
         map.insert(
@@ -455,6 +487,7 @@ mod tests {
                 tool_calls_made: vec!["a".into(), "b".into()],
                 total_turns: 1,
                 final_response: None,
+                ..Default::default()
             },
         );
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -474,6 +507,7 @@ mod tests {
             }))],
             max_turns: 99,
             timeout_secs: 5,
+            agent_id: None,
         };
         let mut map = std::collections::HashMap::new();
         map.insert(
@@ -482,6 +516,7 @@ mod tests {
                 tool_calls_made: vec![],
                 total_turns: 7,
                 final_response: None,
+                ..Default::default()
             },
         );
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -500,6 +535,7 @@ mod tests {
             }))],
             max_turns: 99,
             timeout_secs: 5,
+            agent_id: None,
         };
         let r2 = rt
             .block_on(run_eval_case(&case_bad, &MockEvalAgent::new(map.clone())))

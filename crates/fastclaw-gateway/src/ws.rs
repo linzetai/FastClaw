@@ -1768,6 +1768,8 @@ async fn handle_mcp_add(
         args,
         enabled: Some(true),
         env: Default::default(),
+        url: None,
+        transport: "stdio".to_string(),
     };
 
     {

@@ -175,6 +175,30 @@ impl SessionStore {
             tracing::info!("migrated messages table: added per-message usage columns");
         }
 
+        // conversation_traces table for harness / eval replay
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS conversation_traces (
+                trace_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                model TEXT NOT NULL,
+                context_window INTEGER,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                turns_json TEXT NOT NULL DEFAULT '[]',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_traces_session ON conversation_traces(session_id)",
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -606,6 +630,99 @@ impl SessionStore {
         }
         Ok(count)
     }
+
+    // -----------------------------------------------------------------------
+    // Conversation trace CRUD
+    // -----------------------------------------------------------------------
+
+    /// Insert or replace a conversation trace.
+    pub async fn upsert_trace(
+        &self,
+        trace: &fastclaw_core::types::ConversationTrace,
+    ) -> anyhow::Result<()> {
+        let turns_json = serde_json::to_string(&trace.turns)?;
+        let metadata_json = serde_json::to_string(&trace.metadata)?;
+        let cw = trace.context_window.map(|v| v as i64);
+        sqlx::query(
+            "INSERT OR REPLACE INTO conversation_traces
+                (trace_id, session_id, agent_id, model, context_window, started_at, finished_at, turns_json, metadata_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        )
+        .bind(&trace.trace_id)
+        .bind(&trace.session_id)
+        .bind(&trace.agent_id)
+        .bind(&trace.model)
+        .bind(cw)
+        .bind(&trace.started_at)
+        .bind(&trace.finished_at)
+        .bind(&turns_json)
+        .bind(&metadata_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Retrieve a trace by its ID.
+    pub async fn get_trace(
+        &self,
+        trace_id: &str,
+    ) -> anyhow::Result<Option<fastclaw_core::types::ConversationTrace>> {
+        let row = sqlx::query_as::<_, (String, String, String, String, Option<i64>, String, Option<String>, String, String)>(
+            "SELECT trace_id, session_id, agent_id, model, context_window, started_at, finished_at, turns_json, metadata_json
+             FROM conversation_traces WHERE trace_id = ?1",
+        )
+        .bind(trace_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        match row {
+            Some(r) => Ok(Some(row_to_trace(r)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// List traces, most recent first.
+    pub async fn list_traces(
+        &self,
+        limit: u32,
+        offset: u32,
+    ) -> anyhow::Result<Vec<fastclaw_core::types::ConversationTrace>> {
+        let rows = sqlx::query_as::<_, (String, String, String, String, Option<i64>, String, Option<String>, String, String)>(
+            "SELECT trace_id, session_id, agent_id, model, context_window, started_at, finished_at, turns_json, metadata_json
+             FROM conversation_traces ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(row_to_trace).collect()
+    }
+
+    /// Delete a trace by ID.
+    pub async fn delete_trace(&self, trace_id: &str) -> anyhow::Result<bool> {
+        let result = sqlx::query("DELETE FROM conversation_traces WHERE trace_id = ?1")
+            .bind(trace_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+}
+
+fn row_to_trace(
+    r: (String, String, String, String, Option<i64>, String, Option<String>, String, String),
+) -> anyhow::Result<fastclaw_core::types::ConversationTrace> {
+    Ok(fastclaw_core::types::ConversationTrace {
+        trace_id: r.0,
+        session_id: r.1,
+        agent_id: r.2,
+        model: r.3,
+        context_window: r.4.map(|v| v as u32),
+        started_at: r.5,
+        finished_at: r.6,
+        turns: serde_json::from_str(&r.7)?,
+        metadata: serde_json::from_str(&r.8)?,
+    })
 }
 
 #[cfg(test)]
@@ -744,5 +861,75 @@ mod tests {
             s.updated_at, stale_updated_at,
             "ON CONFLICT should bump updated_at; stale was {stale_updated_at}"
         );
+    }
+
+    fn sample_trace(id: &str) -> fastclaw_core::types::ConversationTrace {
+        fastclaw_core::types::ConversationTrace {
+            trace_id: id.to_string(),
+            session_id: "s1".into(),
+            agent_id: "a1".into(),
+            model: "gpt-4o".into(),
+            context_window: Some(128000),
+            started_at: "2026-01-01T00:00:00Z".into(),
+            finished_at: Some("2026-01-01T00:00:01Z".into()),
+            turns: vec![],
+            metadata: serde_json::Map::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn upsert_and_get_trace() {
+        let store = SessionStore::open_memory().await.unwrap();
+        let t = sample_trace("tr-1");
+        store.upsert_trace(&t).await.unwrap();
+        let got = store.get_trace("tr-1").await.unwrap().unwrap();
+        assert_eq!(got.trace_id, "tr-1");
+        assert_eq!(got.agent_id, "a1");
+        assert_eq!(got.model, "gpt-4o");
+        assert_eq!(got.context_window, Some(128000));
+    }
+
+    #[tokio::test]
+    async fn list_traces_pagination() {
+        let store = SessionStore::open_memory().await.unwrap();
+        for i in 0..5 {
+            store.upsert_trace(&sample_trace(&format!("tr-{i}"))).await.unwrap();
+        }
+        let page1 = store.list_traces(2, 0).await.unwrap();
+        assert_eq!(page1.len(), 2);
+        let page2 = store.list_traces(2, 2).await.unwrap();
+        assert_eq!(page2.len(), 2);
+        let page3 = store.list_traces(2, 4).await.unwrap();
+        assert_eq!(page3.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn delete_trace_removes() {
+        let store = SessionStore::open_memory().await.unwrap();
+        store.upsert_trace(&sample_trace("tr-del")).await.unwrap();
+        assert!(store.get_trace("tr-del").await.unwrap().is_some());
+        let deleted = store.delete_trace("tr-del").await.unwrap();
+        assert!(deleted);
+        assert!(store.get_trace("tr-del").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn upsert_trace_overwrites() {
+        let store = SessionStore::open_memory().await.unwrap();
+        let mut t = sample_trace("tr-ow");
+        t.model = "old-model".into();
+        store.upsert_trace(&t).await.unwrap();
+
+        t.model = "new-model".into();
+        store.upsert_trace(&t).await.unwrap();
+
+        let got = store.get_trace("tr-ow").await.unwrap().unwrap();
+        assert_eq!(got.model, "new-model");
+    }
+
+    #[tokio::test]
+    async fn get_nonexistent_trace() {
+        let store = SessionStore::open_memory().await.unwrap();
+        assert!(store.get_trace("nope").await.unwrap().is_none());
     }
 }

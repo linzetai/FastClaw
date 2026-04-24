@@ -77,6 +77,21 @@ enum Commands {
         #[arg(long, help = "Resume a specific session")]
         session: Option<String>,
     },
+    /// Conversation trace management (harness / eval)
+    Trace {
+        #[command(subcommand)]
+        action: TraceAction,
+    },
+    /// Run evaluation suite against a gateway
+    Eval {
+        #[command(subcommand)]
+        action: EvalAction,
+    },
+    /// Backup and restore state databases
+    Backup {
+        #[command(subcommand)]
+        action: BackupAction,
+    },
     /// Start MCP server (stdio transport) — exposes FastClaw tools to external agents
     McpServer,
     /// Generate shell completions (bash, zsh, fish, powershell, elvish)
@@ -150,6 +165,52 @@ enum AgentAction {
 enum ToolAction {
     /// List available built-in tools
     List,
+}
+
+#[derive(Subcommand)]
+enum TraceAction {
+    /// List recent conversation traces
+    List {
+        #[arg(short, long, default_value = "50")]
+        limit: u32,
+        #[arg(short, long, default_value = "0")]
+        offset: u32,
+    },
+    /// Show a specific trace
+    Show { trace_id: String },
+    /// Export a trace as JSON to stdout
+    Export { trace_id: String },
+}
+
+#[derive(Subcommand)]
+enum EvalAction {
+    /// Run eval cases from a directory against a live gateway
+    Run {
+        #[arg(long, help = "Directory containing eval case JSON files")]
+        cases: String,
+        #[arg(long, default_value = "http://localhost:18789", help = "Gateway base URL")]
+        gateway_url: String,
+        #[arg(long, help = "API key for authentication")]
+        api_key: Option<String>,
+        #[arg(long, help = "Write HTML report to this path")]
+        html: Option<String>,
+        #[arg(long, help = "Write JSON report to this path")]
+        json_out: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum BackupAction {
+    /// Create a backup of all state databases
+    Create {
+        #[arg(long, help = "Output directory for backup files")]
+        output: Option<String>,
+    },
+    /// Restore databases from backup
+    Restore {
+        #[arg(help = "Path to backup directory")]
+        path: String,
+    },
 }
 
 fn state_dir(mode: &fastclaw_core::config::ConfigMode) -> PathBuf {
@@ -350,6 +411,9 @@ async fn main() -> anyhow::Result<()> {
             | Commands::Sessions { .. }
             | Commands::Agents { .. }
             | Commands::Tools { .. }
+            | Commands::Trace { .. }
+            | Commands::Eval { .. }
+            | Commands::Backup { .. }
             | Commands::Health
             | Commands::Doctor
     );
@@ -402,6 +466,15 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Tools { action } => {
             cmd_tools(action, cli.json)?;
+        }
+        Commands::Trace { action } => {
+            cmd_trace(action, &mode, cli.json).await?;
+        }
+        Commands::Eval { action } => {
+            cmd_eval(action).await?;
+        }
+        Commands::Backup { action } => {
+            cmd_backup(action, &mode).await?;
         }
         Commands::Tui {
             url,
@@ -1375,6 +1448,243 @@ fn cmd_onboard(mode: &fastclaw_core::config::ConfigMode) -> anyhow::Result<()> {
     println!("4. Diagnostics:    fastclaw doctor");
     println!("5. Web UI:         http://localhost:<port>/  (see `fastclaw config get gateway.port`)");
     println!("\nDocumentation: https://github.com/your-org/fastclaw");
+
+    Ok(())
+}
+
+// --- Backup ---
+
+async fn cmd_backup(
+    action: BackupAction,
+    mode: &fastclaw_core::config::ConfigMode,
+) -> anyhow::Result<()> {
+    let sd = state_dir(mode);
+    let data_dir = sd.join("data");
+
+    match action {
+        BackupAction::Create { output } => {
+            let backup_dir = output
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+                    sd.join(format!("backups/{ts}"))
+                });
+            std::fs::create_dir_all(&backup_dir)?;
+
+            let db_files = ["sessions.db", "memory.db", "evolution.db"];
+            let mut backed_up = 0;
+            for name in &db_files {
+                let src = data_dir.join(name);
+                if src.exists() {
+                    let dst = backup_dir.join(name);
+                    // Use VACUUM INTO for a consistent snapshot
+                    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                        .max_connections(1)
+                        .connect(&format!("sqlite:{}", src.display()))
+                        .await?;
+                    let vacuum_cmd = format!("VACUUM INTO '{}'", dst.display());
+                    sqlx::query(&vacuum_cmd).execute(&pool).await?;
+                    pool.close().await;
+                    backed_up += 1;
+                    eprintln!("  ✓ {name}");
+                }
+            }
+
+            // Also copy config
+            let config_src = sd.join("config/default.json");
+            if config_src.exists() {
+                let config_dst = backup_dir.join("config.json");
+                std::fs::copy(&config_src, &config_dst)?;
+                eprintln!("  ✓ config.json");
+            }
+
+            eprintln!("\nBackup complete: {} database(s) → {}", backed_up, backup_dir.display());
+        }
+        BackupAction::Restore { path } => {
+            let backup_dir = PathBuf::from(&path);
+            if !backup_dir.exists() {
+                anyhow::bail!("Backup directory not found: {}", backup_dir.display());
+            }
+
+            std::fs::create_dir_all(&data_dir)?;
+
+            let db_files = ["sessions.db", "memory.db", "evolution.db"];
+            let mut restored = 0;
+            for name in &db_files {
+                let src = backup_dir.join(name);
+                if src.exists() {
+                    let dst = data_dir.join(name);
+                    std::fs::copy(&src, &dst)?;
+                    restored += 1;
+                    eprintln!("  ✓ {name}");
+                }
+            }
+
+            let config_src = backup_dir.join("config.json");
+            if config_src.exists() {
+                let config_dir = sd.join("config");
+                std::fs::create_dir_all(&config_dir)?;
+                std::fs::copy(&config_src, config_dir.join("default.json"))?;
+                eprintln!("  ✓ config.json");
+            }
+
+            eprintln!("\nRestore complete: {} database(s) from {}", restored, backup_dir.display());
+        }
+    }
+
+    Ok(())
+}
+
+// --- Eval ---
+
+async fn cmd_eval(action: EvalAction) -> anyhow::Result<()> {
+    match action {
+        EvalAction::Run {
+            cases,
+            gateway_url,
+            api_key,
+            html,
+            json_out,
+        } => {
+            let eval_cases = fastclaw_eval::load_eval_cases_from_dir(&cases)?;
+            if eval_cases.is_empty() {
+                eprintln!("No eval cases found in {cases}");
+                std::process::exit(1);
+            }
+            eprintln!(
+                "Running {} eval case(s) against {gateway_url}...",
+                eval_cases.len()
+            );
+
+            let mut driver = fastclaw_eval::GatewayEvalDriver::new(&gateway_url);
+            if let Some(key) = api_key {
+                driver = driver.with_api_key(key);
+            }
+
+            let suite = fastclaw_eval::run_eval_suite(&eval_cases, &driver).await?;
+            let report =
+                fastclaw_eval::EvalReport::from_suite(&suite, "FastClaw Eval Run");
+
+            // Always print summary
+            eprintln!(
+                "\nResults: {}/{} passed ({:.0}%)",
+                suite.passed,
+                suite.total,
+                suite.pass_rate * 100.0,
+            );
+            for r in &suite.results {
+                let icon = if r.passed { "  ✓" } else { "  ✗" };
+                eprintln!("{icon} {} ({}ms)", r.case_id, r.duration_ms);
+                for reason in &r.failure_reasons {
+                    eprintln!("    → {reason}");
+                }
+            }
+
+            if let Some(path) = json_out {
+                let json = report.to_json()?;
+                std::fs::write(&path, &json)?;
+                eprintln!("\nJSON report written to {path}");
+            }
+
+            if let Some(path) = html {
+                let html_content = report.to_html();
+                std::fs::write(&path, &html_content)?;
+                eprintln!("HTML report written to {path}");
+            }
+
+            if suite.failed > 0 {
+                std::process::exit(1);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// --- Trace ---
+
+async fn cmd_trace(
+    action: TraceAction,
+    mode: &fastclaw_core::config::ConfigMode,
+    as_json: bool,
+) -> anyhow::Result<()> {
+    let db_path = state_dir(mode).join("data/sessions.db");
+    if !db_path.exists() {
+        eprintln!("No session database found at {}", db_path.display());
+        eprintln!("Start the gateway first with `fastclaw serve`.");
+        std::process::exit(1);
+    }
+
+    let store = fastclaw_session::SessionStore::open(&db_path).await?;
+
+    match action {
+        TraceAction::List { limit, offset } => {
+            let traces = store.list_traces(limit, offset).await?;
+            if as_json {
+                println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                    "traces": traces,
+                    "count": traces.len(),
+                }))?);
+            } else if traces.is_empty() {
+                println!("No traces found. Enable tracing with `tracing.conversationTrace: true` in config.");
+            } else {
+                println!("{:<40} {:<12} {:<12} {:<6} {}", "Trace ID", "Agent", "Model", "Turns", "Started");
+                println!("{}", "-".repeat(90));
+                for t in &traces {
+                    println!(
+                        "{:<40} {:<12} {:<12} {:<6} {}",
+                        t.trace_id,
+                        &t.agent_id[..t.agent_id.len().min(11)],
+                        &t.model[..t.model.len().min(11)],
+                        t.turns.len(),
+                        t.started_at,
+                    );
+                }
+                println!("\n{} trace(s)", traces.len());
+            }
+        }
+        TraceAction::Show { trace_id } => match store.get_trace(&trace_id).await? {
+            Some(trace) => {
+                if as_json {
+                    println!("{}", serde_json::to_string_pretty(&trace)?);
+                } else {
+                    println!("Trace:   {}", trace.trace_id);
+                    println!("Session: {}", trace.session_id);
+                    println!("Agent:   {}", trace.agent_id);
+                    println!("Model:   {}", trace.model);
+                    if let Some(cw) = trace.context_window {
+                        println!("Context: {} tokens", cw);
+                    }
+                    println!("Started: {}", trace.started_at);
+                    if let Some(ref f) = trace.finished_at {
+                        println!("Ended:   {}", f);
+                    }
+                    println!("\n{} turn(s):", trace.turns.len());
+                    for turn in &trace.turns {
+                        println!(
+                            "  [{}] user → assistant ({} tool calls, {}ms)",
+                            turn.turn_index,
+                            turn.tool_calls.len(),
+                            turn.latency_ms,
+                        );
+                    }
+                }
+            }
+            None => {
+                eprintln!("Trace not found: {trace_id}");
+                std::process::exit(1);
+            }
+        },
+        TraceAction::Export { trace_id } => match store.get_trace(&trace_id).await? {
+            Some(trace) => {
+                println!("{}", serde_json::to_string_pretty(&trace)?);
+            }
+            None => {
+                eprintln!("Trace not found: {trace_id}");
+                std::process::exit(1);
+            }
+        },
+    }
 
     Ok(())
 }

@@ -153,6 +153,16 @@ async fn handle_non_stream(
 
     fastclaw_observe::record_chat_latency(&setup.agent_id, request_start);
 
+    let elapsed_ms = request_start.elapsed().as_millis() as f64;
+    state.metrics_collector.record_request(&setup.agent_id, "http");
+    state.metrics_collector.record_latency_ms("/api/v1/chat", elapsed_ms);
+    if let Some(usage) = result.response.usage.as_ref() {
+        let total = usage.total_tokens as u64;
+        if total > 0 {
+            state.metrics_collector.record_tokens(&result.response.model, total);
+        }
+    }
+
     let mut resp_json = serde_json::to_value(&result.response)
         .map_err(|e| anyhow::anyhow!("serialization error: {e}"))?;
     if let Some(obj) = resp_json.as_object_mut() {
@@ -329,6 +339,14 @@ async fn handle_stream(
                         input_estimate,
                         streamed_chars,
                     );
+                    state_budget.metrics_collector.record_request(&setup_for_persist.agent_id, "http-stream");
+                    state_budget.metrics_collector.record_latency_ms("/api/v1/chat", elapsed_ms as f64);
+                    if let Some(ref u) = usage {
+                        let total = u.total_tokens as u64;
+                        if total > 0 {
+                            state_budget.metrics_collector.record_tokens(model_for_budget.as_str(), total);
+                        }
+                    }
                     // Persist assistant message (matching non-stream + WS path behavior)
                     if !assistant_content.is_empty() || final_tool_calls.is_some() {
                         let assistant_msg = fastclaw_core::types::ChatMessage {

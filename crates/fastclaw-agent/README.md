@@ -22,3 +22,11 @@ pub use runtime::ExecutionResult;
 pub use builtin_tools::register_builtin_tools_with_sandbox;
 pub use subagent::SubAgentTool;
 ```
+
+## Testing
+
+```bash
+cargo test -p fastclaw-agent
+```
+
+Coverage includes circuit breaker state machine (Closed → Open → HalfOpen → Closed), failure threshold behaviour, per-provider isolation, and LLM provider semaphore concurrency.

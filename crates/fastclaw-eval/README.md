@@ -16,3 +16,11 @@ pub use eval::{EvalCase, EvalResult, run_eval_case, run_eval_suite};
 pub use driver::{EvalAgentDriver, MockEvalAgent};
 pub use loader::load_eval_cases_from_dir;
 ```
+
+## Testing
+
+```bash
+cargo test -p fastclaw-eval
+```
+
+Coverage includes `ReplayDriver` (add/get/replay traces, comparison diffs), `EvalReport` (JSON roundtrip, HTML generation, XSS escaping, empty suites), `MockEvalAgent` suite, and expected-behaviour assertions.

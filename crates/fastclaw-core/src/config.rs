@@ -120,6 +120,25 @@ pub struct FastClawConfig {
     pub mcp_servers: Vec<crate::agent_config::McpServerConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub onboarding: Option<serde_json::Value>,
+    #[serde(default)]
+    pub tracing: TracingConfig,
+}
+
+/// Controls conversation tracing for the harness / eval subsystem.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TracingConfig {
+    /// When true, every chat turn is recorded as a `ConversationTrace` in the session database.
+    #[serde(default)]
+    pub conversation_trace: bool,
+}
+
+impl Default for TracingConfig {
+    fn default() -> Self {
+        Self {
+            conversation_trace: false,
+        }
+    }
 }
 
 /// Intervals for gateway-hosted evolution background tasks ([`FastClawConfig::evolution`]).

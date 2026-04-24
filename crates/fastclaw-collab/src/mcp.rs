@@ -172,11 +172,50 @@ pub enum ToolContent {
 
 // --- MCP Server ---
 
-/// An MCP server that exposes FastClaw's tools over JSON-RPC 2.0.
+/// An MCP resource descriptor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpResource {
+    pub uri: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+}
+
+/// An MCP prompt descriptor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpPrompt {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub arguments: Vec<McpPromptArgument>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpPromptArgument {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub required: bool,
+}
+
+type McpResourceFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>>;
+type McpPromptFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>>;
+
+/// An MCP server that exposes FastClaw's tools, resources, and prompts over JSON-RPC 2.0.
 pub struct McpServer {
     server_info: ServerInfo,
     pub tools: Vec<McpTool>,
     tool_handlers: HashMap<String, Box<dyn Fn(&serde_json::Value) -> McpToolFuture + Send + Sync>>,
+    pub resources: Vec<McpResource>,
+    resource_handlers: HashMap<String, Box<dyn Fn(&serde_json::Value) -> McpResourceFuture + Send + Sync>>,
+    pub prompts: Vec<McpPrompt>,
+    prompt_handlers: HashMap<String, Box<dyn Fn(&serde_json::Value) -> McpPromptFuture + Send + Sync>>,
 }
 
 type McpToolFuture =
@@ -191,6 +230,10 @@ impl McpServer {
             },
             tools: Vec::new(),
             tool_handlers: HashMap::new(),
+            resources: Vec::new(),
+            resource_handlers: HashMap::new(),
+            prompts: Vec::new(),
+            prompt_handlers: HashMap::new(),
         }
     }
 
@@ -211,6 +254,40 @@ impl McpServer {
         );
     }
 
+    /// Register a resource with its read handler.
+    pub fn register_resource<F, Fut>(&mut self, resource: McpResource, handler: F)
+    where
+        F: Fn(serde_json::Value) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send + 'static,
+    {
+        let uri = resource.uri.clone();
+        self.resources.push(resource);
+        self.resource_handlers.insert(
+            uri,
+            Box::new(move |args| {
+                let args = args.clone();
+                Box::pin(handler(args))
+            }),
+        );
+    }
+
+    /// Register a prompt with its get handler.
+    pub fn register_prompt<F, Fut>(&mut self, prompt: McpPrompt, handler: F)
+    where
+        F: Fn(serde_json::Value) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send + 'static,
+    {
+        let name = prompt.name.clone();
+        self.prompts.push(prompt);
+        self.prompt_handlers.insert(
+            name,
+            Box::new(move |args| {
+                let args = args.clone();
+                Box::pin(handler(args))
+            }),
+        );
+    }
+
     /// Handle an incoming JSON-RPC request.
     pub async fn handle_request(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
         match request.method.as_str() {
@@ -218,6 +295,16 @@ impl McpServer {
             "tools/list" => self.handle_tools_list(&request.id),
             "tools/call" => {
                 self.handle_tools_call(&request.id, request.params.as_ref())
+                    .await
+            }
+            "resources/list" => self.handle_resources_list(&request.id),
+            "resources/read" => {
+                self.handle_resources_read(&request.id, request.params.as_ref())
+                    .await
+            }
+            "prompts/list" => self.handle_prompts_list(&request.id),
+            "prompts/get" => {
+                self.handle_prompts_get(&request.id, request.params.as_ref())
                     .await
             }
             "ping" => JsonRpcResponse::success(request.id.clone(), serde_json::json!({})),
@@ -236,8 +323,16 @@ impl McpServer {
                 tools: Some(ToolCapability {
                     list_changed: false,
                 }),
-                resources: None,
-                prompts: None,
+                resources: if self.resources.is_empty() {
+                    None
+                } else {
+                    Some(ResourceCapability { subscribe: false, list_changed: false })
+                },
+                prompts: if self.prompts.is_empty() {
+                    None
+                } else {
+                    Some(PromptCapability { list_changed: false })
+                },
             },
             server_info: self.server_info.clone(),
         };
@@ -286,6 +381,69 @@ impl McpServer {
             None => {
                 JsonRpcResponse::error(id.clone(), -32602, format!("unknown tool: {}", params.name))
             }
+        }
+    }
+
+    fn handle_resources_list(&self, id: &serde_json::Value) -> JsonRpcResponse {
+        JsonRpcResponse::success(
+            id.clone(),
+            serde_json::json!({ "resources": self.resources }),
+        )
+    }
+
+    async fn handle_resources_read(
+        &self,
+        id: &serde_json::Value,
+        params: Option<&serde_json::Value>,
+    ) -> JsonRpcResponse {
+        let uri = params
+            .and_then(|p| p.get("uri"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        match self.resource_handlers.get(uri) {
+            Some(handler) => match handler(&serde_json::json!({ "uri": uri })).await {
+                Ok(content) => JsonRpcResponse::success(id.clone(), content),
+                Err(e) => JsonRpcResponse::error(id.clone(), -32603, e.to_string()),
+            },
+            None => JsonRpcResponse::error(
+                id.clone(),
+                -32602,
+                format!("unknown resource: {uri}"),
+            ),
+        }
+    }
+
+    fn handle_prompts_list(&self, id: &serde_json::Value) -> JsonRpcResponse {
+        JsonRpcResponse::success(
+            id.clone(),
+            serde_json::json!({ "prompts": self.prompts }),
+        )
+    }
+
+    async fn handle_prompts_get(
+        &self,
+        id: &serde_json::Value,
+        params: Option<&serde_json::Value>,
+    ) -> JsonRpcResponse {
+        let name = params
+            .and_then(|p| p.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        match self.prompt_handlers.get(name) {
+            Some(handler) => {
+                let args = params.cloned().unwrap_or(serde_json::json!({}));
+                match handler(&args).await {
+                    Ok(result) => JsonRpcResponse::success(id.clone(), result),
+                    Err(e) => JsonRpcResponse::error(id.clone(), -32603, e.to_string()),
+                }
+            }
+            None => JsonRpcResponse::error(
+                id.clone(),
+                -32602,
+                format!("unknown prompt: {name}"),
+            ),
         }
     }
 
@@ -959,6 +1117,41 @@ pub async fn register_mcp_tools(
     Ok(shared)
 }
 
+/// Register tools from an MCP server reachable via HTTP SSE.
+///
+/// `url` is the SSE endpoint (e.g. `http://host:port/sse`).
+pub async fn register_mcp_tools_sse(
+    url: &str,
+    registry: &fastclaw_core::tool::ToolRegistry,
+    server_prefix: &str,
+) -> anyhow::Result<SharedMcpClient> {
+    let client = McpClient::connect_sse(url).await?;
+    let tools = client.tools().to_vec();
+    let shared = Arc::new(Mutex::new(client));
+
+    let mut registered = 0usize;
+    let mut seen = std::collections::HashSet::new();
+    for tool in &tools {
+        let prefixed = format!("{server_prefix}{}", tool.name);
+        if !seen.insert(prefixed.clone()) {
+            tracing::warn!(tool = %prefixed, "skipping duplicate MCP tool within same server");
+            continue;
+        }
+        let bridge = McpToolBridge::new(tool, shared.clone(), server_prefix);
+        registry.register(Arc::new(bridge));
+        registered += 1;
+    }
+    let count = registered;
+
+    tracing::info!(
+        count,
+        prefix = server_prefix,
+        url,
+        "registered MCP tools (SSE) into FastClaw"
+    );
+    Ok(shared)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1361,5 +1554,173 @@ mod tests {
             msg.contains("/sse"),
             "expected /sse requirement in error: {msg}"
         );
+    }
+
+    // ---- Resources tests ----
+
+    fn rpc(id: i32, method: &str, params: Option<serde_json::Value>) -> JsonRpcRequest {
+        JsonRpcRequest {
+            jsonrpc: "2.0".into(),
+            id: serde_json::json!(id),
+            method: method.into(),
+            params,
+        }
+    }
+
+    #[tokio::test]
+    async fn resources_list_empty() {
+        let server = McpServer::new("test", "1.0");
+        let resp = server.handle_request(&rpc(1, "resources/list", None)).await;
+        let result = resp.result.unwrap();
+        assert_eq!(result["resources"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn resources_list_returns_registered() {
+        let mut server = McpServer::new("test", "1.0");
+        server.register_resource(
+            McpResource {
+                uri: "file:///a.txt".into(),
+                name: "a.txt".into(),
+                description: Some("test".into()),
+                mime_type: Some("text/plain".into()),
+            },
+            |_args| async { Ok(serde_json::json!({"contents": [{"uri": "file:///a.txt", "text": "hi"}]})) },
+        );
+        let resp = server.handle_request(&rpc(1, "resources/list", None)).await;
+        let resources = resp.result.unwrap()["resources"].as_array().unwrap().clone();
+        assert_eq!(resources.len(), 1);
+        assert_eq!(resources[0]["uri"], "file:///a.txt");
+    }
+
+    #[tokio::test]
+    async fn resources_read_success() {
+        let mut server = McpServer::new("test", "1.0");
+        server.register_resource(
+            McpResource {
+                uri: "file:///b.txt".into(),
+                name: "b.txt".into(),
+                description: None,
+                mime_type: None,
+            },
+            |_args| async { Ok(serde_json::json!({"contents": [{"uri": "file:///b.txt", "text": "content"}]})) },
+        );
+        let resp = server
+            .handle_request(&rpc(
+                2,
+                "resources/read",
+                Some(serde_json::json!({"uri": "file:///b.txt"})),
+            ))
+            .await;
+        let result = resp.result.unwrap();
+        assert!(result["contents"].is_array());
+    }
+
+    #[tokio::test]
+    async fn resources_read_unknown_uri() {
+        let server = McpServer::new("test", "1.0");
+        let resp = server
+            .handle_request(&rpc(
+                3,
+                "resources/read",
+                Some(serde_json::json!({"uri": "file:///missing"})),
+            ))
+            .await;
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, -32602);
+    }
+
+    // ---- Prompts tests ----
+
+    #[tokio::test]
+    async fn prompts_list_empty() {
+        let server = McpServer::new("test", "1.0");
+        let resp = server.handle_request(&rpc(1, "prompts/list", None)).await;
+        let result = resp.result.unwrap();
+        assert_eq!(result["prompts"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn prompts_list_returns_registered() {
+        let mut server = McpServer::new("test", "1.0");
+        server.register_prompt(
+            McpPrompt {
+                name: "summarize".into(),
+                description: Some("Summarize text".into()),
+                arguments: vec![McpPromptArgument {
+                    name: "text".into(),
+                    description: None,
+                    required: true,
+                }],
+            },
+            |_args| async { Ok(serde_json::json!({"messages": [{"role": "user", "content": {"type": "text", "text": "summarize this"}}]})) },
+        );
+        let resp = server.handle_request(&rpc(1, "prompts/list", None)).await;
+        let prompts = resp.result.unwrap()["prompts"].as_array().unwrap().clone();
+        assert_eq!(prompts.len(), 1);
+        assert_eq!(prompts[0]["name"], "summarize");
+    }
+
+    #[tokio::test]
+    async fn prompts_get_success() {
+        let mut server = McpServer::new("test", "1.0");
+        server.register_prompt(
+            McpPrompt {
+                name: "greet".into(),
+                description: None,
+                arguments: vec![],
+            },
+            |_args| async { Ok(serde_json::json!({"messages": [{"role": "user", "content": {"type": "text", "text": "hello"}}]})) },
+        );
+        let resp = server
+            .handle_request(&rpc(
+                2,
+                "prompts/get",
+                Some(serde_json::json!({"name": "greet"})),
+            ))
+            .await;
+        let result = resp.result.unwrap();
+        assert!(result["messages"].is_array());
+    }
+
+    #[tokio::test]
+    async fn prompts_get_unknown_name() {
+        let server = McpServer::new("test", "1.0");
+        let resp = server
+            .handle_request(&rpc(
+                3,
+                "prompts/get",
+                Some(serde_json::json!({"name": "nope"})),
+            ))
+            .await;
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, -32602);
+    }
+
+    // ---- Initialize capability advertisement tests ----
+
+    #[tokio::test]
+    async fn initialize_advertises_resources_when_present() {
+        let mut server = McpServer::new("test", "1.0");
+        server.register_resource(
+            McpResource {
+                uri: "file:///x".into(),
+                name: "x".into(),
+                description: None,
+                mime_type: None,
+            },
+            |_| async { Ok(serde_json::json!({})) },
+        );
+        let resp = server.handle_request(&rpc(1, "initialize", None)).await;
+        let caps = &resp.result.unwrap()["capabilities"];
+        assert!(caps["resources"].is_object());
+    }
+
+    #[tokio::test]
+    async fn initialize_omits_resources_when_empty() {
+        let server = McpServer::new("test", "1.0");
+        let resp = server.handle_request(&rpc(1, "initialize", None)).await;
+        let caps = &resp.result.unwrap()["capabilities"];
+        assert!(caps["resources"].is_null());
     }
 }

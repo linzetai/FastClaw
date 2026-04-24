@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod consolidation;
 pub mod error;
 pub mod extract;

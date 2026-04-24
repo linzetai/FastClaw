@@ -21,6 +21,14 @@ pub async fn run(config: FastClawConfig) -> Result<()>;
 pub async fn serve_with_state(state: AppState, listener: TcpListener) -> Result<()>;
 ```
 
+## Testing
+
+```bash
+cargo test -p fastclaw-gateway
+```
+
+Coverage includes OpenAPI spec validation, audit log record/list/pagination, health endpoints, and end-to-end chat/session/agent integration scenarios.
+
 ## Feature Flags
 
 - `test-helpers` — 测试辅助工具

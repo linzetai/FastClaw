@@ -15,3 +15,11 @@
 pub use delegation::{DelegationRequest, DelegationResult};
 pub use mcp::{McpServer, McpTool, create_fastclaw_mcp_server};
 ```
+
+## Testing
+
+```bash
+cargo test -p fastclaw-collab
+```
+
+Coverage includes MCP JSON-RPC (initialize, ping, tools/list, tools/call), resources (list, read), prompts (list, get), capability advertisement, SSE transport, and delegation request/reply with timeout.

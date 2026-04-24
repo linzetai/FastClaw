@@ -42,6 +42,7 @@ pub struct AgentConfig {
 #[serde(rename_all = "camelCase")]
 pub struct McpServerConfig {
     pub id: String,
+    #[serde(default)]
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -49,6 +50,16 @@ pub struct McpServerConfig {
     pub enabled: Option<bool>,
     #[serde(default)]
     pub env: std::collections::HashMap<String, String>,
+    /// SSE URL for HTTP-based MCP servers (alternative to command+args stdio transport).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Transport type: "stdio" (default) or "sse".
+    #[serde(default = "default_transport")]
+    pub transport: String,
+}
+
+fn default_transport() -> String {
+    "stdio".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -638,7 +638,77 @@ pub async fn after_chat(
         );
     }
 
+    if state.config.tracing.conversation_trace {
+        spawn_trace_write(state, setup, assistant);
+    }
+
     Ok(())
+}
+
+fn spawn_trace_write(state: &AppState, setup: &ChatSetup, assistant: &ChatMessage) {
+    use fastclaw_core::types::{
+        ConversationTrace, TraceLlmRequest, TraceLlmResponse, TraceTurn,
+    };
+
+    let store = state.session_store.clone();
+    let session_id = setup.session_id.clone();
+    let agent_id = setup.agent_id.clone();
+    let model = setup.model_for_budget.clone();
+    let (ctx_tokens, ctx_window) = setup.context_tokens_estimate.unwrap_or((0, 0));
+
+    let user_msg = setup
+        .user_messages
+        .last()
+        .cloned()
+        .unwrap_or_else(|| ChatMessage {
+            role: Role::User,
+            content: None,
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        });
+    let assistant_msg = assistant.clone();
+
+    tokio::spawn(async move {
+        let now = chrono::Utc::now().to_rfc3339();
+        let trace_id = format!("tr-{}", uuid::Uuid::new_v4());
+        let turn = TraceTurn {
+            turn_index: 0,
+            user_message: user_msg,
+            assistant_message: assistant_msg,
+            tool_calls: Vec::new(),
+            llm_request: TraceLlmRequest {
+                model: model.clone(),
+                message_count: 1,
+                estimated_tokens: ctx_tokens,
+            },
+            llm_response: TraceLlmResponse {
+                model: model.clone(),
+                usage: None,
+                finish_reason: Some("stop".to_string()),
+                latency_ms: 0,
+            },
+            context_tokens: ctx_tokens,
+            latency_ms: 0,
+            compaction_applied: false,
+        };
+
+        let trace = ConversationTrace {
+            trace_id,
+            session_id,
+            agent_id,
+            model,
+            context_window: if ctx_window > 0 { Some(ctx_window) } else { None },
+            started_at: now.clone(),
+            finished_at: Some(now),
+            turns: vec![turn],
+            metadata: serde_json::Map::new(),
+        };
+
+        if let Err(e) = store.upsert_trace(&trace).await {
+            tracing::warn!(error = %e, "failed to write conversation trace");
+        }
+    });
 }
 
 /// Schedule smart session title generation when [`ChatSetup::needs_title`] is set and the

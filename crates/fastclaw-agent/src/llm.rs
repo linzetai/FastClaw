@@ -29,6 +29,11 @@ pub trait LlmProvider: Send + Sync {
         &self,
         params: &CompletionParams<'_>,
     ) -> anyhow::Result<futures::stream::BoxStream<'static, anyhow::Result<StreamDelta>>>;
+
+    /// Human-readable provider name for metrics labeling.
+    fn provider_name(&self) -> &str {
+        "unknown"
+    }
 }
 
 /// Backoff / retry policy for OpenAI-compatible HTTP calls.
@@ -449,6 +454,10 @@ impl LlmProvider for OpenAiProvider {
         };
 
         Ok(Box::pin(delta_stream))
+    }
+
+    fn provider_name(&self) -> &str {
+        "openai"
     }
 }
 
@@ -1172,18 +1181,137 @@ impl LlmProvider for AnthropicProvider {
 
         Ok(Box::pin(delta_stream))
     }
+
+    fn provider_name(&self) -> &str {
+        "anthropic"
+    }
+}
+
+// ---------- Circuit Breaker ----------
+
+/// Three-state circuit breaker: Closed (healthy), Open (broken), HalfOpen (probing).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CircuitState {
+    Closed,
+    Open,
+    HalfOpen,
+}
+
+struct CircuitBreakerInner {
+    state: CircuitState,
+    failure_count: u32,
+    last_failure: Option<std::time::Instant>,
+}
+
+/// Per-provider circuit breaker with configurable thresholds.
+pub struct CircuitBreaker {
+    breakers: dashmap::DashMap<String, std::sync::Mutex<CircuitBreakerInner>>,
+    failure_threshold: u32,
+    recovery_timeout: std::time::Duration,
+}
+
+impl CircuitBreaker {
+    pub fn new(failure_threshold: u32, recovery_timeout: std::time::Duration) -> Self {
+        Self {
+            breakers: dashmap::DashMap::new(),
+            failure_threshold,
+            recovery_timeout,
+        }
+    }
+
+    /// Check if a provider is available (not in Open state).
+    pub fn is_available(&self, provider: &str) -> bool {
+        let entry = self.breakers.entry(provider.to_string()).or_insert_with(|| {
+            std::sync::Mutex::new(CircuitBreakerInner {
+                state: CircuitState::Closed,
+                failure_count: 0,
+                last_failure: None,
+            })
+        });
+        let mut inner = entry.lock().unwrap_or_else(|e| e.into_inner());
+        match inner.state {
+            CircuitState::Closed => true,
+            CircuitState::Open => {
+                if let Some(last) = inner.last_failure {
+                    if last.elapsed() >= self.recovery_timeout {
+                        inner.state = CircuitState::HalfOpen;
+                        tracing::info!(provider, "circuit breaker half-open, probing");
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            CircuitState::HalfOpen => true,
+        }
+    }
+
+    /// Record a success — resets to Closed.
+    pub fn record_success(&self, provider: &str) {
+        let entry = self.breakers.entry(provider.to_string()).or_insert_with(|| {
+            std::sync::Mutex::new(CircuitBreakerInner {
+                state: CircuitState::Closed,
+                failure_count: 0,
+                last_failure: None,
+            })
+        });
+        let mut inner = entry.lock().unwrap_or_else(|e| e.into_inner());
+        if inner.state != CircuitState::Closed {
+            tracing::info!(provider, "circuit breaker closed (recovered)");
+        }
+        inner.state = CircuitState::Closed;
+        inner.failure_count = 0;
+        inner.last_failure = None;
+    }
+
+    /// Record a failure — may transition to Open.
+    pub fn record_failure(&self, provider: &str) {
+        let entry = self.breakers.entry(provider.to_string()).or_insert_with(|| {
+            std::sync::Mutex::new(CircuitBreakerInner {
+                state: CircuitState::Closed,
+                failure_count: 0,
+                last_failure: None,
+            })
+        });
+        let mut inner = entry.lock().unwrap_or_else(|e| e.into_inner());
+        inner.failure_count += 1;
+        inner.last_failure = Some(std::time::Instant::now());
+        if inner.failure_count >= self.failure_threshold {
+            inner.state = CircuitState::Open;
+            tracing::warn!(provider, failures = inner.failure_count, "circuit breaker opened");
+        }
+    }
+
+    pub fn state(&self, provider: &str) -> CircuitState {
+        self.breakers
+            .get(provider)
+            .map(|e| e.lock().unwrap_or_else(|e| e.into_inner()).state)
+            .unwrap_or(CircuitState::Closed)
+    }
 }
 
 // ---------- Fallback Provider ----------
 
 /// Tries providers in order, falling back to the next on failure.
+/// Integrates with an optional [`CircuitBreaker`] to skip unhealthy providers.
 pub struct FallbackProvider {
     providers: Vec<(String, Box<dyn LlmProvider>)>,
+    circuit_breaker: Option<Arc<CircuitBreaker>>,
 }
 
 impl FallbackProvider {
     pub fn new(providers: Vec<(String, Box<dyn LlmProvider>)>) -> Self {
-        Self { providers }
+        Self {
+            providers,
+            circuit_breaker: None,
+        }
+    }
+
+    pub fn with_circuit_breaker(mut self, cb: Arc<CircuitBreaker>) -> Self {
+        self.circuit_breaker = Some(cb);
+        self
     }
 
     pub fn provider_count(&self) -> usize {
@@ -1196,10 +1324,24 @@ impl LlmProvider for FallbackProvider {
     async fn chat_completion(&self, params: &CompletionParams<'_>) -> anyhow::Result<ChatResponse> {
         let mut last_err = anyhow::anyhow!("no providers configured");
         for (name, provider) in &self.providers {
+            if let Some(ref cb) = self.circuit_breaker {
+                if !cb.is_available(name) {
+                    tracing::info!(provider = %name, "circuit breaker open, skipping");
+                    continue;
+                }
+            }
             match provider.chat_completion(params).await {
-                Ok(resp) => return Ok(resp),
+                Ok(resp) => {
+                    if let Some(ref cb) = self.circuit_breaker {
+                        cb.record_success(name);
+                    }
+                    return Ok(resp);
+                }
                 Err(e) => {
                     tracing::warn!(provider = %name, error = %e, "provider failed, trying fallback");
+                    if let Some(ref cb) = self.circuit_breaker {
+                        cb.record_failure(name);
+                    }
                     last_err = e;
                 }
             }
@@ -1213,15 +1355,33 @@ impl LlmProvider for FallbackProvider {
     ) -> anyhow::Result<futures::stream::BoxStream<'static, anyhow::Result<StreamDelta>>> {
         let mut last_err = anyhow::anyhow!("no providers configured");
         for (name, provider) in &self.providers {
+            if let Some(ref cb) = self.circuit_breaker {
+                if !cb.is_available(name) {
+                    tracing::info!(provider = %name, "circuit breaker open, skipping (stream)");
+                    continue;
+                }
+            }
             match provider.chat_completion_stream(params).await {
-                Ok(stream) => return Ok(stream),
+                Ok(stream) => {
+                    if let Some(ref cb) = self.circuit_breaker {
+                        cb.record_success(name);
+                    }
+                    return Ok(stream);
+                }
                 Err(e) => {
                     tracing::warn!(provider = %name, error = %e, "stream provider failed, trying fallback");
+                    if let Some(ref cb) = self.circuit_breaker {
+                        cb.record_failure(name);
+                    }
                     last_err = e;
                 }
             }
         }
         Err(last_err)
+    }
+
+    fn provider_name(&self) -> &str {
+        "fallback"
     }
 }
 
@@ -1318,5 +1478,104 @@ mod semaphore_tests {
 
         let provider = create_provider_with_credentials("my_openai", None, None, Some(&creds), None);
         assert!(provider.is_ok(), "custom provider key should be accepted");
+    }
+}
+
+#[cfg(test)]
+mod circuit_breaker_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn breaker(threshold: u32, timeout_ms: u64) -> CircuitBreaker {
+        CircuitBreaker::new(threshold, Duration::from_millis(timeout_ms))
+    }
+
+    #[test]
+    fn new_starts_closed() {
+        let cb = breaker(3, 1000);
+        assert_eq!(cb.state("openai"), CircuitState::Closed);
+        assert!(cb.is_available("openai"));
+    }
+
+    #[test]
+    fn opens_after_threshold() {
+        let cb = breaker(3, 1000);
+        cb.record_failure("p");
+        cb.record_failure("p");
+        assert_eq!(cb.state("p"), CircuitState::Closed);
+        cb.record_failure("p");
+        assert_eq!(cb.state("p"), CircuitState::Open);
+        assert!(!cb.is_available("p"));
+    }
+
+    #[test]
+    fn stays_closed_below_threshold() {
+        let cb = breaker(5, 1000);
+        for _ in 0..4 {
+            cb.record_failure("p");
+        }
+        assert_eq!(cb.state("p"), CircuitState::Closed);
+        assert!(cb.is_available("p"));
+    }
+
+    #[test]
+    fn record_success_resets_count() {
+        let cb = breaker(3, 1000);
+        cb.record_failure("p");
+        cb.record_failure("p");
+        cb.record_success("p");
+        assert_eq!(cb.state("p"), CircuitState::Closed);
+        cb.record_failure("p");
+        cb.record_failure("p");
+        assert_eq!(cb.state("p"), CircuitState::Closed);
+    }
+
+    #[tokio::test]
+    async fn half_open_after_recovery_timeout() {
+        let cb = breaker(2, 50);
+        cb.record_failure("p");
+        cb.record_failure("p");
+        assert_eq!(cb.state("p"), CircuitState::Open);
+        assert!(!cb.is_available("p"));
+
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert!(cb.is_available("p"));
+        assert_eq!(cb.state("p"), CircuitState::HalfOpen);
+    }
+
+    #[tokio::test]
+    async fn half_open_success_closes() {
+        let cb = breaker(2, 50);
+        cb.record_failure("p");
+        cb.record_failure("p");
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let _ = cb.is_available("p"); // triggers HalfOpen
+        assert_eq!(cb.state("p"), CircuitState::HalfOpen);
+
+        cb.record_success("p");
+        assert_eq!(cb.state("p"), CircuitState::Closed);
+    }
+
+    #[tokio::test]
+    async fn half_open_failure_reopens() {
+        let cb = breaker(2, 50);
+        cb.record_failure("p");
+        cb.record_failure("p");
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let _ = cb.is_available("p"); // triggers HalfOpen
+
+        cb.record_failure("p");
+        assert_eq!(cb.state("p"), CircuitState::Open);
+    }
+
+    #[test]
+    fn per_provider_isolation() {
+        let cb = breaker(2, 1000);
+        cb.record_failure("openai");
+        cb.record_failure("openai");
+        assert_eq!(cb.state("openai"), CircuitState::Open);
+
+        assert_eq!(cb.state("anthropic"), CircuitState::Closed);
+        assert!(cb.is_available("anthropic"));
     }
 }

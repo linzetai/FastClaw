@@ -444,7 +444,18 @@ impl AgentRuntime {
                 Some(p) => p.clone(),
                 None => self.resolve_provider(&config.agent_id)?,
             };
+            let llm_t0 = std::time::Instant::now();
             let response = provider.chat_completion(&params).await?;
+            {
+                let llm_ms = llm_t0.elapsed().as_millis() as f64;
+                let pname = provider.provider_name();
+                let mc = fastclaw_observe::default_metrics_collector();
+                mc.record_provider_request(pname, &response.model);
+                mc.record_provider_latency_ms(pname, &response.model, llm_ms);
+                if let Some(ref u) = response.usage {
+                    mc.record_provider_tokens(pname, &response.model, u.total_tokens as u64);
+                }
+            }
 
             let choice = response
                 .choices

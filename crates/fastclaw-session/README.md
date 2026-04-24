@@ -16,3 +16,11 @@
 pub use models::{Session, SessionMessage, SessionSummary, SessionCreateOutcome};
 pub use store::SessionStore;
 ```
+
+## Testing
+
+```bash
+cargo test -p fastclaw-session
+```
+
+Coverage includes session CRUD, message append/rollback, conversation trace upsert/get/list/delete, pagination, and duplicate-ID handling — all using in-memory SQLite.

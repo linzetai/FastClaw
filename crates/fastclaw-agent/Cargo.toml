@@ -14,6 +14,7 @@ fastclaw-session = { path = "../fastclaw-session" }
 fastclaw-self-iter = { path = "../fastclaw-self-iter" }
 fastclaw-memory = { path = "../fastclaw-memory", default-features = false }
 fastclaw-security = { path = "../fastclaw-security" }
+fastclaw-observe = { path = "../fastclaw-observe" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -26,6 +27,7 @@ chrono.workspace = true
 futures.workspace = true
 regex.workspace = true
 rand = "0.8"
+dashmap = "5"
 url = "2"
 headless_chrome = { version = "1", optional = true }
 base64 = "0.22.1"
