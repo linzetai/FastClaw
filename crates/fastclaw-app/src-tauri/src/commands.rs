@@ -216,6 +216,9 @@ pub async fn list_sessions(
                 "workDir": s.work_dir,
                 "messageCount": s.message_count,
                 "createdAt": s.created_at, "updatedAt": s.updated_at,
+                "totalPromptTokens": s.total_prompt_tokens,
+                "totalCompletionTokens": s.total_completion_tokens,
+                "totalElapsedMs": s.total_elapsed_ms,
             })
         })
         .collect();
@@ -235,6 +238,9 @@ pub async fn get_session(
             "workDir": s.work_dir,
             "messageCount": s.message_count,
             "createdAt": s.created_at, "updatedAt": s.updated_at,
+            "totalPromptTokens": s.total_prompt_tokens,
+            "totalCompletionTokens": s.total_completion_tokens,
+            "totalElapsedMs": s.total_elapsed_ms,
         })),
         Ok(None) => Err("session not found".into()),
         Err(e) => Err(e.to_string()),
@@ -1202,6 +1208,7 @@ pub async fn chat_stream(
     let agent_config = setup.agent_config.clone();
     let enriched = setup.enriched_request.clone();
     let after_turn_messages = setup.enriched_request.messages.clone();
+    let context_tokens_est = setup.context_tokens_estimate;
 
     for msg in &setup.user_messages {
         if let Err(e) = app.session_store.append_message(&session_id, msg).await {
@@ -1315,6 +1322,8 @@ pub async fn chat_stream(
                 session_id: sid,
                 tool_calls_made,
                 iterations,
+                usage,
+                elapsed_ms,
                 ..
             } => {
                 record_chat_budget_stream_estimate(
@@ -1353,14 +1362,37 @@ pub async fn chat_stream(
                     let _ = after_chat(&app, &setup, &assistant_msg, false).await;
                 }
 
+                let mut complete_data = json!({
+                    "sessionId": sid,
+                    "toolCallsMade": tool_calls_made,
+                    "iterations": iterations,
+                    "elapsedMs": elapsed_ms,
+                });
+                if let Some(ref u) = usage {
+                    complete_data["usage"] = json!({
+                        "promptTokens": u.prompt_tokens,
+                        "completionTokens": u.completion_tokens,
+                        "totalTokens": u.total_tokens,
+                    });
+                }
+                if let Some((est_tokens, ctx_window)) = context_tokens_est {
+                    let actual_prompt = usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0);
+                    complete_data["contextTokens"] = json!(if actual_prompt > 0 { actual_prompt } else { est_tokens });
+                    if ctx_window > 0 {
+                        complete_data["contextWindow"] = json!(ctx_window);
+                    }
+                }
                 let _ = channel.send(json!({
                     "type": "chat.complete",
-                    "data": {
-                        "sessionId": sid,
-                        "toolCallsMade": tool_calls_made,
-                        "iterations": iterations,
-                    }
+                    "data": complete_data,
                 }));
+
+                // Persist usage metrics
+                if let Some(ref sid_str) = sid {
+                    let pt = usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0);
+                    let ct = usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0);
+                    let _ = app.session_store.accumulate_usage(sid_str, pt, ct, *elapsed_ms).await;
+                }
 
                 // Emit Tauri event for session change
                 let _ = app_handle.emit(

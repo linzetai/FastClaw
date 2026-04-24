@@ -1,13 +1,13 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
-import { useAgentStore, type ChatMessage } from "../../lib/agent-store";
+import { useAgentStore, type ChatMessage, type ChatUsage } from "../../lib/agent-store";
 import { MarkdownContent } from "./MarkdownContent";
 import { ToolCallCard, type ToolCall } from "./ToolCallCard";
 import { MentionInput, type MentionInputHandle, type InlineMention, type MentionOption } from "./MentionInput";
 import {
   Image as ImageIcon, FileText, Paperclip, File, Folder, Sparkles,
   X, ChevronUp, ChevronDown, Settings2, FolderOpen, ArrowUp,
-  MessageSquare, Upload, Search, Square,
+  MessageSquare, Upload, Search, Square, Clock, ArrowUpRight, ArrowDownRight,
 } from "lucide-react";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
@@ -40,6 +40,7 @@ interface AttachedFile {
   size: number;
   type: string;
   file: File;
+  previewUrl?: string;
 }
 
 function formatSize(bytes: number) {
@@ -49,11 +50,37 @@ function formatSize(bytes: number) {
 }
 
 function FilePill({ file, onRemove }: { file: AttachedFile; onRemove: () => void }) {
-  const icon = file.type.startsWith("image/")
+  const isImage = file.type.startsWith("image/");
+  const icon = isImage
     ? <ImageIcon size={12} strokeWidth={1.5} />
     : file.type.includes("pdf")
       ? <FileText size={12} strokeWidth={1.5} />
       : <Paperclip size={12} strokeWidth={1.5} />;
+
+  if (isImage && file.previewUrl) {
+    return (
+      <div
+        className="relative inline-block rounded-lg overflow-hidden"
+        style={{
+          border: `0.5px solid var(--separator)`,
+          animation: "pop 0.2s ease-out",
+        }}
+      >
+        <img
+          src={file.previewUrl}
+          alt={file.name}
+          className="block max-h-[80px] max-w-[120px] object-cover"
+        />
+        <button
+          onClick={onRemove}
+          className="absolute top-0.5 right-0.5 flex h-4 w-4 cursor-pointer items-center justify-center rounded-full transition-colors duration-100"
+          style={{ background: "rgba(0,0,0,0.5)", color: "#fff" }}
+        >
+          <X size={8} strokeWidth={2.5} />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -328,6 +355,24 @@ function UserBubble({ msg }: { msg: ChatMessage }) {
           }}
         >
           {text}
+          {msg.images && msg.images.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {msg.images.map((img, i) => (
+                <img
+                  key={i}
+                  src={img.url}
+                  alt={img.alt || "attached image"}
+                  className="rounded-md object-cover"
+                  style={{
+                    maxHeight: 200,
+                    maxWidth: "100%",
+                    border: "0.5px solid rgba(255,255,255,0.2)",
+                  }}
+                  loading="lazy"
+                />
+              ))}
+            </div>
+          )}
           {tags.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {tags.map((tag, ti) =>
@@ -358,7 +403,7 @@ function UserBubble({ msg }: { msg: ChatMessage }) {
 }
 
 /* ─── AI Message ─── */
-function AiMessage({ msg }: { msg: ChatMessage }) {
+function AiMessage({ msg, usage }: { msg: ChatMessage; usage?: ChatUsage }) {
   const toolCalls = msg.toolCalls;
   return (
     <div className="pb-7" style={{ animation: "slide-left 0.2s ease-out", maxWidth: "75%" }}>
@@ -373,9 +418,25 @@ function AiMessage({ msg }: { msg: ChatMessage }) {
         </div>
       )}
       <MarkdownContent content={msg.content} />
-      <span className="mt-1 inline-block text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
-        {ts(msg.timestamp)}
-      </span>
+      <div className="mt-1 flex items-center gap-2.5 text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
+        <span>{ts(msg.timestamp)}</span>
+        {usage && (
+          <>
+            <span className="flex items-center gap-0.5" title="耗时">
+              <Clock size={9} strokeWidth={1.5} />
+              {formatElapsed(usage.elapsedMs)}
+            </span>
+            <span className="flex items-center gap-0.5" title="上行 Token">
+              <ArrowUpRight size={9} strokeWidth={1.5} />
+              {formatTokens(usage.promptTokens)}
+            </span>
+            <span className="flex items-center gap-0.5" title="下行 Token">
+              <ArrowDownRight size={9} strokeWidth={1.5} />
+              {formatTokens(usage.completionTokens)}
+            </span>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -578,6 +639,134 @@ function QuestionPanel({
   );
 }
 
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const secs = ms / 1000;
+  if (secs < 60) return `${secs.toFixed(1)}s`;
+  const mins = Math.floor(secs / 60);
+  const remSecs = Math.round(secs % 60);
+  return `${mins}m ${remSecs}s`;
+}
+
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${(n / 1_000_000).toFixed(2)}M`;
+}
+
+function ContextRing({ used, limit }: { used: number; limit: number }) {
+  const [hover, setHover] = useState(false);
+  const ratio = limit > 0 ? used / limit : 0;
+  const clampedRatio = Math.min(ratio, 1);
+  const pct = clampedRatio * 100;
+  const color = ratio < 0.5
+    ? "var(--green, #68D391)"
+    : ratio < 0.8
+      ? "var(--yellow, #ED8936)"
+      : "var(--red, #FC8181)";
+
+  const size = 24;
+  const strokeWidth = 2.5;
+  const r = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * r;
+  const offset = circumference * (1 - clampedRatio);
+
+  const remaining = Math.max(0, limit - used);
+  const warning = ratio >= 0.8;
+  const critical = ratio >= 0.95;
+
+  return (
+    <div
+      className="relative flex items-center justify-center"
+      style={{
+        width: size,
+        height: size,
+        cursor: "default",
+        animation: critical ? "pulse 2s ease-in-out infinite" : undefined,
+      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle
+          cx={size / 2} cy={size / 2} r={r}
+          fill="none"
+          stroke="var(--separator-opaque, #E2E8F0)"
+          strokeWidth={strokeWidth}
+          opacity={0.6}
+        />
+        <circle
+          cx={size / 2} cy={size / 2} r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          style={{ transition: "stroke-dashoffset 0.4s ease, stroke 0.3s ease" }}
+        />
+      </svg>
+      <span
+        className="absolute text-[7px] font-bold tabular-nums leading-none"
+        style={{ color }}
+      >
+        {pct < 1 ? "<1" : Math.round(pct)}
+      </span>
+      {hover && (
+        <div
+          className="absolute bottom-full mb-2 rounded-xl px-3 py-2.5"
+          style={{
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--separator)",
+            boxShadow: "var(--shadow-lg)",
+            color: "var(--fill-primary)",
+            zIndex: 50,
+            right: -8,
+            minWidth: 180,
+            animation: "fade-in 0.1s ease-out",
+          }}
+        >
+          <div className="mb-1.5 text-[11px] font-semibold" style={{ color: "var(--fill-secondary)" }}>
+            上下文窗口
+          </div>
+          <div className="mb-2 flex items-baseline gap-1">
+            <span className="text-[16px] font-bold tabular-nums" style={{ color }}>{formatTokens(used)}</span>
+            <span className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>/ {formatTokens(limit)} tokens</span>
+          </div>
+          <div
+            className="mb-2 h-[4px] w-full overflow-hidden rounded-full"
+            style={{ background: "var(--separator-opaque, #E2E8F0)" }}
+          >
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${pct}%`,
+                background: color,
+                transition: "width 0.3s ease",
+              }}
+            />
+          </div>
+          <div className="flex justify-between text-[10px]" style={{ color: "var(--fill-tertiary)" }}>
+            <span>已用 {pct.toFixed(1)}%</span>
+            <span>剩余 {formatTokens(remaining)}</span>
+          </div>
+          {warning && (
+            <div
+              className="mt-2 rounded-md px-2 py-1 text-[10px]"
+              style={{
+                background: critical ? "rgba(252,129,129,0.12)" : "rgba(237,137,54,0.12)",
+                color: critical ? "var(--red, #FC8181)" : "var(--yellow, #ED8936)",
+              }}
+            >
+              {critical ? "上下文即将溢出，建议开始新对话" : "上下文使用较高，较长对话可能被压缩"}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Typing() {
   return (
     <div className="pb-6 flex items-center gap-1" style={{ animation: "fade-in 0.15s" }}>
@@ -612,6 +801,7 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
 
   const loadChatStream = useAgentStore((s) => s.loadChatStream);
   const updateChatBackendId = useAgentStore((s) => s.updateChatBackendId);
+  const updateChatUsage = useAgentStore((s) => s.updateChatUsage);
 
   const agent = agents.find((a) => a.id === activeAgentId) ?? agents[0];
   const ac = agentChats[activeAgentId];
@@ -879,6 +1069,7 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
       size: f.size,
       type: f.type,
       file: f,
+      previewUrl: f.type.startsWith("image/") ? URL.createObjectURL(f) : undefined,
     }));
     setAttachedFiles((prev) => [...prev, ...newFiles]);
   }, []);
@@ -894,16 +1085,42 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
   }, [processFiles]);
 
   const removeFile = useCallback((index: number) => {
-    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
+    setAttachedFiles((prev) => {
+      const removed = prev[index];
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      return prev.filter((_, i) => i !== index);
+    });
   }, []);
 
   const sendWithContent = async (txt: string, mentions: InlineMention[]) => {
     const mentionDesc = mentions.length > 0
       ? `\n\n[引用: ${mentions.map((m) => `@${m.label} (${m.type})`).join(", ")}]`
       : "";
-    const fileDesc = attachedFiles.length > 0
-      ? `\n\n[附件: ${attachedFiles.map((f) => f.name).join(", ")}]`
+    const nonImageFiles = attachedFiles.filter((f) => !f.type.startsWith("image/"));
+    const imageFiles = attachedFiles.filter((f) => f.type.startsWith("image/"));
+    const fileDesc = nonImageFiles.length > 0
+      ? `\n\n[附件: ${nonImageFiles.map((f) => f.name).join(", ")}]`
       : "";
+
+    const imageDataUrls: Array<{ url: string; alt?: string }> = [];
+    if (imageFiles.length > 0) {
+      await Promise.all(
+        imageFiles.map(
+          (af) =>
+            new Promise<void>((resolve) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                if (typeof reader.result === "string") {
+                  imageDataUrls.push({ url: reader.result, alt: af.name });
+                }
+                resolve();
+              };
+              reader.onerror = () => resolve();
+              reader.readAsDataURL(af.file);
+            }),
+        ),
+      );
+    }
 
     const currentState = useAgentStore.getState();
     const capturedAgentId = currentState.activeAgentId;
@@ -911,7 +1128,12 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
     const currentActiveChat = currentAc?.chatList.find((c) => c.id === currentAc.activeChatId);
     const capturedChatId = currentActiveChat?.id ?? "temp";
 
-    addMessage(capturedAgentId, { role: "user", content: txt + mentionDesc + fileDesc, timestamp: new Date() }, capturedChatId);
+    addMessage(capturedAgentId, {
+      role: "user",
+      content: txt + mentionDesc + fileDesc,
+      timestamp: new Date(),
+      images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
+    }, capturedChatId);
     atBottomRef.current = true;
     setStreaming(true);
     requestBottomScroll("auto");
@@ -942,9 +1164,22 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
       }
     };
 
+    let messageContent: string | unknown[];
+    if (imageDataUrls.length > 0) {
+      const parts: unknown[] = [];
+      const textBody = txt + mentionDesc + fileDesc;
+      if (textBody) parts.push({ type: "text", text: textBody });
+      for (const img of imageDataUrls) {
+        parts.push({ type: "image_url", image_url: { url: img.url } });
+      }
+      messageContent = parts;
+    } else {
+      messageContent = txt + mentionDesc + fileDesc;
+    }
+
     const { promise: chatPromise, cleanup } = transport.chatStream(
       {
-        messages: [{ role: "user", content: txt + mentionDesc + fileDesc }],
+        messages: [{ role: "user", content: messageContent }],
         agentId: capturedAgentId,
         sessionId: capturedChatId,
         workDir: currentActiveChat?.workDir ?? undefined,
@@ -1006,6 +1241,23 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
 
             if (sid && capturedChatId !== sid) {
               updateChatBackendId(capturedAgentId, capturedChatId, sid);
+            }
+
+            // Track usage metrics (after ID remap so usage lands on the final chat ID)
+            const usageData = event.data?.usage as { promptTokens?: number; completionTokens?: number; totalTokens?: number } | undefined;
+            const elapsedMs = (event.data?.elapsedMs as number) ?? 0;
+            const contextTokens = (event.data?.contextTokens as number) || undefined;
+            const contextWindow = (event.data?.contextWindow as number) || undefined;
+            if (usageData || elapsedMs || contextTokens) {
+              const resolvedChatId = sid ?? capturedChatId;
+              updateChatUsage(capturedAgentId, resolvedChatId, {
+                promptTokens: usageData?.promptTokens ?? 0,
+                completionTokens: usageData?.completionTokens ?? 0,
+                totalTokens: usageData?.totalTokens ?? 0,
+                elapsedMs,
+                contextTokens,
+                contextWindow,
+              });
             }
 
             if (isActive() && atBottomRef.current) {
@@ -1113,7 +1365,10 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
     (txt: string, _mentions: InlineMention[]) => {
       if (!txt.trim() || streamingRef.current) return;
       mentionInputRef.current?.clear();
-      setAttachedFiles([]);
+      setAttachedFiles((prev) => {
+        prev.forEach((f) => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
+        return [];
+      });
       sendRef.current(txt.trim(), _mentions);
     },
     [],
@@ -1483,7 +1738,7 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
               >
                 {m.role === "user" ? <UserBubble msg={m} /> :
                  m.role === "system" ? <SystemMsg msg={m} /> :
-                 <AiMessage msg={m} />}
+                 <AiMessage msg={m} usage={!streaming && idx === visibleStream.length - 1 && m.role === "assistant" ? activeChat?.usage : undefined} />}
               </div>
             );
           }}
@@ -1542,7 +1797,7 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
             onSend={handleMentionSend}
             onNewTopic={handleNewTopic}
             onAttach={() => fileInputRef.current?.click()}
-
+            onPasteFiles={processFiles}
           />
 
           {/* Bottom action bar */}
@@ -1604,39 +1859,47 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
               )}
             </div>
 
-            {streaming ? (
-              <button
-                key="stop"
-                onClick={stopStream}
-                className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-150"
-                style={{
-                  background: "var(--fill-warning, #ED8936)",
-                  color: "#fff",
-                }}
-                title="停止生成"
-              >
-                <Square size={12} strokeWidth={2.5} fill="currentColor" />
-              </button>
-            ) : (
-              <button
-                key="send"
-                onClick={() => {
-                  const ref = mentionInputRef.current;
-                  if (ref) {
-                    const t = ref.getText().trim();
-                    if (t) handleMentionSend(t, ref.getMentions());
-                  }
-                }}
-                className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-150 disabled:opacity-25"
-                style={{
-                  background: "var(--fill-primary)",
-                  color: "var(--fill-inverse)",
-                }}
-                title="发送 ↩"
-              >
-                <ArrowUp size={16} strokeWidth={2} />
-              </button>
-            )}
+            <div className="flex shrink-0 items-center gap-2">
+              {activeChat?.usage?.contextTokens != null && activeChat?.usage?.contextWindow != null && activeChat.usage.contextWindow > 0 && (
+                <ContextRing
+                  used={activeChat.usage.contextTokens}
+                  limit={activeChat.usage.contextWindow}
+                />
+              )}
+              {streaming ? (
+                <button
+                  key="stop"
+                  onClick={stopStream}
+                  className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-150"
+                  style={{
+                    background: "var(--fill-warning, #ED8936)",
+                    color: "#fff",
+                  }}
+                  title="停止生成"
+                >
+                  <Square size={12} strokeWidth={2.5} fill="currentColor" />
+                </button>
+              ) : (
+                <button
+                  key="send"
+                  onClick={() => {
+                    const ref = mentionInputRef.current;
+                    if (ref) {
+                      const t = ref.getText().trim();
+                      if (t) handleMentionSend(t, ref.getMentions());
+                    }
+                  }}
+                  className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-150 disabled:opacity-25"
+                  style={{
+                    background: "var(--fill-primary)",
+                    color: "var(--fill-inverse)",
+                  }}
+                  title="发送 ↩"
+                >
+                  <ArrowUp size={16} strokeWidth={2} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 

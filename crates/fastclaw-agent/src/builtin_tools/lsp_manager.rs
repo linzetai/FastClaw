@@ -384,7 +384,6 @@ async fn validate_command_available(command: &str) -> bool {
     cmd.arg("--version");
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
     cmd.output()
@@ -438,7 +437,6 @@ impl PersistentLspSession {
             .stderr(std::process::Stdio::null());
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
         let mut child = cmd.spawn()?;

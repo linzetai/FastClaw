@@ -322,7 +322,7 @@ async fn handle_stream(
                     });
                     yield Ok(format!("event: tool\ndata: {ev}\n\n"));
                 }
-                StreamEvent::Done { session_id, tool_calls_made, iterations, final_tool_calls } => {
+                StreamEvent::Done { session_id, tool_calls_made, iterations, final_tool_calls, usage, elapsed_ms, .. } => {
                     record_chat_budget_stream_estimate(
                         &state_budget,
                         model_for_budget.as_str(),
@@ -357,9 +357,24 @@ async fn handle_stream(
                         "iterations": iterations,
                         "resolvedAgent": &setup_for_persist.agent_id,
                         "resolveReason": resolve_reason,
+                        "elapsedMs": elapsed_ms,
                     });
+                    if let Some(ref u) = usage {
+                        done_ev["usage"] = json!({
+                            "promptTokens": u.prompt_tokens,
+                            "completionTokens": u.completion_tokens,
+                            "totalTokens": u.total_tokens,
+                        });
+                    }
                     if budget_degraded {
                         done_ev["budgetDegraded"] = json!(true);
+                    }
+                    if let Some((est_tokens, ctx_window)) = setup_for_persist.context_tokens_estimate {
+                        let actual_prompt = usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0);
+                        done_ev["contextTokens"] = json!(if actual_prompt > 0 { actual_prompt } else { est_tokens });
+                        if ctx_window > 0 {
+                            done_ev["contextWindow"] = json!(ctx_window);
+                        }
                     }
                     let ev = done_ev;
                     yield Ok(format!("event: done\ndata: {ev}\n\n"));

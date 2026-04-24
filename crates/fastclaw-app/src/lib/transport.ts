@@ -89,6 +89,9 @@ export interface SessionSummary {
   messageCount: number;
   createdAt: string;
   updatedAt: string;
+  totalPromptTokens?: number;
+  totalCompletionTokens?: number;
+  totalElapsedMs?: number;
 }
 
 export async function listSessions(
@@ -402,7 +405,7 @@ export interface ChatStreamEvent {
 type ChatEventHandler = (event: ChatStreamEvent) => void;
 
 export interface ChatStreamParams {
-  messages: Array<{ role: string; content: string }>;
+  messages: Array<{ role: string; content: string | unknown[] }>;
   agentId?: string;
   sessionId?: string;
   model?: string;

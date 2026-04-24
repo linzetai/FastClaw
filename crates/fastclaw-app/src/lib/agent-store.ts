@@ -21,6 +21,11 @@ export interface ChatMessageToolCall {
   duration?: number;
 }
 
+export interface ChatMessageImage {
+  url: string;
+  alt?: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
@@ -28,9 +33,19 @@ export interface ChatMessage {
   timestamp: Date;
   chatId: string;
   toolCalls?: ChatMessageToolCall[];
+  images?: ChatMessageImage[];
 }
 
 export type StreamItem = { type: "message"; data: ChatMessage };
+
+export interface ChatUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  elapsedMs: number;
+  contextTokens?: number;
+  contextWindow?: number;
+}
 
 export interface Chat {
   id: string;
@@ -41,6 +56,7 @@ export interface Chat {
   createdAt: Date;
   messageCount: number;
   open: boolean;
+  usage?: ChatUsage;
 }
 
 export interface AgentChats {
@@ -74,6 +90,7 @@ interface AgentState {
   loadChatStream: (agentId: string, chatId: string, messages: BackendMessage[]) => void;
   updateChatBackendId: (agentId: string, localChatId: string, backendSessionId: string) => void;
   appendStreamDelta: (agentId: string, chatId: string, delta: string) => void;
+  updateChatUsage: (agentId: string, chatId: string, usage: ChatUsage) => void;
   removeAgent: (agentId: string) => void;
 }
 
@@ -85,6 +102,9 @@ export interface BackendSession {
   messageCount: number;
   createdAt: string;
   updatedAt: string;
+  totalPromptTokens?: number;
+  totalCompletionTokens?: number;
+  totalElapsedMs?: number;
 }
 
 export interface BackendMessage {
@@ -448,6 +468,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           createdAt: new Date(s.createdAt),
           messageCount: s.messageCount,
           open: persistedOpen.has(s.id) && s.messageCount > 0,
+          usage: (s.totalPromptTokens || s.totalCompletionTokens || s.totalElapsedMs) ? {
+            promptTokens: s.totalPromptTokens ?? 0,
+            completionTokens: s.totalCompletionTokens ?? 0,
+            totalTokens: (s.totalPromptTokens ?? 0) + (s.totalCompletionTokens ?? 0),
+            elapsedMs: s.totalElapsedMs ?? 0,
+          } : undefined,
         }));
       const mergedList = [...updatedExisting, ...newChats];
 
@@ -490,15 +516,34 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               result: tc.output as string | undefined,
             }));
           }
+          let content: string;
+          let images: ChatMessageImage[] | undefined;
+          if (Array.isArray(m.content)) {
+            const textParts: string[] = [];
+            const imgParts: ChatMessageImage[] = [];
+            for (const part of m.content as Array<Record<string, unknown>>) {
+              if (part.type === "text" && typeof part.text === "string") {
+                textParts.push(part.text);
+              } else if (part.type === "image_url") {
+                const iu = part.image_url as Record<string, string> | undefined;
+                if (iu?.url) imgParts.push({ url: iu.url });
+              }
+            }
+            content = textParts.join("\n");
+            if (imgParts.length > 0) images = imgParts;
+          } else {
+            content = typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
+          }
           return {
             type: "message" as const,
             data: {
               role: m.role as "user" | "assistant" | "system",
-              content: typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""),
+              content,
               id: nextId++,
               timestamp: new Date(m.createdAt),
               chatId,
               toolCalls,
+              images,
             },
           };
         });
@@ -528,6 +573,36 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             ...ac,
             chatList: ac.chatList.map((c) => (c.id === localChatId ? { ...c, id: backendSessionId } : c)),
             activeChatId: ac.activeChatId === localChatId ? backendSessionId : ac.activeChatId,
+          },
+        },
+      };
+    });
+  },
+
+  updateChatUsage: (agentId, chatId, incoming) => {
+    set((state) => {
+      const ac = state.agentChats[agentId];
+      if (!ac) return state;
+      return {
+        agentChats: {
+          ...state.agentChats,
+          [agentId]: {
+            ...ac,
+            chatList: ac.chatList.map((c) => {
+              if (c.id !== chatId) return c;
+              const prev = c.usage;
+              return {
+                ...c,
+                usage: {
+                  promptTokens: (prev?.promptTokens ?? 0) + incoming.promptTokens,
+                  completionTokens: (prev?.completionTokens ?? 0) + incoming.completionTokens,
+                  totalTokens: (prev?.totalTokens ?? 0) + incoming.totalTokens,
+                  elapsedMs: (prev?.elapsedMs ?? 0) + incoming.elapsedMs,
+                  contextTokens: incoming.contextTokens ?? prev?.contextTokens,
+                  contextWindow: incoming.contextWindow ?? prev?.contextWindow,
+                },
+              };
+            }),
           },
         },
       };

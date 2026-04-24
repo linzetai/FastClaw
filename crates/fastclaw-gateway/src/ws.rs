@@ -799,7 +799,7 @@ async fn spawn_chat(
                 };
                 let _ = after_chat(&state, &setup, &assistant_msg, false).await;
             }
-            let mut resp = event_to_response(&event, &rid, &state);
+            let mut resp = event_to_response(&event, &rid, &state, setup.context_tokens_estimate);
             if is_done {
                 if let Some(data) = resp.data.as_mut().and_then(|d| d.as_object_mut()) {
                     let elapsed_ms = chat_start.elapsed().as_millis() as u64;
@@ -893,7 +893,7 @@ async fn spawn_chat(
     });
 }
 
-fn event_to_response(event: &StreamEvent, req_id: &Option<String>, state: &AppState) -> WsResponse {
+fn event_to_response(event: &StreamEvent, req_id: &Option<String>, state: &AppState, context_estimate: Option<(u32, u32)>) -> WsResponse {
     match event {
         StreamEvent::Delta(delta) => {
             let text = delta
@@ -930,18 +930,29 @@ fn event_to_response(event: &StreamEvent, req_id: &Option<String>, state: &AppSt
             session_id,
             tool_calls_made,
             iterations,
+            usage,
+            elapsed_ms,
             ..
         } => {
             let _ = state.ws_broadcast.send(
                 json!({"type":"event","event":"sessions.changed","data":{"sessionId":session_id}})
                     .to_string(),
             );
+            let mut data = json!({"sessionId": session_id, "toolCallsMade": tool_calls_made, "iterations": iterations, "elapsedMs": elapsed_ms});
+            if let Some(ref u) = usage {
+                data["usage"] = json!({"promptTokens": u.prompt_tokens, "completionTokens": u.completion_tokens, "totalTokens": u.total_tokens});
+            }
+            if let Some((est_tokens, ctx_window)) = context_estimate {
+                let actual_prompt = usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0);
+                data["contextTokens"] = json!(if actual_prompt > 0 { actual_prompt } else { est_tokens });
+                if ctx_window > 0 {
+                    data["contextWindow"] = json!(ctx_window);
+                }
+            }
             WsResponse {
                 id: req_id.clone(),
                 msg_type: "chat.complete".into(),
-                data: Some(
-                    json!({"sessionId": session_id, "toolCallsMade": tool_calls_made, "iterations": iterations}),
-                ),
+                data: Some(data),
                 error: None,
             }
         }
@@ -1019,6 +1030,9 @@ async fn handle_sessions_list(
             let data: Vec<_> = sessions.iter().map(|s| json!({
                 "id": s.id, "agentId": s.agent_id, "title": s.title,
                 "messageCount": s.message_count, "createdAt": s.created_at, "updatedAt": s.updated_at,
+                "totalPromptTokens": s.total_prompt_tokens,
+                "totalCompletionTokens": s.total_completion_tokens,
+                "totalElapsedMs": s.total_elapsed_ms,
             })).collect();
             send_resp(
                 sender,
@@ -1072,6 +1086,9 @@ async fn handle_sessions_get(
                 data: Some(json!({
                     "id": s.id, "agentId": s.agent_id, "title": s.title,
                     "messageCount": s.message_count, "createdAt": s.created_at, "updatedAt": s.updated_at,
+                    "totalPromptTokens": s.total_prompt_tokens,
+                    "totalCompletionTokens": s.total_completion_tokens,
+                    "totalElapsedMs": s.total_elapsed_ms,
                 })), error: None,
             }).await;
         }
@@ -1933,7 +1950,7 @@ mod tests {
             let tmp = tempfile::tempdir().unwrap();
             rt.block_on(async { AppState::for_test(Box::new(NullProvider), tmp.path()).await.unwrap() })
         };
-        let resp = event_to_response(&event, &Some("r1".into()), &state);
+        let resp = event_to_response(&event, &Some("r1".into()), &state, None);
         assert_eq!(resp.msg_type, "chat.ask_question");
         let data = resp.data.unwrap();
         assert_eq!(data["requestId"], "q1");
@@ -1949,13 +1966,17 @@ mod tests {
             tool_calls_made: 2,
             iterations: 1,
             final_tool_calls: None,
+            usage: None,
+            elapsed_ms: 0,
+            context_tokens: None,
+            context_window: None,
         };
         let state = {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let tmp = tempfile::tempdir().unwrap();
             rt.block_on(async { AppState::for_test(Box::new(NullProvider), tmp.path()).await.unwrap() })
         };
-        let resp = event_to_response(&event, &Some("r2".into()), &state);
+        let resp = event_to_response(&event, &Some("r2".into()), &state, None);
         assert_eq!(resp.msg_type, "chat.complete");
         let data = resp.data.unwrap();
         assert_eq!(data["sessionId"], "sess-123");

@@ -166,12 +166,18 @@ impl OpenAiProvider {
 
     fn build_request<'a>(&self, params: &CompletionParams<'a>, stream: bool) -> OpenAiRequest<'a> {
         let tool_choice = params.tools.filter(|t| !t.is_empty()).map(|_| "auto");
+        let stream_options = if stream {
+            Some(StreamOptions { include_usage: true })
+        } else {
+            None
+        };
         OpenAiRequest {
             model: params.model,
             messages: params.messages,
             temperature: params.temperature,
             max_tokens: params.max_tokens,
             stream,
+            stream_options,
             tools: params.tools,
             tool_choice,
         }
@@ -249,6 +255,11 @@ impl OpenAiProvider {
 }
 
 #[derive(Serialize)]
+struct StreamOptions {
+    include_usage: bool,
+}
+
+#[derive(Serialize)]
 struct OpenAiRequest<'a> {
     model: &'a str,
     messages: &'a [ChatMessage],
@@ -257,6 +268,8 @@ struct OpenAiRequest<'a> {
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<&'a [ToolDefinition]>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -667,12 +680,50 @@ impl AnthropicProvider {
                     }
                 }
                 fastclaw_core::types::Role::User => {
+                    let content = match &msg.content {
+                        Some(serde_json::Value::Array(arr)) => {
+                            let converted: Vec<serde_json::Value> = arr
+                                .iter()
+                                .filter_map(|part| {
+                                    let ptype = part.get("type").and_then(|v| v.as_str())?;
+                                    match ptype {
+                                        "text" => Some(part.clone()),
+                                        "image_url" => {
+                                            let url = part
+                                                .get("image_url")
+                                                .and_then(|iu| iu.get("url"))
+                                                .and_then(|u| u.as_str())?;
+                                            if let Some(rest) = url.strip_prefix("data:") {
+                                                let (header, data) = rest.split_once(";base64,")?;
+                                                Some(serde_json::json!({
+                                                    "type": "image",
+                                                    "source": {
+                                                        "type": "base64",
+                                                        "media_type": header,
+                                                        "data": data,
+                                                    }
+                                                }))
+                                            } else {
+                                                Some(serde_json::json!({
+                                                    "type": "image",
+                                                    "source": {
+                                                        "type": "url",
+                                                        "url": url,
+                                                    }
+                                                }))
+                                            }
+                                        }
+                                        _ => Some(part.clone()),
+                                    }
+                                })
+                                .collect();
+                            serde_json::Value::Array(converted)
+                        }
+                        other => other.clone().unwrap_or(serde_json::Value::String(String::new())),
+                    };
                     result.push(AnthropicMessage {
                         role: "user".to_string(),
-                        content: msg
-                            .content
-                            .clone()
-                            .unwrap_or(serde_json::Value::String(String::new())),
+                        content,
                     });
                 }
                 fastclaw_core::types::Role::Assistant => {
@@ -885,6 +936,8 @@ impl LlmProvider for AnthropicProvider {
             let mut model_name = String::new();
             let mut stop_reason: Option<String> = None;
             let mut tool_streams: HashMap<u32, (String, String, String)> = HashMap::new();
+            let mut input_tokens: u32 = 0;
+            let mut output_tokens: u32 = 0;
 
             byte_stream
                 .map(move |chunk_result| {
@@ -926,6 +979,9 @@ impl LlmProvider for AnthropicProvider {
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
                                             .to_string();
+                                        if let Some(u) = m.get("usage") {
+                                            input_tokens = u.get("input_tokens").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+                                        }
                                     }
                                 }
                             }
@@ -937,6 +993,9 @@ impl LlmProvider for AnthropicProvider {
                                         {
                                             stop_reason = Some(sr.to_string());
                                         }
+                                    }
+                                    if let Some(u) = v.get("usage") {
+                                        output_tokens = u.get("output_tokens").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
                                     }
                                 }
                             }
@@ -1003,6 +1062,7 @@ impl LlmProvider for AnthropicProvider {
                                                             },
                                                             finish_reason: None,
                                                         }],
+                                                        usage: None,
                                                     }));
                                                 }
                                             }
@@ -1058,6 +1118,7 @@ impl LlmProvider for AnthropicProvider {
                                                     },
                                                     finish_reason: None,
                                                 }],
+                                                usage: None,
                                             }));
                                         }
                                     }
@@ -1073,6 +1134,16 @@ impl LlmProvider for AnthropicProvider {
                                     Some(s) if !s.is_empty() => Some(s.to_string()),
                                     _ => Some("stop".to_string()),
                                 };
+                                let total = input_tokens + output_tokens;
+                                let usage = if total > 0 {
+                                    Some(Usage {
+                                        prompt_tokens: input_tokens,
+                                        completion_tokens: output_tokens,
+                                        total_tokens: total,
+                                    })
+                                } else {
+                                    None
+                                };
                                 deltas.push(Ok(StreamDelta {
                                     id: msg_id.clone(),
                                     object: "chat.completion.chunk".to_string(),
@@ -1087,6 +1158,7 @@ impl LlmProvider for AnthropicProvider {
                                         },
                                         finish_reason: finish,
                                     }],
+                                    usage,
                                 }));
                             }
                             _ => {}
