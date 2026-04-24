@@ -27,7 +27,7 @@ use fastclaw_session::SessionStore;
 pub use filesystem::{
     ApplyPatchTool, EditFileTool, ListDirectoryTool, ReadFileTool, SearchInFilesTool, WriteFileTool,
 };
-pub use filesystem::with_file_access_mode;
+pub use filesystem::{with_file_access_mode, with_work_dir};
 pub use hub::{HubInstallTool, HubSearchTool};
 pub use media::{ImageGenerateTool, TtsTool};
 pub use memory::{MemorySearchTool, MemoryStoreTool};

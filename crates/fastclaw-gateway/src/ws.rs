@@ -1237,9 +1237,13 @@ async fn handle_sessions_new(
         .and_then(|v| v.as_str())
         .unwrap_or("main");
     let new_id = uuid::Uuid::new_v4().to_string();
+    let work_dir = state
+        .workspaces
+        .get(agent_id)
+        .map(|ws| ws.root.to_string_lossy().to_string());
     match state
         .session_store
-        .create_session(&new_id, agent_id, None)
+        .create_session_with_work_dir(&new_id, agent_id, None, work_dir.as_deref())
         .await
     {
         Ok(_) => {
@@ -1249,7 +1253,7 @@ async fn handle_sessions_new(
                 &WsResponse {
                     id: req_id,
                     msg_type: "sessions.new".into(),
-                    data: Some(json!({"sessionId": new_id, "agentId": agent_id})),
+                    data: Some(json!({"sessionId": new_id, "agentId": agent_id, "workDir": work_dir})),
                     error: None,
                 },
             )

@@ -299,11 +299,20 @@ pub async fn create_session(
     let app = get_state(&gw)?;
     let agent_id = agent_id.as_deref().unwrap_or("main");
     let new_id = uuid::Uuid::new_v4().to_string();
+    let work_dir = app
+        .workspaces
+        .get(agent_id)
+        .map(|ws| ws.root.to_string_lossy().to_string());
     app.session_store
-        .create_session(&new_id, agent_id, None)
+        .create_session_with_work_dir(
+            &new_id,
+            agent_id,
+            None,
+            work_dir.as_deref(),
+        )
         .await
         .map_err(|e| e.to_string())?;
-    Ok(json!({"sessionId": new_id, "agentId": agent_id}))
+    Ok(json!({"sessionId": new_id, "agentId": agent_id, "workDir": work_dir}))
 }
 
 #[tauri::command]

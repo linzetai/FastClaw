@@ -16,7 +16,7 @@ use fastclaw_self_iter::{SelfIterEngine, ToolCallTrace};
 use futures::StreamExt;
 
 use crate::llm::{CompletionParams, LlmProvider};
-use crate::builtin_tools::with_file_access_mode;
+use crate::builtin_tools::{with_file_access_mode, with_work_dir};
 
 /// Max characters of tool output embedded in chat history (per tool message).
 pub const MAX_TOOL_RESULT_CHARS: usize = 8000;
@@ -417,9 +417,10 @@ impl AgentRuntime {
 
                 let result = match tool_registry.get(&tc.function.name) {
                     Some(tool) => {
+                        let work_dir_path = request.work_dir.as_ref().map(std::path::PathBuf::from);
                         let r = with_file_access_mode(
                             config.behavior.file_access,
-                            tool.execute(&tc.function.arguments),
+                            with_work_dir(work_dir_path, tool.execute(&tc.function.arguments)),
                         )
                         .await;
                         if !r.success {
@@ -916,9 +917,10 @@ impl AgentRuntime {
 
                 let mut result = match tool_registry.get(&tc.function.name) {
                     Some(tool) => {
+                        let work_dir_path = request.work_dir.as_ref().map(std::path::PathBuf::from);
                         let r = with_file_access_mode(
                             config.behavior.file_access,
-                            tool.execute(&tc.function.arguments),
+                            with_work_dir(work_dir_path, tool.execute(&tc.function.arguments)),
                         )
                         .await;
                         if !r.success {
@@ -998,9 +1000,10 @@ impl AgentRuntime {
                             let confirmed_args = serde_json::to_string(&args).unwrap_or_default();
 
                             if let Some(tool) = tool_registry.get(&tc.function.name) {
+                                let work_dir_path = request.work_dir.as_ref().map(std::path::PathBuf::from);
                                 result = with_file_access_mode(
                                     config.behavior.file_access,
-                                    tool.execute(&confirmed_args),
+                                    with_work_dir(work_dir_path, tool.execute(&confirmed_args)),
                                 )
                                 .await;
                                 if result.success {

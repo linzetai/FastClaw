@@ -99,9 +99,13 @@ pub async fn resolve_session_context(
         .map(String::from)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
+    let work_dir = state
+        .workspaces
+        .get(agent_id)
+        .map(|ws| ws.root.to_string_lossy().to_string());
     state
         .session_store
-        .create_session(&new_id, agent_id, None)
+        .create_session_with_work_dir(&new_id, agent_id, None, work_dir.as_deref())
         .await?;
 
     let mut messages = Vec::new();

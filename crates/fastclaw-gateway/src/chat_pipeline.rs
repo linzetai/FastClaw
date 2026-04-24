@@ -185,7 +185,10 @@ pub async fn setup_chat(
                     .and_then(|m| m.as_object())
                     .and_then(|models| {
                         models.values().find_map(|cfg| {
-                            let m = cfg.get("model").and_then(|v| v.as_str())?;
+                            let m = cfg
+                                .get("model")
+                                .or_else(|| cfg.get("defaultModel"))
+                                .and_then(|v| v.as_str())?;
                             if m == model_for_budget {
                                 cfg.get("contextWindow").and_then(|v| v.as_u64()).map(|v| v as u32)
                             } else {

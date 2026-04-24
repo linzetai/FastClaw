@@ -12,6 +12,7 @@ use tokio::io::AsyncWriteExt;
 
 tokio::task_local! {
     static FILE_ACCESS_MODE: FileAccessMode;
+    static EFFECTIVE_WORK_DIR: Option<PathBuf>;
 }
 
 pub async fn with_file_access_mode<F, T>(mode: FileAccessMode, fut: F) -> T
@@ -21,8 +22,24 @@ where
     FILE_ACCESS_MODE.scope(mode, fut).await
 }
 
+pub async fn with_work_dir<F, T>(work_dir: Option<PathBuf>, fut: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    EFFECTIVE_WORK_DIR.scope(work_dir, fut).await
+}
+
 fn workspace_root() -> std::io::Result<PathBuf> {
+    if let Ok(Some(dir)) = EFFECTIVE_WORK_DIR.try_with(|d| d.clone()) {
+        if dir.is_dir() {
+            return Ok(dir);
+        }
+    }
     std::env::current_dir()
+}
+
+fn state_dir_root() -> Option<PathBuf> {
+    fastclaw_core::paths::resolve_state_dir_from(None).canonicalize().ok()
 }
 
 fn current_file_access_mode() -> FileAccessMode {
@@ -82,17 +99,21 @@ fn ensure_within_workspace(path: &Path, must_exist: bool) -> std::io::Result<Pat
         )
     };
     if resolved.starts_with(&root) {
-        Ok(resolved)
-    } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            format!(
-                "path '{}' resolves outside workspace root '{}'",
-                path.display(),
-                root.display()
-            ),
-        ))
+        return Ok(resolved);
     }
+    if let Some(state_root) = state_dir_root() {
+        if resolved.starts_with(&state_root) {
+            return Ok(resolved);
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!(
+            "path '{}' resolves outside workspace root '{}'",
+            path.display(),
+            root.display()
+        ),
+    ))
 }
 
 const DEFAULT_READ_FILE_MAX_CHARS: usize = 32_768;
