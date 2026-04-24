@@ -223,6 +223,62 @@ fastclaw gateway start
 fastclaw gateway status
 ```
 
+### Windows build environment (CLI + Desktop App)
+
+```powershell
+# 1) Install Rust toolchain (one-time)
+winget install --id Rustlang.Rustup --source winget -e --accept-package-agreements --accept-source-agreements
+$env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+$env:RUSTUP_DIST_SERVER = "https://mirrors.ustc.edu.cn/rust-static"
+$env:RUSTUP_UPDATE_ROOT = "https://mirrors.ustc.edu.cn/rust-static/rustup"
+rustup default stable
+```
+
+```powershell
+# 2) Install MSVC build tools (one-time)
+winget install --id Microsoft.VisualStudio.2022.BuildTools --source winget -e `
+  --accept-package-agreements --accept-source-agreements `
+  --override "--quiet --wait --norestart --nocache --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+```toml
+# 3) Optional: set Cargo mirror to avoid crates.io timeout
+# file: <repo-root>\.cargo-home\config.toml
+[source.crates-io]
+replace-with = "rsproxy"
+
+[source.rsproxy]
+registry = "sparse+https://rsproxy.cn/index/"
+```
+
+```powershell
+# 4) Build CLI (release) from repo root
+cmd /c '"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" && ^
+set "REPO=<repo-root>" && ^
+set "CARGO_HOME=%REPO%\.cargo-home" && ^
+set "CARGO_HTTP_MULTIPLEXING=false" && ^
+set "PATH=%USERPROFILE%\.cargo\bin;%PATH%" && ^
+cd /d "%REPO%" && cargo build --release'
+```
+
+```powershell
+# 5) Build Desktop App from repo root
+cd "<repo-root>\crates\fastclaw-app"
+npx pnpm@10 install
+cmd /c '"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" && ^
+set "REPO=<repo-root>" && ^
+set "CARGO_HOME=%REPO%\.cargo-home" && ^
+set "CARGO_HTTP_MULTIPLEXING=false" && ^
+set "PATH=%USERPROFILE%\.cargo\bin;%PATH%" && ^
+cd /d "%REPO%\crates\fastclaw-app" && npx tauri build'
+```
+
+Build outputs:
+
+- CLI binary: `<repo-root>\target\release\fastclaw.exe`
+- MSI installer: `<repo-root>\target\release\bundle\msi\FastClaw_0.0.2_x64_en-US.msi`
+- NSIS installer: `<repo-root>\target\release\bundle\nsis\FastClaw_0.0.2_x64-setup.exe`
+
 Docker: `docker compose up -d` then `curl http://127.0.0.1:18789/health` — see [`docker-compose.yml`](docker-compose.yml).
 
 ## Documentation
