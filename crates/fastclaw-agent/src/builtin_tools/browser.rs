@@ -52,6 +52,149 @@ impl BrowserTool {
         base.join("fastclaw").join("browser-profile")
     }
 
+    fn find_chrome() -> Option<std::path::PathBuf> {
+        if let Ok(p) = std::env::var("CHROME") {
+            let path = std::path::PathBuf::from(&p);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            let candidates = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+            ];
+            if let Some(local) = dirs::data_local_dir() {
+                let local_chrome = local.join(r"Google\Chrome\Application\chrome.exe");
+                if local_chrome.exists() {
+                    return Some(local_chrome);
+                }
+            }
+            for c in &candidates {
+                let p = std::path::PathBuf::from(c);
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let candidates = [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            ];
+            for c in &candidates {
+                let p = std::path::PathBuf::from(c);
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Try to connect to an existing Chrome that uses our profile dir by
+    /// scanning its `--remote-debugging-port` and hitting `/json/version`.
+    fn try_reuse_existing(profile: &std::path::Path) -> Option<headless_chrome::Browser> {
+        let profile_str = profile.to_string_lossy();
+
+        #[cfg(target_os = "windows")]
+        let pids_and_ports = {
+            let wql_pattern = profile_str.replace('\\', "\\\\");
+            let output = std::process::Command::new("wmic")
+                .args([
+                    "process",
+                    "where",
+                    &format!(
+                        "commandline like '%{wql_pattern}%' and name='chrome.exe'"
+                    ),
+                    "get",
+                    "commandline",
+                    "/format:list",
+                ])
+                .output()
+                .ok()?;
+            let text = String::from_utf8_lossy(&output.stdout);
+            Self::extract_debug_ports(&text)
+        };
+
+        #[cfg(not(target_os = "windows"))]
+        let pids_and_ports = {
+            let output = std::process::Command::new("sh")
+                .args(["-c", &format!("ps aux | grep chrome | grep '{}'", profile_str)])
+                .output()
+                .ok()?;
+            let text = String::from_utf8_lossy(&output.stdout);
+            Self::extract_debug_ports(&text)
+        };
+
+        for port in pids_and_ports {
+            if let Some(body) = Self::http_get(&format!("127.0.0.1:{port}"), "/json/version") {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&body) {
+                    if let Some(ws_url) = val["webSocketDebuggerUrl"].as_str() {
+                        if let Ok(browser) = headless_chrome::Browser::connect_with_timeout(
+                            ws_url.to_string(),
+                            Duration::from_secs(120),
+                        ) {
+                            return Some(browser);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Minimal blocking HTTP GET — no external crate needed.
+    fn http_get(host_port: &str, path: &str) -> Option<String> {
+        use std::io::{Read, Write};
+        let mut stream = std::net::TcpStream::connect(host_port).ok()?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .ok()?;
+        write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nHost: {host_port}\r\nConnection: close\r\n\r\n"
+        )
+        .ok()?;
+        let mut buf = vec![0u8; 8192];
+        let mut total = 0;
+        loop {
+            match stream.read(&mut buf[total..]) {
+                Ok(0) => break,
+                Ok(n) => {
+                    total += n;
+                    if total >= buf.len() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        let text = String::from_utf8_lossy(&buf[..total]);
+        text.split_once("\r\n\r\n")
+            .map(|(_, body)| body.to_string())
+    }
+
+    fn extract_debug_ports(text: &str) -> Vec<u16> {
+        let re_port = regex::Regex::new(r"--remote-debugging-port=(\d+)").unwrap();
+        let mut ports: Vec<u16> = re_port
+            .captures_iter(text)
+            .filter_map(|c| c[1].parse().ok())
+            .collect();
+        ports.sort_unstable();
+        ports.dedup();
+        ports
+    }
+
     fn ensure_browser(inner: &Mutex<Option<BrowserState>>) -> Result<(), String> {
         let mut guard = inner.lock().map_err(|e| {
             format!(
@@ -60,22 +203,37 @@ impl BrowserTool {
             )
         })?;
         if guard.is_none() {
-            let headless = Self::is_headless();
             let profile = Self::profile_dir();
             std::fs::create_dir_all(&profile).ok();
+
+            // Phase 1: try to reuse an existing Chrome with our profile
+            if let Some(browser) = Self::try_reuse_existing(&profile) {
+                *guard = Some(BrowserState {
+                    browser,
+                    persistent_tab: None,
+                });
+                return Ok(());
+            }
+
+            // Phase 2: kill orphans, clean locks, launch fresh
             Self::cleanup_profile(&profile);
-            let launch_options = headless_chrome::LaunchOptions::default_builder()
+            let headless = Self::is_headless();
+            let chrome_path = Self::find_chrome();
+            let mut builder = headless_chrome::LaunchOptions::default_builder();
+            builder
                 .headless(headless)
                 .sandbox(false)
                 .window_size(Some((1280, 900)))
-                .user_data_dir(Some(profile))
-                .build()
-                .map_err(|e| {
-                    format!(
-                        "browser: invalid Chrome launch options: {e}. \
-                         What to do next: check headless_chrome defaults and OS limits; ask the operator if custom flags are required."
-                    )
-                })?;
+                .user_data_dir(Some(profile));
+            if let Some(ref p) = chrome_path {
+                builder.path(Some(p.clone()));
+            }
+            let launch_options = builder.build().map_err(|e| {
+                format!(
+                    "browser: invalid Chrome launch options: {e}. \
+                     What to do next: check headless_chrome defaults and OS limits; ask the operator if custom flags are required."
+                )
+            })?;
 
             let (tx, rx) = std::sync::mpsc::channel();
             let opts = launch_options;
@@ -127,8 +285,17 @@ impl BrowserTool {
     #[cfg(target_os = "windows")]
     fn kill_orphan_chrome(profile: &std::path::Path) {
         let profile_str = profile.to_string_lossy().replace('/', "\\");
+        let wql_pattern = profile_str.replace('\\', "\\\\");
         let output = std::process::Command::new("wmic")
-            .args(["process", "where", &format!("commandline like '%{profile_str}%' and name='chrome.exe'"), "get", "processid"])
+            .args([
+                "process",
+                "where",
+                &format!(
+                    "commandline like '%{wql_pattern}%' and name='chrome.exe'"
+                ),
+                "get",
+                "processid",
+            ])
             .output();
         if let Ok(out) = output {
             let text = String::from_utf8_lossy(&out.stdout);
