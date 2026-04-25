@@ -390,6 +390,8 @@ pub enum StreamEvent {
         tool_name: String,
         call_id: String,
         output: String,
+        /// Richer output for the UI; `None` means fall back to `output`.
+        display_output: Option<String>,
         success: bool,
     },
     AskQuestion {
@@ -416,6 +418,13 @@ pub enum StreamEvent {
         context_window: Option<u32>,
     },
     Error(String),
+
+    /// Emitted when context token usage exceeds a safety threshold.
+    ContextLimitWarning {
+        used_tokens: u32,
+        limit_tokens: u32,
+        message: String,
+    },
 
     // ── Sub-agent streaming events ──────────────────────────────────
 

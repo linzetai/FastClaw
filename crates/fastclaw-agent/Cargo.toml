@@ -9,6 +9,7 @@ browser = ["dep:headless_chrome"]
 
 [dependencies]
 fastclaw-core = { path = "../fastclaw-core" }
+fastclaw-context = { path = "../fastclaw-context" }
 fastclaw-evolution = { path = "../fastclaw-evolution" }
 fastclaw-session = { path = "../fastclaw-session" }
 fastclaw-self-iter = { path = "../fastclaw-self-iter" }
