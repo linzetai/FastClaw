@@ -17,7 +17,7 @@ const BUILTIN_ENGINES = [
   { id: "360", label: "360搜索 (360 Search)" },
 ] as const;
 
-export function ChannelTab() {
+export function WebSearchTab() {
   const [backend, setBackend] = useState<WebSearchBackend>("");
   const [tavilyKey, setTavilyKey] = useState("");
   const [searxngUrl, setSearxngUrl] = useState("");

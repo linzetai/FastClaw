@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Settings2, Box, Wrench, Server, Info, Search, Shield, Plug, X } from "lucide-react";
 import { GeneralTab } from "./GeneralTab";
 import { ModelTab } from "./ModelTab";
-import { ChannelTab } from "./ChannelTab";
+import { WebSearchTab } from "./WebSearchTab";
 import { SkillsTab } from "./SkillsTab";
 import { McpTab } from "./McpTab";
 import { SecurityTab } from "./SecurityTab";
@@ -85,7 +85,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           <div className="flex-1 overflow-y-auto px-6 py-5">
             {tab === "general" && <GeneralTab />}
             {tab === "models" && <ModelTab />}
-            {tab === "web-search" && <ChannelTab />}
+            {tab === "web-search" && <WebSearchTab />}
             {tab === "skills" && <SkillsTab />}
             {tab === "mcp" && <McpTab />}
             {tab === "security" && <SecurityTab />}

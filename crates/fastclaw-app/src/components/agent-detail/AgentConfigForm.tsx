@@ -39,21 +39,24 @@ export function AgentConfigForm({ section }: { section: ConfigSection }) {
   return (
     <div className="space-y-5 p-4">
       {section === "basic" && (
-        <AgentBasicInfo
-          name={name}
-          onNameChange={setName}
-          models={models}
-          selectedModelValue={selectedModelValue}
-          onModelSelect={(value) => {
-            const parsed = decodeModelOption(value);
-            setSelectedModel(parsed.model);
-            setSelectedProvider(parsed.provider);
-          }}
-          encodeModelOption={encodeModelOption}
-          effectiveOptionValue={effectiveOptionValue}
-          effectiveModel={effectiveModel}
-          effectiveProvider={effectiveProvider}
-        />
+        <>
+          <AgentBasicInfo
+            name={name}
+            onNameChange={setName}
+            models={models}
+            selectedModelValue={selectedModelValue}
+            onModelSelect={(value) => {
+              const parsed = decodeModelOption(value);
+              setSelectedModel(parsed.model);
+              setSelectedProvider(parsed.provider);
+            }}
+            encodeModelOption={encodeModelOption}
+            effectiveOptionValue={effectiveOptionValue}
+            effectiveModel={effectiveModel}
+            effectiveProvider={effectiveProvider}
+          />
+          <ChannelManager agentId={activeAgentId} backendAgent={backendAgent} ready={gatewayReady} />
+        </>
       )}
 
       {section === "identity" && (
@@ -91,8 +94,6 @@ export function AgentConfigForm({ section }: { section: ConfigSection }) {
           uploadingSkill={uploadingSkill}
         />
       )}
-
-      <ChannelManager agentId={activeAgentId} backendAgent={backendAgent} ready={gatewayReady} />
 
       <div className="flex items-center gap-3 pt-2">
         <button
