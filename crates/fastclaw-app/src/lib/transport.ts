@@ -757,6 +757,54 @@ export async function notificationClearRead(): Promise<{ ok: boolean; cleared: n
   throw new Error("notification IPC only available in Tauri mode");
 }
 
+// ─── Migration ───
+
+export interface ExportOptions {
+  includeSessions: boolean;
+  includeSkills: boolean;
+  includeAgentWorkspaces: boolean;
+}
+
+export interface ImportOptions {
+  merge: boolean;
+  overwriteConfig: boolean;
+  overwriteAgents: boolean;
+  overwriteSessions: boolean;
+  overwriteSkills: boolean;
+}
+
+export async function exportData(options: ExportOptions): Promise<Uint8Array> {
+  if (isTauri) {
+    // 将选项转换为 IPC 命令参数
+    const result = await tauriInvoke<number[]>("export_data", {
+      options: {
+        includeSessions: options.includeSessions,
+        includeSkills: options.includeSkills,
+        includeAgentWorkspaces: options.includeAgentWorkspaces,
+      }
+    });
+    // 将数字数组转换回 Uint8Array
+    return new Uint8Array(result);
+  }
+  throw new Error("migration IPC only available in Tauri mode");
+}
+
+export async function importData(data: Uint8Array, options: ImportOptions): Promise<void> {
+  if (isTauri) {
+    await tauriInvoke("import_data", {
+      data: Array.from(data), // 转换为数字数组以进行 JSON 序列化
+      options: {
+        merge: options.merge,
+        overwriteConfig: options.overwriteConfig,
+        overwriteAgents: options.overwriteAgents,
+        overwriteSessions: options.overwriteSessions,
+        overwriteSkills: options.overwriteSkills,
+      }
+    });
+  }
+  throw new Error("migration IPC only available in Tauri mode");
+}
+
 // ─── WebSocket passthrough (browser mode only) ───
 
 export function connectWs(url: string, token?: string): Promise<void> {

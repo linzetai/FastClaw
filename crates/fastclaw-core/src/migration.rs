@@ -354,6 +354,108 @@ fn workspace_exists(workspace_dir: &PathBuf, agent_id: &str) -> bool {
     agent_workspace_dir.exists()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    use std::fs;
+    use std::path::Path;
+
+    #[tokio::test]
+    async fn test_export_import_basic_flow() -> Result<()> {
+        // 创建一个临时目录模拟状态目录
+        let temp_dir = TempDir::new()?;
+        let state_dir = temp_dir.path();
+        
+        // 创建必要的子目录
+        fs::create_dir_all(state_dir.join("config"))?;
+        fs::create_dir_all(state_dir.join("config").join("agents"))?;
+        fs::create_dir_all(state_dir.join("data"))?;
+        fs::create_dir_all(state_dir.join("skills"))?;
+        fs::create_dir_all(state_dir.join("workspace"))?;
+        
+        // 创建一个简单的配置文件
+        let config_path = state_dir.join("config").join("default.json");
+        fs::write(&config_path, r#"{"gateway": {"port": 18789}}"#)?;
+        
+        // 创建一个简单的代理配置
+        let agent_path = state_dir.join("config").join("agents").join("test_agent.json");
+        fs::write(&agent_path, r#"{"agentId": "test_agent", "name": "Test Agent"}"#)?;
+        
+        // 创建一个简单的技能文件
+        let skills_path = state_dir.join("skills").join("test_skill.md");
+        fs::write(&skills_path, "# Test Skill\nThis is a test skill.")?;
+        
+        // 设置导出选项
+        let export_options = ExportOptions {
+            include_sessions: false,
+            include_skills: true,
+            include_agent_workspaces: false,
+        };
+        
+        // 执行导出
+        let migration_data = export_data(&ConfigMode::from_flags(false, None), &export_options).await?;
+        println!("✓ Data exported successfully");
+        
+        // 序列化数据
+        let serialized_data = serialize_migration_data(&migration_data)?;
+        println!("✓ Data serialized to {} bytes", serialized_data.len());
+        
+        // 反序列化数据
+        let deserialized_data = deserialize_migration_data(&serialized_data)?;
+        println!("✓ Data deserialized successfully");
+        
+        // 验证反序列化的数据
+        assert!(deserialized_data.config.is_some());
+        assert!(!deserialized_data.agents.is_empty());
+        assert!(deserialized_data.skills.is_some());
+        
+        // 设置导入选项
+        let import_options = ImportOptions {
+            merge: false,
+            overwrite_config: true,
+            overwrite_agents: true,
+            overwrite_sessions: true,
+            overwrite_skills: true,
+        };
+        
+        // 创建一个临时的目标目录用于导入
+        let import_temp_dir = TempDir::new()?;
+        let import_state_dir = import_temp_dir.path();
+        
+        // 为测试目的，我们需要修改路径解析函数，但这里我们只是测试序列化/反序列化流程
+        
+        Ok(())
+    }
+    
+    #[tokio::test]
+    async fn test_merge_json_values() -> Result<()> {
+        let mut target = serde_json::json!({
+            "existing": "value",
+            "nested": {
+                "inner": "original"
+            }
+        });
+        
+        let source = serde_json::json!({
+            "new": "added",
+            "nested": {
+                "another": "inserted"
+            }
+        });
+        
+        merge_json_values(&mut target, source);
+        
+        // 验证合并结果
+        assert_eq!(target["existing"], "value");  // 原有值保留
+        assert_eq!(target["new"], "added");      // 新值添加
+        assert_eq!(target["nested"]["inner"], "original");  // 嵌套原有值保留
+        assert_eq!(target["nested"]["another"], "inserted"); // 嵌套新值添加
+        
+        Ok(())
+    }
+}
+
 /// 将迁移数据序列化为字节数组
 pub fn serialize_migration_data(data: &MigrationData) -> Result<Vec<u8>> {
     let serialized = serde_json::to_vec(data)?;

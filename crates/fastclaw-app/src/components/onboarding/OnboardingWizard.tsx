@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { ChevronRight, ChevronDown, Bot, MessageSquare, Clock, Search, Wrench, Settings, Sparkles, Eye, EyeOff, Zap, CheckCircle, XCircle, ArrowRight } from "lucide-react";
+import { ChevronRight, ChevronDown, Bot, MessageSquare, Clock, Search, Wrench, Settings, Sparkles, Eye, EyeOff, Zap, CheckCircle, XCircle, ArrowRight, Upload } from "lucide-react";
 import { ClawIcon } from "../layout/ClawIcon";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
+import { ImportChoiceStep } from "./ImportChoiceStep";
 
 type Step = "welcome" | "model" | "features" | "done";
 
@@ -10,11 +11,14 @@ interface OnboardingWizardProps {
   onComplete: () => void;
 }
 
+type ImportChoice = "new" | "import";
+
 export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
-  const [step, setStep] = useState<Step>("welcome");
+  const [step, setStep] = useState<Step | "import_choice">("welcome");
+  const [importChoice, setImportChoice] = useState<ImportChoice | null>(null);
   const [fadeClass, setFadeClass] = useState("ob-fade-in");
 
-  const goTo = useCallback((next: Step) => {
+  const goTo = useCallback((next: Step | "import_choice") => {
     setFadeClass("ob-fade-out");
     setTimeout(() => {
       setStep(next);
@@ -22,17 +26,66 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     }, 250);
   }, []);
 
+  const handleImportChoice = (choice: ImportChoice) => {
+    setImportChoice(choice);
+    if (choice === "import") {
+      // 触发导入文件对话框
+      handleImportClick();
+    } else {
+      goTo("model");
+    }
+  };
+
+  const handleImportClick = async () => {
+    try {
+      // 调用 Tauri 命令来打开文件选择对话框并导入数据
+      if (transport.isTauri) {
+        // 使用 Tauri dialog 打开文件选择器
+        const selected = await window.__TAURI__.dialog.open({
+          filters: [{
+            name: "FastClaw Migration Files",
+            extensions: ["json", "fcdata"]
+          }],
+          multiple: false
+        });
+        
+        if (selected) {
+          // 读取文件内容
+          const fileContents = await window.__TAURI__.fs.readBinaryFile(selected);
+          
+          // 使用导入功能
+          await transport.importData(new Uint8Array(fileContents), {
+            merge: false,
+            overwriteConfig: true,
+            overwriteAgents: true,
+            overwriteSessions: true,
+            overwriteSkills: true
+          });
+          
+          // 导入成功后，跳转到下一个步骤
+          goTo("model");
+        }
+      } else {
+        alert("迁移功能仅在桌面应用中可用");
+      }
+    } catch (error) {
+      console.error("导入失败:", error);
+      alert("导入失败: " + (error as Error).message);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center" style={{ background: "var(--bg-primary)" }}>
       <div className={`w-full max-w-[560px] px-6 ${fadeClass}`}>
-        {step === "welcome" && <WelcomeStep onNext={() => goTo("model")} />}
+        {step === "welcome" && <WelcomeStep onNext={() => handleImportChoice("new")} onImport={() => handleImportChoice("import")} />}
+        {step === "import_choice" && <ImportChoiceStep onSelect={handleImportChoice} />}
         {step === "model" && <ModelStep onNext={() => goTo("features")} />}
         {step === "features" && <FeaturesStep onNext={() => goTo("done")} />}
         {step === "done" && <DoneStep onComplete={onComplete} />}
       </div>
 
       <div className="fixed bottom-8 left-1/2 flex -translate-x-1/2 items-center gap-2">
-        {(["welcome", "model", "features", "done"] as Step[]).map((s) => (
+        {step !== "import_choice" && (["welcome", "model", "features", "done"] as Step[]).map((s) => (
           <div
             key={s}
             className={`ob-dot ${step === s ? "ob-dot-active" : ""}`}
@@ -48,7 +101,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
 
 /* ━━━ Step 1: Welcome ━━━ */
 
-function WelcomeStep({ onNext }: { onNext: () => void }) {
+function WelcomeStep({ onNext, onImport }: { onNext: () => void, onImport: () => void }) {
   return (
     <div className="flex flex-col items-center text-center">
       <div style={{ animation: "scale-in 0.5s ease-out" }}>
@@ -72,19 +125,33 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
         className="mt-6 text-[13px]"
         style={{ color: "var(--fill-tertiary)" }}
       >
-        开始之前，需要配置一个语言模型
+        如何开始？
       </p>
-      <button
-        onClick={onNext}
-        className="mt-8 flex cursor-pointer items-center gap-2 rounded-full px-8 py-3 text-[14px] font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
-        style={{
-          background: "var(--fill-primary)",
-          color: "var(--fill-inverse)",
-        }}
-      >
-        开始配置
-        <ArrowRight size={16} strokeWidth={2} />
-      </button>
+      <div className="mt-4 flex flex-col gap-3 w-full max-w-[280px]">
+        <button
+          onClick={onNext}
+          className="flex cursor-pointer items-center justify-center gap-2 rounded-full px-6 py-3 text-[14px] font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+          style={{
+            background: "var(--fill-primary)",
+            color: "var(--fill-inverse)",
+          }}
+        >
+          新手配置
+          <Settings size={16} strokeWidth={2} />
+        </button>
+        <button
+          onClick={onImport}
+          className="flex cursor-pointer items-center justify-center gap-2 rounded-full px-6 py-3 text-[14px] font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+          style={{
+            background: "var(--bg-elevated)",
+            color: "var(--fill-primary)",
+            border: "1px solid var(--separator-opaque)"
+          }}
+        >
+          导入现有配置
+          <ArrowRight size={16} strokeWidth={2} />
+        </button>
+      </div>
     </div>
   );
 }

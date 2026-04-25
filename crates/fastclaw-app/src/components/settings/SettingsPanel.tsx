@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Settings2, Box, Wrench, Server, Info, Search, Shield, Plug, X } from "lucide-react";
+import { Settings2, Box, Wrench, Server, Info, Search, Shield, Plug, X, RotateCcw } from "lucide-react";
 import { GeneralTab } from "./GeneralTab";
 import { ModelTab } from "./ModelTab";
 import { WebSearchTab } from "./WebSearchTab";
@@ -8,13 +8,14 @@ import { McpTab } from "./McpTab";
 import { SecurityTab } from "./SecurityTab";
 import { GatewayTab } from "./GatewayTab";
 import { AboutTab } from "./AboutTab";
+import { MigrationTab } from "./MigrationTab";
 
 interface SettingsPanelProps {
   open: boolean;
   onClose: () => void;
 }
 
-type SettingsTab = "general" | "models" | "web-search" | "skills" | "mcp" | "security" | "gateway" | "about";
+type SettingsTab = "general" | "models" | "web-search" | "skills" | "mcp" | "security" | "gateway" | "about" | "migration";
 
 const ICON_PROPS = { size: 16, strokeWidth: 1.5 } as const;
 const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
@@ -25,6 +26,7 @@ const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
   { id: "mcp", label: "MCP", icon: <Plug {...ICON_PROPS} /> },
   { id: "security", label: "安全", icon: <Shield {...ICON_PROPS} /> },
   { id: "gateway", label: "网关", icon: <Server {...ICON_PROPS} /> },
+  { id: "migration", label: "迁移", icon: <RotateCcw {...ICON_PROPS} /> },
   { id: "about", label: "关于", icon: <Info {...ICON_PROPS} /> },
 ];
 
@@ -90,6 +92,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             {tab === "mcp" && <McpTab />}
             {tab === "security" && <SecurityTab />}
             {tab === "gateway" && <GatewayTab />}
+            {tab === "migration" && <MigrationTab />}
             {tab === "about" && <AboutTab />}
           </div>
         </div>
