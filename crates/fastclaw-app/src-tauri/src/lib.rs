@@ -293,6 +293,8 @@ pub fn run() {
             commands::notification::notification_unread_count,
             commands::notification::notification_delete,
             commands::notification::notification_clear_read,
+            commands::migration::import_data,
+            commands::migration::export_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running FastClaw app");

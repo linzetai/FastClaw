@@ -152,6 +152,15 @@ fn default_true() -> bool {
     true
 }
 
+/// Three-level tool permission: allow (run freely), ask (needs user confirmation), deny (blocked).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolPermission {
+    Allow,
+    Ask,
+    Deny,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BehaviorConfig {
@@ -159,8 +168,13 @@ pub struct BehaviorConfig {
     pub max_tool_calls_per_turn: u32,
     #[serde(default = "default_max_errors")]
     pub max_consecutive_errors: u32,
+    /// Legacy field — tools matching these patterns require user confirmation.
+    /// Prefer `tools_ask` for new configs; both are merged at runtime.
     #[serde(default)]
     pub require_confirmation_for: Vec<String>,
+    /// Tools matching these patterns require user confirmation before each execution.
+    #[serde(default)]
+    pub tools_ask: Vec<String>,
     #[serde(default)]
     pub tools_allow: Vec<String>,
     #[serde(default)]
@@ -249,6 +263,7 @@ impl Default for BehaviorConfig {
             max_tool_calls_per_turn: default_max_tool_calls(),
             max_consecutive_errors: default_max_errors(),
             require_confirmation_for: Vec::new(),
+            tools_ask: Vec::new(),
             tools_allow: Vec::new(),
             tools_deny: Vec::new(),
             file_access: FileAccessMode::default(),
@@ -275,20 +290,37 @@ pub fn tool_pattern_matches(pattern: &str, tool_name: &str) -> bool {
 }
 
 impl BehaviorConfig {
-    /// Check whether a tool is allowed by this agent's allow/deny policy.
-    /// Supports glob patterns (`mcp_*`) and negation (`!shell_exec`).
-    pub fn is_tool_allowed(&self, tool_name: &str) -> bool {
+    /// Resolve the effective permission for a tool: deny > ask > allow.
+    ///
+    /// Priority: `tools_deny` (highest) > `tools_ask` + `require_confirmation_for` > `tools_allow` (lowest).
+    /// When `tools_allow` is non-empty, unlisted tools are implicitly denied.
+    pub fn tool_permission(&self, tool_name: &str) -> ToolPermission {
         if !self.tools_deny.is_empty()
             && self.tools_deny.iter().any(|d| tool_pattern_matches(d, tool_name))
         {
-            return false;
+            return ToolPermission::Deny;
         }
         if !self.tools_allow.is_empty()
             && !self.tools_allow.iter().any(|a| tool_pattern_matches(a, tool_name))
         {
-            return false;
+            return ToolPermission::Deny;
         }
-        true
+        let ask_patterns = self.tools_ask.iter().chain(self.require_confirmation_for.iter());
+        if ask_patterns.clone().any(|p| tool_pattern_matches(p, tool_name)) {
+            return ToolPermission::Ask;
+        }
+        ToolPermission::Allow
+    }
+
+    /// Check whether a tool is allowed (not denied) by this agent's policy.
+    /// Returns `true` for both `Allow` and `Ask` — use `tool_permission()` for finer control.
+    pub fn is_tool_allowed(&self, tool_name: &str) -> bool {
+        self.tool_permission(tool_name) != ToolPermission::Deny
+    }
+
+    /// Check if a tool requires user confirmation before execution.
+    pub fn requires_confirmation(&self, tool_name: &str) -> bool {
+        self.tool_permission(tool_name) == ToolPermission::Ask
     }
 }
 
@@ -404,5 +436,42 @@ mod tests {
         assert!(!b.is_tool_allowed("mcp_dangerous_tool"));
         assert!(b.is_tool_allowed("web_search"));
         assert!(!b.is_tool_allowed("shell_exec"));
+    }
+
+    #[test]
+    fn tools_ask_requires_confirmation() {
+        let b = BehaviorConfig {
+            tools_ask: vec!["shell_exec".into(), "mcp_dangerous_*".into()],
+            ..Default::default()
+        };
+        assert_eq!(b.tool_permission("shell_exec"), ToolPermission::Ask);
+        assert_eq!(b.tool_permission("mcp_dangerous_rm"), ToolPermission::Ask);
+        assert_eq!(b.tool_permission("http_fetch"), ToolPermission::Allow);
+        assert!(b.is_tool_allowed("shell_exec"));
+        assert!(b.requires_confirmation("shell_exec"));
+        assert!(!b.requires_confirmation("http_fetch"));
+    }
+
+    #[test]
+    fn deny_overrides_ask() {
+        let b = BehaviorConfig {
+            tools_ask: vec!["shell_exec".into()],
+            tools_deny: vec!["shell_exec".into()],
+            ..Default::default()
+        };
+        assert_eq!(b.tool_permission("shell_exec"), ToolPermission::Deny);
+        assert!(!b.is_tool_allowed("shell_exec"));
+    }
+
+    #[test]
+    fn legacy_require_confirmation_for_merges_with_tools_ask() {
+        let b = BehaviorConfig {
+            require_confirmation_for: vec!["shell_exec".into()],
+            tools_ask: vec!["http_fetch".into()],
+            ..Default::default()
+        };
+        assert!(b.requires_confirmation("shell_exec"));
+        assert!(b.requires_confirmation("http_fetch"));
+        assert!(!b.requires_confirmation("web_search"));
     }
 }

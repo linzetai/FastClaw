@@ -32,10 +32,16 @@ pub struct FunctionDefinition {
 }
 
 /// Result of a tool execution.
+///
+/// `output` is what the LLM sees (may be summarized/truncated by the runtime).
+/// `display_output` is an optional richer representation for the UI (images, tables, full data).
+/// When `display_output` is `None`, the UI falls back to `output`.
 #[derive(Debug, Clone)]
 pub struct ToolResult {
     pub success: bool,
     pub output: String,
+    /// Richer output for the UI. Falls back to `output` when `None`.
+    pub display_output: Option<String>,
     /// When `true`, the runtime should pause and ask the user for confirmation
     /// before retrying this tool call. Used by the dangerous-ops-policy `confirm` mode.
     pub needs_confirmation: bool,
@@ -46,6 +52,7 @@ impl ToolResult {
         Self {
             success: true,
             output: output.into(),
+            display_output: None,
             needs_confirmation: false,
         }
     }
@@ -54,8 +61,24 @@ impl ToolResult {
         Self {
             success: false,
             output: error.into(),
+            display_output: None,
             needs_confirmation: false,
         }
+    }
+
+    /// Build a result with separate LLM and UI outputs.
+    pub fn ok_split(llm_output: impl Into<String>, display: impl Into<String>) -> Self {
+        Self {
+            success: true,
+            output: llm_output.into(),
+            display_output: Some(display.into()),
+            needs_confirmation: false,
+        }
+    }
+
+    /// Convenience: the content the UI should display (prefers `display_output`).
+    pub fn ui_output(&self) -> &str {
+        self.display_output.as_deref().unwrap_or(&self.output)
     }
 
     /// A dangerous operation was detected and requires user confirmation before proceeding.
@@ -66,6 +89,7 @@ impl ToolResult {
         Self {
             success: false,
             output: format!("⚠️ Dangerous operation — awaiting user confirmation.\n{desc}"),
+            display_output: None,
             needs_confirmation: true,
         }
     }

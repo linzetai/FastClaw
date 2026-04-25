@@ -18,8 +18,8 @@
   --bg-base: #ffffff;
 
   --fill-primary: #1d1d1f;
-  --fill-secondary: #6e6e73;
-  --fill-tertiary: #aeaeb2;
+  --fill-secondary: #374151;
+  --fill-tertiary: #4B5563;
   --fill-quaternary: #c7c7cc;
   --fill-inverse: #ffffff;
 
@@ -27,6 +27,8 @@
   --tint-bg: rgba(0, 0, 0, 0.04);
   --tint-subtle: rgba(0, 0, 0, 0.02);
   --selection-bg: rgba(0, 122, 255, 0.25);
+
+  --bg-selected: #f0f0f2;
 
   --separator: rgba(60, 60, 67, 0.12);
   --separator-opaque: #c6c6c8;
@@ -72,6 +74,8 @@
   --fill-tertiary: #636366;
   --fill-quaternary: #48484a;
   --fill-inverse: #000000;
+
+  --bg-selected: #1c1c1e;
 
   --tint: #e5e5ea;
   --tint-bg: rgba(255, 255, 255, 0.06);
