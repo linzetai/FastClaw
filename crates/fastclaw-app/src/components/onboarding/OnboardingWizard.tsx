@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ChevronRight, ChevronDown, ChevronLeft, Bot, MessageSquare, Clock, Search, Wrench, Settings, Sparkles, Eye, EyeOff, Zap, CheckCircle, XCircle, ArrowRight, Upload } from "lucide-react";
+import { ChevronRight, ChevronDown, ChevronLeft, Bot, MessageSquare, Clock, Search, Wrench, Settings, Sparkles, Eye, EyeOff, Zap, CheckCircle, XCircle, ArrowRight, Upload, Cpu } from "lucide-react";
 import { ClawIcon } from "../layout/ClawIcon";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
@@ -202,6 +202,42 @@ function WelcomeStep({ onNext, onImport }: { onNext: () => void, onImport: () =>
 
 /* ━━━ Step 2: Model Setup ━━━ */
 
+// 预设模型配置
+const PRESET_MODELS = [
+  {
+    id: "qwen-coding-plan",
+    name: "通义千问 - 编程规划",
+    provider: "openai_compatible",
+    model: "qwen-max",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    description: "适合编程任务的模型配置"
+  },
+  {
+    id: "qwen-api",
+    name: "通义千问 - API",
+    provider: "openai_compatible",
+    model: "qwen-plus",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    description: "通用API模型配置"
+  },
+  {
+    id: "gpt-4o",
+    name: "GPT-4o",
+    provider: "openai_compatible",
+    model: "gpt-4o",
+    baseUrl: "https://api.openai.com/v1",
+    description: "OpenAI最新旗舰模型"
+  },
+  {
+    id: "claude-sonnet",
+    name: "Claude Sonnet 4",
+    provider: "openai_compatible",
+    model: "claude-sonnet-4-20250514",
+    baseUrl: "https://api.anthropic.com/v1",
+    description: "Anthropic高性能模型"
+  }
+];
+
 function ModelStep({ onNext, onPrev, stepStates, updateStepState }: { 
   onNext: () => void, 
   onPrev: () => void,
@@ -220,6 +256,7 @@ function ModelStep({ onNext, onPrev, stepStates, updateStepState }: {
   const [testMsg, setTestMsg] = useState(modelState.testMsg);
   const [saving, setSaving] = useState(modelState.saving);
   const [saved, setSaved] = useState(modelState.saved);
+  const [activeTab, setActiveTab] = useState<"preset" | "custom">("preset");
 
   // 当状态变化时，更新父组件的状态
   useEffect(() => {
@@ -302,6 +339,13 @@ function ModelStep({ onNext, onPrev, stepStates, updateStepState }: {
     setSaving(false);
   };
 
+  const handlePresetSelect = (preset: typeof PRESET_MODELS[number]) => {
+    setKey(preset.id);
+    setProvider(preset.provider);
+    setModel(preset.model);
+    setBaseUrl(preset.baseUrl);
+  };
+
   const inputCls = "w-full rounded-[8px] px-3 py-2.5 text-[13px] outline-none transition-all focus:ring-2 focus:ring-[var(--tint)]";
   const inputStyle: React.CSSProperties = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
   const labelCls = "mb-1.5 block text-[11px] font-semibold tracking-wide uppercase";
@@ -354,96 +398,164 @@ function ModelStep({ onNext, onPrev, stepStates, updateStepState }: {
         </p>
       </div>
 
+      {/* Tab 切 */}
+      <div className="flex mb-4 rounded-[var(--radius-sm)] p-1" style={{ background: "var(--bg-base)" }}>
+        <button
+          className={`flex-1 rounded-[var(--radius-xs)] py-2 text-[13px] font-medium transition-colors ${
+            activeTab === "preset" ? "" : "hover:bg-[var(--bg-hover)]"
+          }`}
+          style={{
+            background: activeTab === "preset" ? "var(--fill-primary)" : "transparent",
+            color: activeTab === "preset" ? "var(--fill-inverse)" : "var(--fill-secondary)"
+          }}
+          onClick={() => setActiveTab("preset")}
+        >
+          预设模型
+        </button>
+        <button
+          className={`flex-1 rounded-[var(--radius-xs)] py-2 text-[13px] font-medium transition-colors ${
+            activeTab === "custom" ? "" : "hover:bg-[var(--bg-hover)]"
+          }`}
+          style={{
+            background: activeTab === "custom" ? "var(--fill-primary)" : "transparent",
+            color: activeTab === "custom" ? "var(--fill-inverse)" : "var(--fill-secondary)"
+          }}
+          onClick={() => setActiveTab("custom")}
+        >
+          自定义模型
+        </button>
+      </div>
+
       <div
         className="overflow-hidden rounded-[var(--radius-md)]"
         style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)", boxShadow: "var(--shadow-md)" }}
       >
-        <div className="space-y-3.5 p-5">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label htmlFor="ob-key" className={labelCls} style={labelStyle}>名称</label>
-              <input id="ob-key" value={key} onChange={(e) => setKey(e.target.value)} placeholder="如 dashscope" className={inputCls} style={inputStyle} />
+        {activeTab === "preset" && (
+          <div className="p-5">
+            <p className="text-[13px] mb-4" style={{ color: "var(--fill-secondary)" }}>
+              选择一个预设模型配置快速开始
+            </p>
+            <div className="grid grid-cols-1 gap-3">
+              {PRESET_MODELS.map((preset) => (
+                <div
+                  key={preset.id}
+                  className="rounded-[var(--radius-sm)] p-4 cursor-pointer transition-all hover:scale-[1.02]"
+                  style={{ 
+                    background: key === preset.id ? "var(--bg-selected)" : "var(--bg-base)",
+                    border: `1px solid ${key === preset.id ? "var(--fill-primary)" : "var(--separator-opaque)"}`,
+                  }}
+                  onClick={() => handlePresetSelect(preset)}
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-medium text-[14px]" style={{ color: "var(--fill-primary)" }}>
+                        {preset.name}
+                      </h3>
+                      <p className="text-[12px] mt-1" style={{ color: "var(--fill-tertiary)" }}>
+                        {preset.description}
+                      </p>
+                    </div>
+                    <div className="text-[10px] px-2 py-1 rounded" style={{ background: "var(--bg-elevated)", color: "var(--fill-tertiary)" }}>
+                      {preset.provider}
+                    </div>
+                  </div>
+                  <div className="mt-2 text-[11px] font-mono" style={{ color: "var(--fill-quaternary)" }}>
+                    {preset.model} • {preset.baseUrl}
+                  </div>
+                </div>
+              ))}
             </div>
+          </div>
+        )}
+
+        {activeTab === "custom" && (
+          <div className="space-y-3.5 p-5">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="ob-key" className={labelCls} style={labelStyle}>名称</label>
+                <input id="ob-key" value={key} onChange={(e) => setKey(e.target.value)} placeholder="如 dashscope" className={inputCls} style={inputStyle} />
+              </div>
+              <div>
+                <label htmlFor="ob-provider" className={labelCls} style={labelStyle}>Provider</label>
+                <div className="relative">
+                  <select id="ob-provider" value={provider} onChange={(e) => setProvider(e.target.value)} className={`${inputCls} cursor-pointer pr-8`} style={{ ...inputStyle, appearance: "none" }}>
+                    <option value="openai_compatible">OpenAI Compatible</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                  </select>
+                  <ChevronDown size={10} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
+                </div>
+              </div>
+            </div>
+
             <div>
-              <label htmlFor="ob-provider" className={labelCls} style={labelStyle}>Provider</label>
+              <label htmlFor="ob-model" className={labelCls} style={labelStyle}>模型名称</label>
+              <input id="ob-model" value={model} onChange={(e) => setModel(e.target.value)} placeholder="如 qwen-plus / gpt-4o / claude-sonnet-4-20250514" className={inputCls} style={inputStyle} />
+            </div>
+
+            <div>
+              <label htmlFor="ob-baseurl" className={labelCls} style={labelStyle}>Base URL</label>
+              <input id="ob-baseurl" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="如 https://dashscope.aliyuncs.com/compatible-mode/v1" className={inputCls} style={inputStyle} />
+            </div>
+
+            <div>
+              <label htmlFor="ob-apikey" className={labelCls} style={labelStyle}>API Key</label>
               <div className="relative">
-                <select id="ob-provider" value={provider} onChange={(e) => setProvider(e.target.value)} className={`${inputCls} cursor-pointer pr-8`} style={{ ...inputStyle, appearance: "none" }}>
-                  <option value="openai_compatible">OpenAI Compatible</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
-                </select>
-                <ChevronDown size={10} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
+                <input
+                  id="ob-apikey"
+                  type={showApiKey ? "text" : "password"}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="sk-..."
+                  className={`${inputCls} pr-20`}
+                  style={inputStyle}
+                />
+                <div className="absolute top-1/2 right-2 flex -translate-y-1/2 gap-1">
+                  <button
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-[var(--bg-hover)]"
+                    style={{ color: "var(--fill-tertiary)" }}
+                  >
+                    {showApiKey ? <EyeOff size={13} /> : <Eye size={13} />}
+                  </button>
+                  <button
+                    onClick={handleTest}
+                    disabled={testStatus === "testing"}
+                    className="flex h-7 cursor-pointer items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
+                    style={{ color: testStatus === "success" ? "var(--green)" : testStatus === "error" ? "var(--red)" : "var(--fill-secondary)" }}
+                  >
+                    {testStatus === "testing" ? (
+                      <Zap size={11} className="animate-pulse" />
+                    ) : testStatus === "success" ? (
+                      <CheckCircle size={11} />
+                    ) : testStatus === "error" ? (
+                      <XCircle size={11} />
+                    ) : (
+                      <Zap size={11} />
+                    )}
+                    测试
+                  </button>
+                </div>
               </div>
+              {testMsg && (
+                <p className="mt-1.5 text-[11px]" style={{ color: testStatus === "success" ? "var(--green)" : "var(--red)" }}>
+                  {testMsg}
+                </p>
+              )}
             </div>
-          </div>
 
-          <div>
-            <label htmlFor="ob-model" className={labelCls} style={labelStyle}>模型名称</label>
-            <input id="ob-model" value={model} onChange={(e) => setModel(e.target.value)} placeholder="如 qwen-plus / gpt-4o / claude-sonnet-4-20250514" className={inputCls} style={inputStyle} />
-          </div>
-
-          <div>
-            <label htmlFor="ob-baseurl" className={labelCls} style={labelStyle}>Base URL</label>
-            <input id="ob-baseurl" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="如 https://dashscope.aliyuncs.com/compatible-mode/v1" className={inputCls} style={inputStyle} />
-          </div>
-
-          <div>
-            <label htmlFor="ob-apikey" className={labelCls} style={labelStyle}>API Key</label>
-            <div className="relative">
-              <input
-                id="ob-apikey"
-                type={showApiKey ? "text" : "password"}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
-                className={`${inputCls} pr-20`}
-                style={inputStyle}
-              />
-              <div className="absolute top-1/2 right-2 flex -translate-y-1/2 gap-1">
-                <button
-                  onClick={() => setShowApiKey(!showApiKey)}
-                  className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-[var(--bg-hover)]"
-                  style={{ color: "var(--fill-tertiary)" }}
-                >
-                  {showApiKey ? <EyeOff size={13} /> : <Eye size={13} />}
-                </button>
-                <button
-                  onClick={handleTest}
-                  disabled={testStatus === "testing"}
-                  className="flex h-7 cursor-pointer items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
-                  style={{ color: testStatus === "success" ? "var(--green)" : testStatus === "error" ? "var(--red)" : "var(--fill-secondary)" }}
-                >
-                  {testStatus === "testing" ? (
-                    <Zap size={11} className="animate-pulse" />
-                  ) : testStatus === "success" ? (
-                    <CheckCircle size={11} />
-                  ) : testStatus === "error" ? (
-                    <XCircle size={11} />
-                  ) : (
-                    <Zap size={11} />
-                  )}
-                  测试
-                </button>
+            {showAdvanced && (
+              <div className="rounded-[8px] p-3" style={{ background: "var(--bg-base)" }}>
+                <p className="mb-2 text-[11px] font-medium" style={{ color: "var(--fill-tertiary)" }}>
+                  高级选项（可保持默认）
+                </p>
+                <p className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
+                  Temperature: 0 · 并发: 10 · 超时: 120s
+                </p>
               </div>
-            </div>
-            {testMsg && (
-              <p className="mt-1.5 text-[11px]" style={{ color: testStatus === "success" ? "var(--green)" : "var(--red)" }}>
-                {testMsg}
-              </p>
             )}
           </div>
-
-          {showAdvanced && (
-            <div className="rounded-[8px] p-3" style={{ background: "var(--bg-base)" }}>
-              <p className="mb-2 text-[11px] font-medium" style={{ color: "var(--fill-tertiary)" }}>
-                高级选项（可保持默认）
-              </p>
-              <p className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-                Temperature: 0 · 并发: 10 · 超时: 120s
-              </p>
-            </div>
-          )}
-        </div>
+        )}
 
         <div
           className="flex items-center justify-between px-5 py-3"
