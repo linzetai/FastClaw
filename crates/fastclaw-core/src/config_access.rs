@@ -95,10 +95,19 @@ pub fn set_nested_key(
     Err(())
 }
 
-/// Persist a single config key to the user's `~/.fastclaw/config/default.json`.
+/// Persist a single config key to the user's config file.
 pub fn persist_config_key(key: &str, value: &serde_json::Value) -> anyhow::Result<()> {
+    // 获取当前配置模式（根据编译模式自动判断）
+    let mode = crate::config::ConfigMode::from_flags(false, None);
+    
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot resolve home directory"))?;
-    let cfg_path = home.join(".fastclaw/config/default.json");
+    let state_dir = match &mode {
+        crate::config::ConfigMode::Development => home.join(".fastclaw-dev"),
+        crate::config::ConfigMode::Profile(name) => home.join(format!(".fastclaw-{name}")),
+        crate::config::ConfigMode::Production => home.join(".fastclaw"),
+    };
+    
+    let cfg_path = state_dir.join("config/default.json");
     let mut cfg_value: serde_json::Value = if cfg_path.exists() {
         let text = std::fs::read_to_string(&cfg_path)?;
         json5::from_str(&text).unwrap_or_else(|_| json!({}))

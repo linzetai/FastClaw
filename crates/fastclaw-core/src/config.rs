@@ -22,7 +22,14 @@ impl ConfigMode {
         match (dev, profile) {
             (true, _) => Self::Development,
             (_, Some(name)) => Self::Profile(name.to_string()),
-            _ => Self::Production,
+            _ => {
+                // 如果没有明确指定 dev 标志，则根据编译模式决定
+                if cfg!(debug_assertions) {
+                    Self::Development
+                } else {
+                    Self::Production
+                }
+            }
         }
     }
 

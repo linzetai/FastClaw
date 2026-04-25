@@ -241,9 +241,7 @@ impl Default for ShellSandboxConfig {
                 "reboot".into(),
                 "poweroff".into(),
                 "halt".into(),
-                "kill".into(),
-                "killall".into(),
-                "pkill".into(),
+                // kill/killall/pkill removed — allow process management for dev workflows
                 "mount".into(),
                 "umount".into(),
                 "iptables".into(),

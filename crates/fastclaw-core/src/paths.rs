@@ -2,14 +2,21 @@ use std::path::{Path, PathBuf};
 
 use crate::config::PathsConfig;
 
-/// Resolve the FastClaw state directory from config, or fall back to `~/.fastclaw`.
+/// Resolve the FastClaw state directory from config, or fall back to the appropriate directory based on build mode.
 pub fn resolve_state_dir_from(cfg: Option<&PathsConfig>) -> PathBuf {
     if let Some(p) = cfg.and_then(|c| c.state_dir.as_deref()) {
         return PathBuf::from(p);
     }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".fastclaw")
+    
+    // 如果没有在配置中指定状态目录，则根据当前构建模式决定
+    let mode = crate::config::ConfigMode::from_flags(false, None);
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    
+    match mode {
+        crate::config::ConfigMode::Development => home.join(".fastclaw-dev"),
+        crate::config::ConfigMode::Profile(name) => home.join(format!(".fastclaw-{name}")),
+        crate::config::ConfigMode::Production => home.join(".fastclaw"),
+    }
 }
 
 /// Resolve the state dir using defaults only (no config).

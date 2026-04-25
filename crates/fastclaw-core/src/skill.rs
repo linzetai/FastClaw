@@ -254,12 +254,18 @@ pub fn load_skills_from_dirs_with_layer(dirs: &[&Path], layer: SkillLayer) -> Sk
     registry
 }
 
-/// Resolve the global shared skills directory: `~/.fastclaw/skills/`.
+/// Resolve the global shared skills directory based on the current build mode.
 pub fn resolve_global_skills_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".fastclaw")
-        .join("skills")
+    let mode = crate::config::ConfigMode::from_flags(false, None);
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    
+    let state_dir = match mode {
+        crate::config::ConfigMode::Development => home.join(".fastclaw-dev"),
+        crate::config::ConfigMode::Profile(name) => home.join(format!(".fastclaw-{name}")),
+        crate::config::ConfigMode::Production => home.join(".fastclaw"),
+    };
+    
+    state_dir.join("skills")
 }
 
 /// Build a per-agent SkillRegistry by merging layers in priority order.
