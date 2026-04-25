@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { ChevronRight, ChevronDown, Bot, MessageSquare, Clock, Search, Wrench, Settings, Sparkles, Eye, EyeOff, Zap, CheckCircle, XCircle, ArrowRight, Upload } from "lucide-react";
+import { ChevronRight, ChevronDown, ChevronLeft, Bot, MessageSquare, Clock, Search, Wrench, Settings, Sparkles, Eye, EyeOff, Zap, CheckCircle, XCircle, ArrowRight, Upload } from "lucide-react";
 import { ClawIcon } from "../layout/ClawIcon";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
@@ -79,8 +79,8 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
       <div className={`w-full max-w-[560px] px-6 ${fadeClass}`}>
         {step === "welcome" && <WelcomeStep onNext={() => handleImportChoice("new")} onImport={() => handleImportChoice("import")} />}
         {step === "import_choice" && <ImportChoiceStep onSelect={handleImportChoice} />}
-        {step === "model" && <ModelStep onNext={() => goTo("features")} />}
-        {step === "features" && <FeaturesStep onNext={() => goTo("done")} />}
+        {step === "model" && <ModelStep onNext={() => goTo("features")} onPrev={() => goTo("welcome")} />}
+        {step === "features" && <FeaturesStep onNext={() => goTo("done")} onPrev={() => goTo("model")} />}
         {step === "done" && <DoneStep onComplete={onComplete} />}
       </div>
 
@@ -160,7 +160,7 @@ function WelcomeStep({ onNext, onImport }: { onNext: () => void, onImport: () =>
 
 type TestStatus = "idle" | "testing" | "success" | "error";
 
-function ModelStep({ onNext }: { onNext: () => void }) {
+function ModelStep({ onNext, onPrev }: { onNext: () => void, onPrev: () => void }) {
   const [key, setKey] = useState("");
   const [provider, setProvider] = useState("openai_compatible");
   const [model, setModel] = useState("");
@@ -433,7 +433,7 @@ const FEATURES = [
   },
 ];
 
-function FeaturesStep({ onNext }: { onNext: () => void }) {
+function FeaturesStep({ onNext, onPrev }: { onNext: () => void, onPrev: () => void }) {
   return (
     <div>
       <div className="mb-6 text-center">
@@ -468,7 +468,15 @@ function FeaturesStep({ onNext }: { onNext: () => void }) {
         ))}
       </div>
 
-      <div className="mt-6 flex justify-center">
+      <div className="mt-6 flex justify-between">
+        <button
+          onClick={onPrev}
+          className="flex cursor-pointer items-center gap-1 rounded-full px-6 py-2.5 text-[14px] font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+          style={{ background: "var(--bg-elevated)", color: "var(--fill-primary)", border: "1px solid var(--separator-opaque)" }}
+        >
+          <ChevronLeft size={14} strokeWidth={2} />
+          返回
+        </button>
         <button
           onClick={onNext}
           className="flex cursor-pointer items-center gap-2 rounded-full px-8 py-3 text-[14px] font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
@@ -485,10 +493,14 @@ function FeaturesStep({ onNext }: { onNext: () => void }) {
 /* ━━━ Step 4: Done ━━━ */
 
 function DoneStep({ onComplete }: { onComplete: () => void }) {
+  const [delayedComplete, setDelayedComplete] = useState(false);
+
   useEffect(() => {
-    const t = setTimeout(onComplete, 1200);
+    const t = setTimeout(() => {
+      setDelayedComplete(true);
+    }, 1200);
     return () => clearTimeout(t);
-  }, [onComplete]);
+  }, []);
 
   return (
     <div className="flex flex-col items-center text-center">
@@ -504,6 +516,19 @@ function DoneStep({ onComplete }: { onComplete: () => void }) {
       <p className="mt-2 text-[14px]" style={{ color: "var(--fill-secondary)" }}>
         准备好和你的 Agent 开始对话了
       </p>
+      
+      <div className="mt-6 flex gap-3">
+        {delayedComplete && (
+          <button
+            onClick={onComplete}
+            className="flex cursor-pointer items-center gap-2 rounded-full px-8 py-3 text-[14px] font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+            style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
+          >
+            开始使用
+            <ArrowRight size={16} strokeWidth={2} />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
