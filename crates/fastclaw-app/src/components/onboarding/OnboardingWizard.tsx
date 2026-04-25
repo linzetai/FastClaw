@@ -370,14 +370,24 @@ function ModelStep({ onNext, onPrev }: { onNext: () => void, onPrev: () => void 
           className="flex items-center justify-between px-5 py-3"
           style={{ borderTop: "0.5px solid var(--separator)" }}
         >
-          <button
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            className="flex cursor-pointer items-center gap-1 text-[12px] transition-colors hover:opacity-80"
-            style={{ color: "var(--fill-tertiary)" }}
-          >
-            <ChevronRight size={12} className={`transition-transform ${showAdvanced ? "rotate-90" : ""}`} />
-            高级选项
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={onPrev}
+              className="flex cursor-pointer items-center gap-1 text-[12px] transition-colors hover:opacity-80"
+              style={{ color: "var(--fill-tertiary)" }}
+            >
+              <ChevronLeft size={12} />
+              返回
+            </button>
+            <button
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex cursor-pointer items-center gap-1 text-[12px] transition-colors hover:opacity-80"
+              style={{ color: "var(--fill-tertiary)" }}
+            >
+              <ChevronRight size={12} className={`transition-transform ${showAdvanced ? "rotate-90" : ""}`} />
+              高级选项
+            </button>
+          </div>
           <button
             onClick={handleSave}
             disabled={!canSave || saving}
