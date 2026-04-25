@@ -5,6 +5,7 @@ pub mod config;
 pub mod cron;
 mod helpers;
 pub mod mcp;
+pub mod migration;
 pub mod notification;
 pub mod session;
 pub mod skill;
@@ -29,6 +30,7 @@ pub use session::{
     set_session_work_dir, update_session_title,
 };
 pub use skill::{list_skills, refresh_skills, upload_skill};
+pub use migration::{export_data, import_data};
 
 #[cfg(test)]
 mod tests {
