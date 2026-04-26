@@ -1,17 +1,34 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useAgentStore } from "../../lib/agent-store";
 import type { MentionInputHandle, MentionOption } from "./MentionInput";
 import { MessageRendererRow } from "./MessageRenderer";
-import { ThinkingIndicator } from "./ThinkingIndicator";
+
 import { StreamFooter, type AttachedFile, MOD_KEY } from "./StreamFooter";
 import { useStreamScroll, STREAM_PAGE_SIZE } from "./useStreamScroll";
 import { useMessageStreamChat } from "./useMessageStreamChat";
 import { X, ChevronUp, ChevronDown, Settings2, Upload, Search } from "lucide-react";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
+import { useAvatarUrl } from "../../lib/use-avatar-url";
 import { ChatTabsBar } from "./ChatTabsBar";
 import { StreamEmptyState } from "./StreamEmptyState";
+
+const VIEWPORT_INCREASE = { top: 200, bottom: 200 };
+
+const VirtuosoFooter = () => <div className="h-8" />;
+
+const VirtuosoHeaderWithMore = memo(function VirtuosoHeaderWithMore() {
+  return (
+    <div className="flex h-8 items-center justify-center">
+      <span className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
+        ↑ 滚动加载更多
+      </span>
+    </div>
+  );
+});
+
+const VirtuosoHeaderEmpty = () => <div className="h-8" />;
 
 interface MessageStreamProps {
   onToggleDetail?: () => void;
@@ -31,6 +48,7 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
   const loadChatStream = useAgentStore((s) => s.loadChatStream);
 
   const agent = agents.find((a) => a.id === activeAgentId) ?? agents[0];
+  const agentAvatarUrl = useAvatarUrl(agent?.avatar);
   const ac = agentChats[activeAgentId];
   const activeChat = ac?.chatList.find((c) => c.id === ac.activeChatId);
   const stream = activeChat?.stream ?? [];
@@ -264,10 +282,12 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
     runProgrammaticScroll,
   });
 
-  const isEmpty = stream.length === 0 && !streaming;
+  const virtuosoComponents = useMemo(() => ({
+    Header: hasMore ? VirtuosoHeaderWithMore : VirtuosoHeaderEmpty,
+    Footer: VirtuosoFooter,
+  }), [hasMore]);
 
-  const hasTextSegment = streamSegments.some((s) => s.type === "text");
-  const showThinking = streaming && !hasTextSegment;
+  const isEmpty = stream.length === 0 && !streaming;
 
   return (
     <div
@@ -309,10 +329,14 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
       >
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <div
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold"
+            className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-[13px] font-semibold"
             style={{ background: agent.color, color: "white" }}
           >
-            {agent.initial}
+            {agentAvatarUrl ? (
+              <img src={agentAvatarUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              agent.initial
+            )}
           </div>
           <div className="min-w-0">
             <div className="truncate text-[14px] font-semibold" style={{ color: "var(--fill-primary)" }} title={agent.name}>{agent.name}</div>
@@ -441,26 +465,9 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
               bottomRef={bottomRef}
             />
           )}
-          increaseViewportBy={{ top: 200, bottom: 200 }}
-          components={{
-            Header: () => (
-              <div className="flex h-8 items-center justify-center">
-                {hasMore && (
-                  <span className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-                    ↑ 滚动加载更多
-                  </span>
-                )}
-              </div>
-            ),
-            Footer: () => <div className="h-8" />,
-          }}
+          increaseViewportBy={VIEWPORT_INCREASE}
+          components={virtuosoComponents}
         />
-      )}
-
-      {showThinking && (
-        <div className="px-8 py-2">
-          <ThinkingIndicator />
-        </div>
       )}
 
       <StreamFooter

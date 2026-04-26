@@ -3,8 +3,10 @@ import {
   FileText, PenLine, Search, Terminal, Globe, Download, Monitor,
   Brain, Database, Image, Volume2, PackageSearch, PackagePlus,
   TableProperties, Play, Wrench, Check, X as XIcon, ChevronRight, Plug,
-  Copy, Maximize2,
+  Copy, Maximize2, ListTodo, Code2,
 } from "lucide-react";
+import { TodoCard, isTodoResult } from "./TodoCard";
+import { DiffCard, isEditResult } from "./DiffCard";
 
 export interface ToolCall {
   id: string;
@@ -43,6 +45,9 @@ const TOOL_META: Record<string, { icon: ReactNode; label?: string }> = {
   write_skill: { icon: <PenLine {...ICON_PROPS} />, label: "写入 Skill" },
   http_fetch: { icon: <Globe {...ICON_PROPS} />, label: "HTTP 请求" },
   calculator: { icon: <TableProperties {...ICON_PROPS} />, label: "计算器" },
+  todo_write: { icon: <ListTodo {...ICON_PROPS} />, label: "任务管理" },
+  edit_file: { icon: <Code2 {...ICON_PROPS} />, label: "编辑文件" },
+  lsp: { icon: <Code2 {...ICON_PROPS} />, label: "代码分析" },
 };
 
 const DEFAULT_META = { icon: <Wrench {...ICON_PROPS} /> };
@@ -342,6 +347,18 @@ export function ToolCallCard({ tool }: { tool: ToolCall }) {
           {resultImages.map((src, i) => (
             <ImageViewer key={i} src={src} />
           ))}
+        </div>
+      )}
+
+      {/* Specialized tool result cards — shown without expanding */}
+      {!isRunning && tool.result && isTodoResult(tool.name, tool.result) && (
+        <div className="px-3 pb-2">
+          <TodoCard result={tool.result} />
+        </div>
+      )}
+      {!isRunning && tool.result && isEditResult(tool.name, tool.result) && (
+        <div className="px-3 pb-2">
+          <DiffCard result={tool.result} args={tool.args} />
         </div>
       )}
 

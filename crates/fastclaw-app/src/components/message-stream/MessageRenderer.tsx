@@ -51,7 +51,7 @@ function UserBubble({ msg, copyable, selected, onToggleSelect }: { msg: ChatMess
             </button>
           )}
           <div
-            className="rounded-2xl px-4 py-3 text-[15px] leading-[1.6] break-words relative"
+            className="user-bubble-content rounded-2xl px-4 py-3 text-[15px] leading-[1.6] break-words relative"
             style={{
               background: "var(--bubble-user)",
               color: "var(--bubble-user-text)",

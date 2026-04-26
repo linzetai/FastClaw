@@ -298,6 +298,13 @@
     -webkit-text-fill-color: var(--fill-inverse);
   }
 
+  .user-bubble-content ::selection,
+  .user-bubble-content::selection {
+    background: rgba(255, 255, 255, 0.35);
+    color: #ffffff;
+    -webkit-text-fill-color: #ffffff;
+  }
+
   :focus-visible {
     outline: 2px solid var(--tint);
     outline-offset: 2px;
@@ -610,9 +617,9 @@
     display: inline;
     font-weight: 500;
     border-radius: 3px;
-    padding: 1px 2px;
-    border: 0.5px solid;
-    font-size: 0.95em;
+    padding: 0;
+    border: none;
+    font-size: inherit;
   }
 }
 
