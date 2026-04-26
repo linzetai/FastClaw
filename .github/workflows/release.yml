@@ -5,6 +5,10 @@ on:
     tags:
       - "v*"
 
+env:
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
 jobs:
   build:
     name: Build (${{ matrix.platform }})
@@ -26,13 +30,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ✅ 先安装 pnpm（修复 cache 问题）
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
-      # ✅ 再 setup node + cache
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -43,7 +45,6 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # ✅ Rust cache（支持 workspace）
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
@@ -51,7 +52,6 @@ jobs:
             .
             crates/fastclaw-app/src-tauri
 
-      # ✅ Linux 依赖修复
       - name: Install dependencies (Linux)
         if: matrix.platform == 'ubuntu-latest'
         run: |
@@ -64,45 +64,41 @@ jobs:
             librsvg2-dev \
             patchelf
 
-      # ✅ macOS universal 构建需要两个 target
       - name: Add Rust targets (macOS)
         if: matrix.platform == 'macos-latest'
         run: |
           rustup target add x86_64-apple-darwin
           rustup target add aarch64-apple-darwin
 
-      # ✅ 安装前端依赖
       - name: Install frontend deps
         working-directory: crates/fastclaw-app
         run: pnpm install --frozen-lockfile
 
-      # Lint workspace before building release artifacts
       - name: Clippy (release)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # ✅ 构建前端
       - name: Build frontend
         working-directory: crates/fastclaw-app
         run: pnpm build
 
-      # ✅ 安装 Tauri CLI（更稳）
       - name: Install Tauri CLI
         run: cargo install tauri-cli --locked
 
-      # ✅ 构建 Tauri（修复 macOS bundle 问题）
       - name: Build Tauri App
         working-directory: crates/fastclaw-app
         run: pnpm exec -- tauri build ${{ matrix.args }}
 
-      # ✅ 收集产物（跨平台）
-      # When --target is used (e.g. universal-apple-darwin), bundles go to
-      # target/<triple>/release/bundle instead of target/release/bundle.
       - name: Collect artifacts (Linux/macOS)
         if: matrix.platform != 'windows-latest'
         run: |
           mkdir -p upload
           for dir in target/release/bundle target/*/release/bundle; do
-            [ -d "$dir" ] && find "$dir" -type f \( -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" \) -exec cp {} upload/ \;
+            [ -d "$dir" ] || continue
+            find "$dir" -type f \( \
+              -name "*.AppImage" -o -name "*.AppImage.tar.gz" -o -name "*.AppImage.tar.gz.sig" \
+              -o -name "*.dmg" -o -name "*.app.tar.gz" -o -name "*.app.tar.gz.sig" \
+              -o -name "*.deb" \
+            \) -exec cp {} upload/ \;
           done
           ls -la upload/
 
@@ -115,7 +111,7 @@ jobs:
           $dirs += Get-ChildItem -Path target -Directory | ForEach-Object { Join-Path $_.FullName "release\bundle" }
           foreach ($d in $dirs) {
             if (Test-Path $d) {
-              Get-ChildItem -Recurse $d -Include *.exe,*.msi | Copy-Item -Destination upload
+              Get-ChildItem -Recurse $d -Include *.exe,*.msi,*.nsis.zip,*.nsis.zip.sig | Copy-Item -Destination upload
             }
           }
           Get-ChildItem upload
@@ -130,26 +126,78 @@ jobs:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      # ✅ 防止文件名冲突
       - name: Flatten artifacts
         run: |
           mkdir dist
-          find artifacts -type f | while read f; do
-            base=$(basename "$f")
-            new_name="$(echo "$f" | tr '/' '_')_${base}"
-            cp "$f" "dist/$new_name"
-          done
+          find artifacts -type f -exec cp {} dist/ \;
+          ls -la dist/
+
+      - name: Generate latest.json for updater
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          REPO="${GITHUB_REPOSITORY}"
+          BASE_URL="https://github.com/${REPO}/releases/download/${GITHUB_REF_NAME}"
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Read signatures if they exist
+          LINUX_SIG=""
+          WINDOWS_SIG=""
+          MACOS_SIG=""
+          for f in dist/*.AppImage.tar.gz.sig; do [ -f "$f" ] && LINUX_SIG=$(cat "$f"); done
+          for f in dist/*.nsis.zip.sig; do [ -f "$f" ] && WINDOWS_SIG=$(cat "$f"); done
+          for f in dist/*.app.tar.gz.sig; do [ -f "$f" ] && MACOS_SIG=$(cat "$f"); done
+
+          # Find artifact filenames
+          LINUX_FILE=$(cd dist && ls *.AppImage.tar.gz 2>/dev/null | head -1 || true)
+          WINDOWS_FILE=$(cd dist && ls *.nsis.zip 2>/dev/null | head -1 || true)
+          MACOS_FILE=$(cd dist && ls *.app.tar.gz 2>/dev/null | head -1 || true)
+
+          # Build platforms JSON
+          PLATFORMS="{"
+          FIRST=true
+          if [ -n "$LINUX_FILE" ] && [ -n "$LINUX_SIG" ]; then
+            PLATFORMS="$PLATFORMS\"linux-x86_64\":{\"url\":\"${BASE_URL}/${LINUX_FILE}\",\"signature\":\"${LINUX_SIG}\"}"
+            FIRST=false
+          fi
+          if [ -n "$WINDOWS_FILE" ] && [ -n "$WINDOWS_SIG" ]; then
+            [ "$FIRST" = false ] && PLATFORMS="$PLATFORMS,"
+            PLATFORMS="$PLATFORMS\"windows-x86_64\":{\"url\":\"${BASE_URL}/${WINDOWS_FILE}\",\"signature\":\"${WINDOWS_SIG}\"}"
+            FIRST=false
+          fi
+          if [ -n "$MACOS_FILE" ] && [ -n "$MACOS_SIG" ]; then
+            [ "$FIRST" = false ] && PLATFORMS="$PLATFORMS,"
+            PLATFORMS="$PLATFORMS\"darwin-universal\":{\"url\":\"${BASE_URL}/${MACOS_FILE}\",\"signature\":\"${MACOS_SIG}\"}"
+          fi
+          PLATFORMS="$PLATFORMS}"
+
+          cat > dist/latest.json <<EOF
+          {
+            "version": "${VERSION}",
+            "notes": "FastClaw v${VERSION}",
+            "pub_date": "${DATE}",
+            "platforms": ${PLATFORMS}
+          }
+          EOF
+
+          echo "=== latest.json ==="
+          cat dist/latest.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          generate_release_notes: true
           files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
