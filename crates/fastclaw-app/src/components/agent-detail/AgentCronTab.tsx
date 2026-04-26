@@ -3,6 +3,11 @@ import { ChevronDown, ChevronRight, AlertTriangle, Plus, Pencil, Clock, RefreshC
 import { useAgentStore } from "../../lib/agent-store";
 import { useGatewayStore } from "../../lib/store";
 import * as api from "../../lib/api";
+
+function parseUtc(ts: string): Date {
+  if (!ts || ts.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(ts)) return new Date(ts);
+  return new Date(ts.replace(" ", "T") + "Z");
+}
 import type { CronJob, CronJobAction, CronJobRun } from "../../lib/transport";
 import { FormModal, ListContainer, SectionHeader, Toggle } from "./common";
 
@@ -136,7 +141,7 @@ function RunLogList({ jobId }: { jobId: string }) {
           <div className="flex cursor-pointer items-center justify-between gap-2 px-2.5 py-1.5" onClick={() => setExpanded(expanded === run.id ? null : run.id)}>
             <div className="flex items-center gap-2">
               <span className="inline-block h-[6px] w-[6px] rounded-full" style={{ background: run.status === "ok" ? "var(--green, #48bb78)" : run.status === "running" ? "var(--blue, #4299e1)" : "var(--red, #e53e3e)" }} />
-              <span style={{ color: "var(--fill-secondary)" }}>{new Date(run.started_at).toLocaleString("zh-CN")}</span>
+              <span style={{ color: "var(--fill-secondary)" }}>{parseUtc(run.started_at).toLocaleString("zh-CN")}</span>
             </div>
             <span style={{ color: "var(--fill-quaternary)" }}>{run.status === "ok" ? "成功" : run.status === "running" ? "运行中" : "失败"}</span>
           </div>
@@ -156,7 +161,7 @@ function RunLogList({ jobId }: { jobId: string }) {
               )}
               {run.ended_at && (
                 <p className="mt-1" style={{ color: "var(--fill-quaternary)" }}>
-                  耗时: {Math.round((new Date(run.ended_at).getTime() - new Date(run.started_at).getTime()) / 1000)}s
+                  耗时: {Math.round((parseUtc(run.ended_at).getTime() - parseUtc(run.started_at).getTime()) / 1000)}s
                 </p>
               )}
             </div>
@@ -567,7 +572,7 @@ export function CronTab() {
               )}
               {job.next_run && (
                 <div className="mt-0.5 text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
-                  下次执行: {new Date(job.next_run).toLocaleString("zh-CN")}
+                  下次执行: {parseUtc(job.next_run).toLocaleString("zh-CN")}
                 </div>
               )}
             </div>

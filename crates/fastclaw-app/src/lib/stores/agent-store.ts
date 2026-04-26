@@ -22,12 +22,12 @@ export function buildAgentSlice({ set, get }: SetGet) {
       get().clearUnread(id);
     },
 
-    syncAgentsFromBackend: (backendAgents: Array<{ agentId: string; name: string; model: string }>) => {
+    syncAgentsFromBackend: (backendAgents: Array<{ agentId: string; name: string; model: string; avatar?: string | null }>) => {
       const COLORS = ["var(--tint)", "#34c759", "#ff9500", "#ff3b30", "#af52de", "#5856d6", "#007aff"];
       set((state) => {
         const merged: Agent[] = backendAgents.map((ba, i) => {
           const existing = state.agents.find((a) => a.id === ba.agentId);
-          if (existing) return { ...existing, name: ba.name, model: ba.model, online: true };
+          if (existing) return { ...existing, name: ba.name, model: ba.model, avatar: ba.avatar ?? existing.avatar, online: true };
           return {
             id: ba.agentId,
             name: ba.name,
@@ -36,6 +36,7 @@ export function buildAgentSlice({ set, get }: SetGet) {
             tagline: "",
             online: true,
             model: ba.model,
+            avatar: ba.avatar ?? undefined,
           };
         });
 
@@ -54,6 +55,18 @@ export function buildAgentSlice({ set, get }: SetGet) {
             : state.activeAgentId,
           agentChats: newChats,
         };
+      });
+    },
+
+    updateAgentProps: (agentId: string, props: Partial<Pick<Agent, "name" | "model" | "avatar">>) => {
+      set((state) => {
+        const agents = state.agents.map((a) => {
+          if (a.id !== agentId) return a;
+          const updated = { ...a, ...props };
+          if (props.name) updated.initial = props.name.charAt(0).toUpperCase();
+          return updated;
+        });
+        return { agents };
       });
     },
 

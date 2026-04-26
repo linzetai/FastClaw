@@ -1,10 +1,28 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, memo } from "react";
 import { createPortal } from "react-dom";
 import { useAgentStore } from "../../lib/agent-store";
 import { useGatewayStore } from "../../lib/store";
 import { Search, Plus, ChevronDown, Check, Camera, X } from "lucide-react";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
+import { useAvatarUrl, loadAvatarBlobUrl } from "../../lib/use-avatar-url";
+import type { Agent } from "../../lib/stores/types";
+
+const AgentAvatar = memo(function AgentAvatar({ agent }: { agent: Agent }) {
+  const avatarUrl = useAvatarUrl(agent.avatar);
+  return (
+    <div
+      className="flex h-[42px] w-[42px] items-center justify-center overflow-hidden rounded-full text-[15px] font-semibold"
+      style={{ background: agent.color || "var(--bg-tertiary)", color: agent.color ? "#fff" : "var(--fill-secondary)" }}
+    >
+      {avatarUrl ? (
+        <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+      ) : (
+        agent.initial
+      )}
+    </div>
+  );
+});
 
 export function AgentList() {
   const agents = useAgentStore((s) => s.agents);
@@ -76,8 +94,8 @@ export function AgentList() {
       if (result) {
         const path = typeof result === "string" ? result : result;
         setNewAvatarPath(path as string);
-        const { convertFileSrc } = await import("@tauri-apps/api/core");
-        setNewAvatarPreview(convertFileSrc(path as string));
+        const url = await loadAvatarBlobUrl(path as string);
+        setNewAvatarPreview(url);
       }
     } catch { /* user cancelled */ }
   }, []);
@@ -95,11 +113,15 @@ export function AgentList() {
       provider: selectedModelMeta?.provider,
     });
     if (agent) {
+      let avatarPath: string | undefined;
       if (newAvatarPath) {
-        await api.uploadAgentAvatar(agent.agentId, newAvatarPath);
+        avatarPath = (await api.uploadAgentAvatar(agent.agentId, newAvatarPath)) ?? undefined;
       }
       const newModelStr = typeof agent.model === "string" ? agent.model : agent.model?.model ?? "";
-      syncAgents([...agents.map((a) => ({ agentId: a.id, name: a.name, model: a.model })), { agentId: agent.agentId, name: agent.name ?? "", model: newModelStr }]);
+      syncAgents([
+        ...agents.map((a) => ({ agentId: a.id, name: a.name, model: a.model, avatar: a.avatar })),
+        { agentId: agent.agentId, name: agent.name ?? "", model: newModelStr, avatar: avatarPath },
+      ]);
       setActiveAgent(agent.agentId);
     }
     setCreating(false);
@@ -143,7 +165,7 @@ export function AgentList() {
         ? created.model
         : created.model?.model ?? "";
     syncAgents([
-      ...agents.map((a) => ({ agentId: a.id, name: a.name, model: a.model })),
+      ...agents.map((a) => ({ agentId: a.id, name: a.name, model: a.model, avatar: a.avatar })),
       { agentId: created.agentId, name: created.name ?? defaultName, model: newModelStr },
     ]);
     setActiveAgent(created.agentId);
@@ -252,14 +274,8 @@ export function AgentList() {
                 animation: `slide-up 0.3s ease-out ${i * 0.04}s backwards`,
               }}
             >
-              {/* Avatar (greyscale) */}
               <div className="relative shrink-0">
-                <div
-                  className="flex h-[42px] w-[42px] items-center justify-center rounded-full text-[15px] font-semibold"
-                  style={{ background: agent.color || "var(--bg-tertiary)", color: agent.color ? "#fff" : "var(--fill-secondary)" }}
-                >
-                  {agent.initial}
-                </div>
+                <AgentAvatar agent={agent} />
                 {agent.online && (
                   <div
                     className="absolute bottom-0 right-0 h-[11px] w-[11px] rounded-full"

@@ -20,7 +20,7 @@ export function AgentConfigForm({ section }: { section: ConfigSection }) {
     gatewayReady,
     name, setName, models, selectedModel, setSelectedModel, selectedProvider, setSelectedProvider,
     fileAccessMode, setFileAccessMode,
-    saving, saveMsg, backendAgent,
+    saving, saveMsg, isDirty, backendAgent,
     toolQuery, setToolQuery, skillQuery, setSkillQuery,
     handleSave, handleToolToggle, handleSkillToggle, handleDelete,
     handleRefreshSkills, handleUploadSkillFolder, handleUploadSkillZip,
@@ -98,13 +98,21 @@ export function AgentConfigForm({ section }: { section: ConfigSection }) {
       <div className="flex items-center gap-3 pt-2">
         <button
           onClick={handleSave}
-          disabled={saving}
-          className="cursor-pointer rounded-[var(--radius-sm)] px-5 py-2 text-[13px] font-medium transition-opacity duration-150 hover:opacity-90 disabled:opacity-50"
-          style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
+          disabled={saving || (!isDirty && !saveMsg)}
+          className="cursor-pointer rounded-[var(--radius-sm)] px-5 py-2 text-[13px] font-medium transition-all duration-200 hover:opacity-90 disabled:opacity-50"
+          style={{
+            background: saveMsg === "已保存" ? "var(--green, #48bb78)" : isDirty ? "var(--fill-primary)" : "var(--bg-tertiary)",
+            color: saveMsg === "已保存" ? "#fff" : isDirty ? "var(--fill-inverse)" : "var(--fill-tertiary)",
+          }}
         >
-          {saving ? "保存中..." : "保存配置"}
+          {saving ? "保存中..." : saveMsg === "已保存" ? "已保存" : saveMsg === "保存失败" ? "保存失败，重试" : isDirty ? "保存配置" : "保存配置"}
         </button>
-        {saveMsg && <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>{saveMsg}</span>}
+        {isDirty && !saving && !saveMsg && (
+          <span className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>有未保存的更改</span>
+        )}
+        {saveMsg && saveMsg !== "已保存" && (
+          <span className="text-[12px]" style={{ color: "var(--red, #e53e3e)" }}>{saveMsg}</span>
+        )}
       </div>
 
       <div className="pt-4" style={{ borderTop: "0.5px solid var(--separator)" }}>

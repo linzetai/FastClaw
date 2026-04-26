@@ -20,7 +20,7 @@ pub async fn list_agents(
         .await
         .list_agents()
         .iter()
-        .map(|a| json!({"agentId": a.agent_id, "name": a.name, "model": a.model.model}))
+        .map(|a| json!({"agentId": a.agent_id, "name": a.name, "model": a.model.model, "avatar": a.avatar}))
         .collect();
     Ok(json!({"agents": agents}))
 }

@@ -12,8 +12,13 @@ const isTauri =
   typeof window !== "undefined" &&
   ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 
+function parseUtc(ts: string): Date {
+  if (!ts || ts.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(ts)) return new Date(ts);
+  return new Date(ts.replace(" ", "T") + "Z");
+}
+
 function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+  const diff = Date.now() - parseUtc(iso).getTime();
   const secs = Math.floor(diff / 1000);
   if (secs < 60) return "刚刚";
   const mins = Math.floor(secs / 60);
@@ -22,7 +27,7 @@ function relativeTime(iso: string): string {
   if (hours < 24) return `${hours}小时前`;
   const days = Math.floor(hours / 24);
   if (days < 30) return `${days}天前`;
-  return new Date(iso).toLocaleDateString();
+  return parseUtc(iso).toLocaleDateString();
 }
 
 function categoryIcon(category: string): ReactNode {

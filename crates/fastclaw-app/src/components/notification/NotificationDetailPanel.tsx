@@ -68,7 +68,7 @@ export function NotificationDetailPanel({ notification, onClose }: Props) {
                 className="text-[10px]"
                 style={{ color: "var(--fill-quaternary)" }}
               >
-                {label} · {new Date(notification.createdAt).toLocaleString()}
+                {label} · {new Date(notification.createdAt.endsWith("Z") ? notification.createdAt : notification.createdAt.replace(" ", "T") + "Z").toLocaleString()}
               </div>
             </div>
           </div>

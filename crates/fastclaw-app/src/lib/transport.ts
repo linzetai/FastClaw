@@ -66,6 +66,7 @@ export interface AgentSummary {
   agentId: string;
   name: string;
   model: string;
+  avatar?: string | null;
 }
 
 export async function listAgents(): Promise<AgentSummary[]> {

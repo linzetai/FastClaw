@@ -25,13 +25,17 @@
       "identifier": "fs:scope",
       "allow": [
         { "path": "$APPDATA/**" },
-        { "path": "$HOME/.fastclaw/**" }
+        { "path": "$HOME/.fastclaw/**" },
+        { "path": "$HOME/.fastclaw-dev/**" }
       ]
     },
     "dialog:allow-open",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
-    "mcp-bridge:default"
+    "mcp-bridge:default",
+    "updater:default",
+    "process:allow-restart",
+    "process:allow-exit"
   ]
 }

@@ -17,6 +17,13 @@ import type {
   SubAgentToolCall,
 } from "./types";
 
+/** SQLite `datetime('now')` stores UTC without a tz suffix; ensure JS parses as UTC. */
+function parseUtcTimestamp(ts: string): Date {
+  if (!ts) return new Date();
+  if (ts.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(ts)) return new Date(ts);
+  return new Date(ts.replace(" ", "T") + "Z");
+}
+
 type SetGet = {
   set: (partial: AgentState | Partial<AgentState> | ((s: AgentState) => AgentState | Partial<AgentState>)) => void;
   get: () => AgentState;
@@ -239,7 +246,7 @@ export function buildSessionSlice({ set, get }: SetGet) {
             title: s.title || "未命名会话",
             workDir: s.workDir ?? null,
             stream: [],
-            createdAt: new Date(s.createdAt),
+            createdAt: parseUtcTimestamp(s.createdAt),
             messageCount: s.messageCount,
             open: persistedOpen.has(s.id) && s.messageCount > 0,
             subAgentRuns: {},
@@ -324,7 +331,7 @@ export function buildSessionSlice({ set, get }: SetGet) {
                 role: m.role as "user" | "assistant" | "system",
                 content,
                 id: idCounter.nextId++,
-                timestamp: new Date(m.createdAt),
+                timestamp: parseUtcTimestamp(m.createdAt),
                 chatId,
                 toolCalls,
                 images,

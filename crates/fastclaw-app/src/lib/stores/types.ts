@@ -107,7 +107,8 @@ export interface AgentState {
   renameChat: (agentId: string, chatId: string, title: string) => void;
   reorderChats: (agentId: string, fromIdx: number, toIdx: number) => void;
   clearUnread: (agentId: string) => void;
-  syncAgentsFromBackend: (backendAgents: Array<{ agentId: string; name: string; model: string }>) => void;
+  updateAgentProps: (agentId: string, props: Partial<Pick<Agent, "name" | "model" | "avatar">>) => void;
+  syncAgentsFromBackend: (backendAgents: Array<{ agentId: string; name: string; model: string; avatar?: string | null }>) => void;
   syncSessionsForAgent: (agentId: string, sessions: BackendSession[]) => void;
   loadChatStream: (agentId: string, chatId: string, messages: BackendMessage[]) => void;
   updateChatBackendId: (agentId: string, localChatId: string, backendSessionId: string) => void;

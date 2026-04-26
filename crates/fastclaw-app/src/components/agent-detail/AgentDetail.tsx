@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useAgentStore } from "../../lib/agent-store";
 import { X, Camera } from "lucide-react";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
+import { useAvatarUrl, loadAvatarBlobUrl } from "../../lib/use-avatar-url";
 import { ChatsTab } from "./AgentChatsTab";
 import { CronTab } from "./AgentCronTab";
 import { AgentConfigForm, type ConfigSection } from "./AgentConfigForm";
@@ -34,32 +35,35 @@ export function AgentDetail({ open, onClose, agentName, agentInitial, agentColor
   const [tab, setTab] = useState<MainTab>("basic");
   const activeAgentId = useAgentStore((s) => s.activeAgentId);
   const agents = useAgentStore((s) => s.agents);
+  const updateAgentProps = useAgentStore((s) => s.updateAgentProps);
   const agent = agents.find((a) => a.id === activeAgentId);
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [uploadPreview, setUploadPreview] = useState<string | null>(null);
 
-  useEffect(() => {
-    setAvatarPreview(null);
-  }, [activeAgentId]);
+  const storedAvatarUrl = useAvatarUrl(agent?.avatar);
+  const avatarSrc = uploadPreview ?? storedAvatarUrl;
 
   const handleAvatarClick = useCallback(async () => {
     if (!transport.isTauri) return;
     try {
       const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
-      const selected = await openDialog({ filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }], multiple: false });
-      if (selected) {
-        const path = typeof selected === "string" ? selected : (selected as { path?: string }).path;
-        if (path) {
-          const resp = await api.uploadAgentAvatar(activeAgentId, path);
-          if (resp) {
-            const { convertFileSrc } = await import("@tauri-apps/api/core");
-            setAvatarPreview(convertFileSrc(resp));
-          }
-        }
+      const selected = await openDialog({
+        title: "选择头像图片",
+        filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }],
+        multiple: false,
+      });
+      if (!selected) return;
+      const path = typeof selected === "string" ? selected : (selected as { path?: string }).path;
+      if (!path) return;
+      const resp = await api.uploadAgentAvatar(activeAgentId, path);
+      if (resp) {
+        updateAgentProps(activeAgentId, { avatar: resp });
+        const url = await loadAvatarBlobUrl(resp);
+        if (url) setUploadPreview(url);
       }
-    } catch { /* silent */ }
-  }, [activeAgentId]);
-
-  const avatarSrc = avatarPreview || (agent?.avatar ? (() => { try { return new URL(agent.avatar!).href; } catch { return undefined; } })() : undefined);
+    } catch (e) {
+      console.warn("[AgentDetail] avatar upload failed:", e);
+    }
+  }, [activeAgentId, updateAgentProps]);
 
   return (
     <aside

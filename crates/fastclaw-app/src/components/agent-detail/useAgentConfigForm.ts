@@ -17,6 +17,7 @@ export function useAgentConfigForm() {
   const agents = useAgentStore((s) => s.agents);
   const agent = agents.find((a) => a.id === activeAgentId) ?? agents[0];
   const removeAgent = useAgentStore((s) => s.removeAgent);
+  const updateAgentProps = useAgentStore((s) => s.updateAgentProps);
   const gatewayReady = useGatewayStore((s) => s.connected);
 
   const [name, setName] = useState(agent?.name ?? "");
@@ -69,6 +70,7 @@ export function useAgentConfigForm() {
       setSkillsDeny(deny);
       if (a) {
         setBackendAgent(a);
+        if (a.name) setName(a.name);
         if (typeof a.model === "string") {
           setSelectedModel(a.model);
           setSelectedProvider(null);
@@ -123,14 +125,17 @@ export function useAgentConfigForm() {
       },
     };
     const ok = await api.updateAgent(activeAgentId, payload);
-    if (ok && !backendAgent) {
-      const refreshed = await api.getAgent(activeAgentId).catch(() => null);
-      if (refreshed) setBackendAgent(refreshed);
+    if (ok) {
+      updateAgentProps(activeAgentId, {
+        name: name || activeAgentId,
+        model: selectedModel,
+      });
+      setBackendAgent(payload);
     }
     setSaving(false);
     setSaveMsg(ok ? "已保存" : "保存失败");
     setTimeout(() => setSaveMsg(""), 2000);
-  }, [activeAgentId, name, selectedModel, selectedProvider, backendAgent, fileAccessMode, models]);
+  }, [activeAgentId, name, selectedModel, selectedProvider, backendAgent, fileAccessMode, models, updateAgentProps]);
 
   const handleToolToggle = useCallback(async (toolId: string, newEnabled: boolean) => {
     setTogglingTool(toolId);
@@ -209,6 +214,24 @@ export function useAgentConfigForm() {
     setUploadingSkill(false);
   }, [reloadSkillsList]);
 
+  const isDirty = useMemo(() => {
+    if (!backendAgent) return name !== (agent?.name ?? "");
+    const currentName = backendAgent.name ?? "";
+    const currentModel = typeof backendAgent.model === "string"
+      ? backendAgent.model
+      : backendAgent.model?.model ?? "";
+    const currentProvider = typeof backendAgent.model === "object"
+      ? backendAgent.model.provider
+      : null;
+    const currentFileAccess = backendAgent.behavior?.fileAccess ?? "workspace";
+    return (
+      name !== currentName ||
+      selectedModel !== currentModel ||
+      (selectedProvider ?? "") !== (currentProvider ?? "") ||
+      fileAccessMode !== currentFileAccess
+    );
+  }, [name, selectedModel, selectedProvider, fileAccessMode, backendAgent, agent?.name]);
+
   const nonMcpTools = useMemo(() => agentTools.filter((t) => !t.name.startsWith("mcp_")), [agentTools]);
   const filteredTools = useMemo(() => {
     if (!toolQuery) return nonMcpTools;
@@ -262,6 +285,7 @@ export function useAgentConfigForm() {
     handleToolToggle,
     handleSkillToggle,
     handleDelete,
+    isDirty,
     handleRefreshSkills,
     handleUploadSkillZip,
     handleUploadSkillFolder,
