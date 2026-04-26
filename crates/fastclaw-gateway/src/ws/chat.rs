@@ -550,14 +550,19 @@ pub fn event_to_response(
             output,
             display_output,
             success,
-        } => WsResponse {
-            id: req_id.clone(),
-            msg_type: "chat.tool.done".into(),
-            data: Some(
-                json!({"tool": tool_name, "callId": call_id, "output": display_output.as_ref().unwrap_or(output), "success": success}),
-            ),
-            error: None,
-        },
+            metadata,
+        } => {
+            let mut data = json!({"tool": tool_name, "callId": call_id, "output": display_output.as_ref().unwrap_or(output), "success": success});
+            if let Some(meta) = metadata {
+                data["metadata"] = meta.clone();
+            }
+            WsResponse {
+                id: req_id.clone(),
+                msg_type: "chat.tool.done".into(),
+                data: Some(data),
+                error: None,
+            }
+        }
         StreamEvent::Done {
             session_id,
             tool_calls_made,

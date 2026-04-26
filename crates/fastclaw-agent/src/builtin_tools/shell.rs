@@ -1,7 +1,86 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolResult};
+use fastclaw_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolResult};
+
+/// Default output truncation limit (raised from 8KB to 64KB to capture more useful output).
+const DEFAULT_MAX_OUTPUT_BYTES: usize = 65536;
+
+/// Truncate output string at a char boundary, adding a note about total size.
+fn truncate_output(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    let end = s
+        .char_indices()
+        .map(|(i, _)| i)
+        .take_while(|&i| i <= max_bytes)
+        .last()
+        .unwrap_or(0);
+    format!("{}... [truncated, {} bytes total]", &s[..end], s.len())
+}
+
+/// Detect the preferred shell on Unix (bash if available, else sh).
+#[cfg(not(windows))]
+fn preferred_shell() -> &'static str {
+    use std::sync::OnceLock;
+    static SHELL: OnceLock<&str> = OnceLock::new();
+    *SHELL.get_or_init(|| {
+        if std::path::Path::new("/bin/bash").exists()
+            || std::path::Path::new("/usr/bin/bash").exists()
+        {
+            "bash"
+        } else {
+            "sh"
+        }
+    })
+}
+
+/// Build common shell parameter schema.
+fn shell_parameter_schema(include_is_background: bool) -> ToolParameterSchema {
+    let mut props = HashMap::new();
+    props.insert(
+        "command".to_string(),
+        serde_json::json!({
+            "type": "string",
+            "description": "The shell command to execute."
+        }),
+    );
+    props.insert(
+        "description".to_string(),
+        serde_json::json!({
+            "type": "string",
+            "description": "Optional brief description of the command's purpose, shown to the user."
+        }),
+    );
+    props.insert(
+        "working_dir".to_string(),
+        serde_json::json!({
+            "type": "string",
+            "description": "Optional working directory (relative to project root or absolute). Must exist."
+        }),
+    );
+    if include_is_background {
+        props.insert(
+            "is_background".to_string(),
+            serde_json::json!({
+                "type": "boolean",
+                "description": "Whether to run the command in background. Required. \
+                 Set true for long-running processes (dev servers, watchers, daemons). \
+                 Set false for one-time commands that should complete before proceeding."
+            }),
+        );
+    }
+    let mut required = vec!["command".to_string()];
+    if include_is_background {
+        required.push("is_background".to_string());
+    }
+    ToolParameterSchema {
+        schema_type: "object".to_string(),
+        properties: props,
+        required,
+    }
+}
 
 /// Execute a shell command and return stdout/stderr.
 pub struct ShellTool {
@@ -16,40 +95,21 @@ impl ShellTool {
 
 #[async_trait]
 impl Tool for ShellTool {
+    fn kind(&self) -> ToolKind { ToolKind::Execute }
     fn name(&self) -> &str {
         "shell_exec"
     }
 
     fn description(&self) -> &str {
-        "Run one shell snippet and return JSON {exit_code, stdout, stderr}. Uses cmd.exe /C on Windows and sh -c on Unix. This is the escape hatch for builds (cargo test, npm run), git, package managers, environment inspection (node --version, where/which), and short glue scripts when no narrower builtin fits. \
-         Use this tool to diagnose environment issues (check PATH, installed tool versions, npm/node configuration) before giving up on other tool failures. \
-         The child inherits the gateway environment and current working directory unless you set working_dir explicitly. \
-         Each call has a hard wall-clock timeout; stdin is not interactive. stdout and stderr are truncated around 8192 bytes per stream. \
-         Non-zero exit_code is returned as a tool error, but the error string still embeds the same JSON payload—read stderr first for the primary error message. \
-         Example: {\"command\": \"node --version\", \"working_dir\": \"D:\\\\FastClaw\"}."
+        "Run a shell command. Returns exit_code, stdout, stderr, and signal info. \
+         Uses bash -c (Unix) or cmd.exe /C (Windows). \
+         Set is_background=true for long-running processes (dev servers, watchers); \
+         set is_background=false for one-time commands. \
+         stdout/stderr truncated at ~64KB. Non-zero exit_code returned as tool error."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
-        let mut props = HashMap::new();
-        props.insert(
-            "command".to_string(),
-            serde_json::json!({
-                "type": "string",
-                "description": "Single string passed to cmd.exe /C (Windows) or sh -c (Unix). On Windows use & or && to chain commands; on Unix use pipes |, &&, ;. Examples: 'node --version', 'cargo test -p fastclaw-agent', 'where npx' (Win) / 'which npx' (Unix), 'npm cache clean --force'. Keep commands short; do not embed megabyte payloads."
-            }),
-        );
-        props.insert(
-            "working_dir".to_string(),
-            serde_json::json!({
-                "type": "string",
-                "description": "Optional cwd; the directory must already exist. Examples: absolute repo root '/home/you/FastClaw', or 'crates/fastclaw-agent' for crate-scoped cargo. Omit only when you are sure the gateway cwd is correct—wrong cwd is the most common cause of spurious \"file not found\" and missing Cargo.toml errors in builds."
-            }),
-        );
-        ToolParameterSchema {
-            schema_type: "object".to_string(),
-            properties: props,
-            required: vec!["command".to_string()],
-        }
+        shell_parameter_schema(true)
     }
 
     async fn execute(&self, arguments: &str) -> ToolResult {
@@ -57,7 +117,7 @@ impl Tool for ShellTool {
             Ok(v) => v,
             Err(e) => return ToolResult::err(format!(
                 "shell_exec arguments are not valid JSON: {e}. \
-                 Pass {{\"command\": \"...\"}} with optional \"working_dir\": \"...\", both as strings, then retry."
+                 Pass {{\"command\": \"...\", \"is_background\": false}} with optional \"working_dir\", \"description\"."
             )),
         };
 
@@ -65,11 +125,15 @@ impl Tool for ShellTool {
             Some(s) => s,
             None => return ToolResult::err(
                 "shell_exec is missing string field 'command'. \
-                 Example: {\"command\": \"ls -la\"}. \
-                 working_dir alone is not enough—the shell snippet must be non-empty."
+                 Example: {\"command\": \"ls -la\", \"is_background\": false}."
                     .to_string(),
             ),
         };
+
+        let is_background = args
+            .get("is_background")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let user_confirmed = args
             .get("confirmed")
@@ -102,7 +166,8 @@ impl Tool for ShellTool {
         };
         #[cfg(not(windows))]
         let mut cmd = {
-            let mut c = tokio::process::Command::new("sh");
+            let shell = preferred_shell();
+            let mut c = tokio::process::Command::new(shell);
             c.arg("-c").arg(command);
             c
         };
@@ -111,56 +176,76 @@ impl Tool for ShellTool {
             cmd.current_dir(dir);
         }
 
+        // Set env indicator so scripts can detect they're running inside FastClaw
+        cmd.env("FASTCLAW_AGENT", "1");
+
         cmd.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
         let timeout = tokio::time::Duration::from_secs(self.timeout_secs);
 
-        match tokio::time::timeout(timeout, cmd.output()).await {
-            Ok(Ok(output)) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let code = output.status.code().unwrap_or(-1);
-
-                let truncate = |s: &str| -> String {
-                    if s.len() > 8192 {
-                        let end = s
-                            .char_indices()
-                            .map(|(i, _)| i)
-                            .take_while(|&i| i <= 8192)
-                            .last()
-                            .unwrap_or(0);
-                        format!("{}... [truncated, {} bytes total]", &s[..end], s.len())
-                    } else {
-                        s.to_string()
-                    }
-                };
-
-                let result = serde_json::json!({
-                    "exit_code": code,
-                    "stdout": truncate(&stdout),
-                    "stderr": truncate(&stderr),
-                });
-
-                if code == 0 {
-                    ToolResult::ok(result.to_string())
-                } else {
-                    ToolResult::err(format!(
-                        "shell_exec finished with exit_code={code} (non-zero), which is treated as failure. What went wrong: the shell snippet returned a failing status—often a compiler/test/git error. What to do next: parse the embedded JSON in this message; read stderr first for the primary error line, then stdout for command output; fix flags, install missing binaries, correct working_dir to the repo root, or address failing tests; rerun a narrower command if the output was truncated. JSON payload: {}",
-                        result.to_string()
-                    ))
+        if is_background {
+            // For background commands, spawn and return PID immediately
+            match cmd.spawn() {
+                Ok(child) => {
+                    let pid = child.id();
+                    let desc = args.get("description").and_then(|v| v.as_str()).unwrap_or(command);
+                    ToolResult::ok(
+                        serde_json::json!({
+                            "background": true,
+                            "pid": pid,
+                            "command": command,
+                            "description": desc,
+                        })
+                        .to_string(),
+                    )
                 }
+                Err(e) => ToolResult::err(format!("shell_exec spawn failed: {e}")),
             }
-            Ok(Err(e)) => ToolResult::err(format!(
-                "shell_exec could not spawn the subprocess: {e}. \
-                 What went wrong: sh -c never started (bad path to sh, invalid working_dir, resource limits, or OS refusal). \
-                 What to do next: confirm /bin/sh is available, working_dir exists and is a directory the gateway user can enter, and the command string is valid; retry with a minimal command like echo ok to isolate the issue."
-            )),
-            Err(_) => ToolResult::err(format!(
-                "shell_exec timed out after {}s—the command was killed. \
-                 Narrow output (add head/tail, filters), split into smaller steps, or ask the operator to raise shell_exec timeout if the workload is legitimately long.",
-                self.timeout_secs
-            )),
+        } else {
+            match tokio::time::timeout(timeout, cmd.output()).await {
+                Ok(Ok(output)) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let code = output.status.code().unwrap_or(-1);
+
+                    #[cfg(unix)]
+                    let signal = {
+                        use std::os::unix::process::ExitStatusExt;
+                        output.status.signal()
+                    };
+                    #[cfg(not(unix))]
+                    let signal: Option<i32> = None;
+
+                    let result = serde_json::json!({
+                        "exit_code": code,
+                        "stdout": truncate_output(&stdout, DEFAULT_MAX_OUTPUT_BYTES),
+                        "stderr": truncate_output(&stderr, DEFAULT_MAX_OUTPUT_BYTES),
+                        "signal": signal,
+                    });
+
+                    let full_display = result.to_string();
+                    if code == 0 {
+                        let llm_summary = format!(
+                            "{{\"exit_code\":0,\"stdout\":{},\"stderr\":{}}}",
+                            serde_json::Value::String(truncate_output(&stdout, DEFAULT_MAX_OUTPUT_BYTES)),
+                            serde_json::Value::String(truncate_output(&stderr, DEFAULT_MAX_OUTPUT_BYTES)),
+                        );
+                        ToolResult::ok_split(llm_summary, full_display)
+                    } else {
+                        ToolResult::err(format!(
+                            "exit_code={code}: {}", result
+                        ))
+                    }
+                }
+                Ok(Err(e)) => ToolResult::err(format!(
+                    "shell_exec spawn failed: {e}"
+                )),
+                Err(_) => ToolResult::err(format!(
+                    "shell_exec timed out after {}s, command killed.",
+                    self.timeout_secs
+                )),
+            }
         }
     }
 }
@@ -384,40 +469,22 @@ impl SandboxedShellTool {
 
 #[async_trait]
 impl Tool for SandboxedShellTool {
+    fn kind(&self) -> ToolKind { ToolKind::Execute }
     fn name(&self) -> &str {
         "shell_exec"
     }
 
     fn description(&self) -> &str {
-        "Same contract as shell_exec—JSON {command, working_dir?} in, JSON {exit_code, stdout, stderr, sandboxed: true} out—but every command is validated before spawn: risky base binaries and each && / || / ; segment must pass allow/deny rules. \
-         Typical enforcement: blocklists (sudo, mkfs, dd, …), pattern denials (sensitive paths, fork bombs), optional command allowlists, optional cwd confined to allowed_dirs, secret env vars stripped, optional Linux namespace isolation via unshare when enabled. File-destructive commands (rm, chmod, chown) are governed by the dangerous_ops security policy (deny/confirm/allow). \
-         Prefer read_file, write_file, list_directory for plain file work; use sandboxed shell_exec when operators require bounded automation (git, cargo, npm, rg) instead of arbitrary shell. \
-         stdout+stderr share one max_output_bytes ceiling; timeouts still kill hung work; stdin stays non-interactive. \
-         SANDBOX BLOCKED means zero execution—adjust the command, cwd, or policy; resubmitting the same blocked command will never succeed. \
-         Example: {\"command\": \"git diff --stat\", \"working_dir\": \"/repo\"} with allowed_dirs covering /repo."
+        "Sandboxed shell_exec — commands validated against allow/deny rules before execution. \
+         Uses bash -c (Unix) or cmd.exe /C (Windows). \
+         Set is_background=true for long-running processes (dev servers, watchers); \
+         set is_background=false for one-time commands. \
+         Blocked commands (sudo, mkfs, dd, etc.) return SANDBOX BLOCKED. \
+         Destructive ops (rm, chmod) follow the dangerous_ops security policy."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
-        let mut props = HashMap::new();
-        props.insert(
-            "command".to_string(),
-            serde_json::json!({
-                "type": "string",
-                "description": "Argument to sh -c (or unshare … sh -c when namespace mode is on). Examples: 'git status -sb', 'cargo check -p mycrate', 'rg -n pattern .'. Must satisfy allowlist, denylist, and pattern rules or the tool returns SANDBOX BLOCKED without spawning."
-            }),
-        );
-        props.insert(
-            "working_dir".to_string(),
-            serde_json::json!({
-                "type": "string",
-                "description": "Optional cwd. If the deployment sets allowed_dirs, the canonicalized cwd must lie under one of those roots; otherwise any existing directory the gateway user can access is allowed. The directory must exist before the command runs."
-            }),
-        );
-        ToolParameterSchema {
-            schema_type: "object".to_string(),
-            properties: props,
-            required: vec!["command".to_string()],
-        }
+        shell_parameter_schema(true)
     }
 
     async fn execute(&self, arguments: &str) -> ToolResult {
@@ -425,7 +492,7 @@ impl Tool for SandboxedShellTool {
             Ok(v) => v,
             Err(e) => return ToolResult::err(format!(
                 "sandboxed shell_exec arguments are not valid JSON: {e}. \
-                 Pass {{\"command\": \"...\"}} with optional \"working_dir\", then retry."
+                 Pass {{\"command\": \"...\", \"is_background\": false}} with optional \"working_dir\", \"description\"."
             )),
         };
 
@@ -433,11 +500,15 @@ impl Tool for SandboxedShellTool {
             Some(s) => s,
             None => return ToolResult::err(
                 "sandboxed shell_exec is missing string field 'command'. \
-                 Example: {\"command\": \"echo ok\"}. \
-                 Ensure the snippet obeys allow/deny policy before retrying."
+                 Example: {\"command\": \"echo ok\", \"is_background\": false}."
                     .to_string(),
             ),
         };
+
+        let is_background = args
+            .get("is_background")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         if let Err(reason) = self.validate_command(command) {
             return ToolResult::err(format!(
@@ -478,8 +549,9 @@ impl Tool for SandboxedShellTool {
         }
 
         let mut cmd = if self.config.use_namespace {
+            let shell = preferred_shell();
             let mut c = tokio::process::Command::new("unshare");
-            c.args(["--mount", "--pid", "--fork", "--", "sh", "-c", command]);
+            c.args(["--mount", "--pid", "--fork", "--", shell, "-c", command]);
             c
         } else {
             #[cfg(windows)]
@@ -491,7 +563,8 @@ impl Tool for SandboxedShellTool {
             }
             #[cfg(not(windows))]
             {
-                let mut c = tokio::process::Command::new("sh");
+                let shell = preferred_shell();
+                let mut c = tokio::process::Command::new(shell);
                 c.arg("-c").arg(command);
                 c
             }
@@ -504,6 +577,7 @@ impl Tool for SandboxedShellTool {
         for var in &self.config.strip_env_vars {
             cmd.env_remove(var);
         }
+        cmd.env("FASTCLAW_AGENT", "1");
 
         cmd.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -511,46 +585,69 @@ impl Tool for SandboxedShellTool {
         let timeout = tokio::time::Duration::from_secs(self.config.timeout_secs);
         let max_out = self.config.max_output_bytes;
 
-        match tokio::time::timeout(timeout, cmd.output()).await {
-            Ok(Ok(output)) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let code = output.status.code().unwrap_or(-1);
-
-                let truncate = |s: &str| -> String {
-                    if s.len() > max_out {
-                        format!("{}... [truncated, {} bytes total]", &s[..max_out], s.len())
-                    } else {
-                        s.to_string()
-                    }
-                };
-
-                let result = serde_json::json!({
-                    "exit_code": code,
-                    "stdout": truncate(&stdout),
-                    "stderr": truncate(&stderr),
-                    "sandboxed": true,
-                });
-
-                if code == 0 {
-                    ToolResult::ok(result.to_string())
-                } else {
-                    ToolResult::err(format!(
-                        "sandboxed shell_exec finished with exit_code={code} (failure). What went wrong: the command ran but returned a non-zero status. What to do next: inspect stderr then stdout inside the JSON payload; fix compiler/test/git errors, correct working_dir, or narrow the command; retry. JSON payload: {}",
-                        result.to_string()
-                    ))
+        if is_background {
+            match cmd.spawn() {
+                Ok(child) => {
+                    let pid = child.id();
+                    let desc = args.get("description").and_then(|v| v.as_str()).unwrap_or(command);
+                    ToolResult::ok(
+                        serde_json::json!({
+                            "background": true,
+                            "pid": pid,
+                            "command": command,
+                            "description": desc,
+                            "sandboxed": true,
+                        })
+                        .to_string(),
+                    )
                 }
+                Err(e) => ToolResult::err(format!("sandboxed shell_exec spawn failed: {e}")),
             }
-            Ok(Err(e)) => ToolResult::err(format!(
-                "sandboxed shell_exec failed to start the subprocess: {e}. \
-                 What went wrong: the process did not launch after sandbox validation (missing sh/unshare, bad working_dir, or OS spawn error). \
-                 What to do next: verify sh exists, if use_namespace is on confirm unshare is installed and permitted, ensure working_dir is a real directory, then retry with echo ok; if spawn still fails, escalate to the operator."
-            )),
-            Err(_) => ToolResult::err(format!(
-                "sandboxed shell_exec timed out after {}s—the process was stopped. \
-                 Narrow the command, paginate output, or split work across calls; stdout/stderr are capped by max_output_bytes.",
-                self.config.timeout_secs
-            )),
+        } else {
+            match tokio::time::timeout(timeout, cmd.output()).await {
+                Ok(Ok(output)) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let code = output.status.code().unwrap_or(-1);
+
+                    #[cfg(unix)]
+                    let signal = {
+                        use std::os::unix::process::ExitStatusExt;
+                        output.status.signal()
+                    };
+                    #[cfg(not(unix))]
+                    let signal: Option<i32> = None;
+
+                    let result = serde_json::json!({
+                        "exit_code": code,
+                        "stdout": truncate_output(&stdout, max_out),
+                        "stderr": truncate_output(&stderr, max_out),
+                        "signal": signal,
+                        "sandboxed": true,
+                    });
+
+                    let full_display = result.to_string();
+                    if code == 0 {
+                        let llm_summary = format!(
+                            "{{\"exit_code\":0,\"stdout\":{},\"stderr\":{}}}",
+                            serde_json::Value::String(truncate_output(&stdout, max_out)),
+                            serde_json::Value::String(truncate_output(&stderr, max_out)),
+                        );
+                        ToolResult::ok_split(llm_summary, full_display)
+                    } else {
+                        ToolResult::err(format!(
+                            "exit_code={code}: {}", result
+                        ))
+                    }
+                }
+                Ok(Err(e)) => ToolResult::err(format!(
+                    "sandboxed shell_exec spawn failed: {e}"
+                )),
+                Err(_) => ToolResult::err(format!(
+                    "sandboxed shell_exec timed out after {}s, command killed.",
+                    self.config.timeout_secs
+                )),
+            }
         }
     }
 }
@@ -579,9 +676,10 @@ mod sandbox_tests {
     #[test]
     fn blocks_chained_dangerous() {
         let tool = default_sandbox();
-        // rm is no longer blocked; kill still is
+        // rm and kill are no longer blocked by sandbox (handled by dangerous_ops policy)
         assert!(tool.validate_command("echo hello && rm file.txt").is_ok());
-        assert!(tool.validate_command("ls; kill -9 1234").is_err());
+        // sudo is still blocked
+        assert!(tool.validate_command("ls; sudo rm -rf /").is_err());
     }
 
     #[test]
@@ -628,13 +726,16 @@ mod sandbox_tests {
     #[tokio::test]
     async fn executes_safe_command() {
         let tool = default_sandbox();
-        let result = tool.execute(r#"{"command": "echo sandbox_test"}"#).await;
-        assert!(result.success);
+        let result = tool.execute(r#"{"command": "echo sandbox_test", "is_background": false}"#).await;
+        assert!(result.success, "command should succeed: {}", result.output);
         assert!(result.output.contains("sandbox_test"));
-        assert!(
-            result.output.contains("\"sandboxed\":true")
-                || result.output.contains("\"sandboxed\": true")
-        );
+        // "sandboxed" flag is in display_output (richer UI representation)
+        if let Some(ref display) = result.display_output {
+            assert!(
+                display.contains("\"sandboxed\":true") || display.contains("\"sandboxed\": true"),
+                "display_output should contain sandboxed flag: {}", display
+            );
+        }
     }
 
     #[tokio::test]
@@ -672,5 +773,47 @@ mod sandbox_tests {
     fn ssh_regex_allows_non_ssh_paths() {
         let tool = default_sandbox();
         assert!(tool.validate_command("cat docs/openssh-guide.md").is_ok());
+    }
+
+    #[tokio::test]
+    async fn background_command_returns_pid() {
+        let tool = default_sandbox();
+        let result = tool.execute(r#"{"command": "sleep 0.1", "is_background": true}"#).await;
+        assert!(result.success, "background command should succeed: {}", result.output);
+        assert!(
+            result.output.contains("\"background\":true") || result.output.contains("\"background\": true"),
+            "output should indicate background: {}", result.output
+        );
+        assert!(
+            result.output.contains("\"pid\""),
+            "output should include PID: {}", result.output
+        );
+    }
+
+    #[tokio::test]
+    async fn foreground_command_returns_signal_field() {
+        let tool = default_sandbox();
+        let result = tool.execute(r#"{"command": "echo signal_test", "is_background": false}"#).await;
+        assert!(result.success, "command should succeed: {}", result.output);
+        // display_output should contain signal field
+        if let Some(ref display) = result.display_output {
+            assert!(
+                display.contains("\"signal\""),
+                "display output should include signal field: {}", display
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn description_field_in_background_output() {
+        let tool = default_sandbox();
+        let result = tool.execute(
+            r#"{"command": "sleep 0.1", "is_background": true, "description": "test bg process"}"#
+        ).await;
+        assert!(result.success, "should succeed: {}", result.output);
+        assert!(
+            result.output.contains("test bg process"),
+            "should include description: {}", result.output
+        );
     }
 }

@@ -5,6 +5,34 @@ use std::sync::Arc;
 
 use crate::error::{FastClawError, FastClawResult};
 
+/// Categorizes a tool by the nature of its operation.
+/// Used for concurrent scheduling (read-only tools run in parallel)
+/// and for permission decisions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ToolKind {
+    /// Pure reads: read_file, list_dir, etc. Safe to run concurrently.
+    Read,
+    /// Text search: grep, glob, workspace_symbols. Safe to run concurrently.
+    Search,
+    /// Network fetch: web_fetch, web_search, http_fetch. Safe to run concurrently.
+    Fetch,
+    /// File writes: write_file, edit_file, apply_patch. Must be serialized.
+    Edit,
+    /// Shell/process execution: shell_exec. Must be serialized.
+    Execute,
+    /// Informational: calculator, current_time. Safe to run concurrently.
+    Think,
+    /// Other/uncategorized tools.
+    Other,
+}
+
+impl ToolKind {
+    /// Whether this kind of tool is safe to execute concurrently with others.
+    pub fn is_concurrency_safe(&self) -> bool {
+        matches!(self, Self::Read | Self::Search | Self::Fetch | Self::Think)
+    }
+}
+
 /// JSON Schema describing a tool's parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolParameterSchema {
@@ -31,6 +59,70 @@ pub struct FunctionDefinition {
     pub parameters: ToolParameterSchema,
 }
 
+/// Structured error types for tool failures.
+/// Helps the agent understand *why* a tool failed and pick the right recovery strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolErrorType {
+    // ── General ──
+    InvalidToolParams,
+    Unknown,
+    ExecutionFailed,
+    ExecutionDenied,
+
+    // ── File system ──
+    FileNotFound,
+    FileWriteFailure,
+    ReadContentFailure,
+    AttemptToCreateExistingFile,
+    FileTooLarge,
+    PermissionDenied,
+    NoSpaceLeft,
+    TargetIsDirectory,
+    PathNotInWorkspace,
+    SearchPathNotFound,
+    SearchPathNotADirectory,
+
+    // ── Edit ──
+    EditPreparationFailure,
+    EditNoOccurrenceFound,
+    EditMultipleOccurrences,
+    EditNoChange,
+
+    // ── Search / glob / ls ──
+    GlobExecutionError,
+    GrepExecutionError,
+    LsExecutionError,
+    PathIsNotADirectory,
+
+    // ── Shell ──
+    ShellExecuteError,
+
+    // ── Network ──
+    WebFetchFailed,
+    HttpFetchFailed,
+
+    // ── LSP ──
+    LspUnavailable,
+    LspRequestFailed,
+
+    // ── MCP ──
+    McpToolError,
+
+    // ── Truncation ──
+    OutputTruncated,
+}
+
+impl std::fmt::Display for ToolErrorType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = serde_json::to_value(self)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| format!("{:?}", self));
+        write!(f, "{}", s)
+    }
+}
+
 /// Result of a tool execution.
 ///
 /// `output` is what the LLM sees (may be summarized/truncated by the runtime).
@@ -42,9 +134,14 @@ pub struct ToolResult {
     pub output: String,
     /// Richer output for the UI. Falls back to `output` when `None`.
     pub display_output: Option<String>,
+    /// Structured error classification when `success` is `false`.
+    pub error_type: Option<ToolErrorType>,
     /// When `true`, the runtime should pause and ask the user for confirmation
     /// before retrying this tool call. Used by the dangerous-ops-policy `confirm` mode.
     pub needs_confirmation: bool,
+    /// Optional structured metadata for the UI (e.g. file info, diff stats).
+    /// Not sent to the LLM; consumed by frontend components for richer rendering.
+    pub metadata: Option<serde_json::Value>,
 }
 
 impl ToolResult {
@@ -53,7 +150,9 @@ impl ToolResult {
             success: true,
             output: output.into(),
             display_output: None,
+            error_type: None,
             needs_confirmation: false,
+            metadata: None,
         }
     }
 
@@ -62,7 +161,21 @@ impl ToolResult {
             success: false,
             output: error.into(),
             display_output: None,
+            error_type: Some(ToolErrorType::Unknown),
             needs_confirmation: false,
+            metadata: None,
+        }
+    }
+
+    /// Error with a specific structured error type.
+    pub fn typed_err(error_type: ToolErrorType, message: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            output: message.into(),
+            display_output: None,
+            error_type: Some(error_type),
+            needs_confirmation: false,
+            metadata: None,
         }
     }
 
@@ -72,7 +185,9 @@ impl ToolResult {
             success: true,
             output: llm_output.into(),
             display_output: Some(display.into()),
+            error_type: None,
             needs_confirmation: false,
+            metadata: None,
         }
     }
 
@@ -90,7 +205,9 @@ impl ToolResult {
             success: false,
             output: format!("⚠️ Dangerous operation — awaiting user confirmation.\n{desc}"),
             display_output: None,
+            error_type: None,
             needs_confirmation: true,
+            metadata: None,
         }
     }
 }
@@ -101,6 +218,12 @@ pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn parameters_schema(&self) -> ToolParameterSchema;
+
+    /// Tool category for concurrent scheduling and permission decisions.
+    /// Defaults to `Other`; override in tool implementations.
+    fn kind(&self) -> ToolKind {
+        ToolKind::Other
+    }
 
     async fn execute(&self, arguments: &str) -> ToolResult;
 
@@ -239,5 +362,56 @@ impl ToolRegistry {
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ─── Tool Lifecycle Hooks ────────────────────────────────────────────
+
+/// Context passed to tool hooks before or after execution.
+#[derive(Debug, Clone)]
+pub struct ToolHookContext {
+    pub tool_name: String,
+    pub tool_kind: ToolKind,
+    pub call_id: String,
+    pub arguments: String,
+    pub agent_id: String,
+}
+
+/// Result modifications a hook can request before tool execution.
+#[derive(Debug, Default)]
+pub struct PreToolAction {
+    /// If set, the tool call is blocked and this message is returned to the LLM instead.
+    pub block_reason: Option<String>,
+    /// If set, replaces the original arguments string.
+    pub modified_arguments: Option<String>,
+}
+
+/// Information passed to post-tool hooks.
+#[derive(Debug, Clone)]
+pub struct PostToolInfo {
+    pub success: bool,
+    pub output_len: usize,
+    pub latency_ms: u64,
+}
+
+/// Trait for hooks that observe or modify tool execution lifecycle.
+#[async_trait]
+pub trait ToolHook: Send + Sync {
+    fn name(&self) -> &str;
+
+    /// Called before a tool is executed. Can block or modify the call.
+    async fn pre_tool_use(
+        &self,
+        _ctx: &ToolHookContext,
+    ) -> PreToolAction {
+        PreToolAction::default()
+    }
+
+    /// Called after a tool completes. Useful for logging, metrics, or follow-up actions.
+    async fn post_tool_use(
+        &self,
+        _ctx: &ToolHookContext,
+        _info: &PostToolInfo,
+    ) {
     }
 }

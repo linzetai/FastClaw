@@ -10,6 +10,7 @@ mod network;
 mod session;
 mod shell;
 mod skill;
+mod todo;
 mod utility;
 
 #[cfg(feature = "browser")]
@@ -24,11 +25,11 @@ use fastclaw_core::workspace::AgentWorkspace;
 use fastclaw_session::SessionStore;
 
 pub use filesystem::{
-    ApplyPatchTool, EditFileTool, ListDirectoryTool, ReadFileTool, SearchInFilesTool, WriteFileTool,
+    ApplyPatchTool, EditFileTool, GlobTool, ListDirectoryTool, ReadFileTool, SearchInFilesTool, WriteFileTool,
 };
 pub use filesystem::{with_file_access_mode, with_work_dir};
 pub use media::{ImageGenerateTool, TtsTool};
-pub use memory::{MemorySearchTool, MemoryStoreTool};
+pub use memory::{MemorySearchTool, MemoryStoreTool, UnifiedMemoryTool};
 pub use network::{
     HttpFetchTool, SearchEngine, SearchResult, SearxngEngine, TavilyEngine,
     WebFetchTool, WebSearchBackend, WebSearchTool,
@@ -37,11 +38,12 @@ pub use network::{
 };
 pub use session::{session_inbox_topic, SessionsSendTool, SessionsSpawnTool};
 pub use shell::{SandboxedShellTool, ShellSandboxConfig, ShellTool};
-pub use identity::{GetIdentityTool, SetIdentityTool};
-pub use skill::{ListSkillsTool, ReadSkillTool, WriteSkillTool};
+pub use identity::{GetIdentityTool, SetIdentityTool, UnifiedIdentityTool};
+pub use skill::{ListSkillsTool, ReadSkillTool, UnifiedSkillTool, WriteSkillTool};
 pub use ask_question::{AskQuestionTool, with_stream_context};
 pub use confirm::ConfirmTool;
-pub use code_intel::{FindReferencesTool, GoToDefinitionTool, WorkspaceSymbolsTool};
+pub use todo::{TodoStore, TodoWriteTool, TodoStatus, TodoItem};
+pub use code_intel::{FindReferencesTool, GoToDefinitionTool, UnifiedLspTool, WorkspaceSymbolsTool};
 pub use utility::{CalculatorTool, CurrentTimeTool};
 
 #[cfg(feature = "browser")]
@@ -71,9 +73,8 @@ pub fn register_builtin_tools_with_sandbox(registry: &ToolRegistry, sandboxed: b
     registry.register(Arc::new(EditFileTool));
     registry.register(Arc::new(ApplyPatchTool));
     registry.register(Arc::new(SearchInFilesTool));
-    registry.register(Arc::new(WorkspaceSymbolsTool));
-    registry.register(Arc::new(GoToDefinitionTool));
-    registry.register(Arc::new(FindReferencesTool));
+    registry.register(Arc::new(GlobTool));
+    registry.register(Arc::new(UnifiedLspTool));
     registry.register(Arc::new(ListDirectoryTool));
 }
 
@@ -89,27 +90,28 @@ pub fn register_media_tools(registry: &ToolRegistry, base_url: &str, api_key: &s
     registry.register(Arc::new(TtsTool::new(base_url, api_key)));
 }
 
-/// Register skill-related tools (list_skills, read_skill).
+/// Register the unified skill tool (read-only: list + read).
 pub fn register_skill_tools(registry: &ToolRegistry, skill_registry: Arc<SkillRegistry>) {
-    registry.register(Arc::new(ListSkillsTool::new(skill_registry.clone())));
-    registry.register(Arc::new(ReadSkillTool::new(skill_registry)));
+    registry.register(Arc::new(UnifiedSkillTool::readonly(skill_registry)));
 }
 
-/// Register skill tools plus the write_skill tool (requires agent workspace).
+/// Register the unified skill tool with write support (list + read + write).
 pub fn register_skill_tools_full(
     registry: &ToolRegistry,
     skill_registry: Arc<SkillRegistry>,
     workspace: Arc<AgentWorkspace>,
 ) {
-    registry.register(Arc::new(ListSkillsTool::new(skill_registry.clone())));
-    registry.register(Arc::new(ReadSkillTool::new(skill_registry)));
-    registry.register(Arc::new(WriteSkillTool::new(workspace)));
+    registry.register(Arc::new(UnifiedSkillTool::new(skill_registry, Some(workspace))));
 }
 
-/// Register identity tools (get_identity, set_identity) for reading/writing SOUL.md, USER.md, AGENTS.md.
+/// Register the unified identity tool for reading/writing SOUL.md, USER.md, AGENTS.md.
 pub fn register_identity_tools(registry: &ToolRegistry, workspace: Arc<AgentWorkspace>) {
-    registry.register(Arc::new(GetIdentityTool::new(workspace.clone())));
-    registry.register(Arc::new(SetIdentityTool::new(workspace)));
+    registry.register(Arc::new(UnifiedIdentityTool::new(workspace)));
+}
+
+/// Register todo tracking tool (todo_write) with a shared in-session store.
+pub fn register_todo_tools(registry: &ToolRegistry, store: TodoStore) {
+    registry.register(Arc::new(TodoWriteTool::new(store)));
 }
 
 pub fn register_session_tools(

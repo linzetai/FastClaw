@@ -780,6 +780,18 @@ impl StateBuilder {
             let dream_scorer = Some(fastclaw_memory::ImportanceScorer::from(
                 state.cfg.config.memory.importance.clone(),
             ));
+            let dream_skill_store = state.store.skill_store.clone();
+            let dream_llm = Arc::new(super::LlmSkillExtraction {
+                provider: state.rt.runtime.default_provider_arc(),
+                model: state
+                    .cfg
+                    .config
+                    .agents
+                    .list
+                    .first()
+                    .and_then(|a| a.model.clone())
+                    .unwrap_or_else(|| "gpt-4o-mini".to_string()),
+            });
             tokio::spawn(async move {
                 const DREAM_EPISODE_BATCH: i64 = 50;
                 let mut interval =
@@ -809,8 +821,18 @@ impl StateBuilder {
                                             facts = report.facts_extracted,
                                             embeddings = report.embeddings_backfilled,
                                             rescored = report.importance_rescored,
+                                            skill_candidates = report.skill_candidates_found,
                                             "dream cycle completed"
                                         );
+                                    }
+                                    if report.skill_candidates_found > 0 {
+                                        promote_episodes_to_skills(
+                                            ep.as_ref(),
+                                            &dream_skill_store,
+                                            dream_llm.as_ref(),
+                                            agent_id,
+                                        )
+                                        .await;
                                     }
                                 }
                                 Err(e) => tracing::warn!(
@@ -868,5 +890,79 @@ impl StateBuilder {
         }
 
         Ok(state)
+    }
+}
+
+/// Promote high-importance procedural episodes into candidate skills via LLM.
+async fn promote_episodes_to_skills(
+    episodic: &EpisodicMemory,
+    skill_store: &SkillStore,
+    llm: &dyn fastclaw_evolution::LlmExtractionCallback,
+    agent_id: &str,
+) {
+    use fastclaw_evolution::{ExtractedSkill, SkillStatus};
+
+    let episodes = match episodic.high_importance(0.8, 10).await {
+        Ok(eps) => eps,
+        Err(e) => {
+            tracing::warn!(agent_id, error = %e, "failed to query high-importance episodes");
+            return;
+        }
+    };
+
+    for ep in &episodes {
+        let summary = format!(
+            "Agent '{}' completed the following high-value task:\n\n{}",
+            agent_id, ep.summary
+        );
+        let pattern = match llm.extract_pattern(&summary).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::debug!(episode_id = %ep.id, error = %e, "LLM skill extraction from episode skipped");
+                continue;
+            }
+        };
+        if pattern.strategy_template.split_whitespace().count() < 10 {
+            continue;
+        }
+
+        let needle = format!("{} {}", pattern.name, pattern.task_pattern);
+        let is_dup = skill_store
+            .find_similar(&needle, 10)
+            .await
+            .map(|existing| !existing.is_empty())
+            .unwrap_or(false);
+        if is_dup {
+            tracing::debug!(episode_id = %ep.id, name = %pattern.name, "skill already exists, skipping promotion");
+            continue;
+        }
+
+        let skill = ExtractedSkill {
+            id: format!("ep_promote_{}", &ep.id),
+            name: pattern.name.clone(),
+            task_pattern: pattern.task_pattern,
+            strategy_template: pattern.strategy_template,
+            parameters: pattern.parameters,
+            source_trajectory_ids: vec![ep.id.clone()],
+            success_rate: 0.0,
+            usage_count: 0,
+            status: SkillStatus::Candidate,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            version: 1,
+            parent_id: None,
+        };
+        match skill_store.save_skill(&skill).await {
+            Ok(()) => tracing::info!(
+                skill_id = %skill.id,
+                name = %skill.name,
+                episode_id = %ep.id,
+                "promoted episode to candidate skill"
+            ),
+            Err(e) => tracing::warn!(
+                episode_id = %ep.id,
+                error = %e,
+                "failed to save promoted skill"
+            ),
+        }
     }
 }

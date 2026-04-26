@@ -203,6 +203,58 @@ impl LspSessionManager {
         Ok(Some(out))
     }
 
+    pub async fn hover(
+        &self,
+        path: &str,
+        line: usize,
+        column: usize,
+        workspace_root: &str,
+    ) -> anyhow::Result<Option<String>> {
+        if !self.supports_path(path).await {
+            return Ok(None);
+        }
+        let (session, _reused) = match self.get_or_create_session(workspace_root).await {
+            Ok(s) => s,
+            Err(_) => return Ok(None),
+        };
+        let mut guard = session.lock().await;
+        self.requests_total.fetch_add(1, Ordering::Relaxed);
+
+        let result = guard
+            .request(
+                "textDocument/hover",
+                serde_json::json!({
+                    "textDocument": { "uri": path_to_uri(path)? },
+                    "position": { "line": line.saturating_sub(1), "character": column.saturating_sub(1) }
+                }),
+            )
+            .await;
+        let result = match result {
+            Ok(r) => r,
+            Err(e) => {
+                self.requests_failed.fetch_add(1, Ordering::Relaxed);
+                drop(guard);
+                self.invalidate_session(workspace_root).await;
+                return Err(e);
+            }
+        };
+        if result.is_null() {
+            return Ok(None);
+        }
+        let content = result
+            .get("contents")
+            .and_then(|c| {
+                if let Some(s) = c.as_str() {
+                    Some(s.to_string())
+                } else if let Some(obj) = c.as_object() {
+                    obj.get("value").and_then(|v| v.as_str()).map(|s| s.to_string())
+                } else {
+                    Some(c.to_string())
+                }
+            });
+        Ok(content)
+    }
+
     async fn supports_path(&self, path: &str) -> bool {
         let ext = Path::new(path)
             .extension()

@@ -5,7 +5,9 @@ use fastclaw_core::types::{ChatMessage, Role};
 use crate::llm::{CompletionParams, LlmProvider};
 
 /// Fraction of context window at which LLM compression triggers.
-pub const COMPRESSION_THRESHOLD: f32 = 0.70;
+/// Lowered from 0.70 to 0.60 — compressing earlier gives the agent more
+/// headroom and avoids the hard-truncation cliff.
+pub const COMPRESSION_THRESHOLD: f32 = 0.60;
 
 /// Fraction of recent history to preserve (the rest gets compressed).
 const PRESERVE_FRACTION: f32 = 0.30;
@@ -13,33 +15,17 @@ const PRESERVE_FRACTION: f32 = 0.30;
 /// Minimum fraction of history that must be compressible to justify an LLM call.
 const MIN_COMPRESSIBLE_FRACTION: f32 = 0.05;
 
-const COMPRESSION_SYSTEM_PROMPT: &str = r#"You are a conversation compression engine. Distill the provided conversation history into a structured state snapshot. This snapshot will become the agent's ONLY memory of the past. Preserve ALL critical details.
-
-Generate a <state_snapshot> containing:
+const COMPRESSION_SYSTEM_PROMPT: &str = r#"You are a conversation compression engine. Produce a CONCISE state snapshot (target: ≤800 tokens). This snapshot will be the agent's ONLY memory of the compressed portion. Preserve critical facts; omit verbose tool outputs, code listings, and conversational filler.
 
 <state_snapshot>
-<overall_goal>
-    <!-- One sentence: the user's high-level objective -->
-</overall_goal>
-
-<key_knowledge>
-    <!-- Crucial facts, constraints, conventions. Bullet points. -->
-</key_knowledge>
-
-<file_system_state>
-    <!-- Files created/read/modified/deleted. Status and key findings. -->
-</file_system_state>
-
-<recent_actions>
-    <!-- Last significant agent actions and outcomes. -->
-</recent_actions>
-
-<current_plan>
-    <!-- Step-by-step plan. Mark [DONE] / [IN PROGRESS] / [TODO]. -->
-</current_plan>
+<goal>One sentence: the user's objective.</goal>
+<facts>Key constraints, decisions, tech stack. Bullet points, max 10.</facts>
+<files>Files touched: path → status (created/modified/read). Only list files still relevant.</files>
+<progress>Completed steps (one-liner each). Current step. Remaining TODO items.</progress>
+<errors>Unresolved issues or blockers, if any.</errors>
 </state_snapshot>
 
-Be extremely dense with information. Omit conversational filler."#;
+Rules: no code blocks, no raw tool output, no filler. Pure information density."#;
 
 pub struct CompressionResult {
     pub compressed: bool,
@@ -91,13 +77,19 @@ fn has_tool_response(msg: &ChatMessage) -> bool {
 /// Triggers when estimated tokens exceed `COMPRESSION_THRESHOLD * context_window`.
 /// Calls the LLM with a compression prompt to generate a state snapshot,
 /// then replaces the compressed portion with the snapshot.
+/// `api_prompt_tokens`: if >0, use the API-reported prompt token count
+/// (from the previous LLM call's `usage.prompt_tokens`) as the authoritative
+/// context size. Falls back to `estimate_messages_tokens` when 0.
 pub async fn try_compress_chat(
     messages: &mut Vec<ChatMessage>,
     context_window: u32,
     provider: &Arc<dyn LlmProvider>,
     model: &str,
+    api_prompt_tokens: usize,
 ) -> CompressionResult {
-    let estimated = fastclaw_context::estimate_messages_tokens(messages);
+    let local_estimate = fastclaw_context::estimate_messages_tokens(messages);
+    // Prefer API-reported tokens; fall back to local estimate.
+    let estimated = if api_prompt_tokens > 0 { api_prompt_tokens } else { local_estimate };
     let threshold = (context_window as f32 * COMPRESSION_THRESHOLD) as usize;
 
     if estimated <= threshold {
@@ -111,6 +103,8 @@ pub async fn try_compress_chat(
 
     tracing::info!(
         estimated,
+        local_estimate,
+        api_prompt_tokens,
         threshold,
         context_window,
         "context compression triggered"
@@ -193,7 +187,7 @@ pub async fn try_compress_chat(
         model,
         messages: &compress_messages,
         temperature: 0.0,
-        max_tokens: Some(4096),
+        max_tokens: Some(2048),
         tools: None,
     };
 

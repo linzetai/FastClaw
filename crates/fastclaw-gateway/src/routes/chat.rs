@@ -363,14 +363,17 @@ async fn handle_stream(
                     });
                     yield Ok(format!("event: tool\ndata: {ev}\n\n"));
                 }
-                StreamEvent::ToolResult { tool_name, call_id, output, display_output, success } => {
-                    let ev = json!({
+                StreamEvent::ToolResult { tool_name, call_id, output, display_output, success, metadata } => {
+                    let mut ev = json!({
                         "type": "tool_result",
                         "tool": tool_name,
                         "call_id": call_id,
                         "output": display_output.as_ref().unwrap_or(&output),
                         "success": success,
                     });
+                    if let Some(meta) = metadata {
+                        ev["metadata"] = meta;
+                    }
                     yield Ok(format!("event: tool\ndata: {ev}\n\n"));
                 }
                 StreamEvent::Done { session_id, tool_calls_made, iterations, final_tool_calls, usage, elapsed_ms, .. } => {

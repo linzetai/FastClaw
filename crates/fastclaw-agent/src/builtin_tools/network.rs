@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolResult};
+use fastclaw_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolResult};
 use fastclaw_security::ssrf::{ssrf_check_url, ssrf_safe_redirect_policy};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
@@ -61,19 +61,16 @@ impl HttpFetchTool {
 
 #[async_trait]
 impl Tool for HttpFetchTool {
+    fn kind(&self) -> ToolKind { ToolKind::Fetch }
     fn name(&self) -> &str {
         "http_fetch"
     }
 
     fn description(&self) -> &str {
-        "HTTP request to one absolute URL: supports GET, POST, PUT, DELETE, PATCH, and HEAD, returning JSON {status, body} (raw response text, no HTML cleanup). Omitted or empty method defaults to GET. Use GET to read a resource, HEAD to retrieve only the status line (body is always empty for HEAD in the tool output), POST to create or trigger actions, PUT to replace a whole resource, PATCH for partial updates, and DELETE to remove. Send optional raw body text on POST, PUT, or PATCH (e.g. JSON you serialized yourself) and set Content-Type / Authorization / Accept in headers when the API needs them. \
-         For long HTML articles or docs you want to read, use web_fetch with extract_mode \"text\"—it strips tags and allows a larger text budget than http_fetch's ~4KB body truncation. \
-         When you only have a question or keywords, use web_search first, pick trustworthy URLs, then http_fetch for compact JSON or web_fetch for prose. \
-         SSRF rules block localhost, private RFC1918 ranges, link-local addresses, file://, and unsafe redirects; only vetted public http(s) URLs succeed. \
-         Responses truncate near 4096 bytes (except HEAD, which has no body) with a total-size suffix; client timeout is 10s—narrow the endpoint, add query limits, or move to web_fetch if you routinely hit limits. \
-         Non-2xx HTTP statuses still return JSON with the status field—treat them as logical failures for automation. \
-         Anti-pattern: pulling huge HTML landing pages through http_fetch expecting readable text. \
-         Example GET: {\"url\": \"https://api.github.com/zen\"}. Example POST: {\"url\": \"https://api.example.com/v1/items\", \"method\": \"POST\", \"headers\": {\"Content-Type\": \"application/json\"}, \"body\": \"{}\"}."
+        "HTTP request to an absolute URL. Returns JSON {status, body}. \
+         Supports GET (default), POST, PUT, DELETE, PATCH, HEAD. \
+         Body truncated at ~4096 bytes; timeout 10s. For HTML content, prefer web_fetch. \
+         SSRF protection blocks localhost and private IPs."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -82,7 +79,7 @@ impl Tool for HttpFetchTool {
             "url".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Full http(s) URL including scheme and host, e.g. 'https://api.github.com/repos/org/repo'. Relative paths ('/v1/status') are invalid. Must pass SSRF policy (no localhost/private/file). If DNS or TLS fails, fix the hostname or trust chain before retrying."
+                "description": "Absolute http(s) URL."
             }),
         );
         props.insert(
@@ -91,21 +88,21 @@ impl Tool for HttpFetchTool {
                 "type": "string",
                 "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"],
                 "default": "GET",
-                "description": "HTTP method. GET: fetch a representation (default when omitted). HEAD: like GET but the tool does not return a response body—only {status, body: \"\"}—use to check existence, ETag, or status without payload size. POST: submit a body to create a resource or run an action. PUT: replace a resource with the given body. PATCH: apply a partial change with a body. DELETE: request deletion (body is not sent even if 'body' is set). Use case-insensitive values if your stack requires; the schema lists uppercase for clarity."
+                "description": "HTTP method (default GET)."
             }),
         );
         props.insert(
             "headers".to_string(),
             serde_json::json!({
                 "type": "object",
-                "description": "Optional string-to-string map of request headers, e.g. {\"Content-Type\": \"application/json\", \"Authorization\": \"Bearer <token>\", \"Accept\": \"application/json\"}. Values must be strings (not numbers). Set Content-Type when you send a JSON or form body; set Authorization for bearer tokens, API keys in headers, or basic auth. Omit for simple GET/HEAD. Invalid header names or values are rejected; prefer documented API names."
+                "description": "Optional request headers as {name: value} map."
             }),
         );
         props.insert(
             "body".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Optional raw request body for POST, PUT, or PATCH only. You serialize JSON, form strings, or plain text yourself (e.g. \"{\\\"ok\\\":true}\", or \"name=a&b=c\" for x-www-form-urlencoded with matching Content-Type). Ignored for GET, HEAD, and DELETE. Leave unset for empty bodies when the method allows."
+                "description": "Optional request body (POST/PUT/PATCH only)."
             }),
         );
         ToolParameterSchema {
@@ -950,16 +947,14 @@ impl WebSearchTool {
 
 #[async_trait]
 impl Tool for WebSearchTool {
+    fn kind(&self) -> ToolKind { ToolKind::Search }
     fn name(&self) -> &str {
         "web_search"
     }
 
     fn description(&self) -> &str {
-        "Search the public web and return ranked hits {title, url, snippet}. Backend is deployment-specific: Tavily (API key required) or SearXNG (self-hosted instance URL). Configure in Settings → 联网搜索. \
-         Use web_search when facts may be outdated, you need discoverable URLs, or you must narrow sources before web_fetch/http_fetch. For code and configs in this workspace, use read_file, list_directory, and shell_exec+rg—web_search cannot read local files. \
-         Optional max_results defaults to 5 and caps at 10; snippets are short summaries—follow 1–3 primary URLs with web_fetch for authoritative text, tables, or API fields. \
-         Anti-pattern: treating snippets as full specifications; anti-pattern: web_search for symbols you could rg locally. \
-         Example: {\"query\": \"Rust tokio select! vs join! 2024\", \"max_results\": 5}, then web_fetch the official doc URL you pick."
+        "Search the public web. Returns ranked hits {title, url, snippet}. \
+         max_results defaults to 5, caps at 10. Follow up with web_fetch for full content."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -968,14 +963,14 @@ impl Tool for WebSearchTool {
             "query".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Keywords or a short question. Examples: 'async rust axum middleware example', 'OpenAI responses API streaming'. Add year, vendor, or version when topics collide ('postgres 16 replication')."
+                "description": "Search query string."
             }),
         );
         props.insert(
             "max_results".to_string(),
             serde_json::json!({
                 "type": "integer",
-                "description": "Max hits to return (integer; default 5, hard max 10). Non-integer JSON is ignored—send a bare number like 5, not \"5\". Use 3–5 for focused answers; use up to 10 only when comparing many similar pages."
+                "description": "Max results (default 5, max 10)."
             }),
         );
         ToolParameterSchema {
@@ -1066,18 +1061,15 @@ impl WebFetchTool {
 
 #[async_trait]
 impl Tool for WebFetchTool {
+    fn kind(&self) -> ToolKind { ToolKind::Fetch }
     fn name(&self) -> &str {
         "web_fetch"
     }
 
     fn description(&self) -> &str {
-        "Download one HTTP(S) document and return JSON {url, status, content_type, content, content_length}. Field extract_mode controls shaping: \"text\" (default) strips HTML to readable plain text; \"raw\" keeps truncated HTML; \"markdown\" is a lightweight text pass—not CommonMark-perfect and not a browser. \
-         No JavaScript execution—SPAs that render entirely in JS may look empty; in that case use an API, static mirror, or the browser tool if enabled. \
-         Use web_fetch after web_search or when the user supplies a URL and you need readable prose, README pages, or docs. Prefer http_fetch for tiny JSON probes; web_fetch is meant for HTML with a larger extracted-text ceiling than http_fetch's raw ~4KB cap. \
-         SSRF policy matches http_fetch. Extracted content truncates at max_content_bytes (commonly 32768) with an explicit suffix—use anchors, section URLs, or site search when clipped. \
-         HTTP 4xx/5xx still returns tool-success JSON—inspect status before trusting content (error pages are not facts). \
-         Anti-pattern: fetching PDFs, archives, or images expecting text. \
-         Example: {\"url\": \"https://doc.rust-lang.org/book/ch03-02-data-types.html\", \"extract_mode\": \"text\"}."
+        "Fetch a web page and extract content. Returns JSON {url, status, content_type, content, content_length}. \
+         extract_mode: 'text' (default, strips HTML), 'raw' (raw HTML), 'markdown'. \
+         No JS execution. Content truncated at ~32KB."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -1086,13 +1078,13 @@ impl Tool for WebFetchTool {
             "url".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Full https URL to fetch, e.g. 'https://docs.rs/serde/latest/serde/'. Must satisfy SSRF rules. Prefer URLs from web_search results or the user; do not guess private hostnames."
+                "description": "Absolute http(s) URL to fetch."
             }),
         );
         props.insert("extract_mode".to_string(), serde_json::json!({
             "type": "string",
             "enum": ["text", "raw", "markdown"],
-            "description": "text (default): strip tags for human reading; raw: keep HTML (truncated); markdown: light cleanup (not spec-perfect). Omit for text. Unknown values behave like text."
+            "description": "Content extraction mode (default 'text')."
         }));
         ToolParameterSchema {
             schema_type: "object".to_string(),

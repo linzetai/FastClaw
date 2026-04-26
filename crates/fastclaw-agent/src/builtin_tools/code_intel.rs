@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolResult};
+use fastclaw_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolResult};
 use serde::Deserialize;
 
 use super::filesystem::{ReadFileTool, SearchInFilesTool};
@@ -100,6 +100,7 @@ pub struct WorkspaceSymbolsTool;
 
 #[async_trait]
 impl Tool for WorkspaceSymbolsTool {
+    fn kind(&self) -> ToolKind { ToolKind::Search }
     fn name(&self) -> &str {
         "workspace_symbols"
     }
@@ -232,6 +233,7 @@ pub struct GoToDefinitionTool;
 
 #[async_trait]
 impl Tool for GoToDefinitionTool {
+    fn kind(&self) -> ToolKind { ToolKind::Search }
     fn name(&self) -> &str {
         "go_to_definition"
     }
@@ -350,6 +352,7 @@ pub struct FindReferencesTool;
 
 #[async_trait]
 impl Tool for FindReferencesTool {
+    fn kind(&self) -> ToolKind { ToolKind::Search }
     fn name(&self) -> &str {
         "find_references"
     }
@@ -514,6 +517,310 @@ impl Tool for FindReferencesTool {
             .to_string(),
         )
     }
+}
+
+// ─── Unified LSP Tool ────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnifiedLspArgs {
+    operation: String,
+    #[serde(default)]
+    file_path: Option<String>,
+    #[serde(default)]
+    line: Option<usize>,
+    #[serde(default)]
+    character: Option<usize>,
+    #[serde(default)]
+    include_declaration: Option<bool>,
+    #[serde(default)]
+    query: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+pub struct UnifiedLspTool;
+
+#[async_trait]
+impl Tool for UnifiedLspTool {
+    fn kind(&self) -> ToolKind { ToolKind::Search }
+    fn name(&self) -> &str { "lsp" }
+
+    fn description(&self) -> &str {
+        "Unified LSP tool supporting multiple code intelligence operations: \
+         goToDefinition, findReferences, hover, documentSymbol, workspaceSymbol, \
+         goToImplementation, diagnostics, workspaceDiagnostics, codeActions. \
+         Requires file_path for file-scoped operations, and line+character for position-scoped ones."
+    }
+
+    fn parameters_schema(&self) -> ToolParameterSchema {
+        let mut props = HashMap::new();
+        props.insert("operation".to_string(), serde_json::json!({
+            "type": "string",
+            "enum": ["goToDefinition", "findReferences", "hover", "documentSymbol",
+                     "workspaceSymbol", "goToImplementation", "diagnostics",
+                     "workspaceDiagnostics", "codeActions"],
+            "description": "LSP operation to perform."
+        }));
+        props.insert("filePath".to_string(), serde_json::json!({
+            "type": "string",
+            "description": "File path (absolute or workspace-relative). Required for all operations except workspaceSymbol and workspaceDiagnostics."
+        }));
+        props.insert("line".to_string(), serde_json::json!({
+            "type": "integer",
+            "description": "1-based line number. Required for position-scoped operations (goToDefinition, findReferences, hover, goToImplementation)."
+        }));
+        props.insert("character".to_string(), serde_json::json!({
+            "type": "integer",
+            "description": "1-based column number. Required for position-scoped operations."
+        }));
+        props.insert("includeDeclaration".to_string(), serde_json::json!({
+            "type": "boolean",
+            "description": "Include the declaration in findReferences results. Default false."
+        }));
+        props.insert("query".to_string(), serde_json::json!({
+            "type": "string",
+            "description": "Query string for workspaceSymbol search."
+        }));
+        props.insert("limit".to_string(), serde_json::json!({
+            "type": "integer",
+            "description": "Maximum number of results. Default 50."
+        }));
+        ToolParameterSchema {
+            schema_type: "object".to_string(),
+            properties: props,
+            required: vec!["operation".to_string()],
+        }
+    }
+
+    async fn execute(&self, arguments: &str) -> ToolResult {
+        let args: UnifiedLspArgs = match serde_json::from_str(arguments) {
+            Ok(v) => v,
+            Err(e) => return ToolResult::err(format!("lsp tool invalid JSON: {e}")),
+        };
+
+        match args.operation.as_str() {
+            "goToDefinition" => {
+                let (path, line, col) = match require_position(&args) {
+                    Ok(v) => v,
+                    Err(e) => return ToolResult::err(e),
+                };
+                let inner_args = serde_json::json!({
+                    "path": path, "line": line, "column": col,
+                    "limit": args.limit.unwrap_or(20)
+                }).to_string();
+                GoToDefinitionTool.execute(&inner_args).await
+            }
+            "findReferences" => {
+                let (path, line, col) = match require_position(&args) {
+                    Ok(v) => v,
+                    Err(e) => return ToolResult::err(e),
+                };
+                let inner_args = serde_json::json!({
+                    "path": path, "line": line, "column": col,
+                    "include_declaration": args.include_declaration.unwrap_or(false),
+                    "limit": args.limit.unwrap_or(200)
+                }).to_string();
+                FindReferencesTool.execute(&inner_args).await
+            }
+            "workspaceSymbol" => {
+                let query = match &args.query {
+                    Some(q) if !q.trim().is_empty() => q.clone(),
+                    _ => return ToolResult::err("workspaceSymbol requires a non-empty 'query' parameter.".to_string()),
+                };
+                let inner_args = serde_json::json!({
+                    "query": query,
+                    "limit": args.limit.unwrap_or(50)
+                }).to_string();
+                WorkspaceSymbolsTool.execute(&inner_args).await
+            }
+            "hover" => {
+                let (path, line, col) = match require_position(&args) {
+                    Ok(v) => v,
+                    Err(e) => return ToolResult::err(e),
+                };
+                execute_hover(&path, line, col).await
+            }
+            "documentSymbol" => {
+                let path = match &args.file_path {
+                    Some(p) if !p.trim().is_empty() => p.clone(),
+                    _ => return ToolResult::err("documentSymbol requires 'filePath'.".to_string()),
+                };
+                execute_document_symbol(&path).await
+            }
+            "goToImplementation" => {
+                let (path, line, col) = match require_position(&args) {
+                    Ok(v) => v,
+                    Err(e) => return ToolResult::err(e),
+                };
+                execute_go_to_implementation(&path, line, col).await
+            }
+            "diagnostics" => {
+                let path = match &args.file_path {
+                    Some(p) if !p.trim().is_empty() => p.clone(),
+                    _ => return ToolResult::err("diagnostics requires 'filePath'.".to_string()),
+                };
+                execute_diagnostics(&path).await
+            }
+            "workspaceDiagnostics" => {
+                execute_workspace_diagnostics().await
+            }
+            "codeActions" => {
+                let (path, line, col) = match require_position(&args) {
+                    Ok(v) => v,
+                    Err(e) => return ToolResult::err(e),
+                };
+                execute_code_actions(&path, line, col).await
+            }
+            other => ToolResult::err(format!(
+                "Unknown LSP operation: '{}'. Supported: goToDefinition, findReferences, hover, \
+                 documentSymbol, workspaceSymbol, goToImplementation, diagnostics, \
+                 workspaceDiagnostics, codeActions.",
+                other
+            )),
+        }
+    }
+}
+
+fn require_position(args: &UnifiedLspArgs) -> Result<(String, usize, usize), String> {
+    let path = args.file_path.as_deref().filter(|p| !p.trim().is_empty())
+        .ok_or_else(|| format!("{} requires 'filePath'.", args.operation))?;
+    let line = args.line.ok_or_else(|| format!("{} requires 'line'.", args.operation))?;
+    let col = args.character.ok_or_else(|| format!("{} requires 'character'.", args.operation))?;
+    Ok((path.to_string(), line, col))
+}
+
+async fn execute_hover(path: &str, line: usize, col: usize) -> ToolResult {
+    if let Ok(workspace_root) = std::env::current_dir() {
+        let lsp = LspSessionManager::global();
+        if let Ok(Some(result)) = lsp.hover(path, line, col, &workspace_root.to_string_lossy()).await {
+            return ToolResult::ok(serde_json::json!({
+                "operation": "hover",
+                "filePath": path,
+                "line": line,
+                "character": col,
+                "content": result,
+                "engine": "lsp",
+            }).to_string());
+        }
+    }
+    let read_args = serde_json::json!({"path": path, "offset": line as i64, "limit": 5}).to_string();
+    let context = ReadFileTool.execute(&read_args).await;
+    if context.success {
+        let token = extract_token_at_column(
+            context.output.lines().next().unwrap_or_default(), col
+        );
+        ToolResult::ok(serde_json::json!({
+            "operation": "hover",
+            "filePath": path,
+            "line": line,
+            "character": col,
+            "content": format!("Token: {}. Context:\n{}", token.unwrap_or_default(), context.output),
+            "engine": "fallback",
+        }).to_string())
+    } else {
+        ToolResult::err(format!("hover: could not read {}:{}:{}", path, line, col))
+    }
+}
+
+async fn execute_document_symbol(path: &str) -> ToolResult {
+    let pattern = r"\b(fn|struct|enum|trait|impl|class|interface|type|const|static|pub|def|function)\s+\w+";
+    let search_args = serde_json::json!({
+        "pattern": pattern,
+        "path": path,
+        "max_results": 200,
+    }).to_string();
+    let result = SearchInFilesTool.execute(&search_args).await;
+    if !result.success {
+        return result;
+    }
+    let matches = match parse_search_matches(&result.output) {
+        Ok(m) => m,
+        Err(e) => return ToolResult::err(e),
+    };
+    let symbols: Vec<serde_json::Value> = matches.into_iter().map(|m| {
+        let text = m.get("text").and_then(|v| v.as_str()).unwrap_or_default();
+        serde_json::json!({
+            "name": text.split_whitespace().last().unwrap_or_default(),
+            "kind": text.split_whitespace().next().unwrap_or("symbol"),
+            "line": m.get("line").and_then(|v| v.as_u64()).unwrap_or(0),
+            "snippet": text.trim(),
+        })
+    }).collect();
+    ToolResult::ok(serde_json::json!({
+        "operation": "documentSymbol",
+        "filePath": path,
+        "symbols": symbols,
+        "count": symbols.len(),
+        "engine": "heuristic",
+    }).to_string())
+}
+
+async fn execute_go_to_implementation(path: &str, line: usize, col: usize) -> ToolResult {
+    let read_args = serde_json::json!({"path": path, "offset": line as i64, "limit": 1}).to_string();
+    let line_result = ReadFileTool.execute(&read_args).await;
+    if !line_result.success {
+        return line_result;
+    }
+    let token = extract_token_at_column(
+        line_result.output.lines().next().unwrap_or_default(), col
+    );
+    let symbol = match token {
+        Some(t) => t,
+        None => return ToolResult::err(format!("goToImplementation: no symbol at {}:{}:{}", path, line, col)),
+    };
+    let pattern = format!(r"\bimpl\s+(?:\w+\s+for\s+)?{}\b", regex::escape(&symbol));
+    let search_args = serde_json::json!({
+        "pattern": pattern,
+        "path": ".",
+        "max_results": 50,
+    }).to_string();
+    let result = SearchInFilesTool.execute(&search_args).await;
+    if !result.success {
+        return result;
+    }
+    let matches = match parse_search_matches(&result.output) {
+        Ok(m) => m,
+        Err(e) => return ToolResult::err(e),
+    };
+    ToolResult::ok(serde_json::json!({
+        "operation": "goToImplementation",
+        "symbol": symbol,
+        "implementations": matches,
+        "count": matches.len(),
+        "engine": "heuristic",
+    }).to_string())
+}
+
+async fn execute_diagnostics(path: &str) -> ToolResult {
+    ToolResult::ok(serde_json::json!({
+        "operation": "diagnostics",
+        "filePath": path,
+        "diagnostics": [],
+        "count": 0,
+        "note": "LSP diagnostics not yet connected. Use shell_exec with compiler/linter for diagnostics.",
+    }).to_string())
+}
+
+async fn execute_workspace_diagnostics() -> ToolResult {
+    ToolResult::ok(serde_json::json!({
+        "operation": "workspaceDiagnostics",
+        "diagnostics": [],
+        "count": 0,
+        "note": "LSP workspace diagnostics not yet connected. Use shell_exec with compiler/linter.",
+    }).to_string())
+}
+
+async fn execute_code_actions(path: &str, line: usize, col: usize) -> ToolResult {
+    ToolResult::ok(serde_json::json!({
+        "operation": "codeActions",
+        "filePath": path,
+        "line": line,
+        "character": col,
+        "actions": [],
+        "count": 0,
+        "note": "LSP code actions not yet connected. Describe the desired fix and use edit_file directly.",
+    }).to_string())
 }
 
 #[cfg(test)]

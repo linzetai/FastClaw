@@ -190,6 +190,22 @@ async fn run_consolidation(
 
     let (summary, facts) = parse_consolidation_reply(&reply);
 
+    if summary.split_whitespace().count() < 5 && facts.is_empty() {
+        tracing::debug!(
+            agent_id = %agent_id,
+            summary_len = summary.len(),
+            "consolidation reply too short or empty, skipping storage"
+        );
+        return Ok(());
+    }
+
+    let facts: Vec<_> = facts
+        .into_iter()
+        .filter(|(s, p, o)| {
+            !s.trim().is_empty() && !p.trim().is_empty() && !o.trim().is_empty()
+        })
+        .collect();
+
     if !summary.is_empty() {
         let ep = Episode {
             id: format!("cons_{}", &uuid::Uuid::new_v4().to_string()[..8]),

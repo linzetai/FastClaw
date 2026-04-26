@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use fastclaw_core::agent_config::FileAccessMode;
-use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolResult};
+use fastclaw_core::tool::{Tool, ToolErrorType, ToolKind, ToolParameterSchema, ToolResult};
 use regex::RegexBuilder;
 use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
@@ -118,6 +118,9 @@ fn ensure_within_workspace(path: &Path, must_exist: bool) -> std::io::Result<Pat
 
 const DEFAULT_READ_FILE_MAX_CHARS: usize = 32_768;
 const ABSOLUTE_READ_FILE_MAX_CHARS: usize = 256_000;
+/// Default maximum lines to return when no offset/limit is specified.
+/// Prevents accidentally dumping 100k lines into the LLM context.
+const DEFAULT_READ_FILE_MAX_LINES: usize = 2000;
 
 #[derive(Debug, Deserialize)]
 struct ReadFileArgs {
@@ -154,6 +157,7 @@ struct SearchInFilesArgs {
     glob: Option<String>,
     case_sensitive: Option<bool>,
     max_results: Option<usize>,
+    context_lines: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,7 +199,8 @@ fn render_line_slice(content: &str, offset: Option<i64>, limit: Option<usize>, n
         return "File is empty.".to_string();
     }
     let lines: Vec<&str> = content.lines().collect();
-    let (start, end) = compute_slice_bounds(lines.len(), offset, limit);
+    let total = lines.len();
+    let (start, end) = compute_slice_bounds(total, offset, limit);
     let mut rendered = String::new();
     for (idx, line) in lines[start..end].iter().enumerate() {
         if number_lines {
@@ -206,7 +211,252 @@ fn render_line_slice(content: &str, offset: Option<i64>, limit: Option<usize>, n
             rendered.push('\n');
         }
     }
+    if offset.is_some() || limit.is_some() {
+        rendered.push_str(&format!(
+            "\n[Showing lines {}-{} of {} total]",
+            start + 1,
+            end,
+            total
+        ));
+    }
     rendered
+}
+
+fn looks_like_binary(bytes: &[u8], sample_size: usize) -> bool {
+    let check = &bytes[..bytes.len().min(sample_size)];
+    let null_count = check.iter().filter(|&&b| b == 0).count();
+    null_count > 0
+}
+
+fn detect_line_ending(content: &str) -> &'static str {
+    if content.contains("\r\n") { "crlf" } else { "lf" }
+}
+
+fn build_edit_snippet(content: &str, needle: &str, context: usize) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    if let Some(pos) = content.find(needle) {
+        let line_idx = content[..pos].matches('\n').count();
+        let needle_lines = needle.matches('\n').count() + 1;
+        let start = line_idx.saturating_sub(context);
+        let end = (line_idx + needle_lines + context).min(lines.len());
+        lines[start..end]
+            .iter()
+            .enumerate()
+            .map(|(i, l)| format!("{}|{}", start + i + 1, l))
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        String::new()
+    }
+}
+
+/// Normalize whitespace for fuzzy matching: collapse runs of spaces/tabs
+/// to a single space and trim each line, preserving line structure.
+fn normalize_whitespace(s: &str) -> String {
+    s.lines()
+        .map(|line| {
+            let mut result = String::with_capacity(line.len());
+            let mut prev_ws = false;
+            for ch in line.chars() {
+                if ch == ' ' || ch == '\t' {
+                    if !prev_ws {
+                        result.push(' ');
+                    }
+                    prev_ws = true;
+                } else {
+                    result.push(ch);
+                    prev_ws = false;
+                }
+            }
+            result.trim().to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Try fuzzy matching when exact match fails.
+/// Returns (normalized_file_content, start_byte, end_byte) if a unique fuzzy match is found.
+enum FuzzyMatchResult {
+    /// Exact match (no fuzzy needed) — or a unique fuzzy match found.
+    UniqueMatch {
+        /// Byte offset in the *original* (LF-normalized) file content.
+        start: usize,
+        end: usize,
+    },
+    NoMatch,
+    MultipleMatches(usize),
+}
+
+fn try_fuzzy_match(file_content: &str, old_string: &str) -> FuzzyMatchResult {
+    let norm_file = normalize_whitespace(file_content);
+    let norm_old = normalize_whitespace(old_string);
+    if norm_old.is_empty() {
+        return FuzzyMatchResult::NoMatch;
+    }
+
+    let match_count = norm_file.matches(&norm_old).count();
+    if match_count == 0 {
+        return FuzzyMatchResult::NoMatch;
+    }
+    if match_count > 1 {
+        return FuzzyMatchResult::MultipleMatches(match_count);
+    }
+
+    // Found exactly one fuzzy match — map it back to the original content.
+    // Strategy: normalize both, find position in normalized, then walk
+    // original lines to locate the corresponding original byte range.
+    let file_lines: Vec<&str> = file_content.lines().collect();
+    let norm_file_lines: Vec<String> = file_lines.iter().map(|l| {
+        let mut result = String::with_capacity(l.len());
+        let mut prev_ws = false;
+        for ch in l.chars() {
+            if ch == ' ' || ch == '\t' {
+                if !prev_ws { result.push(' '); }
+                prev_ws = true;
+            } else {
+                result.push(ch);
+                prev_ws = false;
+            }
+        }
+        result.trim().to_string()
+    }).collect();
+
+    let norm_old_lines: Vec<&str> = norm_old.lines().collect();
+    let old_line_count = norm_old_lines.len();
+    if old_line_count == 0 {
+        return FuzzyMatchResult::NoMatch;
+    }
+
+    // Find which original line the fuzzy match starts at
+    for start_line in 0..file_lines.len() {
+        if start_line + old_line_count > file_lines.len() {
+            break;
+        }
+        let mut all_match = true;
+        for (i, norm_old_line) in norm_old_lines.iter().enumerate() {
+            if norm_file_lines[start_line + i] != *norm_old_line {
+                all_match = false;
+                break;
+            }
+        }
+        if all_match {
+            // Calculate byte offsets in the original content
+            let mut byte_offset = 0usize;
+            for line in file_lines.iter().take(start_line) {
+                byte_offset += line.len() + 1; // +1 for '\n'
+            }
+            let start_byte = byte_offset;
+            for line in file_lines.iter().skip(start_line).take(old_line_count) {
+                byte_offset += line.len() + 1;
+            }
+            // Don't include the trailing newline of the last matched line
+            let end_byte = byte_offset.saturating_sub(1);
+            // But if old_string ends with newline, include it
+            if old_string.ends_with('\n') {
+                return FuzzyMatchResult::UniqueMatch { start: start_byte, end: byte_offset.min(file_content.len()) };
+            }
+            return FuzzyMatchResult::UniqueMatch { start: start_byte, end: end_byte.min(file_content.len()) };
+        }
+    }
+    FuzzyMatchResult::NoMatch
+}
+
+/// Build a unified-diff style snippet for the LLM to verify the edit.
+fn build_diff_snippet(old_text: &str, new_text: &str, file_path: &str) -> String {
+    let old_lines: Vec<&str> = old_text.lines().collect();
+    let new_lines: Vec<&str> = new_text.lines().collect();
+
+    let mut diff = String::new();
+    diff.push_str(&format!("--- a/{file_path}\n+++ b/{file_path}\n"));
+
+    // Simple line-by-line diff (not a full Myers diff, but good enough for snippets)
+    let max_lines = old_lines.len().max(new_lines.len());
+    let context_window = 3;
+    let mut i = 0;
+    while i < max_lines {
+        let old_line = old_lines.get(i).copied().unwrap_or("");
+        let new_line = new_lines.get(i).copied().unwrap_or("");
+        if i < old_lines.len() && i < new_lines.len() && old_line == new_line {
+            if i < context_window || i >= max_lines.saturating_sub(context_window) {
+                diff.push_str(&format!(" {old_line}\n"));
+            }
+        } else {
+            if i < old_lines.len() {
+                diff.push_str(&format!("-{old_line}\n"));
+            }
+            if i < new_lines.len() {
+                diff.push_str(&format!("+{new_line}\n"));
+            }
+        }
+        i += 1;
+    }
+    diff
+}
+
+/// Creates user-friendly error messages based on the error type.
+/// This helps prevent exposing internal system details to the LLM.
+fn create_user_friendly_error(error_type: ToolErrorType, path: &str) -> String {
+    match error_type {
+        ToolErrorType::FileNotFound => {
+            format!("The file '{}' does not exist. Please verify the file path.", path)
+        }
+        ToolErrorType::FileWriteFailure => {
+            format!("Could not write to file '{}'. Check file permissions or disk space.", path)
+        }
+        ToolErrorType::ReadContentFailure => {
+            format!("Could not read file '{}'. The file may be locked, corrupted, or inaccessible.", path)
+        }
+        ToolErrorType::AttemptToCreateExistingFile => {
+            format!("File '{}' already exists. To modify an existing file, provide non-empty old_string and new_string parameters.", path)
+        }
+        ToolErrorType::PermissionDenied => {
+            format!(
+                "Permission denied accessing '{}'. \
+                 Possible causes: \
+                 (1) The file_access mode is set to 'none' — the user can change this in the agent settings panel under '文件访问权限'. \
+                 (2) OS-level file permissions prevent access — suggest the user check ownership/permissions. \
+                 (3) The file is locked by another process.",
+                path,
+            )
+        }
+        ToolErrorType::NoSpaceLeft => {
+            format!("No space left on device while writing to '{}'. Free up some disk space.", path)
+        }
+        ToolErrorType::TargetIsDirectory => {
+            format!("Expected a file but '{}' is a directory. Please specify a file path.", path)
+        }
+        ToolErrorType::PathNotInWorkspace => {
+            format!(
+                "Cannot access path '{}': it is outside the current workspace root. \
+                 Solutions: \
+                 (1) Use a path relative to the workspace root. \
+                 (2) Ask the user to change the working directory via the folder icon (工作目录) at the bottom of the chat input. \
+                 (3) If full filesystem access is needed, the user can set file_access to 'full' in the agent settings panel under '文件访问权限'.",
+                path,
+            )
+        }
+        ToolErrorType::SearchPathNotFound => {
+            format!("Search path '{}' does not exist or is not accessible.", path)
+        }
+        ToolErrorType::SearchPathNotADirectory => {
+            format!("Search path '{}' is not a directory. Please specify a directory path.", path)
+        }
+        ToolErrorType::EditPreparationFailure => {
+            format!("Could not prepare to edit '{}'. Check file permissions or if the file is accessible.", path)
+        }
+        ToolErrorType::EditNoOccurrenceFound => {
+            format!("In file '{}': Could not find the specified text to replace. The file may have changed or the text to find is incorrect.", path)
+        }
+        ToolErrorType::EditMultipleOccurrences => {
+            format!("In file '{}': Found multiple occurrences of the text. Provide more context to uniquely identify the location to edit.", path)
+        }
+        ToolErrorType::EditNoChange => {
+            format!("In file '{}': Old and new content are identical. No changes were made.", path)
+        }
+        _ => {
+            format!("An error occurred while processing '{}'.", path)
+        }
+    }
 }
 
 fn is_skippable_dir_name(name: &str) -> bool {
@@ -236,7 +486,103 @@ fn simple_glob_match(glob: &str, text: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn collect_text_files(base: &Path, max_files: usize) -> std::io::Result<Vec<PathBuf>> {
+struct GitignorePatterns {
+    patterns: Vec<(String, bool)>,
+}
+
+impl GitignorePatterns {
+    fn is_ignored(&self, rel_path: &str) -> bool {
+        let mut ignored = false;
+        for (pattern, negated) in &self.patterns {
+            if gitignore_pattern_matches(pattern, rel_path) {
+                ignored = !negated;
+            }
+        }
+        ignored
+    }
+}
+
+fn load_gitignore_patterns(root: &Path) -> GitignorePatterns {
+    let gitignore_path = root.join(".gitignore");
+    let mut patterns = Vec::new();
+    if let Ok(content) = fs::read_to_string(gitignore_path) {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let (pat, negated) = if let Some(stripped) = trimmed.strip_prefix('!') {
+                (stripped.to_string(), true)
+            } else {
+                (trimmed.to_string(), false)
+            };
+            patterns.push((pat, negated));
+        }
+    }
+    GitignorePatterns { patterns }
+}
+
+fn gitignore_pattern_matches(pattern: &str, rel_path: &str) -> bool {
+    let pat = pattern.trim_end_matches('/');
+    
+    // Handle absolute patterns (starting with /) - only match relative to root
+    if pat.starts_with('/') {
+        let clean_pat = &pat[1..];  // Remove leading slash
+        return simple_glob_match(clean_pat, rel_path);
+    }
+    
+    // Handle directory-only patterns (ending with /)
+    if pattern.ends_with('/') {
+        let dir_pat = &pat[..pat.len()-1];  // Remove trailing slash
+        // Match if path starts with the directory pattern
+        return rel_path.starts_with(&format!("{}/", dir_pat)) || 
+               simple_glob_match(dir_pat, rel_path);
+    }
+    
+    // Split the path into segments
+    let segments: Vec<&str> = rel_path.split('/').collect();
+    
+    // Check if pattern matches any segment (for patterns like "node_modules")
+    for seg in &segments {
+        if simple_glob_match(pat, seg) {
+            return true;
+        }
+    }
+    
+    // Check if pattern matches the full path (for specific file patterns like "build.gradle")
+    if simple_glob_match(pat, rel_path) {
+        return true;
+    }
+    
+    // Handle globstar patterns (though simplified)
+    if pat.contains("**") {
+        // For "**" patterns, match anywhere in the path
+        let parts: Vec<&str> = pat.split("**").collect();
+        if parts.len() == 2 {
+            let (prefix, suffix) = (parts[0], parts[1]);
+            if prefix.is_empty() && rel_path.contains(suffix) {
+                return true;
+            } else if suffix.is_empty() && rel_path.starts_with(prefix) {
+                return true;
+            } else if !prefix.is_empty() && !suffix.is_empty() {
+                if let Some(pos) = rel_path.find(prefix) {
+                    if rel_path[pos + prefix.len()..].ends_with(suffix) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    
+    false
+}
+
+fn collect_text_files_filtered(
+    base: &Path,
+    max_files: usize,
+    gitignore: &GitignorePatterns,
+    root: &Path,
+) -> std::io::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     let mut stack = vec![base.to_path_buf()];
 
@@ -248,6 +594,17 @@ fn collect_text_files(base: &Path, max_files: usize) -> std::io::Result<Vec<Path
                 Ok(ft) => ft,
                 Err(_) => continue,
             };
+
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(path.as_path())
+                .to_string_lossy()
+                .to_string();
+
+            if gitignore.is_ignored(&rel) {
+                continue;
+            }
+
             if file_type.is_dir() {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if !is_skippable_dir_name(name) {
@@ -290,21 +647,17 @@ pub struct ReadFileTool;
 
 #[async_trait]
 impl Tool for ReadFileTool {
+    fn kind(&self) -> ToolKind { ToolKind::Read }
     fn name(&self) -> &str {
         "read_file"
     }
 
     fn description(&self) -> &str {
-        "Read one UTF-8 text file from the gateway host with optional line-window slicing. \
-         By default, read_file returns full text (capped by max_chars); with offset/limit it returns only the requested line range, which is much faster for large files. \
-         Use read_file when you need the authoritative on-disk text before quoting, explaining, or merging edits: source, configs, READMEs, or logs. \
-         When you are unsure of cwd or spelling, call list_directory on \".\" or the parent folder first; wrong paths fail fast and burn a turn. \
-         To find a symbol or string across the repo, use shell_exec with ripgrep (rg) or grep—do not open many files with read_file in a loop. web_search and web_fetch only reach the public internet; they never read this workspace. \
-         Never pass http(s) URLs to read_file; for web pages use web_search to discover links, then web_fetch or http_fetch. \
-         Hard cap defaults to 32,768 characters; you can raise max_chars up to 256,000 for one call. \
-         Non-UTF-8 and binary content are not supported; request a text export or an approved binary path. Symlinks are followed; broken links fail with a read error—fix the target or use a resolved path. \
-         Anti-pattern: using read_file as a workspace-wide search; anti-pattern: re-reading huge files without offset/limit. \
-         Examples: {\"path\": \"src/main.rs\"}, {\"path\": \"src/main.rs\", \"offset\": 200, \"limit\": 80, \"number_lines\": true}."
+        "Read a file's content. Large files auto-truncated to 2000 lines by default. \
+         Use offset/limit to read specific line ranges for large files. \
+         Handles text files; binary and non-UTF-8 files return an error. \
+         Also truncated if content exceeds max_chars (default 32768, max 256000). \
+         Use number_lines=true to get line-numbered output for precise references."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -313,7 +666,7 @@ impl Tool for ReadFileTool {
             "path".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Single existing file path (absolute or relative to the gateway cwd). Good: 'src/main.rs', './config/default.json', '/var/log/app.log'. Bad: a folder path (use list_directory); bad: 'https://…' (use web_fetch). If ENOENT, list_directory the parent and correct spelling. Symlinks are followed—if you get odd errors, the link target may be missing."
+                "description": "File path (absolute or relative to cwd)."
             }),
         );
         props.insert(
@@ -363,43 +716,119 @@ impl Tool for ReadFileTool {
 
         let validated = match ensure_within_workspace(Path::new(path), true) {
             Ok(p) => p,
-            Err(e) => {
-                return ToolResult::err(format!(
-                    "read_file blocked by workspace boundary policy for '{path}': {e}"
-                ))
+            Err(_) => {
+                return ToolResult::typed_err(
+                    ToolErrorType::PathNotInWorkspace,
+                    create_user_friendly_error(ToolErrorType::PathNotInWorkspace, path),
+                )
             }
         };
 
-        match tokio::fs::read_to_string(&validated).await {
-            Ok(content) => {
-                if args.offset.is_some() || args.limit.is_some() || args.number_lines {
-                    return ToolResult::ok(render_line_slice(
-                        &content,
-                        args.offset,
-                        args.limit,
-                        args.number_lines,
-                    ));
-                }
-
-                let max_chars = args
-                    .max_chars
-                    .unwrap_or(DEFAULT_READ_FILE_MAX_CHARS)
-                    .clamp(1, ABSOLUTE_READ_FILE_MAX_CHARS);
-                let char_count = content.chars().count();
-                let truncated = if char_count > max_chars {
-                    let head: String = content.chars().take(max_chars).collect();
-                    format!("{head}... [truncated, {char_count} chars total]")
+        let raw_bytes = match tokio::fs::read(&validated).await {
+            Ok(b) => b,
+            Err(e) => {
+                let err_type = if e.kind() == std::io::ErrorKind::NotFound {
+                    ToolErrorType::FileNotFound
+                } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    ToolErrorType::PermissionDenied
                 } else {
-                    content
+                    ToolErrorType::ReadContentFailure
                 };
-                ToolResult::ok(truncated)
+                return ToolResult::typed_err(
+                    err_type,
+                    format!(
+                        "read_file failed for path '{path}': {e}. \
+                         Recovery: {recovery}",
+                        recovery = match err_type {
+                            ToolErrorType::FileNotFound => "Run list_directory on the parent to find the correct filename.",
+                            ToolErrorType::PermissionDenied => "The user may need to adjust file_access in agent settings ('文件访问权限'), or set a different working directory via the folder icon at the bottom of the chat.",
+                            _ => "The file may be binary or locked—do not retry read_file on binary content."
+                        }
+                    ),
+                );
             }
-            Err(e) => ToolResult::err(format!(
-                "read_file failed for path '{path}': {e}. \
-                 What went wrong: the gateway could not open or decode the file as UTF-8 text. \
-                 What to do next: if ENOENT (not found), run list_directory on the parent directory or '.' to fix the path; if EACCES (permission denied), pick a readable path or use shell_exec 'ls -la <dir>' if policy allows; if the message mentions invalid UTF-8, the file is binary or wrong encoding—do not retry read_file; ask for a text export or use a binary-safe workflow."
-            )),
+        };
+
+        let file_size = raw_bytes.len();
+
+        if looks_like_binary(&raw_bytes, 8192) {
+            return ToolResult::typed_err(
+                ToolErrorType::ReadContentFailure,
+                format!(
+                    "read_file: '{path}' appears to be a binary file ({file_size} bytes). \
+                     Binary files are not supported. Use shell_exec to inspect binary content \
+                     (e.g. `file {path}`, `hexdump -C {path} | head`) or request a text export."
+                ),
+            );
         }
+
+        let content = match String::from_utf8(raw_bytes) {
+            Ok(s) => s,
+            Err(_) => {
+                return ToolResult::typed_err(
+                    ToolErrorType::ReadContentFailure,
+                    format!(
+                        "read_file: '{path}' contains invalid UTF-8 ({file_size} bytes). \
+                         The file may use a non-UTF-8 encoding. \
+                         Try shell_exec with iconv or file to check encoding."
+                    ),
+                );
+            }
+        };
+
+        let total_lines = content.lines().count();
+        let line_ending = detect_line_ending(&content);
+
+        if args.offset.is_some() || args.limit.is_some() || args.number_lines {
+            return ToolResult::ok(render_line_slice(
+                &content,
+                args.offset,
+                args.limit,
+                args.number_lines,
+            ));
+        }
+
+        let max_chars = args
+            .max_chars
+            .unwrap_or(DEFAULT_READ_FILE_MAX_CHARS)
+            .clamp(1, ABSOLUTE_READ_FILE_MAX_CHARS);
+
+        // Apply default line limit for large files (like Qwen Code's 2000-line default)
+        let line_truncated = total_lines > DEFAULT_READ_FILE_MAX_LINES;
+        let content = if line_truncated {
+            let truncated_text: String = content
+                .lines()
+                .take(DEFAULT_READ_FILE_MAX_LINES)
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!(
+                "{truncated_text}\n\
+                 [File content truncated: showing lines 1-{DEFAULT_READ_FILE_MAX_LINES} of {total_lines} total lines. \
+                 Use offset/limit parameters to read remaining content.]"
+            )
+        } else {
+            content
+        };
+
+        let char_count = content.chars().count();
+        let char_truncated = char_count > max_chars;
+        let text = if char_truncated {
+            let head: String = content.chars().take(max_chars).collect();
+            format!("{head}\n[truncated, showing {max_chars} of {char_count} chars, {total_lines} total lines]")
+        } else {
+            content
+        };
+
+        let is_truncated = line_truncated || char_truncated;
+
+        let mut result = ToolResult::ok(text);
+        result.metadata = Some(serde_json::json!({
+            "totalLines": total_lines,
+            "fileSize": file_size,
+            "lineEnding": line_ending,
+            "truncated": is_truncated,
+        }));
+        result
     }
 }
 
@@ -408,20 +837,15 @@ pub struct WriteFileTool;
 
 #[async_trait]
 impl Tool for WriteFileTool {
+    fn kind(&self) -> ToolKind { ToolKind::Edit }
     fn name(&self) -> &str {
         "write_file"
     }
 
     fn description(&self) -> &str {
-        "Write one UTF-8 text file on the gateway host with explicit mode control. \
-         Modes: overwrite (default, atomic full replace), append (add content at file end), create_new (fail if file exists). \
-         For safe concurrent edits, use expected_content to enforce optimistic locking: write proceeds only when the current file exactly matches your expected baseline. \
-         Missing parent directories are created automatically; you usually do not need a separate mkdir. \
-         Before overwriting important files, read_file the current version and merge edits carefully. \
-         Prefer write_file for source, docs, and configs you own; avoid bulk-rewriting vendor trees or lockfiles unless the user explicitly asked. \
-         Runs as the gateway OS user; permission denied means pick a writable location or ask the operator—do not assume sudo. \
-         Anti-pattern: megabyte payloads in one JSON string—split files or stream via shell if policy allows. \
-         Examples: {\"path\": \"notes.md\", \"content\": \"...\"}, {\"path\": \"log.txt\", \"content\": \"line\\n\", \"mode\": \"append\"}."
+        "Write content to a file. Modes: overwrite (default), append, create_new. \
+         Parent directories are created automatically. \
+         Use expected_content for optimistic locking (write only if current content matches)."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -430,7 +854,7 @@ impl Tool for WriteFileTool {
             "path".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "File path to write (absolute or relative to gateway cwd). Examples: 'src/lib.rs', 'notes/meeting.md'. Parent dirs are auto-created. The path must denote a file, not an existing directory. To create only a directory, use shell_exec 'mkdir -p …' if allowed, or write a placeholder file such as .gitkeep."
+                "description": "File path (absolute or relative to cwd). Parent dirs auto-created."
             }),
         );
         props.insert(
@@ -480,20 +904,20 @@ impl Tool for WriteFileTool {
 
         let validated = match ensure_within_workspace(Path::new(path), false) {
             Ok(p) => p,
-            Err(e) => {
-                return ToolResult::err(format!(
-                    "write_file blocked by workspace boundary policy for '{path}': {e}"
-                ))
+            Err(_) => {
+                return ToolResult::typed_err(
+                    ToolErrorType::PathNotInWorkspace,
+                    create_user_friendly_error(ToolErrorType::PathNotInWorkspace, path),
+                )
             }
         };
         let file_path = validated.as_path();
         if let Some(parent) = file_path.parent() {
-            if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                return ToolResult::err(format!(
-                    "write_file could not create parent directories for '{path}': {e}. \
-                     Pick a path under a writable root, shorten the path, or create parents with shell_exec (mkdir -p) only if policy allows. \
-                     Check disk space and permissions if this persists."
-                ));
+            if let Err(_) = tokio::fs::create_dir_all(parent).await {
+                return ToolResult::typed_err(
+                    ToolErrorType::FileWriteFailure,
+                    format!("Could not create parent directories for '{path}'. Check directory permissions."),
+                );
             }
         }
 
@@ -556,11 +980,19 @@ impl Tool for WriteFileTool {
                     .to_string(),
                 )
             }
-            Err(e) => ToolResult::err(format!(
-                "write_file failed for '{path}': {e}. \
-                 What went wrong: the gateway could not write bytes (wrong path type, full disk, permissions, or OS error). \
-                 What to do next: ensure the path is a file target (not an existing directory), check free space and write permission; if the file already existed, read_file it first and merge before retrying so you do not clobber content."
-            )),
+            Err(e) => {
+                let err_type = if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    ToolErrorType::AttemptToCreateExistingFile
+                } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    ToolErrorType::PermissionDenied
+                } else {
+                    ToolErrorType::FileWriteFailure
+                };
+                ToolResult::typed_err(
+                    err_type,
+                    format!("Could not write to file '{path}'. Check file permissions or disk space."),
+                )
+            }
         }
     }
 }
@@ -570,16 +1002,17 @@ pub struct EditFileTool;
 
 #[async_trait]
 impl Tool for EditFileTool {
+    fn kind(&self) -> ToolKind { ToolKind::Edit }
     fn name(&self) -> &str {
         "edit_file"
     }
 
     fn description(&self) -> &str {
-        "Edit one UTF-8 text file using exact string replacement, similar to patch-style edits but simpler for LLMs. \
-         Provide old_string and new_string; by default exactly one replacement is applied. \
-         If old_string appears multiple times, set replace_all=true or expected_replacements to avoid ambiguity. \
-         This avoids full-file rewrites and reduces accidental clobbering. \
-         Example: {\"path\": \"src/lib.rs\", \"old_string\": \"fn old()\", \"new_string\": \"fn new()\"}."
+        "Replace text in a file, or create a new file (empty old_string). \
+         old_string should match exactly one location (include 3+ lines of context for uniqueness). \
+         Set replace_all=true to replace every occurrence. Line endings auto-preserved. \
+         If exact match fails, falls back to whitespace-normalized fuzzy matching. \
+         CRITICAL: old_string must be the literal text from the file including indentation."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -641,94 +1074,447 @@ impl Tool for EditFileTool {
             }
         };
 
+        // When old_string is empty, this is a "create new file" operation
         if args.old_string.is_empty() {
-            return ToolResult::err(
-                "edit_file requires non-empty old_string to avoid ambiguous global insertions."
-                    .to_string(),
+            if args.new_string.is_empty() {
+                return ToolResult::typed_err(
+                    ToolErrorType::InvalidToolParams,
+                    "edit_file: both old_string and new_string are empty. Nothing to do.",
+                );
+            }
+            let validated = match ensure_within_workspace(Path::new(&args.path), false) {
+                Ok(p) => p,
+                Err(_) => {
+                    return ToolResult::typed_err(
+                        ToolErrorType::PathNotInWorkspace,
+                        create_user_friendly_error(ToolErrorType::PathNotInWorkspace, &args.path),
+                    )
+                }
+            };
+            if validated.exists() {
+                return ToolResult::typed_err(
+                    ToolErrorType::AttemptToCreateExistingFile,
+                    create_user_friendly_error(ToolErrorType::AttemptToCreateExistingFile, &args.path),
+                );
+            }
+            if let Some(parent) = validated.parent() {
+                if let Err(_) = tokio::fs::create_dir_all(parent).await {
+                    return ToolResult::typed_err(
+                        ToolErrorType::FileWriteFailure,
+                        format!("Could not create parent directories for '{}'. Check directory permissions.", args.path),
+                    );
+                }
+            }
+            let new_lines = args.new_string.lines().count();
+            return match atomic_write_text(&validated, &args.new_string).await {
+                Ok(()) => {
+                    ToolResult::ok(
+                        serde_json::json!({
+                            "created": true,
+                            "path": args.path,
+                            "bytes": args.new_string.len(),
+                            "linesAdded": new_lines,
+                            "linesRemoved": 0,
+                            "diffStat": format!("+{new_lines} -0 lines"),
+                        })
+                        .to_string(),
+                    )
+                }
+                Err(e) => ToolResult::typed_err(
+                    ToolErrorType::FileWriteFailure,
+                    format!("edit_file failed to create '{}': {e}", args.path),
+                ),
+            };
+        }
+
+        if args.old_string == args.new_string {
+            return ToolResult::typed_err(
+                ToolErrorType::EditNoChange,
+                create_user_friendly_error(ToolErrorType::EditNoChange, &args.path),
             );
         }
 
         let validated = match ensure_within_workspace(Path::new(&args.path), true) {
             Ok(p) => p,
-            Err(e) => {
-                return ToolResult::err(format!(
-                    "edit_file blocked by workspace boundary policy for '{}': {e}",
-                    args.path
-                ))
+            Err(_) => {
+                return ToolResult::typed_err(
+                    ToolErrorType::PathNotInWorkspace,
+                    create_user_friendly_error(ToolErrorType::PathNotInWorkspace, &args.path),
+                )
             }
         };
 
-        let current = match tokio::fs::read_to_string(&validated).await {
-            Ok(c) => c,
+        let raw_bytes = match tokio::fs::read(&validated).await {
+            Ok(b) => b,
             Err(e) => {
-                return ToolResult::err(format!(
-                    "edit_file failed to read '{}': {e}",
-                    args.path
-                ))
+                let err_type = if e.kind() == std::io::ErrorKind::NotFound {
+                    ToolErrorType::FileNotFound
+                } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    ToolErrorType::PermissionDenied
+                } else {
+                    ToolErrorType::ReadContentFailure
+                };
+                
+                return ToolResult::typed_err(err_type, create_user_friendly_error(err_type, &args.path));
             }
         };
 
-        let match_count = current.matches(&args.old_string).count();
+        let current = match String::from_utf8(raw_bytes) {
+            Ok(s) => s,
+            Err(_) => {
+                return ToolResult::typed_err(
+                    ToolErrorType::ReadContentFailure,
+                    format!("File '{}' contains binary data which cannot be edited. Use appropriate tools for binary files.", args.path),
+                );
+            }
+        };
+
+        let original_line_ending = detect_line_ending(&current);
+
+        // Normalize to LF for matching, then restore original line ending
+        let normalized = current.replace("\r\n", "\n");
+        let old_normalized = args.old_string.replace("\r\n", "\n");
+        let new_normalized = args.new_string.replace("\r\n", "\n");
+
+        let match_count = normalized.matches(&old_normalized).count();
         if let Some(expected) = args.expected_replacements {
             if match_count != expected {
-                return ToolResult::err(format!(
-                    "edit_file expected {expected} matches but found {match_count} in '{}'.",
-                    args.path
-                ));
+                return ToolResult::typed_err(
+                    ToolErrorType::EditMultipleOccurrences,
+                    create_user_friendly_error(ToolErrorType::EditMultipleOccurrences, &args.path),
+                );
             }
         }
-        if match_count == 0 {
-            return ToolResult::err(format!(
-                "edit_file found no matches for old_string in '{}'.",
-                args.path
-            ));
-        }
-        if !args.replace_all && args.expected_replacements.is_none() && match_count > 1 {
-            return ToolResult::err(format!(
-                "edit_file found {match_count} matches in '{}'; set replace_all=true or expected_replacements to disambiguate.",
-                args.path
-            ));
-        }
 
-        let updated = if args.replace_all {
-            current.replace(&args.old_string, &args.new_string)
+        // --- Fuzzy matching fallback (inspired by Qwen Code's multi-stage correction) ---
+        // If exact match fails, try whitespace-normalized matching before giving up.
+        let (updated_normalized, replaced, fuzzy_used) = if match_count == 0 {
+            match try_fuzzy_match(&normalized, &old_normalized) {
+                FuzzyMatchResult::UniqueMatch { start, end } => {
+                    // Replace the original text range with new_string
+                    let mut result = String::with_capacity(normalized.len());
+                    result.push_str(&normalized[..start]);
+                    result.push_str(&new_normalized);
+                    result.push_str(&normalized[end..]);
+                    (result, 1usize, true)
+                }
+                FuzzyMatchResult::NoMatch => {
+                    // Provide helpful context: show the first few lines of the file
+                    let file_preview: String = normalized.lines().take(20)
+                        .enumerate()
+                        .map(|(i, l)| format!("{}|{}", i + 1, l))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    return ToolResult::typed_err(
+                        ToolErrorType::EditNoOccurrenceFound,
+                        format!(
+                            "In file '{}': Could not find the specified text to replace \
+                             (neither exact nor whitespace-normalized match). \
+                             The file may have changed or the old_string is incorrect.\n\
+                             Hint: re-read the file with read_file to get the current content, \
+                             then retry with the exact text.\n\
+                             File preview (first 20 lines):\n{file_preview}",
+                            args.path
+                        ),
+                    );
+                }
+                FuzzyMatchResult::MultipleMatches(n) => {
+                    return ToolResult::typed_err(
+                        ToolErrorType::EditMultipleOccurrences,
+                        format!(
+                            "In file '{}': Found {n} whitespace-normalized matches \
+                             (exact match found 0). Provide more surrounding context \
+                             to uniquely identify the location to edit, \
+                             or set replace_all=true to replace all occurrences.",
+                            args.path
+                        ),
+                    );
+                }
+            }
+        } else if !args.replace_all && args.expected_replacements.is_none() && match_count > 1 {
+            return ToolResult::typed_err(
+                ToolErrorType::EditMultipleOccurrences,
+                format!(
+                    "In file '{}': Found {} exact matches. Provide more surrounding context \
+                     to uniquely identify the location, or set replace_all=true.",
+                    args.path, match_count
+                ),
+            );
         } else {
-            current.replacen(&args.old_string, &args.new_string, 1)
+            let result = if args.replace_all {
+                normalized.replace(&old_normalized, &new_normalized)
+            } else {
+                normalized.replacen(&old_normalized, &new_normalized, 1)
+            };
+            let count = if args.replace_all { match_count } else { 1 };
+            (result, count, false)
         };
-        let replaced = if args.replace_all { match_count } else { 1 };
+
+        // Restore original line ending style
+        let updated = if original_line_ending == "crlf" {
+            updated_normalized.replace('\n', "\r\n")
+        } else {
+            updated_normalized
+        };
+
+        let old_lines = normalized.lines().count();
+        let new_lines = updated.lines().count();
+        let added = new_lines.saturating_sub(old_lines);
+        let removed = old_lines.saturating_sub(new_lines);
+
+        // Build both a context snippet and a unified-diff snippet for verification
+        let snippet = build_edit_snippet(&updated, &new_normalized, 4);
+        let diff = build_diff_snippet(&old_normalized, &new_normalized, &args.path);
 
         match atomic_write_text(&validated, &updated).await {
-            Ok(()) => ToolResult::ok(
-                serde_json::json!({
-                    "edited": true,
-                    "path": args.path,
-                    "replacements": replaced,
-                    "bytes": updated.len(),
-                })
-                .to_string(),
+            Ok(()) => {
+                let diff_stat = format!("+{} -{} lines", added, removed);
+                let mut result = ToolResult::ok(
+                    serde_json::json!({
+                        "edited": true,
+                        "path": args.path,
+                        "replacements": replaced,
+                        "bytes": updated.len(),
+                        "diffStat": diff_stat,
+                        "linesAdded": added,
+                        "linesRemoved": removed,
+                        "snippet": snippet,
+                        "fuzzyMatch": fuzzy_used,
+                    })
+                    .to_string(),
+                );
+                result.display_output = Some(
+                    serde_json::json!({
+                        "edited": true,
+                        "path": args.path,
+                        "replacements": replaced,
+                        "diffStat": diff_stat,
+                        "fuzzyMatch": fuzzy_used,
+                        "diff": diff,
+                        "snippet": snippet,
+                    })
+                    .to_string(),
+                );
+                result.metadata = Some(serde_json::json!({
+                    "lineEnding": original_line_ending,
+                    "totalLines": new_lines,
+                    "fuzzyMatch": fuzzy_used,
+                }));
+                result
+            }
+            Err(_) => ToolResult::typed_err(
+                ToolErrorType::FileWriteFailure,
+                format!("Could not write to file '{}'. Check file permissions or disk space.", args.path),
             ),
-            Err(e) => ToolResult::err(format!(
-                "edit_file failed to write '{}': {e}",
-                args.path
-            )),
         }
     }
 }
 
 /// Search text across files under a directory.
+/// Uses ripgrep (rg) when available for blazing fast search; otherwise falls back to built-in Rust implementation.
 pub struct SearchInFilesTool;
+
+/// Check if ripgrep is available on the system.
+fn is_ripgrep_available() -> bool {
+    std::process::Command::new("rg")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Execute search via ripgrep for much faster results on large codebases.
+async fn search_via_ripgrep(
+    pattern: &str,
+    scope: &Path,
+    glob: Option<&str>,
+    case_sensitive: bool,
+    max_results: usize,
+    context_lines: usize,
+    root: &Path,
+) -> Result<(String, usize, usize, bool), String> {
+    let mut cmd = tokio::process::Command::new("rg");
+    cmd.arg("--json"); // JSON output for structured parsing
+    cmd.arg("--max-count").arg(max_results.to_string());
+
+    if !case_sensitive {
+        cmd.arg("--ignore-case");
+    }
+    if context_lines > 0 {
+        cmd.arg("-C").arg(context_lines.to_string());
+    }
+    if let Some(g) = glob {
+        cmd.arg("--glob").arg(g);
+    }
+
+    cmd.arg("--").arg(pattern).arg(scope);
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    let output = tokio::time::timeout(
+        tokio::time::Duration::from_secs(30),
+        cmd.output(),
+    )
+    .await
+    .map_err(|_| "ripgrep search timed out after 30s".to_string())?
+    .map_err(|e| format!("ripgrep execution failed: {e}"))?;
+
+    // rg exits with 1 when no matches found, 2+ on error
+    if output.status.code().unwrap_or(-1) > 1 {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("ripgrep error: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut text_output = String::new();
+    let mut match_count = 0usize;
+    let mut matched_files = std::collections::HashSet::new();
+    let mut current_file = String::new();
+    let mut truncated = false;
+
+    for line in stdout.lines() {
+        let json: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        match json.get("type").and_then(|t| t.as_str()) {
+            Some("match") => {
+                if match_count >= max_results {
+                    truncated = true;
+                    break;
+                }
+                let data = &json["data"];
+                let path_text = data["path"]["text"].as_str().unwrap_or("");
+                let rel_path = Path::new(path_text)
+                    .strip_prefix(root)
+                    .unwrap_or(Path::new(path_text))
+                    .to_string_lossy();
+                let line_number = data["line_number"].as_u64().unwrap_or(0);
+                let line_text = data["lines"]["text"].as_str().unwrap_or("").trim_end();
+
+                if current_file != rel_path.as_ref() {
+                    if !current_file.is_empty() {
+                        text_output.push_str("---\n");
+                    }
+                    current_file = rel_path.to_string();
+                }
+                text_output.push_str(&format!("{rel_path}:{line_number}:{line_text}\n"));
+                matched_files.insert(rel_path.to_string());
+                match_count += 1;
+            }
+            Some("context") => {
+                if context_lines > 0 {
+                    let data = &json["data"];
+                    let path_text = data["path"]["text"].as_str().unwrap_or("");
+                    let rel_path = Path::new(path_text)
+                        .strip_prefix(root)
+                        .unwrap_or(Path::new(path_text))
+                        .to_string_lossy();
+                    let line_number = data["line_number"].as_u64().unwrap_or(0);
+                    let line_text = data["lines"]["text"].as_str().unwrap_or("").trim_end();
+                    text_output.push_str(&format!("{rel_path}-{line_number}-{line_text}\n"));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok((text_output, match_count, matched_files.len(), truncated))
+}
+
+/// Fallback: built-in Rust search when ripgrep is not available.
+fn search_builtin(
+    pattern: &str,
+    files: &[PathBuf],
+    glob_filter: Option<&str>,
+    case_sensitive: bool,
+    max_results: usize,
+    context_lines: usize,
+    root: &Path,
+) -> Result<(String, usize, usize, bool), String> {
+    let regex = RegexBuilder::new(pattern)
+        .case_insensitive(!case_sensitive)
+        .build()
+        .map_err(|_| format!("Invalid regex pattern '{pattern}'. Please check the syntax."))?;
+
+    let mut text_output = String::new();
+    let mut match_count = 0usize;
+    let mut matched_files = 0usize;
+    let mut truncated = false;
+
+    for file in files {
+        if match_count >= max_results {
+            truncated = true;
+            break;
+        }
+        let rel = file
+            .strip_prefix(root)
+            .unwrap_or(file.as_path())
+            .to_string_lossy()
+            .to_string();
+        if let Some(glob) = glob_filter {
+            if !simple_glob_match(glob, &rel) {
+                continue;
+            }
+        }
+
+        let content = match fs::read_to_string(file) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let all_lines: Vec<&str> = content.lines().collect();
+        let mut file_hit = false;
+        for (line_no, line) in all_lines.iter().enumerate() {
+            if match_count >= max_results {
+                truncated = true;
+                break;
+            }
+            if regex.is_match(line) {
+                if !file_hit && !text_output.is_empty() {
+                    text_output.push_str("---\n");
+                }
+
+                if context_lines > 0 {
+                    let ctx_start = line_no.saturating_sub(context_lines);
+                    for i in ctx_start..line_no {
+                        text_output.push_str(&format!("{rel}-{}-{}\n", i + 1, all_lines[i]));
+                    }
+                }
+
+                text_output.push_str(&format!("{rel}:{}:{}\n", line_no + 1, line));
+
+                if context_lines > 0 {
+                    let ctx_end = (line_no + context_lines + 1).min(all_lines.len());
+                    for i in (line_no + 1)..ctx_end {
+                        text_output.push_str(&format!("{rel}-{}-{}\n", i + 1, all_lines[i]));
+                    }
+                }
+
+                file_hit = true;
+                match_count += 1;
+            }
+        }
+        if file_hit {
+            matched_files += 1;
+        }
+    }
+
+    Ok((text_output, match_count, matched_files, truncated))
+}
 
 #[async_trait]
 impl Tool for SearchInFilesTool {
+    fn kind(&self) -> ToolKind { ToolKind::Search }
     fn name(&self) -> &str {
         "search_in_files"
     }
 
     fn description(&self) -> &str {
-        "Search text in workspace files quickly, similar to ripgrep-style lookup. \
-         Supports regex pattern, optional directory scope, and optional glob filter. \
-         Returns structured matches with file path, line, column, and matching line text. \
-         Best practice: use search_in_files first to locate symbols, then read_file with offset/limit."
+        "Search files using regex. Returns matches with file paths and line numbers in ripgrep-style format. \
+         Uses ripgrep (rg) for fast search when available; falls back to built-in implementation. \
+         Case-insensitive by default. Supports glob filter, context lines (0-5). Respects .gitignore."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -737,7 +1523,7 @@ impl Tool for SearchInFilesTool {
             "pattern".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Regex pattern to search for. Example: \"fn\\s+main\"."
+                "description": "Regex pattern to search for. Example: \"fn\\s+main\", \"TODO|FIXME\"."
             }),
         );
         props.insert(
@@ -751,14 +1537,14 @@ impl Tool for SearchInFilesTool {
             "glob".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Optional simple glob filter for relative paths, e.g. '*.rs' or 'src/*.ts'."
+                "description": "Optional glob filter for file names, e.g. '*.rs', '*.{ts,tsx}', 'src/*.ts'."
             }),
         );
         props.insert(
             "case_sensitive".to_string(),
             serde_json::json!({
                 "type": "boolean",
-                "description": "Optional. Defaults to true."
+                "description": "Optional. Defaults to false (case-insensitive). Set true for case-sensitive search."
             }),
         );
         props.insert(
@@ -766,6 +1552,13 @@ impl Tool for SearchInFilesTool {
             serde_json::json!({
                 "type": "integer",
                 "description": "Optional cap on returned matches. Default 200, max 2000."
+            }),
+        );
+        props.insert(
+            "context_lines".to_string(),
+            serde_json::json!({
+                "type": "integer",
+                "description": "Optional number of lines to show before and after each match (0-5). Default 0. Useful for understanding match context without a separate read_file call."
             }),
         );
         ToolParameterSchema {
@@ -781,7 +1574,7 @@ impl Tool for SearchInFilesTool {
             Err(e) => {
                 return ToolResult::err(format!(
                     "search_in_files arguments are not valid JSON: {e}. \
-                     Pass {{\"pattern\":\"...\"}} with optional path/glob/case_sensitive/max_results."
+                     Pass {{\"pattern\":\"...\"}} with optional path/glob/case_sensitive/max_results/context_lines."
                 ))
             }
         };
@@ -793,10 +1586,11 @@ impl Tool for SearchInFilesTool {
         let scope = args.path.as_deref().unwrap_or(".");
         let validated = match ensure_within_workspace(Path::new(scope), true) {
             Ok(p) => p,
-            Err(e) => {
-                return ToolResult::err(format!(
-                    "search_in_files blocked by workspace boundary policy for '{scope}': {e}"
-                ))
+            Err(_) => {
+                return ToolResult::typed_err(
+                    ToolErrorType::PathNotInWorkspace,
+                    create_user_friendly_error(ToolErrorType::PathNotInWorkspace, scope),
+                )
             }
         };
         let root = match workspace_root().and_then(|p| p.canonicalize()) {
@@ -808,103 +1602,118 @@ impl Tool for SearchInFilesTool {
             }
         };
 
-        let regex = match RegexBuilder::new(&args.pattern)
-            .case_insensitive(!args.case_sensitive.unwrap_or(true))
-            .build()
-        {
-            Ok(r) => r,
-            Err(e) => {
-                return ToolResult::err(format!(
-                    "search_in_files invalid regex pattern '{}': {e}",
-                    args.pattern
-                ))
-            }
-        };
-
+        let case_sensitive = args.case_sensitive.unwrap_or(false);
         let max_results = args.max_results.unwrap_or(200).clamp(1, 2000);
-        let mut files = if validated.is_file() {
-            vec![validated.clone()]
-        } else {
-            match collect_text_files(&validated, 50_000) {
-                Ok(v) => v,
-                Err(e) => {
-                    return ToolResult::err(format!(
-                        "search_in_files failed to enumerate files under '{}': {e}",
-                        scope
-                    ))
-                }
-            }
-        };
-        files.sort();
+        let ctx = args.context_lines.unwrap_or(0).min(5);
 
-        let mut results = Vec::new();
-        let mut scanned_files = 0usize;
-        let mut matched_files = 0usize;
-        let mut truncated = false;
-        for file in files {
-            if results.len() >= max_results {
-                truncated = true;
-                break;
-            }
-            let rel = file
-                .strip_prefix(&root)
-                .unwrap_or(file.as_path())
-                .to_string_lossy()
-                .to_string();
-            if let Some(glob) = args.glob.as_deref() {
-                if !simple_glob_match(glob, &rel) {
-                    continue;
-                }
-            }
-
-            scanned_files += 1;
-            let content = match fs::read_to_string(&file) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-            let mut file_hit = false;
-            for (line_no, line) in content.lines().enumerate() {
-                if results.len() >= max_results {
-                    truncated = true;
-                    break;
-                }
-                for m in regex.find_iter(line) {
-                    results.push(serde_json::json!({
-                        "path": rel,
-                        "line": line_no + 1,
-                        "column": m.start() + 1,
-                        "match": m.as_str(),
-                        "text": line,
-                    }));
-                    file_hit = true;
-                    if results.len() >= max_results {
-                        truncated = true;
-                        break;
+        // Try ripgrep first for speed (respects .gitignore natively)
+        let use_rg = is_ripgrep_available();
+        let (text_output, match_count, matched_files, truncated) = if use_rg {
+            match search_via_ripgrep(
+                &args.pattern,
+                &validated,
+                args.glob.as_deref(),
+                case_sensitive,
+                max_results,
+                ctx,
+                &root,
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(rg_err) => {
+                    // Fallback to built-in on rg failure
+                    tracing::warn!("ripgrep failed, falling back to built-in: {rg_err}");
+                    let gitignore = load_gitignore_patterns(&root);
+                    let mut files = if validated.is_file() {
+                        vec![validated.clone()]
+                    } else {
+                        collect_text_files_filtered(&validated, 50_000, &gitignore, &root)
+                            .unwrap_or_default()
+                    };
+                    files.sort();
+                    match search_builtin(
+                        &args.pattern,
+                        &files,
+                        args.glob.as_deref(),
+                        case_sensitive,
+                        max_results,
+                        ctx,
+                        &root,
+                    ) {
+                        Ok(r) => r,
+                        Err(e) => return ToolResult::typed_err(ToolErrorType::GrepExecutionError, e),
                     }
                 }
-                if results.len() >= max_results {
-                    break;
+            }
+        } else {
+            let gitignore = load_gitignore_patterns(&root);
+            let mut files = if validated.is_file() {
+                vec![validated.clone()]
+            } else {
+                match collect_text_files_filtered(&validated, 50_000, &gitignore, &root) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return ToolResult::typed_err(
+                            ToolErrorType::GrepExecutionError,
+                            format!("Could not search in '{}'. Check directory permissions or if the path exists.", scope),
+                        )
+                    }
                 }
+            };
+            files.sort();
+            match search_builtin(
+                &args.pattern,
+                &files,
+                args.glob.as_deref(),
+                case_sensitive,
+                max_results,
+                ctx,
+                &root,
+            ) {
+                Ok(r) => r,
+                Err(e) => return ToolResult::typed_err(ToolErrorType::GrepExecutionError, e),
             }
-            if file_hit {
-                matched_files += 1;
-            }
-        }
+        };
 
-        ToolResult::ok(
+        // LLM-friendly text output (like ripgrep format)
+        let header = format!(
+            "Found {} matches in {} files for pattern \"{}\" in \"{}\"{}:\n",
+            match_count,
+            matched_files,
+            args.pattern,
+            scope,
+            if let Some(ref g) = args.glob { format!(" (filter: \"{}\")", g) } else { String::new() },
+        );
+        let truncation_note = if truncated {
+            format!("\n[Results truncated at {} matches]", max_results)
+        } else {
+            String::new()
+        };
+        let llm_output = format!("{header}{text_output}{truncation_note}");
+
+        // JSON metadata for the UI
+        let mut result = ToolResult::ok_split(
+            &llm_output,
             serde_json::json!({
                 "pattern": args.pattern,
                 "scope": scope,
                 "glob": args.glob,
-                "case_sensitive": args.case_sensitive.unwrap_or(true),
-                "matches": results,
-                "count": results.len(),
-                "scanned_files": scanned_files,
+                "case_sensitive": case_sensitive,
+                "count": match_count,
                 "matched_files": matched_files,
                 "truncated": truncated,
+                "engine": if use_rg { "ripgrep" } else { "builtin" },
+                "text": text_output,
             })
             .to_string(),
-        )
+        );
+        result.metadata = Some(serde_json::json!({
+            "engine": if use_rg { "ripgrep" } else { "builtin" },
+            "matchCount": match_count,
+            "matchedFiles": matched_files,
+        }));
+        result
     }
 }
 
@@ -913,6 +1722,7 @@ pub struct ApplyPatchTool;
 
 #[async_trait]
 impl Tool for ApplyPatchTool {
+    fn kind(&self) -> ToolKind { ToolKind::Edit }
     fn name(&self) -> &str {
         "apply_patch"
     }
@@ -970,21 +1780,29 @@ impl Tool for ApplyPatchTool {
 
         let validated = match ensure_within_workspace(Path::new(&args.path), true) {
             Ok(p) => p,
-            Err(e) => {
-                return ToolResult::err(format!(
-                    "apply_patch blocked by workspace boundary policy for '{}': {e}",
-                    args.path
-                ))
+            Err(_) => {
+                return ToolResult::typed_err(
+                    ToolErrorType::PathNotInWorkspace,
+                    create_user_friendly_error(ToolErrorType::PathNotInWorkspace, &args.path),
+                )
             }
         };
 
         let mut current = match tokio::fs::read_to_string(&validated).await {
             Ok(c) => c,
             Err(e) => {
-                return ToolResult::err(format!(
-                    "apply_patch failed to read '{}': {e}",
-                    args.path
-                ))
+                let err_type = if e.kind() == std::io::ErrorKind::NotFound {
+                    ToolErrorType::FileNotFound
+                } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    ToolErrorType::PermissionDenied
+                } else {
+                    ToolErrorType::ReadContentFailure
+                };
+                
+                return ToolResult::typed_err(
+                    err_type,
+                    create_user_friendly_error(err_type, &args.path),
+                );
             }
         };
 
@@ -1044,10 +1862,10 @@ impl Tool for ApplyPatchTool {
                 })
                 .to_string(),
             ),
-            Err(e) => ToolResult::err(format!(
-                "apply_patch failed to write '{}': {e}",
-                args.path
-            )),
+            Err(_) => ToolResult::typed_err(
+                ToolErrorType::FileWriteFailure,
+                format!("Could not write to file '{}'. Check file permissions or disk space.", args.path),
+            ),
         }
     }
 }
@@ -1057,17 +1875,14 @@ pub struct ListDirectoryTool;
 
 #[async_trait]
 impl Tool for ListDirectoryTool {
+    fn kind(&self) -> ToolKind { ToolKind::Read }
     fn name(&self) -> &str {
         "list_directory"
     }
 
     fn description(&self) -> &str {
-        "List immediate children of one directory on the gateway host. The JSON response includes each child's name, type (file, directory, or symlink), and size in bytes; names are sorted lexicographically for stable output across calls. \
-         Use list_directory to discover layout, confirm spelling before read_file or write_file, or see sibling modules next to a path the user mentioned. \
-         Non-recursive by design—one level per call. To go deeper, call list_directory on subdirectories, or use shell_exec with find/rg when policy allows for large discovery. \
-         Do not use this on a file path (ENOTDIR)—use read_file for file bodies. Dotfiles appear if the OS lists them; they are not hidden by default. \
-         Anti-pattern: expecting a full tree in one shot; anti-pattern: listing huge trees like node_modules without filtering—narrow with rg or ask the user. \
-         Example: {\"path\": \".\"} at the repo root; {\"path\": \"crates/fastclaw-agent\"} before editing files in that crate."
+        "List immediate children of a directory. Returns name, type (file/directory/symlink), and size. \
+         Non-recursive — one level per call. Use glob for recursive file search."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -1076,7 +1891,7 @@ impl Tool for ListDirectoryTool {
             "path".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Directory that must exist (absolute or relative to gateway cwd). Examples: '.', 'src/components', '/tmp/out'. Not for files—if you need file contents, use read_file. Symlinked dirs show type 'symlink'. Sort order is lexical, not semantic priority."
+                "description": "Directory path (absolute or relative to cwd)."
             }),
         );
         ToolParameterSchema {
@@ -1108,10 +1923,11 @@ impl Tool for ListDirectoryTool {
         let mut entries = Vec::new();
         let validated = match ensure_within_workspace(Path::new(path), true) {
             Ok(p) => p,
-            Err(e) => {
-                return ToolResult::err(format!(
-                    "list_directory blocked by workspace boundary policy for '{path}': {e}"
-                ))
+            Err(_) => {
+                return ToolResult::typed_err(
+                    ToolErrorType::PathNotInWorkspace,
+                    create_user_friendly_error(ToolErrorType::PathNotInWorkspace, path),
+                )
             }
         };
 
@@ -1163,6 +1979,130 @@ impl Tool for ListDirectoryTool {
     }
 }
 
+// ─── Glob (file pattern search) ──────────────────────────────────────
+
+pub struct GlobTool;
+
+#[async_trait]
+impl Tool for GlobTool {
+    fn kind(&self) -> ToolKind { ToolKind::Read }
+    fn name(&self) -> &str { "glob" }
+
+    fn description(&self) -> &str {
+        "Find files by glob pattern. Recursive search, results sorted by modification time (newest first). \
+         Respects .gitignore patterns. Examples: '*.rs', 'src/**/*.tsx', '**/test_*.py'. Returns up to 100 results."
+    }
+
+    fn parameters_schema(&self) -> ToolParameterSchema {
+        let mut props = HashMap::new();
+        props.insert("pattern".to_string(), serde_json::json!({
+            "type": "string",
+            "description": "Glob pattern to match files against. Examples: '*.rs', 'src/**/*.tsx', '**/Cargo.toml'."
+        }));
+        props.insert("path".to_string(), serde_json::json!({
+            "type": "string",
+            "description": "Directory to search in (default '.'). Relative to workspace root."
+        }));
+        ToolParameterSchema {
+            schema_type: "object".to_string(),
+            properties: props,
+            required: vec!["pattern".to_string()],
+        }
+    }
+
+    async fn execute(&self, arguments: &str) -> ToolResult {
+        let args: serde_json::Value = match serde_json::from_str(arguments) {
+            Ok(v) => v,
+            Err(e) => return ToolResult::err(format!("glob: invalid JSON: {e}")),
+        };
+
+        let pattern = match args.get("pattern").and_then(|v| v.as_str()) {
+            Some(p) if !p.trim().is_empty() => p.trim(),
+            _ => return ToolResult::err(
+                "glob requires a non-empty 'pattern'. Example: {\"pattern\": \"*.rs\"}".to_string()
+            ),
+        };
+        let base = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+
+        let base_dir = match ensure_within_workspace(Path::new(base), true) {
+            Ok(p) => p,
+            Err(_) => return ToolResult::typed_err(
+                ToolErrorType::PathNotInWorkspace,
+                create_user_friendly_error(ToolErrorType::PathNotInWorkspace, base),
+            ),
+        };
+
+        let root = workspace_root().and_then(|p| p.canonicalize()).unwrap_or_else(|_| base_dir.clone());
+        let gitignore = load_gitignore_patterns(&root);
+
+        let full_pattern = if pattern.starts_with("**/") || pattern.contains('/') {
+            base_dir.join(pattern).to_string_lossy().to_string()
+        } else {
+            base_dir.join("**").join(pattern).to_string_lossy().to_string()
+        };
+
+        let options = glob::MatchOptions {
+            case_sensitive: true,
+            require_literal_separator: false,
+            require_literal_leading_dot: true,
+        };
+
+        let mut entries: Vec<(PathBuf, u64)> = Vec::new();
+        match glob::glob_with(&full_pattern, options) {
+            Ok(paths) => {
+                for entry in paths.flatten() {
+                    if !entry.is_file() {
+                        continue;
+                    }
+                    // Filter out .gitignore'd files
+                    let rel = entry
+                        .strip_prefix(&root)
+                        .unwrap_or(entry.as_path())
+                        .to_string_lossy()
+                        .to_string();
+                    if gitignore.is_ignored(&rel) {
+                        continue;
+                    }
+                    // Skip common noise directories
+                    let rel_lower = rel.to_lowercase();
+                    if rel_lower.contains("node_modules/") || rel_lower.contains(".git/") || rel_lower.contains("/target/") {
+                        continue;
+                    }
+                    let mtime = entry.metadata()
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    entries.push((entry, mtime));
+                    if entries.len() >= 200 { break; }
+                }
+            }
+            Err(e) => return ToolResult::err(format!("glob: invalid pattern: {e}")),
+        }
+
+        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        let max_results = 100;
+        let truncated = entries.len() > max_results;
+        entries.truncate(max_results);
+
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let file_list: Vec<String> = entries.iter().map(|(p, _)| {
+            p.strip_prefix(&cwd).unwrap_or(p).to_string_lossy().to_string()
+        }).collect();
+
+        let total = file_list.len();
+
+        ToolResult::ok(serde_json::json!({
+            "pattern": pattern,
+            "path": base,
+            "files": file_list,
+            "count": total,
+            "truncated": truncated,
+        }).to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1199,13 +2139,25 @@ mod tests {
         let out = Tool::execute(&tool, &args).await;
         assert!(out.success, "tool should succeed: {}", out.output);
 
-        let payload: serde_json::Value =
-            serde_json::from_str(&out.output).expect("json payload");
-        let count = payload
-            .get("count")
-            .and_then(|v| v.as_u64())
-            .unwrap_or_default();
-        assert!(count >= 1, "should return at least one match");
+        // LLM output is now text-based (ripgrep-style); verify it contains the match
+        assert!(
+            out.output.contains("hello_world"),
+            "output should contain the match text: {}",
+            out.output
+        );
+        assert!(
+            out.output.contains("Found") && out.output.contains("match"),
+            "output should have the header line: {}",
+            out.output
+        );
+
+        // display_output contains JSON metadata
+        if let Some(ref display) = out.display_output {
+            let payload: serde_json::Value =
+                serde_json::from_str(display).expect("display json payload");
+            let count = payload.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+            assert!(count >= 1, "should have at least one match in metadata");
+        }
     }
 
     #[tokio::test]
@@ -1249,7 +2201,7 @@ mod tests {
         let out = with_file_access_mode(FileAccessMode::None, Tool::execute(&tool, &args)).await;
         assert!(!out.success, "read_file should be blocked in none mode");
         assert!(
-            out.output.contains("file access is disabled"),
+            out.output.contains("outside the current workspace root") || out.output.contains("file access is disabled"),
             "unexpected error output: {}",
             out.output
         );
@@ -1266,7 +2218,7 @@ mod tests {
         let out = with_file_access_mode(FileAccessMode::Workspace, Tool::execute(&tool, &args)).await;
         assert!(!out.success, "workspace mode should block outside path");
         assert!(
-            out.output.contains("workspace boundary policy"),
+            out.output.contains("outside the current workspace root"),
             "unexpected error output: {}",
             out.output
         );
@@ -1299,7 +2251,7 @@ mod tests {
 
         let out = with_file_access_mode(FileAccessMode::None, Tool::execute(&tool, &args)).await;
         assert!(!out.success, "write_file should be blocked in none mode");
-        assert!(out.output.contains("file access is disabled"));
+        assert!(out.output.contains("outside the current workspace root") || out.output.contains("file access is disabled"));
     }
 
     #[tokio::test]
@@ -1317,7 +2269,7 @@ mod tests {
         .to_string();
         let out = with_file_access_mode(FileAccessMode::Workspace, Tool::execute(&tool, &args)).await;
         assert!(!out.success, "workspace mode should block outside edit");
-        assert!(out.output.contains("workspace boundary policy"));
+        assert!(out.output.contains("outside the current workspace root"), "unexpected: {}", out.output);
     }
 
     #[tokio::test]
@@ -1335,6 +2287,167 @@ mod tests {
         .to_string();
         let out = with_file_access_mode(FileAccessMode::None, Tool::execute(&tool, &args)).await;
         assert!(!out.success, "search_in_files should be blocked in none mode");
-        assert!(out.output.contains("file access is disabled"));
+        assert!(out.output.contains("outside the current workspace root") || out.output.contains("file access is disabled"),
+            "unexpected: {}", out.output);
+    }
+}
+
+#[cfg(test)]
+mod new_feature_tests {
+    use super::*;
+    use fastclaw_core::tool::Tool;
+    use tempfile::tempdir_in;
+
+    #[test]
+    fn fuzzy_match_normalizes_whitespace() {
+        let content = "fn main() {\n    let x = 1;\n    let y = 2;\n}\n";
+        // old_string with extra spaces
+        let old = "fn  main() {\n  let  x = 1;\n  let y  = 2;\n}";
+        match try_fuzzy_match(content, old) {
+            FuzzyMatchResult::UniqueMatch { start, end } => {
+                assert_eq!(start, 0);
+                assert!(end > 0, "end should be > 0, got {end}");
+            }
+            FuzzyMatchResult::NoMatch => panic!("expected fuzzy match but got NoMatch"),
+            FuzzyMatchResult::MultipleMatches(n) => panic!("expected unique match but got {n}"),
+        }
+    }
+
+    #[test]
+    fn fuzzy_match_returns_no_match_for_different_content() {
+        let content = "fn main() {\n    let x = 1;\n}\n";
+        let old = "fn other() {\n    let y = 2;\n}";
+        assert!(matches!(try_fuzzy_match(content, old), FuzzyMatchResult::NoMatch));
+    }
+
+    #[test]
+    fn normalize_whitespace_collapses_tabs_and_spaces() {
+        assert_eq!(normalize_whitespace("  hello   world  "), "hello world");
+        assert_eq!(normalize_whitespace("\t\thello\t\tworld"), "hello world");
+        assert_eq!(normalize_whitespace("a  b\n  c  d"), "a b\nc d");
+    }
+
+    #[tokio::test]
+    async fn edit_file_fuzzy_match_succeeds_with_whitespace_diff() {
+        let cwd = std::env::current_dir().expect("current dir");
+        let tmp = tempdir_in(&cwd).expect("temp dir in workspace");
+        let file_path = tmp.path().join("fuzzy.rs");
+        let original = "fn greet() {\n    println!(\"hello\");\n}\n";
+        tokio::fs::write(&file_path, original).await.expect("write");
+
+        let tool = EditFileTool;
+        // old_string with slightly different whitespace (2 spaces instead of 4)
+        let args = serde_json::json!({
+            "path": file_path.to_string_lossy(),
+            "old_string": "fn greet() {\n  println!(\"hello\");\n}",
+            "new_string": "fn greet() {\n    println!(\"world\");\n}"
+        })
+        .to_string();
+        let out = Tool::execute(&tool, &args).await;
+        assert!(out.success, "fuzzy edit should succeed: {}", out.output);
+        assert!(out.output.contains("\"fuzzyMatch\":true") || out.output.contains("\"fuzzyMatch\": true"),
+            "should report fuzzy match: {}", out.output);
+
+        let updated = tokio::fs::read_to_string(&file_path).await.expect("read");
+        assert!(updated.contains("world"), "file should contain the new text");
+    }
+
+    #[tokio::test]
+    async fn read_file_truncates_large_files() {
+        let cwd = std::env::current_dir().expect("current dir");
+        let tmp = tempdir_in(&cwd).expect("temp dir in workspace");
+        let file_path = tmp.path().join("large.txt");
+        let content: String = (0..3000).map(|i| format!("line {i}\n")).collect();
+        tokio::fs::write(&file_path, &content).await.expect("write");
+
+        let tool = ReadFileTool;
+        let args = serde_json::json!({ "path": file_path.to_string_lossy() }).to_string();
+        let out = Tool::execute(&tool, &args).await;
+        assert!(out.success, "read should succeed: {}", out.output);
+        assert!(
+            out.output.contains("File content truncated"),
+            "should contain truncation message: ...{}...",
+            &out.output[out.output.len().saturating_sub(200)..],
+        );
+        // Verify metadata indicates truncation
+        if let Some(meta) = &out.metadata {
+            assert_eq!(meta["truncated"], true);
+            assert_eq!(meta["totalLines"], 3000);
+        }
+    }
+
+    #[tokio::test]
+    async fn search_case_insensitive_by_default() {
+        let cwd = std::env::current_dir().expect("current dir");
+        let tmp = tempdir_in(&cwd).expect("temp dir in workspace");
+        let file_path = tmp.path().join("case.txt");
+        tokio::fs::write(&file_path, "Hello World\nhello world\nHELLO WORLD\n")
+            .await
+            .expect("write");
+
+        let tool = SearchInFilesTool;
+        let args = serde_json::json!({
+            "pattern": "hello world",
+            "path": tmp.path().to_string_lossy()
+        })
+        .to_string();
+        let out = Tool::execute(&tool, &args).await;
+        assert!(out.success, "search should succeed: {}", out.output);
+        // Should find all 3 lines (case-insensitive default)
+        assert!(
+            out.output.contains("3 matches") || out.output.contains("Found 3"),
+            "should find 3 case-insensitive matches: {}",
+            out.output
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_diff_output_in_display() {
+        let cwd = std::env::current_dir().expect("current dir");
+        let tmp = tempdir_in(&cwd).expect("temp dir in workspace");
+        let file_path = tmp.path().join("diff_test.rs");
+        tokio::fs::write(&file_path, "fn old_name() {}\n").await.expect("write");
+
+        let tool = EditFileTool;
+        let args = serde_json::json!({
+            "path": file_path.to_string_lossy(),
+            "old_string": "fn old_name() {}",
+            "new_string": "fn new_name() {}"
+        })
+        .to_string();
+        let out = Tool::execute(&tool, &args).await;
+        assert!(out.success, "edit should succeed: {}", out.output);
+
+        // display_output should contain unified diff
+        if let Some(ref display) = out.display_output {
+            assert!(display.contains("diff") || display.contains("-fn old_name") || display.contains("+fn new_name"),
+                "display should contain diff info: {}", display);
+        }
+    }
+}
+
+#[cfg(test)]
+mod user_friendly_error_tests {
+    use super::*;
+
+    #[test]
+    fn test_create_user_friendly_error_messages() {
+        let path = "test_file.txt";
+        
+        assert!(create_user_friendly_error(ToolErrorType::FileNotFound, path)
+            .contains("does not exist"));
+        assert!(create_user_friendly_error(ToolErrorType::FileWriteFailure, path)
+            .contains("Check file permissions"));
+        assert!(create_user_friendly_error(ToolErrorType::ReadContentFailure, path)
+            .contains("Could not read"));
+
+        let perm_msg = create_user_friendly_error(ToolErrorType::PermissionDenied, path);
+        assert!(perm_msg.contains("Permission denied"), "should mention denial: {perm_msg}");
+        assert!(perm_msg.contains("文件访问权限"), "should guide user to setting: {perm_msg}");
+
+        let workspace_msg = create_user_friendly_error(ToolErrorType::PathNotInWorkspace, path);
+        assert!(workspace_msg.contains("outside the current workspace root"), "should explain boundary: {workspace_msg}");
+        assert!(workspace_msg.contains("工作目录"), "should guide user to work_dir: {workspace_msg}");
+        assert!(workspace_msg.contains("文件访问权限"), "should guide user to setting: {workspace_msg}");
     }
 }

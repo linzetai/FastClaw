@@ -393,6 +393,8 @@ pub enum StreamEvent {
         /// Richer output for the UI; `None` means fall back to `output`.
         display_output: Option<String>,
         success: bool,
+        /// Optional structured metadata for frontend rendering.
+        metadata: Option<serde_json::Value>,
     },
     AskQuestion {
         request_id: String,

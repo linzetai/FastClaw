@@ -1,24 +1,20 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolResult};
+use fastclaw_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolResult};
 
 /// Returns current UTC time. Useful for agents that need to reason about time.
 pub struct CurrentTimeTool;
 
 #[async_trait]
 impl Tool for CurrentTimeTool {
+    fn kind(&self) -> ToolKind { ToolKind::Think }
     fn name(&self) -> &str {
         "get_current_time"
     }
 
     fn description(&self) -> &str {
-        "Return the gateway host's current time as JSON {\"utc\": \"...\"} using RFC3339 UTC (e.g. 2026-04-20T12:34:56Z). \
-         Use get_current_time whenever \"now\" must be factual: expirations, scheduling, log windows, release dates, or disambiguating model priors about the calendar year. \
-         This is UTC only—no automatic local timezone, DST, or locale; if the user needs civil time in a region, ask for their IANA zone or use values they provided. \
-         No parameters; pass {}. Extra keys are ignored. Calls are cheap—repeat if a long task might cross midnight. \
-         Anti-pattern: guessing today's date from training data when the answer matters legally or operationally. \
-         Example response shape: {\"utc\": \"2026-04-20T12:34:56.789012Z\"}."
+        "Get current time in UTC (RFC3339). Returns JSON {\"utc\": \"...\"}. No parameters needed."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -40,17 +36,15 @@ pub struct CalculatorTool;
 
 #[async_trait]
 impl Tool for CalculatorTool {
+    fn kind(&self) -> ToolKind { ToolKind::Think }
     fn name(&self) -> &str {
         "calculator"
     }
 
     fn description(&self) -> &str {
-        "Evaluate a simple arithmetic expression with + - * / over decimal literals. Multiplication and division bind tighter than addition and subtraction within this parser's left-to-right structure—good for invoices, ratios, quick totals, and sanity checks—not for symbolic math, matrices, or statistics builtins. \
-         Prefer calculator whenever numeric exactness matters; avoid doing multi-step arithmetic mentally in the model for money, dosage, or compliance-sensitive values. \
-         Not supported: parentheses, functions (sqrt, pow), variables, scientific notation (1e6), percentages as tokens, thousands separators—split logic into multiple calculator calls or use shell_exec with python/bc if policy allows. \
-         Division by zero fails with the same guidance as malformed input. \
-         Anti-pattern: one enormous expression—decompose so errors are obvious. \
-         Example: {\"expression\": \"12.5 * 4 - 3 / 2\"}."
+        "Evaluate a simple arithmetic expression (+ - * /). \
+         Supports decimal literals with standard operator precedence. \
+         No parentheses, functions, or variables — use shell_exec with python for complex math."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -59,7 +53,7 @@ impl Tool for CalculatorTool {
             "expression".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Single-line expression with digits, optional '.', operators + - * /, and spaces only. Example: '100 / 4 + 2'. No parentheses, no letters—those require a different tool."
+                "description": "Arithmetic expression, e.g. '100 / 4 + 2'."
             }),
         );
         ToolParameterSchema {

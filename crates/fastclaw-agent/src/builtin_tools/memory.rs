@@ -171,6 +171,102 @@ impl Tool for MemorySearchTool {
     }
 }
 
+// ─── Unified Memory Tool ──────────────────────────────────────────────
+
+pub struct UnifiedMemoryTool {
+    search: MemorySearchTool,
+    store: MemoryStoreTool,
+}
+
+impl UnifiedMemoryTool {
+    pub fn new(
+        episodic: Arc<fastclaw_memory::EpisodicMemory>,
+        semantic: Arc<fastclaw_memory::SemanticMemory>,
+        embedder: Option<Arc<dyn fastclaw_memory::EmbeddingProvider>>,
+        agent_id: String,
+    ) -> Self {
+        Self {
+            search: MemorySearchTool::new(episodic.clone(), semantic.clone(), embedder.clone()),
+            store: MemoryStoreTool::new(episodic, semantic, embedder, agent_id),
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for UnifiedMemoryTool {
+    fn name(&self) -> &str { "memory" }
+
+    fn description(&self) -> &str {
+        "Agent long-term memory: search or store facts and episodes. \
+         action 'search': find stored knowledge (requires query). \
+         action 'store': persist a fact (subject/predicate/object) or episode (summary). \
+         Use search for user preferences, prior decisions, project rules. \
+         Use store for durable knowledge worth recalling across sessions. \
+         Never store secrets (passwords, API keys, tokens)."
+    }
+
+    fn parameters_schema(&self) -> ToolParameterSchema {
+        let mut props = HashMap::new();
+        props.insert("action".to_string(), serde_json::json!({
+            "type": "string",
+            "enum": ["search", "store"],
+            "description": "search: query memory; store: persist new knowledge."
+        }));
+        props.insert("query".to_string(), serde_json::json!({
+            "type": "string",
+            "description": "For search: natural-language query or keywords."
+        }));
+        props.insert("scope".to_string(), serde_json::json!({
+            "type": "string",
+            "enum": ["all", "facts", "episodes"],
+            "description": "For search: which memory to query (default all)."
+        }));
+        props.insert("limit".to_string(), serde_json::json!({
+            "type": "integer",
+            "description": "For search: max results per scope (default 10)."
+        }));
+        props.insert("type".to_string(), serde_json::json!({
+            "type": "string",
+            "enum": ["fact", "episode"],
+            "description": "For store: what kind of memory entry."
+        }));
+        props.insert("subject".to_string(), serde_json::json!({"type": "string", "description": "For store fact: subject."}));
+        props.insert("predicate".to_string(), serde_json::json!({"type": "string", "description": "For store fact: relation."}));
+        props.insert("object".to_string(), serde_json::json!({"type": "string", "description": "For store fact: value."}));
+        props.insert("category".to_string(), serde_json::json!({
+            "type": "string",
+            "enum": ["user_preference", "user_fact", "domain_knowledge", "correction"],
+            "description": "For store fact: category."
+        }));
+        props.insert("summary".to_string(), serde_json::json!({"type": "string", "description": "For store episode: recap."}));
+        props.insert("importance".to_string(), serde_json::json!({"type": "number", "description": "For store episode: 0.0-1.0."}));
+        props.insert("tags".to_string(), serde_json::json!({"type": "string", "description": "For store episode: comma-separated."}));
+        ToolParameterSchema {
+            schema_type: "object".to_string(),
+            properties: props,
+            required: vec!["action".to_string()],
+        }
+    }
+
+    async fn execute(&self, arguments: &str) -> ToolResult {
+        let args: serde_json::Value = match serde_json::from_str(arguments) {
+            Ok(v) => v,
+            Err(e) => return ToolResult::err(format!("memory: invalid JSON: {e}")),
+        };
+
+        let action = match args.get("action").and_then(|v| v.as_str()) {
+            Some(a) => a,
+            None => return ToolResult::err("memory requires 'action': 'search' or 'store'.".to_string()),
+        };
+
+        match action {
+            "search" => self.search.execute(arguments).await,
+            "store" => self.store.execute(arguments).await,
+            other => ToolResult::err(format!("memory: unknown action '{other}'. Use 'search' or 'store'.")),
+        }
+    }
+}
+
 /// Store a fact or episode into agent memory.
 pub struct MemoryStoreTool {
     episodic: Arc<fastclaw_memory::EpisodicMemory>,

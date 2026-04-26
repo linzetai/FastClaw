@@ -261,6 +261,106 @@ impl Tool for WriteSkillTool {
     }
 }
 
+// ─── Unified Skill Tool ──────────────────────────────────────────────
+
+/// Single tool that combines list, read, and write skill operations.
+pub struct UnifiedSkillTool {
+    list: ListSkillsTool,
+    read: ReadSkillTool,
+    write: Option<WriteSkillTool>,
+}
+
+impl UnifiedSkillTool {
+    pub fn new(registry: Arc<fastclaw_core::skill::SkillRegistry>, workspace: Option<Arc<AgentWorkspace>>) -> Self {
+        Self {
+            list: ListSkillsTool::new(registry.clone()),
+            read: ReadSkillTool::new(registry),
+            write: workspace.map(WriteSkillTool::new),
+        }
+    }
+
+    pub fn readonly(registry: Arc<fastclaw_core::skill::SkillRegistry>) -> Self {
+        Self {
+            list: ListSkillsTool::new(registry.clone()),
+            read: ReadSkillTool::new(registry),
+            write: None,
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for UnifiedSkillTool {
+    fn name(&self) -> &str { "skill" }
+
+    fn description(&self) -> &str {
+        "Manage agent skills: list available skills, read a skill's full content, or write/update a skill. \
+         Actions: 'list' (no params needed), 'read' (requires skill_id), 'write' (requires skill_id + content). \
+         Always list before read to get valid ids. Skills are runbooks with instructions—obey them unless the user explicitly contradicts."
+    }
+
+    fn parameters_schema(&self) -> ToolParameterSchema {
+        let mut props = HashMap::new();
+        props.insert("action".to_string(), serde_json::json!({
+            "type": "string",
+            "enum": ["list", "read", "write"],
+            "description": "list: return all enabled skills; read: fetch one skill by id; write: create/overwrite a SKILL.md."
+        }));
+        props.insert("skill_id".to_string(), serde_json::json!({
+            "type": "string",
+            "description": "Required for read and write. Copy exactly from list output."
+        }));
+        props.insert("content".to_string(), serde_json::json!({
+            "type": "string",
+            "description": "Required for write. Full SKILL.md content (use \\n for newlines)."
+        }));
+        props.insert("target".to_string(), serde_json::json!({
+            "type": "string",
+            "enum": ["workspace", "global"],
+            "description": "For write only. 'workspace' (default) or 'global'."
+        }));
+        ToolParameterSchema {
+            schema_type: "object".to_string(),
+            properties: props,
+            required: vec!["action".to_string()],
+        }
+    }
+
+    async fn execute(&self, arguments: &str) -> ToolResult {
+        let args: serde_json::Value = match serde_json::from_str(arguments) {
+            Ok(v) => v,
+            Err(e) => return ToolResult::err(format!("skill: invalid JSON: {e}")),
+        };
+
+        let action = match args.get("action").and_then(|v| v.as_str()) {
+            Some(a) => a,
+            None => return ToolResult::err(
+                "skill requires 'action': 'list', 'read', or 'write'.".to_string()
+            ),
+        };
+
+        match action {
+            "list" => self.list.execute("{}").await,
+            "read" => {
+                let inner = serde_json::json!({
+                    "skill_id": args.get("skill_id")
+                }).to_string();
+                self.read.execute(&inner).await
+            }
+            "write" => {
+                match &self.write {
+                    Some(w) => w.execute(arguments).await,
+                    None => ToolResult::err(
+                        "skill write is not available in read-only mode.".to_string()
+                    ),
+                }
+            }
+            other => ToolResult::err(format!(
+                "skill: unknown action '{other}'. Use 'list', 'read', or 'write'."
+            )),
+        }
+    }
+}
+
 #[cfg(test)]
 mod skill_tool_tests {
     use super::*;
@@ -442,7 +542,7 @@ mod skill_tool_tests {
     // ── register_skill_tools ───────────────────────────────────────
 
     #[test]
-    fn register_adds_both_tools() {
+    fn register_adds_unified_skill_tool() {
         let reg = build_registry();
         let tool_reg = ToolRegistry::new();
 
@@ -450,12 +550,11 @@ mod skill_tool_tests {
 
         let defs = tool_reg.definitions();
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
-        assert!(names.contains(&"list_skills"));
-        assert!(names.contains(&"read_skill"));
+        assert!(names.contains(&"skill"), "should register unified 'skill' tool, got: {:?}", names);
     }
 
     #[test]
-    fn register_full_adds_all_three_tools() {
+    fn register_full_adds_unified_skill_tool() {
         let reg = build_registry();
         let tmp = tempfile::TempDir::new().unwrap();
         let ws = Arc::new(fastclaw_core::workspace::AgentWorkspace::new(
@@ -468,9 +567,7 @@ mod skill_tool_tests {
 
         let defs = tool_reg.definitions();
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
-        assert!(names.contains(&"list_skills"));
-        assert!(names.contains(&"read_skill"));
-        assert!(names.contains(&"write_skill"));
+        assert!(names.contains(&"skill"), "should register unified 'skill' tool, got: {:?}", names);
     }
 
     // ── WriteSkillTool ─────────────────────────────────────────────

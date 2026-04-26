@@ -208,15 +208,20 @@ pub async fn chat_stream(
                 output,
                 display_output,
                 success,
+                metadata,
             } => {
                 let ui_out = display_output.as_ref().unwrap_or(output);
                 if let Some(tc) = accumulated_tool_calls.iter_mut().find(|(cid, _, _, _, _)| cid == call_id) {
                     tc.3 = Some(ui_out.clone());
                     tc.4 = *success;
                 }
+                let mut data = json!({"tool": tool_name, "callId": call_id, "output": ui_out, "success": success});
+                if let Some(meta) = metadata {
+                    data["metadata"] = meta.clone();
+                }
                 let _ = channel.send(json!({
                     "type": "chat.tool.done",
-                    "data": {"tool": tool_name, "callId": call_id, "output": ui_out, "success": success}
+                    "data": data
                 }));
             }
             StreamEvent::Done {

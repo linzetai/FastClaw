@@ -327,7 +327,14 @@ pub const DEFAULT_COMPACTION_THRESHOLD: usize = crate::compressor::DEFAULT_IMPOR
 pub const DEFAULT_SYSTEM_REMINDER_INTERVAL_USER_TURNS: usize = 20;
 
 /// Brief nudge inserted by [`SystemReminderHook`] on assemble (e.g. every 20 user turns).
-pub const DEFAULT_SYSTEM_REMINDER_TEXT: &str = "[System reminder] You have access to tools. Use read_file, write_file, shell_exec, web_search and other tools to accomplish tasks. Don't hallucinate — verify information. Be concise. Remember to use memory_store for important facts, user preferences, and key decisions; use memory_search before answering questions about past context.";
+/// Wrapped in `<system-reminder>` tags so the LLM can distinguish system injections from user input.
+pub const DEFAULT_SYSTEM_REMINDER_TEXT: &str = "<system-reminder>\
+You have access to tools. Use read_file, write_file, shell_exec, web_search and other tools to accomplish tasks. \
+Don't hallucinate — verify information. Be concise. \
+Remember to use memory(action: store) for important facts, user preferences, key decisions, AND error patterns you encounter; \
+use memory(action: search) before answering context-dependent questions or retrying a previously failed approach. \
+When you complete a reusable multi-step workflow, create a skill via write_skill so it can be reused in future sessions.\
+</system-reminder>";
 
 /// Pluggable context engine that manages the full context lifecycle.
 ///
@@ -509,6 +516,70 @@ impl ContextHook for SystemReminderHook {
                     tool_call_id: None,
                 },
             );
+        }
+        Ok(())
+    }
+}
+
+/// Injects sandbox/environment awareness into the system prompt so the LLM understands
+/// its execution context (sandboxed vs. direct, which restrictions apply).
+pub struct SandboxAwarenessHook {
+    sandboxed: bool,
+    sandbox_type: Option<String>,
+}
+
+impl SandboxAwarenessHook {
+    pub fn new(sandboxed: bool, sandbox_type: Option<String>) -> Self {
+        Self { sandboxed, sandbox_type }
+    }
+
+    pub fn detect() -> Self {
+        let is_sandboxed = std::env::var("FASTCLAW_SANDBOX").is_ok()
+            || std::env::var("SANDBOX").is_ok();
+        let sandbox_type = std::env::var("FASTCLAW_SANDBOX")
+            .or_else(|_| std::env::var("SANDBOX"))
+            .ok();
+        Self::new(is_sandboxed, sandbox_type)
+    }
+}
+
+#[async_trait]
+impl ContextHook for SandboxAwarenessHook {
+    fn name(&self) -> &str {
+        "sandbox_awareness"
+    }
+
+    async fn on_bootstrap(
+        &self,
+        messages: &mut Vec<ChatMessage>,
+        _agent_id: &str,
+    ) -> anyhow::Result<()> {
+        let awareness_text = if self.sandboxed {
+            let stype = self.sandbox_type.as_deref().unwrap_or("unknown");
+            format!(
+                "<system-reminder>\n# Sandbox Environment\n\
+                 You are running inside a sandbox ({stype}) with restricted access. \
+                 File system access is limited to the project directory and system temp. \
+                 Some shell commands may be blocked by sandbox policy. \
+                 If a command fails with 'Operation not permitted', 'SANDBOX BLOCKED', or similar, \
+                 explain the sandbox restriction to the user and suggest alternatives \
+                 (e.g., use dedicated file tools instead of shell).\n\
+                 </system-reminder>"
+            )
+        } else {
+            "<system-reminder>\n# Direct Execution\n\
+             You are running directly on the user's system without sandbox isolation. \
+             Exercise extra caution with destructive commands (rm, chmod, etc.). \
+             Always explain potentially risky operations before executing them.\n\
+             </system-reminder>"
+                .to_string()
+        };
+
+        if let Some(sys_msg) = messages.first_mut().filter(|m| matches!(m.role, Role::System)) {
+            if let Some(serde_json::Value::String(ref mut text)) = sys_msg.content {
+                text.push_str("\n\n");
+                text.push_str(&awareness_text);
+            }
         }
         Ok(())
     }
@@ -1141,6 +1212,7 @@ pub fn build_default_engine(
     threshold: usize,
 ) -> ContextEngine {
     let mut engine = ContextEngine::new(threshold);
+    engine.add_hook(Arc::new(SandboxAwarenessHook::detect()));
     engine.add_hook(Arc::new(CompactionHook::new(strategy)));
     engine
 }

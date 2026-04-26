@@ -1214,6 +1214,10 @@ fn cmd_tools(action: ToolAction, as_json: bool) -> anyhow::Result<()> {
         ToolAction::List => {
             let registry = fastclaw_core::tool::ToolRegistry::new();
             fastclaw_agent::builtin_tools::register_builtin_tools(&registry);
+            fastclaw_agent::builtin_tools::register_todo_tools(
+                &registry,
+                fastclaw_agent::builtin_tools::TodoStore::new(),
+            );
             let tools = registry.definitions();
             if as_json {
                 let items: Vec<_> = tools
@@ -1694,6 +1698,10 @@ async fn cmd_trace(
 async fn cmd_mcp_server() -> anyhow::Result<()> {
     let registry = fastclaw_core::tool::ToolRegistry::new();
     fastclaw_agent::builtin_tools::register_builtin_tools(&registry);
+    fastclaw_agent::builtin_tools::register_todo_tools(
+        &registry,
+        fastclaw_agent::builtin_tools::TodoStore::new(),
+    );
 
     let tool_registry = std::sync::Arc::new(registry);
     let server = fastclaw_collab::create_fastclaw_mcp_server(tool_registry);

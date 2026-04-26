@@ -335,7 +335,7 @@ impl SubAgentManager {
                             })
                             .await;
                     }
-                    StreamEvent::ToolResult { tool_name, call_id, output, display_output, success } => {
+                    StreamEvent::ToolResult { tool_name, call_id, output, display_output, success, .. } => {
                         let ui_out = display_output.as_ref().unwrap_or(output);
                         let _ = parent_tx_clone
                             .send(StreamEvent::SubAgentToolResult {

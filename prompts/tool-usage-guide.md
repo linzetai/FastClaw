@@ -1,160 +1,131 @@
 # Tool Usage Guide
 
 ## File Operations
-- **read_file**: Read a file by path. Always read before editing.
-- **write_file**: Create or fully overwrite a file.
-- **edit_file**: Targeted find-and-replace edits within a file.
-- **search_in_files**: Search file contents by pattern (regex/glob) across workspace.
-- **apply_patch**: Apply a unified diff patch.
-- **list_directory**: List files/dirs at a path.
+- **read_file**: Read file by path. Auto-detects binary. Returns `totalLines`, `fileSize`, `lineEnding`, `truncated`. Use `offset`/`limit` for large files, `number_lines: true` for line refs.
+- **write_file**: Create/overwrite file. Modes: `overwrite`/`append`/`create_new`. Supports `expected_content` for optimistic locking.
+- **edit_file**: Find-and-replace edits. `old_string` + `new_string`. Empty `old_string` = create new file. Auto-detects line endings. Multiple matches → add context or `replace_all=true`.
+- **search_in_files**: Regex search across workspace. `context_lines` (0-5) for surrounding context. Respects `.gitignore`.
+- **apply_patch**: Multiple string replacements on one file atomically.
+- **glob**: Find files by name pattern. Examples: `*.rs`, `src/**/*.tsx`, `**/Cargo.toml`. Returns up to 100 results sorted by modification time.
+- **list_directory**: List immediate children with name, type, size.
 
 ## Shell
-- **shell_exec**: Run shell commands. Prefer dedicated tools when they exist. Sandboxed.
+- **shell_exec**: Run shell commands. Uses bash -c (Unix) or cmd.exe /C (Windows). Required: `command` (string), `is_background` (boolean). Optional: `description`, `working_dir`.
+  - Set `is_background=true` for dev servers, watchers, long-running processes. Returns PID.
+  - Set `is_background=false` for one-time commands. Returns exit_code, stdout, stderr.
+  - Background commands: use `&` is NOT needed — just set `is_background=true`.
+  - Interactive commands (git rebase -i, npm init without -y) may hang — use non-interactive variants.
+  - Sandbox mode: some commands may be blocked. If you see "SANDBOX BLOCKED" or "Operation not permitted", explain the restriction and use alternative tools.
 
 ## Web
-- **web_search**: Search the web for current information. Requires backend config (Tavily API key or SearXNG instance); unconfigured returns a setup prompt.
-- **web_fetch**: Fetch and extract readable text/markdown from an HTTP(S) document. Best for long HTML pages, docs, READMEs.
-- **http_fetch**: HTTP request (GET/POST/PUT/DELETE/PATCH/HEAD; default GET) with optional `headers` and `body` (POST/PUT/PATCH), returns `{ status, body }` with raw text truncated (~4 KB). Best for small JSON APIs, health checks, REST calls. SSRF policy blocks private/localhost URLs.
+- **web_search**: Search the web. Requires backend config.
+- **web_fetch**: Fetch readable text/markdown from URL. Best for docs, READMEs.
+- **http_fetch**: Raw HTTP request (GET/POST/PUT/DELETE/PATCH/HEAD). Best for JSON APIs. SSRF blocks private URLs.
 
 ## Code Intelligence
-- **workspace_symbols**: Search symbols by name across workspace.
-- **go_to_definition**: Jump to a symbol's definition.
-- **find_references**: Find all references to a symbol.
+- **lsp**: Unified LSP tool with 9 operations. **Prefer over grep for code navigation.**
+  - Position-based: `goToDefinition`, `findReferences`, `hover`, `goToImplementation`, `codeActions` (need `filePath`, `line`, `character`)
+  - File-based: `documentSymbol`, `diagnostics` (need `filePath`)
+  - Workspace-wide: `workspaceSymbol` (need `query`), `workspaceDiagnostics`
 
 ## Memory
+- **memory**: Unified memory tool (action: `search` or `store`).
+  - `search`: query long-term memory for preferences, decisions, context. Params: `query`, optional `scope` (all/facts/episodes), `limit`.
+  - `store`: persist knowledge. `type=fact` (subject/predicate/object) or `type=episode` (summary). Never store secrets.
+  - Store when: user says "remember", states preference, corrects you, key decision made.
+  - Search before: answering context-dependent questions, referencing past work.
 
-Persistent long-term memory. Use actively.
-
-**memory_store** — Store when: user says "记住"/"remember", states a preference, corrects you, key decision made, session ends with outcomes, non-obvious discovery. Use `type=fact` for preferences/context, `type=episode` for decisions/outcomes. Never store secrets/keys/tokens.
-
-**memory_search** — Search before answering context-dependent questions, when user references past conversations, or when making assumptions about preferences.
+## Task Management
+- **todo_write**: Create/update structured task list. Items: `id`, `content`, `status` (pending/in_progress/completed). `merge=true` updates by id; `merge=false` replaces all.
 
 ## Interaction
 - **ask_question**: Present structured questions with options.
 - **confirm**: Yes/no confirmation before destructive actions.
 
-## Session Management
-- **sessions_spawn**: Start a new session with another agent.
-- **sessions_send**: Send a message to an existing session.
-
-## Scheduling
-- **manage_cron**: CRUD for scheduled cron jobs.
+## Sessions
+- **sessions_spawn** / **sessions_send**: Start or message another agent session.
 
 ## Skills
-- **list_skills** / **read_skill** / **write_skill**: Manage agent skills.
-  > Only available when `skills.prompt_mode` is `"compact"` or `"lazy"`. In `"full"` mode (default), skill content is injected directly into the system prompt and these tools are not registered. `write_skill` additionally requires an active AgentWorkspace.
+- **skill**: Unified skill tool (action: `list`, `read`, `write`). List first to get valid ids, then read by id. Write requires workspace.
 
 ## Identity
-- **get_identity** / **set_identity**: Read/update agent persona files (SOUL.md, USER.md).
+- **identity**: Read/write agent persona files (action: `get` or `set`). Files: soul/user/agents/all. Always get before set.
 
 ## Utilities
-- **get_current_time**: Current date and time.
+- **get_current_time**: Current date/time.
 - **calculator**: Evaluate math expressions.
-- **browser**: Chrome via CDP (visible window by default; one persistent tab keeps cookies). Requires `feature = "browser"` and a local Chrome/Chromium; use `FASTCLAW_BROWSER_HEADLESS=true` in CI. **Actions (JSON `action` field):** `navigate`, `go_back`, `go_forward`, `reload`; `screenshot` / `pdf`; `evaluate` (optional `url`); `click`, `type`, `hover`, `select`, `wait_for`, `press_key`, `scroll` (direction up/down, amount in px); `cookies` (get, set, delete, clear; set/delete use `cookie_name` / `cookie_value` as needed); `interact` (user login/CAPTCHA, optional `wait_seconds`); `get_content` (read current page). Form flow: `navigate` → `wait_for` → `type` → `click` → `wait_for`. Login: `navigate` → `interact` → `cookies` get if needed → `navigate` to a protected page.
-- **image_generate**: Generate images from text.
-- **text_to_speech**: Convert text to audio.
+- **browser**: Chrome automation via CDP. Actions: `navigate`, `screenshot`, `click`, `type`, `evaluate`, `cookies`, `interact`, etc.
+- **image_generate** / **text_to_speech**: Media generation (requires API keys).
 
 ## MCP Extensions
+- **mcp_***: Tools from external MCP servers (`mcp_{serverId}_{toolName}`).
+- **manage_mcp_server**: Add/remove/list/reload MCP servers at runtime.
 
-**mcp_***: Tools from external MCP servers (`mcp_{serverId}_{toolName}`). Use like built-in tools.
+## Best Practices
 
-**manage_mcp_server**: Add/remove/list/reload MCP servers at runtime.
-- `list` — show servers + status
-- `add` — register server (`id`, `command`, `args`)
-- `remove` — unregister (`id`)
-- `reload` — restart all connections
+### File Operations
+- Always `read_file` before editing to get current content. Use `offset`/`limit` for large files — don't read entire huge files repeatedly.
+- Prefer `search_in_files` or `glob` for locating files/symbols — don't `read_file` in a loop to search.
+- If a path doesn't exist, `list_directory` the parent to confirm spelling before retrying.
+- `write_file` with `expected_content` for safe concurrent edits. Read-then-write for important files.
+- `edit_file` `old_string` must be unique — include enough surrounding context. Prefer `edit_file` over `write_file` for targeted changes.
 
-Install workflow: `shell_exec` to install package → `manage_mcp_server(action:"add")` to register.
+### Shell
+- Use dedicated tools (`read_file`, `write_file`, `list_directory`) for file operations instead of `shell_exec` + cat/echo/ls.
+- Use `shell_exec` for builds (cargo, npm), git, and environment checks — it's the escape hatch.
+- Before executing commands that modify the file system or system state, briefly explain the command's purpose.
+- Combine independent shell commands with `&&` to save round trips (e.g. `git status && git diff HEAD && git log -n 3`).
 
-## Channel Integrations
+### Web
+- `web_search` for discovery → `web_fetch` for reading docs → `http_fetch` for JSON APIs.
+- `web_search`/`web_fetch`/`http_fetch` cannot access local workspace files.
 
-**list_channels** / **add_channel** / **remove_channel**: Manage IM channel connections.
+## Troubleshooting & User Guidance
 
-Supported channels and required credentials:
+When you encounter errors, provide **actionable** guidance pointing the user to specific UI controls.
 
-| Channel   | Required                            | Optional                                   |
-|-----------|-------------------------------------|-------------------------------------------|
-| feishu    | appId, appSecret                    | connectionMode (websocket/webhook), domain, replyMode, userAccessToken |
-| slack     | appSecret (xoxb-... Bot Token)      | verificationToken (Signing Secret), appId  |
-| discord   | appSecret (Bot Token), appId        |                                            |
-| telegram  | appSecret (Bot Token from BotFather)|                                            |
-| whatsapp  | appId (Phone Number ID), appSecret (Token) | verificationToken (Webhook Verify Token) |
-| matrix    | domain (Homeserver URL), appId (User ID), appSecret (Access Token) |          |
-| msteams   | appId (Bot App ID), appSecret (Password) |                                     |
+### Common Errors and Resolutions
 
-Workflow: `list_channels` → ask user which channel → collect credentials one by one via `ask_question` → `add_channel`. Never guess credentials; always ask the user. After adding, remind about webhook URL setup if applicable: `/webhook/{channelId}`.
+| Error | Likely Cause | What to Tell the User |
+|---|---|---|
+| **PathNotInWorkspace** — "outside the allowed workspace" | The file is outside the current working directory and `file_access` is `workspace` | "这个路径在当前工作目录之外。你可以：(1) 点击聊天输入框底部的 **文件夹图标（工作目录）** 切换到目标目录；(2) 在 Agent 设置面板的「**文件访问权限**」中改为「完全访问文件系统」。" |
+| **PermissionDenied** — "file access is disabled" | `file_access` mode is `none` | "文件访问被禁用了。请在 Agent 设置面板的「**文件访问权限**」中选择「仅访问工作区」或「完全访问文件系统」。" |
+| **PermissionDenied** — OS-level | File owned by root or read-protected | "这个文件的系统权限不允许读写。你可以在终端用 `ls -la <path>` 查看权限，或用 `chmod`/`chown` 调整。" |
+| **FileNotFound** | Typo or wrong working directory | Use `list_directory` on the parent. If the entire project is missing, the user likely needs to set the correct **工作目录**. |
+| **SandboxBlocked** | Sandbox policy prevents the command | "当前处于沙箱模式，该操作被限制。你可以改用专用文件工具代替 shell 命令，或联系管理员调整沙箱策略。" |
 
-## Sub-Agent Delegation
+### Key UI Controls to Reference
 
-Use `spawn_subagent` to delegate tasks to specialized child agents. Each sub-agent runs independently with its own context, tools, and session — it does **not** share your conversation history.
+- **工作目录 (Working Directory)**: Folder icon at the bottom-left of the chat input area. Click to set or change the project root.
+- **文件访问权限 (File Access Mode)**: In the agent detail/settings panel → "文件访问权限" dropdown. Options: 禁止访问 / 仅访问工作区 / 完全访问.
+- **工具开关 (Tool Toggle)**: In the agent detail/settings panel → "工具" section. Each tool can be individually enabled/disabled.
+- **新对话 (New Chat)**: Creates a fresh chat that can have its own working directory.
 
-### Agent Discovery
+### Guidance Principles
 
-Before delegating, use the agent discovery tools to choose the right target:
+1. **Never just report the error** — always include a concrete next step the user can take.
+2. **Prefer the least-privilege solution** — suggest changing `work_dir` before suggesting `file_access=full`.
+3. **Use Chinese** for UI element names (matching the app interface) when the user communicates in Chinese.
+4. **Reference the specific setting path** — e.g., "Agent 设置面板 → 文件访问权限" not just "settings".
 
-- **`list_agents`** — Returns all available agents with their IDs, names, descriptions, models, and capabilities. Call this first to see what agents exist.
-- **`get_agent_info`** — Returns detailed configuration for a specific agent (model, tools, behavior, delegation policy). Use when you need to understand an agent's capabilities before delegating.
+## Self-Evolution
 
-Workflow: `list_agents` → pick agent → optionally `get_agent_info` for details → `spawn_subagent` with the chosen `agent_id`.
+### Error-Driven Learning
+- After resolving any execution error, store the pattern: `memory(action: store, type: episode, summary: "[tool] failed: [error]. Cause: [cause]. Fix: [fix].")`
+- Before retrying a failed approach, check: `memory(action: search, query: "[error_type] [tool_name]")`
+- Memory is injected automatically on each turn via `MemoryIngestHook` — relevant past errors will surface when you encounter similar contexts.
 
-### When to Use
-
-**DO** use sub-agents when:
-- The task has 2+ independent sub-problems that benefit from parallel execution.
-- A subtask requires a different tool set (e.g., browser automation while you do code analysis).
-- The task is complex enough that dedicated focus improves quality.
-- You need to research/explore while continuing your main reasoning chain.
-
-**DO NOT** use sub-agents for:
-- Simple single-tool operations — just call the tool directly.
-- Tasks that need your current conversation context (sub-agents start fresh).
-- Sequential steps where each depends on the previous result (do them yourself).
-
-### Sub-Agent Types
-
-| Type | Best For | Available Tools |
-|------|----------|-----------------|
-| `general` | Full-capability subtask | Inherits parent's tool set |
-| `explore` | Read-only research, code exploration, codebase questions | file_read, search, web_search, web_fetch, memory_search |
-| `shell` | Command execution, builds, tests, git operations | shell_exec, file_read, file_write |
-| `browser` | Web interaction, UI testing, scraping | browser_*, web_fetch |
-
-### Parameters
-
-```json
-{
-  "task": "Clear, self-contained description of what the sub-agent should accomplish",
-  "agent_id": "main",
-  "subagent_type": "explore",
-  "context": "Optional: key facts/data the sub-agent needs but cannot discover on its own"
-}
-```
-
-**Important**: Always use a valid `agent_id` from the `list_agents` results. If unsure which agent to use, call `list_agents` first.
-
-### Writing Good Task Descriptions
-
-1. **Self-contained** — include all context needed. The sub-agent cannot see your conversation.
-2. **Specific outcome** — state exactly what to return (e.g., "Return the file path and function name").
-3. **Bounded scope** — one clear objective per sub-agent.
-4. **Include constraints** — mention language, framework, or files to focus on when relevant.
-
-### Parallel Execution
-
-Batch multiple `spawn_subagent` calls in **one response** for parallel execution:
-
-```
-Thought: I need to research the auth module AND run the test suite simultaneously.
-→ spawn_subagent(type=explore, task="Find all authentication middleware in src/...")
-  AND spawn_subagent(type=shell, task="Run `cargo test` and report failures...")
-```
-
-The runtime executes them concurrently and returns all results before your next reasoning step.
+### Skill Self-Creation
+- After completing a reusable multi-step workflow (5+ steps, domain-specific), create a skill: `write_skill(skill_id: "verb-noun", content: "...", target: "workspace")`
+- Skills are surfaced to you via `list_skills` / `read_skill` — you can reference them in future sessions.
+- Good skill candidates: setup procedures, migration workflows, debugging playbooks, deployment checklists.
 
 ## Quick Reference
-
-1. Context-dependent task? → `memory_search` first
-2. Known file? → `read_file` · Find file/symbol? → `search_in_files` / `workspace_symbols`
-3. External info? → `web_search` · Run commands? → `shell_exec`
-4. Learned something? → `memory_store` immediately
-5. Connect IM channel? → `list_channels` → `add_channel` with user-provided credentials
+1. Complex task (3+ steps)? → `todo_write` to plan, mark first task in_progress, and start working
+2. Context-dependent? → `memory` search first
+3. Find file by name? → `glob` · Find symbol? → `lsp` · Find text? → `search_in_files`
+4. Create file? → `edit_file` (empty `old_string`) · Modify? → `read_file` then `edit_file`
+5. External info? → `web_search` · Run commands? → `shell_exec`
+6. Learned something? → `memory` store immediately
+7. Error resolved? → `memory` store the error pattern (cause + fix)
+8. Completed a reusable workflow? → `write_skill` to save it

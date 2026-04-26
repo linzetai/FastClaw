@@ -2,15 +2,57 @@ use std::sync::Arc;
 
 use fastclaw_core::agent_config::AgentConfig;
 use fastclaw_core::agent_config::BehaviorConfig;
-use fastclaw_core::tool::{ToolDefinition, ToolRegistry};
+use fastclaw_core::tool::{PostToolInfo, ToolDefinition, ToolHook, ToolHookContext, ToolRegistry};
 use fastclaw_core::types::ToolCall;
 
 use crate::builtin_tools::{with_file_access_mode, with_work_dir};
 
 use super::prompt_builder::memory_tool_suffix;
 
-/// Max characters of tool output embedded in chat history (per tool message).
-pub const MAX_TOOL_RESULT_CHARS: usize = 4000;
+/// Default max characters of tool output embedded in chat history.
+/// Individual tools override this via `tool_output_char_limit`.
+pub const MAX_TOOL_RESULT_CHARS: usize = 2000;
+
+/// Per-tool character limits.
+/// Tools that produce large but low-density output get tighter limits;
+/// tools whose output is highly actionable get more room.
+fn tool_output_char_limit(tool_name: &str) -> usize {
+    match tool_name {
+        // Write/edit tools: the LLM already knows what it wrote; keep only the status.
+        "write_file" | "edit_file" | "apply_patch" | "create_directory" => 300,
+
+        // Search tools: only the first few matches matter; rest can be re-searched.
+        "grep" | "ripgrep" | "glob" | "web_search" => 1200,
+
+        // Directory listing: compact structure.
+        "list_dir" | "list_directory" => 800,
+
+        // File reading: key content, but agent can re-read specific sections.
+        "read_file" => 1500,
+
+        // Shell execution: tail-heavy (errors/results at end).
+        "shell_exec" | "shell" | "run_command" => 1500,
+
+        // Web fetch: often huge HTML; extract only key text.
+        "web_fetch" | "fetch_url" => 2000,
+
+        // Memory/todo tools are already compact.
+        "memory_store" | "memory_search" | "todo_write" => 1500,
+
+        // Default: use the global limit.
+        _ => MAX_TOOL_RESULT_CHARS,
+    }
+}
+
+/// Per-tool line limits (same principle).
+fn tool_output_line_limit(tool_name: &str) -> usize {
+    match tool_name {
+        "write_file" | "edit_file" | "apply_patch" | "create_directory" => 15,
+        "grep" | "ripgrep" | "glob" | "web_search" => 60,
+        "list_dir" | "list_directory" => 40,
+        _ => MAX_TOOL_RESULT_LINES,
+    }
+}
 
 fn safe_char_boundary(s: &str, idx: usize) -> usize {
     if idx >= s.len() {
@@ -67,19 +109,22 @@ fn save_truncated_output(tool_name: &str, output: &str) -> Option<String> {
 /// If truncation occurs, the full output is saved to a temp file and the
 /// agent is told it can use `read_file` to retrieve the complete content.
 pub(crate) fn truncate_tool_result_output(output: &str, tool_name: &str) -> String {
+    let char_limit = tool_output_char_limit(tool_name);
+    let line_limit = tool_output_line_limit(tool_name);
+
     let total_chars = output.chars().count();
     let lines: Vec<&str> = output.lines().collect();
     let total_lines = lines.len();
 
-    if total_chars <= MAX_TOOL_RESULT_CHARS && total_lines <= MAX_TOOL_RESULT_LINES {
+    if total_chars <= char_limit && total_lines <= line_limit {
         return output.to_string();
     }
 
-    let effective_lines = total_lines.min(MAX_TOOL_RESULT_LINES);
+    let effective_lines = total_lines.min(line_limit);
     let head_line_count = (effective_lines / 5).max(1);
     let tail_line_count = effective_lines - head_line_count;
 
-    let head_budget = MAX_TOOL_RESULT_CHARS / 5;
+    let head_budget = char_limit / 5;
     let mut head_parts = Vec::new();
     let mut head_used = 0usize;
     for line in lines.iter().take(head_line_count) {
@@ -97,7 +142,7 @@ pub(crate) fn truncate_tool_result_output(output: &str, tool_name: &str) -> Stri
         head_used += line.len() + 1;
     }
 
-    let tail_budget = MAX_TOOL_RESULT_CHARS.saturating_sub(head_used).saturating_sub(TRUNCATION_SEPARATOR.len());
+    let tail_budget = char_limit.saturating_sub(head_used).saturating_sub(TRUNCATION_SEPARATOR.len());
     let mut tail_parts: Vec<String> = Vec::new();
     let mut tail_used = 0usize;
     let tail_start = total_lines.saturating_sub(tail_line_count).max(head_parts.len());
@@ -133,18 +178,27 @@ pub(crate) fn truncate_tool_result_output(output: &str, tool_name: &str) -> Stri
     }
 }
 
-const MICROCOMPACT_CLEARED: &str = "[Old tool result cleared to save context]";
-
-/// Compactable tool names whose old results can be safely cleared.
+/// Compactable tool names whose old results can be progressively faded.
 const COMPACTABLE_TOOLS: &[&str] = &[
     "read_file", "shell_exec", "shell", "grep", "glob", "web_search",
-    "web_fetch", "write_file", "edit_file", "list_dir",
+    "web_fetch", "write_file", "edit_file", "list_dir", "list_directory",
+    "run_command", "ripgrep", "fetch_url",
 ];
 
 /// Heuristic: does this tool result look like an error?
-/// Preserving error results prevents the agent from repeating the same mistakes.
+/// Error results are always preserved to prevent repeated mistakes.
 fn is_error_tool_result(content: &str) -> bool {
-    let lower = content.to_lowercase();
+    // If the content starts with a semantic header, check the header for ERR
+    // and also check the body (after the first newline).
+    let check_text = if content.starts_with(SEMANTIC_HEADER_MARKER) {
+        if content.contains("→ ERR") {
+            return true;
+        }
+        content.find('\n').map(|pos| &content[pos + 1..]).unwrap_or("")
+    } else {
+        content
+    };
+    let lower = check_text.to_lowercase();
     let trimmed = lower.trim_start();
     trimmed.starts_with("error")
         || trimmed.starts_with("failed")
@@ -157,15 +211,130 @@ fn is_error_tool_result(content: &str) -> bool {
         || trimmed.starts_with("not found")
 }
 
-/// Clear old tool result content from non-recent tool messages.
-/// Keeps the last `keep_recent` tool results intact; older ones get replaced
-/// with a short marker to save context tokens. Error results are never cleared
-/// so the agent can learn from past mistakes.
+/// Build a one-liner summary for a fully faded tool result.
+/// If the content already contains a semantic header (§), reuse it directly.
+fn one_liner_summary(tool_name: &str, content: &str) -> String {
+    if content.starts_with(SEMANTIC_HEADER_MARKER) {
+        if let Some(header_end) = content.find('\n') {
+            return content[..header_end].to_string();
+        }
+        return content.to_string();
+    }
+
+    let line_count = content.lines().count();
+    let char_count = content.len();
+    let first_line = content.lines().next().unwrap_or("").chars().take(60).collect::<String>();
+
+    if first_line.is_empty() {
+        format!("[{tool_name} → {char_count} chars, ok]")
+    } else {
+        format!("[{tool_name} → {line_count} lines: {first_line}…]")
+    }
+}
+
+/// Fade a tool result to a short preview (tier 2).
+fn fade_to_preview(content: &str, max_chars: usize) -> String {
+    if content.len() <= max_chars {
+        return content.to_string();
+    }
+    let safe_end = safe_char_boundary(content, max_chars.saturating_sub(20));
+    format!("{}…\n[{} more chars faded]", &content[..safe_end], content.len() - safe_end)
+}
+
+const FADED_MARKER: &str = "[faded]";
+const ONELINER_MARKER: &str = "[oneliner]";
+const SEMANTIC_HEADER_MARKER: &str = "§";
+
+/// Build a semantic summary header from tool name, arguments, and output metadata.
+///
+/// Returns a single line like `§ read_file: src/main.rs → ok, 150 lines`.
+/// This header is prepended to the tool result so that even when progressive
+/// fading truncates the body, the LLM retains key context about the call.
+pub(crate) fn semantic_header(
+    tool_name: &str,
+    arguments: &str,
+    output: &str,
+    success: bool,
+) -> String {
+    let v: Option<serde_json::Value> = serde_json::from_str(arguments).ok();
+
+    let target = match tool_name {
+        "read_file" => extract_str(&v, &["path", "file_path"]),
+        "write_file" | "edit_file" | "apply_patch" | "create_file" => {
+            extract_str(&v, &["path", "file_path"])
+        }
+        "create_directory" => extract_str(&v, &["path"]),
+        "list_dir" | "list_directory" => extract_str(&v, &["path", "directory"]),
+        "shell_exec" | "shell" | "run_command" => {
+            extract_str(&v, &["command", "cmd"]).map(|s| truncate_str(&s, 60))
+        }
+        "grep" | "ripgrep" => {
+            let pattern = extract_str(&v, &["pattern"]).unwrap_or_else(|| "?".into());
+            let path = extract_str(&v, &["path"]).unwrap_or_else(|| ".".into());
+            Some(format!("\"{}\" in {}", truncate_str(&pattern, 30), truncate_str(&path, 40)))
+        }
+        "web_search" => {
+            extract_str(&v, &["query", "search_query"]).map(|s| format!("\"{}\"", truncate_str(&s, 50)))
+        }
+        "web_fetch" | "fetch_url" | "http_fetch" => {
+            extract_str(&v, &["url"]).map(|s| truncate_str(&s, 80))
+        }
+        "todo_write" => Some("task list".into()),
+        "memory_store" | "memory_search" => {
+            extract_str(&v, &["key", "query"]).map(|s| truncate_str(&s, 40))
+        }
+        _ => None,
+    };
+
+    let line_count = output.lines().count();
+    let status = if success { "ok" } else { "ERR" };
+    let size = if line_count > 1 {
+        format!("{} lines", line_count)
+    } else {
+        format!("{} chars", output.len().min(9999))
+    };
+
+    match target {
+        Some(t) => format!("{SEMANTIC_HEADER_MARKER} {tool_name}: {t} → {status}, {size}"),
+        None => format!("{SEMANTIC_HEADER_MARKER} {tool_name} → {status}, {size}"),
+    }
+}
+
+fn extract_str(v: &Option<serde_json::Value>, keys: &[&str]) -> Option<String> {
+    let obj = v.as_ref()?;
+    for key in keys {
+        if let Some(s) = obj.get(*key).and_then(|p| p.as_str()) {
+            return Some(s.to_string());
+        }
+    }
+    None
+}
+
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        let end = safe_char_boundary(s, max.saturating_sub(1));
+        format!("{}…", &s[..end])
+    }
+}
+
+/// Progressive fading: tool results are kept at three tiers based on recency.
+///
+/// - **Tier 1** (most recent `full_keep` results): kept in full.
+/// - **Tier 2** (next `preview_keep` results): faded to a short preview (~150 chars).
+/// - **Tier 3** (all older): collapsed to a single-line summary.
+///
+/// Error results are always preserved regardless of age.
+/// Results already faded/collapsed are not re-processed.
 pub(crate) fn microcompact_tool_results(
     messages: &mut [fastclaw_core::types::ChatMessage],
     keep_recent: usize,
 ) {
     use fastclaw_core::types::Role;
+
+    let full_keep = keep_recent.min(3);
+    let preview_keep: usize = 3;
 
     let tool_indices: Vec<usize> = messages
         .iter()
@@ -180,22 +349,136 @@ pub(crate) fn microcompact_tool_results(
         .map(|(i, _)| i)
         .collect();
 
-    if tool_indices.len() <= keep_recent {
+    let total = tool_indices.len();
+    if total <= full_keep {
         return;
     }
 
-    let clear_count = tool_indices.len() - keep_recent;
-    for &idx in tool_indices.iter().take(clear_count) {
+    for (rank_from_end, &idx) in tool_indices.iter().rev().enumerate() {
         let msg = &mut messages[idx];
-        if let Some(text) = msg.text_content() {
-            if text == MICROCOMPACT_CLEARED {
-                continue;
-            }
-            if is_error_tool_result(&text) {
-                continue;
-            }
-            msg.content = Some(serde_json::Value::String(MICROCOMPACT_CLEARED.to_string()));
+        let text = match msg.text_content() {
+            Some(t) => t,
+            None => continue,
+        };
+
+        if text.starts_with(ONELINER_MARKER) || text.starts_with(FADED_MARKER) {
+            continue;
         }
+        if is_error_tool_result(&text) {
+            continue;
+        }
+
+        let tool_name = msg.name.clone().unwrap_or_default();
+
+        if rank_from_end < full_keep {
+            // Tier 1: keep fully
+        } else if rank_from_end < full_keep + preview_keep {
+            // Tier 2: fade to preview
+            let faded = format!("{FADED_MARKER} {}", fade_to_preview(&text, 150));
+            msg.content = Some(serde_json::Value::String(faded));
+        } else {
+            // Tier 3: collapse to one-liner
+            let summary = format!("{ONELINER_MARKER} {}", one_liner_summary(&tool_name, &text));
+            msg.content = Some(serde_json::Value::String(summary));
+        }
+    }
+}
+
+/// Deduplicate repeated tool calls on the same target.
+///
+/// When the same file is `read_file`-d multiple times, or the same command is
+/// `shell`-ed multiple times, only the **most recent** result is kept.
+/// Older duplicates are replaced with a short pointer.
+///
+/// Detection is based on extracting a "target key" from the tool arguments in
+/// the preceding assistant message's tool_call. For `read_file` the key is
+/// the file path; for `shell` it is the command string.
+pub(crate) fn dedup_repeated_tool_calls(
+    messages: &mut [fastclaw_core::types::ChatMessage],
+) {
+    use fastclaw_core::types::Role;
+    use std::collections::HashMap;
+
+    const DEDUP_TOOLS: &[&str] = &["read_file", "shell_exec", "shell", "run_command"];
+
+    // Collect (tool_call_id, tool_name, msg_index) for all Tool messages
+    let tool_entries: Vec<(String, String, usize)> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| matches!(m.role, Role::Tool))
+        .filter_map(|(i, m)| {
+            let name = m.name.as_deref()?;
+            if !DEDUP_TOOLS.iter().any(|t| name.starts_with(t)) {
+                return None;
+            }
+            let call_id = m.tool_call_id.clone()?;
+            Some((call_id, name.to_string(), i))
+        })
+        .collect();
+
+    // For each tool entry, find the matching tool_call in the preceding assistant message
+    // and extract a "target key" (e.g., file path or command)
+    let mut target_map: HashMap<(String, String), Vec<usize>> = HashMap::new(); // (tool_name, target_key) -> [indices]
+
+    for (call_id, tool_name, msg_idx) in &tool_entries {
+        // Search backwards for the assistant message containing this tool_call
+        let target_key = messages[..*msg_idx]
+            .iter()
+            .rev()
+            .filter(|m| matches!(m.role, Role::Assistant))
+            .find_map(|m| {
+                m.tool_calls.as_ref()?.iter().find_map(|tc| {
+                    if tc.id == *call_id {
+                        extract_target_key(&tool_name, &tc.function.arguments)
+                    } else {
+                        None
+                    }
+                })
+            });
+
+        if let Some(key) = target_key {
+            target_map.entry((tool_name.clone(), key)).or_default().push(*msg_idx);
+        }
+    }
+
+    // For groups with >1 entry, replace all but the last with a short pointer
+    for ((_tool_name, target_key), indices) in &target_map {
+        if indices.len() <= 1 {
+            continue;
+        }
+        // Keep the last (most recent) result, supersede the rest
+        for &idx in &indices[..indices.len() - 1] {
+            let msg = &mut messages[idx];
+            if let Some(text) = msg.text_content() {
+                if text.starts_with("[superseded") {
+                    continue;
+                }
+                if is_error_tool_result(&text) {
+                    continue;
+                }
+            }
+            msg.content = Some(serde_json::Value::String(
+                format!("[superseded: re-executed on \"{}\", see latest result below]",
+                    if target_key.len() > 60 {
+                        format!("{}…", &target_key[..57])
+                    } else {
+                        target_key.clone()
+                    }
+                ),
+            ));
+        }
+    }
+}
+
+/// Extract a target key from tool arguments for deduplication.
+fn extract_target_key(tool_name: &str, arguments: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(arguments).ok()?;
+    match tool_name {
+        "read_file" => v.get("path").or(v.get("file_path")).and_then(|p| p.as_str()).map(|s| s.to_string()),
+        "shell_exec" | "shell" | "run_command" => {
+            v.get("command").or(v.get("cmd")).and_then(|c| c.as_str()).map(|s| s.to_string())
+        }
+        _ => None,
     }
 }
 
@@ -247,9 +530,60 @@ pub(crate) fn filter_tool_definitions(
         .collect()
 }
 
+/// Validate tool arguments against the tool's parameter schema.
+/// Returns `Some(error_message)` if validation fails, `None` if OK.
+fn validate_tool_arguments(tool: &dyn fastclaw_core::tool::Tool, arguments: &str) -> Option<String> {
+    let schema = tool.parameters_schema();
+    if schema.required.is_empty() {
+        return None;
+    }
+
+    let parsed: serde_json::Value = match serde_json::from_str(arguments) {
+        Ok(v) => v,
+        Err(e) => {
+            return Some(format!(
+                "Invalid JSON arguments for tool '{}': {}. Please provide valid JSON.",
+                tool.name(), e
+            ));
+        }
+    };
+
+    let obj = match parsed.as_object() {
+        Some(o) => o,
+        None => {
+            return Some(format!(
+                "Arguments for tool '{}' must be a JSON object, got: {}",
+                tool.name(),
+                parsed
+            ));
+        }
+    };
+
+    let missing: Vec<&str> = schema
+        .required
+        .iter()
+        .filter(|r| !obj.contains_key(r.as_str()))
+        .map(|r| r.as_str())
+        .collect();
+
+    if missing.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Missing required parameter(s) for tool '{}': {}. Required: {:?}",
+            tool.name(),
+            missing.join(", "),
+            schema.required
+        ))
+    }
+}
+
 type ToolExecResult = (String, String, String, fastclaw_core::tool::ToolResult);
 
-/// Execute a batch of tool calls in parallel (fork-join).
+/// Execute a batch of tool calls with ToolKind-aware scheduling.
+///
+/// Read/Search/Fetch/Think tools run concurrently; Edit/Execute tools run sequentially.
+/// When `hooks` is non-empty, fires `pre_tool_use` before and `post_tool_use` after each call.
 pub(crate) async fn execute_tool_batch(
     tool_calls: &[ToolCall],
     tool_registry: &Arc<ToolRegistry>,
@@ -257,53 +591,145 @@ pub(crate) async fn execute_tool_batch(
     work_dir: &Option<String>,
     log_suffix: &str,
 ) -> Vec<ToolExecResult> {
-    let shared_registry = Arc::clone(tool_registry);
-    let shared_behavior = Arc::new(behavior.clone());
-    let futures: Vec<_> = tool_calls
-        .iter()
-        .map(|tc| {
-            let tool_name = tc.function.name.clone();
-            let call_id = tc.id.clone();
-            let arguments = tc.function.arguments.clone();
-            let registry = Arc::clone(&shared_registry);
-            let behavior = Arc::clone(&shared_behavior);
-            let work_dir = work_dir.clone();
-            async move {
-                if !is_tool_allowed(&tool_name, &behavior) {
-                    tracing::warn!(tool = %tool_name, "tool blocked by allow/deny policy{log_suffix}");
-                    let msg = format!("tool '{}' is not allowed by agent policy", tool_name);
-                    return (tool_name, call_id, arguments, fastclaw_core::tool::ToolResult::err(msg));
-                }
-                if behavior.requires_confirmation(&tool_name) {
-                    tracing::info!(tool = %tool_name, "tool requires user confirmation (tools_ask){log_suffix}");
-                    let result = fastclaw_core::tool::ToolResult::needs_confirm(
-                        format!("Tool '{}' requires user confirmation per agent policy.", tool_name),
-                    );
-                    return (tool_name, call_id, arguments, result);
-                }
-                let result = match registry.get(&tool_name) {
-                    Some(tool) => {
-                        let work_dir_path = work_dir.as_ref().map(std::path::PathBuf::from);
-                        with_file_access_mode(
-                            behavior.file_access,
-                            with_work_dir(work_dir_path, tool.execute(&arguments)),
-                        )
-                        .await
-                    }
-                    None => {
-                        let msg = format!("tool not found: {}", tool_name);
-                        fastclaw_core::tool::ToolResult::err(msg)
-                    }
-                };
-                tracing::info!(
-                    tool = %tool_name, success = result.success,
-                    output_len = result.output.len(), "tool result{log_suffix}"
-                );
-                (tool_name, call_id, arguments, result)
-            }
-        })
-        .collect();
-    futures::future::join_all(futures).await
+    execute_tool_batch_with_hooks(tool_calls, tool_registry, behavior, work_dir, log_suffix, &[], "").await
+}
+
+pub(crate) async fn execute_tool_batch_with_hooks(
+    tool_calls: &[ToolCall],
+    tool_registry: &Arc<ToolRegistry>,
+    behavior: &BehaviorConfig,
+    work_dir: &Option<String>,
+    log_suffix: &str,
+    hooks: &[Arc<dyn ToolHook>],
+    agent_id: &str,
+) -> Vec<ToolExecResult> {
+    let mut concurrent_indices = Vec::new();
+    let mut sequential_indices = Vec::new();
+
+    for (i, tc) in tool_calls.iter().enumerate() {
+        let kind = tool_registry.get(&tc.function.name)
+            .map(|t| t.kind())
+            .unwrap_or(fastclaw_core::tool::ToolKind::Other);
+        if kind.is_concurrency_safe() {
+            concurrent_indices.push(i);
+        } else {
+            sequential_indices.push(i);
+        }
+    }
+
+    let mut results: Vec<Option<ToolExecResult>> = vec![None; tool_calls.len()];
+
+    if !concurrent_indices.is_empty() {
+        let concurrent_futures: Vec<_> = concurrent_indices.iter().map(|&i| {
+            execute_single_tool(
+                &tool_calls[i], tool_registry, behavior, work_dir, log_suffix, hooks, agent_id,
+            )
+        }).collect();
+        let concurrent_results = futures::future::join_all(concurrent_futures).await;
+        for (slot, result) in concurrent_indices.iter().zip(concurrent_results) {
+            results[*slot] = Some(result);
+        }
+    }
+
+    for &i in &sequential_indices {
+        let result = execute_single_tool(
+            &tool_calls[i], tool_registry, behavior, work_dir, log_suffix, hooks, agent_id,
+        ).await;
+        results[i] = Some(result);
+    }
+
+    results.into_iter().map(|r| r.expect("all slots filled")).collect()
+}
+
+async fn execute_single_tool(
+    tc: &ToolCall,
+    tool_registry: &Arc<ToolRegistry>,
+    behavior: &BehaviorConfig,
+    work_dir: &Option<String>,
+    log_suffix: &str,
+    hooks: &[Arc<dyn ToolHook>],
+    agent_id: &str,
+) -> ToolExecResult {
+    let tool_name = tc.function.name.clone();
+    let call_id = tc.id.clone();
+    let arguments = tc.function.arguments.clone();
+
+    if !is_tool_allowed(&tool_name, behavior) {
+        tracing::warn!(tool = %tool_name, "tool blocked by allow/deny policy{log_suffix}");
+        let msg = format!("tool '{}' is not allowed by agent policy", tool_name);
+        return (tool_name, call_id, arguments, fastclaw_core::tool::ToolResult::err(msg));
+    }
+    if behavior.requires_confirmation(&tool_name) {
+        tracing::info!(tool = %tool_name, "tool requires user confirmation (tools_ask){log_suffix}");
+        let result = fastclaw_core::tool::ToolResult::needs_confirm(
+            format!("Tool '{}' requires user confirmation per agent policy.", tool_name),
+        );
+        return (tool_name, call_id, arguments, result);
+    }
+
+    let tool_kind = tool_registry.get(&tool_name)
+        .map(|t| t.kind())
+        .unwrap_or(fastclaw_core::tool::ToolKind::Other);
+
+    let hook_ctx = ToolHookContext {
+        tool_name: tool_name.clone(),
+        tool_kind,
+        call_id: call_id.clone(),
+        arguments: arguments.clone(),
+        agent_id: agent_id.to_string(),
+    };
+
+    if let Some(tool) = tool_registry.get(&tool_name) {
+        if let Some(err) = validate_tool_arguments(tool.as_ref(), &arguments) {
+            tracing::warn!(tool = %tool_name, "tool parameter validation failed: {err}");
+            return (tool_name, call_id, arguments, fastclaw_core::tool::ToolResult::err(err));
+        }
+    }
+
+    let mut effective_args = arguments.clone();
+    for hook in hooks {
+        let action = hook.pre_tool_use(&hook_ctx).await;
+        if let Some(reason) = action.block_reason {
+            tracing::info!(tool = %tool_name, hook = hook.name(), "tool blocked by hook: {reason}");
+            return (tool_name, call_id, arguments, fastclaw_core::tool::ToolResult::err(reason));
+        }
+        if let Some(new_args) = action.modified_arguments {
+            effective_args = new_args;
+        }
+    }
+
+    let t0 = std::time::Instant::now();
+    let result = match tool_registry.get(&tool_name) {
+        Some(tool) => {
+            let work_dir_path = work_dir.as_ref().map(std::path::PathBuf::from);
+            with_file_access_mode(
+                behavior.file_access,
+                with_work_dir(work_dir_path, tool.execute(&effective_args)),
+            )
+            .await
+        }
+        None => {
+            let msg = format!("tool not found: {}", tool_name);
+            fastclaw_core::tool::ToolResult::err(msg)
+        }
+    };
+    let latency_ms = t0.elapsed().as_millis() as u64;
+
+    tracing::info!(
+        tool = %tool_name, success = result.success,
+        output_len = result.output.len(), latency_ms, "tool result{log_suffix}"
+    );
+
+    let post_info = PostToolInfo {
+        success: result.success,
+        output_len: result.output.len(),
+        latency_ms,
+    };
+    for hook in hooks {
+        hook.post_tool_use(&hook_ctx, &post_info).await;
+    }
+
+    (tool_name, call_id, arguments, result)
 }
 
 #[cfg(test)]
@@ -340,10 +766,11 @@ mod tool_result_truncation_tests {
     }
 
     #[test]
-    fn microcompact_clears_old_tool_results() {
-        use super::microcompact_tool_results;
+    fn microcompact_progressive_fading() {
+        use super::{microcompact_tool_results, ONELINER_MARKER, FADED_MARKER};
         use fastclaw_core::types::{ChatMessage, Role};
 
+        // 10 tool results: indices 0..9, most recent = index 9
         let mut msgs: Vec<ChatMessage> = (0..10)
             .map(|i| ChatMessage {
                 role: Role::Tool,
@@ -356,12 +783,17 @@ mod tool_result_truncation_tests {
 
         microcompact_tool_results(&mut msgs, 3);
 
-        for msg in &msgs[..7] {
-            assert_eq!(
-                msg.text_content().as_deref(),
-                Some("[Old tool result cleared to save context]"),
-            );
+        // Tier 3 (oldest, indices 0..4): collapsed to one-liner
+        for msg in &msgs[..4] {
+            let text = msg.text_content().unwrap();
+            assert!(text.starts_with(ONELINER_MARKER), "expected oneliner, got: {text}");
         }
+        // Tier 2 (indices 4..7): faded to preview
+        for msg in &msgs[4..7] {
+            let text = msg.text_content().unwrap();
+            assert!(text.starts_with(FADED_MARKER), "expected faded, got: {text}");
+        }
+        // Tier 1 (most recent 3, indices 7..10): kept fully
         for msg in &msgs[7..] {
             assert!(msg.text_content().unwrap().starts_with("output"));
         }
@@ -369,7 +801,7 @@ mod tool_result_truncation_tests {
 
     #[test]
     fn microcompact_preserves_error_results() {
-        use super::microcompact_tool_results;
+        use super::{microcompact_tool_results, FADED_MARKER, ONELINER_MARKER};
         use fastclaw_core::types::{ChatMessage, Role};
 
         let mut msgs: Vec<ChatMessage> = vec![
@@ -412,15 +844,62 @@ mod tool_result_truncation_tests {
 
         microcompact_tool_results(&mut msgs, 1);
 
-        // Error results should be preserved even though they're old
+        // Error results preserved even though old
         assert!(msgs[0].text_content().unwrap().contains("Error: file not found"));
-        // Successful old results should be cleared
-        assert_eq!(msgs[1].text_content().as_deref(), Some("[Old tool result cleared to save context]"));
-        // Error results should be preserved
+        // Non-error old results get faded or onelined (not full)
+        let t1 = msgs[1].text_content().unwrap();
+        assert!(
+            t1.starts_with(FADED_MARKER) || t1.starts_with(ONELINER_MARKER),
+            "expected faded/oneliner, got: {t1}"
+        );
+        // Error results preserved
         assert!(msgs[2].text_content().unwrap().contains("Failed to connect"));
-        // Successful old results should be cleared
-        assert_eq!(msgs[3].text_content().as_deref(), Some("[Old tool result cleared to save context]"));
-        // Recent results should be preserved
+        // Non-error older results get faded
+        let t3 = msgs[3].text_content().unwrap();
+        assert!(
+            t3.starts_with(FADED_MARKER) || t3.starts_with(ONELINER_MARKER),
+            "expected faded/oneliner, got: {t3}"
+        );
+        // Most recent result preserved fully
         assert!(msgs[4].text_content().unwrap().contains("recent output"));
+    }
+
+    #[test]
+    fn semantic_header_includes_tool_target() {
+        use super::semantic_header;
+
+        let h = semantic_header(
+            "read_file",
+            r#"{"path": "src/main.rs"}"#,
+            "fn main() {\n    println!(\"hello\");\n}\n",
+            true,
+        );
+        assert!(h.contains("read_file"), "should contain tool name");
+        assert!(h.contains("src/main.rs"), "should contain file path");
+        assert!(h.contains("ok"), "should show ok for success");
+
+        let h_err = semantic_header(
+            "shell_exec",
+            r#"{"command": "cargo build"}"#,
+            "error[E0001]: some error\n",
+            false,
+        );
+        assert!(h_err.contains("ERR"), "should show ERR for failure");
+        assert!(h_err.contains("cargo build"), "should contain command");
+    }
+
+    #[test]
+    fn oneliner_reuses_semantic_header() {
+        use super::{one_liner_summary, SEMANTIC_HEADER_MARKER};
+
+        let content = format!(
+            "{SEMANTIC_HEADER_MARKER} read_file: src/lib.rs → ok, 50 lines\nactual file content here..."
+        );
+        let summary = one_liner_summary("read_file", &content);
+        assert!(
+            summary.contains("src/lib.rs"),
+            "oneliner should reuse semantic header, got: {summary}"
+        );
+        assert!(!summary.contains("actual file content"), "should not include body");
     }
 }

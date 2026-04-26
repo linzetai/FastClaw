@@ -153,6 +153,8 @@ static MODEL_LIMITS: &[PatternEntry] = &[
     // Qwen
     PatternEntry { prefix: "qwen3-coder-plus",  input: 1_000_000, output: 64_000 },
     PatternEntry { prefix: "qwen3-coder-flash", input: 1_000_000, output: 64_000 },
+    PatternEntry { prefix: "qwen3.5-plus",      input: 1_000_000, output: 64_000 },
+    PatternEntry { prefix: "qwen3.5",           input: 1_000_000, output: 64_000 },
     PatternEntry { prefix: "qwen3-max", input: 256_000,   output: 32_000 },
     PatternEntry { prefix: "qwen-plus-latest", input: 1_000_000, output: 32_000 },
     PatternEntry { prefix: "qwen-flash-latest", input: 1_000_000, output: 32_000 },

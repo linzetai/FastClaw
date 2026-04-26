@@ -19,7 +19,8 @@ use fastclaw_core::Router as AgentRouter;
 use fastclaw_cron::CronJobStore;
 use fastclaw_dag::CheckpointStore;
 use fastclaw_evolution::{
-    FeedbackStore, PromptDistiller, SkillExtractor, SkillStore, TrajectoryStore,
+    FeedbackStore, LlmExtractionCallback, LlmExtractedPattern, PromptDistiller, SkillExtractor,
+    SkillParam, SkillStore, TrajectoryStore,
 };
 use fastclaw_memory::{EmbeddingProvider, EpisodicMemory, SemanticMemory};
 use fastclaw_model_router::BudgetTracker;
@@ -96,6 +97,77 @@ pub struct StorageState {
     pub trajectory_store: Arc<TrajectoryStore>,
     pub skill_store: Arc<SkillStore>,
     pub context_engine: Arc<fastclaw_context::ContextEngine>,
+}
+
+/// LLM-backed skill extraction callback for the evolution pipeline.
+pub(crate) struct LlmSkillExtraction {
+    pub(crate) provider: Arc<dyn fastclaw_agent::LlmProvider>,
+    pub(crate) model: String,
+}
+
+#[async_trait::async_trait]
+impl LlmExtractionCallback for LlmSkillExtraction {
+    async fn extract_pattern(&self, trajectories_summary: &str) -> anyhow::Result<LlmExtractedPattern> {
+        let prompt = format!(
+            "You are a skill pattern extractor. Given a cluster of successful AI agent trajectories, \
+             extract a reusable skill pattern.\n\n\
+             Respond in JSON with these fields:\n\
+             - name: short descriptive name\n\
+             - task_pattern: when this skill applies\n\
+             - strategy_template: step-by-step instructions for an AI agent to follow\n\
+             - parameters: array of {{name, param_type, description}} for variable parts\n\n\
+             Trajectories:\n{trajectories_summary}"
+        );
+        let messages = vec![fastclaw_core::types::ChatMessage {
+            role: fastclaw_core::types::Role::User,
+            content: Some(serde_json::Value::String(prompt)),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }];
+        let params = fastclaw_agent::CompletionParams {
+            model: &self.model,
+            messages: &messages,
+            temperature: 0.3,
+            max_tokens: Some(500),
+            tools: None,
+        };
+        let resp = self.provider.chat_completion(&params).await?;
+        let text = resp
+            .choices
+            .first()
+            .and_then(|c| c.message.text_content())
+            .unwrap_or_default();
+
+        let cleaned = text
+            .trim()
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+
+        let parsed: serde_json::Value = serde_json::from_str(cleaned)?;
+        Ok(LlmExtractedPattern {
+            name: parsed["name"].as_str().unwrap_or("unnamed").to_string(),
+            task_pattern: parsed["task_pattern"].as_str().unwrap_or("").to_string(),
+            strategy_template: parsed["strategy_template"].as_str().unwrap_or("").to_string(),
+            parameters: parsed["parameters"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|p| {
+                            Some(SkillParam {
+                                name: p["name"].as_str()?.to_string(),
+                                param_type: p["param_type"].as_str().unwrap_or("string").to_string(),
+                                description: p["description"].as_str().unwrap_or("").to_string(),
+                                default_value: p["default_value"].as_str().map(String::from),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+    }
 }
 
 /// Memory subsystem.
@@ -298,6 +370,17 @@ impl AppState {
 
         let skill_store_ex = self.store.skill_store.clone();
         let trajectory_store_ex = self.store.trajectory_store.clone();
+        let llm_for_extraction = Arc::new(LlmSkillExtraction {
+            provider: self.rt.runtime.default_provider_arc(),
+            model: self
+                .cfg
+                .config
+                .agents
+                .list
+                .first()
+                .and_then(|a| a.model.clone())
+                .unwrap_or_else(|| "gpt-4o-mini".to_string()),
+        });
         let extraction_secs = self.cfg.config.evolution.skill_extraction_interval_secs;
         if extraction_secs > 0 {
             tokio::spawn(async move {
@@ -309,12 +392,23 @@ impl AppState {
                     match trajectory_store_ex.get_recent_successful_global(200).await {
                         Ok(trajs) if !trajs.is_empty() => {
                             let extractor = SkillExtractor::default();
-                            let extracted = extractor.extract_skills(&trajs);
-                            tracing::info!(
-                                trajectories = trajs.len(),
-                                candidates = extracted.len(),
-                                "skill extraction pass (rule-based)"
-                            );
+                            let extracted = match extractor
+                                .extract_skills_with_llm(&trajs, llm_for_extraction.as_ref())
+                                .await
+                            {
+                                Ok(skills) => {
+                                    tracing::info!(
+                                        trajectories = trajs.len(),
+                                        candidates = skills.len(),
+                                        "skill extraction pass (LLM-enhanced)"
+                                    );
+                                    skills
+                                }
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "LLM skill extraction failed, falling back to rule-based");
+                                    extractor.extract_skills(&trajs)
+                                }
+                            };
                             for ext in extracted {
                                 let needle = format!("{} {}", ext.name, ext.task_pattern);
                                 let similar = match skill_store_ex.find_similar(&needle, 18).await {
@@ -549,6 +643,10 @@ impl AppState {
         let creds = &config.credentials;
         let tool_registry = ToolRegistry::new();
         fastclaw_agent::builtin_tools::register_builtin_tools(&tool_registry);
+        fastclaw_agent::builtin_tools::register_todo_tools(
+            &tool_registry,
+            fastclaw_agent::builtin_tools::TodoStore::new(),
+        );
 
         let ws_cfg = &config.web_search;
         let search_backend = match ws_cfg.backend.as_str() {
@@ -803,12 +901,7 @@ impl AppState {
                 agent_episodic_map.get(agent_id),
                 agent_semantic_map.get(agent_id),
             ) {
-                let search_inner = Arc::new(fastclaw_agent::MemorySearchTool::new(
-                    ep.clone(),
-                    sem.clone(),
-                    embedding_provider.clone(),
-                ));
-                let store_inner = Arc::new(fastclaw_agent::MemoryStoreTool::new(
+                let unified_memory = Arc::new(fastclaw_agent::UnifiedMemoryTool::new(
                     ep.clone(),
                     sem.clone(),
                     embedding_provider.clone(),
@@ -816,27 +909,18 @@ impl AppState {
                 ));
                 if multi_agent_memory {
                     let sfx = memory_tool_agent_suffix(agent_id);
-                    let search_name = format!("memory_search__{sfx}");
-                    let store_name = format!("memory_store__{sfx}");
-                    let search_desc =
-                        format!("{} (agent `{}`)", search_inner.description(), agent_id);
-                    let store_desc =
-                        format!("{} (agent `{}`)", store_inner.description(), agent_id);
+                    let mem_name = format!("memory__{sfx}");
+                    let mem_desc =
+                        format!("{} (agent `{}`)", unified_memory.description(), agent_id);
                     tool_registry.register(Arc::new(RenamedTool::new(
-                        search_name,
-                        search_desc,
-                        search_inner.clone() as Arc<dyn fastclaw_core::tool::Tool + Send + Sync>,
+                        mem_name,
+                        mem_desc,
+                        unified_memory as Arc<dyn fastclaw_core::tool::Tool + Send + Sync>,
                     )));
-                    tool_registry.register(Arc::new(RenamedTool::new(
-                        store_name,
-                        store_desc,
-                        store_inner.clone() as Arc<dyn fastclaw_core::tool::Tool + Send + Sync>,
-                    )));
-                    tracing::info!(agent_id = %agent_id, "registered scoped memory_search / memory_store tools");
+                    tracing::info!(agent_id = %agent_id, "registered scoped unified memory tool");
                 } else {
-                    tool_registry.register(search_inner);
-                    tool_registry.register(store_inner);
-                    tracing::info!(agent_id = %agent_id, "registered memory_search and memory_store tools");
+                    tool_registry.register(unified_memory);
+                    tracing::info!(agent_id = %agent_id, "registered unified memory tool");
                 }
             }
         }
@@ -1262,6 +1346,10 @@ impl AppState {
 
         let tool_registry = ToolRegistry::new();
         fastclaw_agent::builtin_tools::register_builtin_tools(&tool_registry);
+        fastclaw_agent::builtin_tools::register_todo_tools(
+            &tool_registry,
+            fastclaw_agent::builtin_tools::TodoStore::new(),
+        );
 
         let subagent_manager = Arc::new(fastclaw_agent::SubAgentManager::new(
             runtime.clone(),

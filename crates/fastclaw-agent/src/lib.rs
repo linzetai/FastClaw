@@ -7,7 +7,8 @@ pub mod subagent_manager;
 
 pub use builtin_tools::{
     ImageGenerateTool, MemorySearchTool,
-    MemoryStoreTool, SearchEngine, SearxngEngine, TavilyEngine, TtsTool, WebFetchTool,
+    MemoryStoreTool, UnifiedMemoryTool,
+    SearchEngine, SearxngEngine, TavilyEngine, TtsTool, WebFetchTool,
     WebSearchBackend, WebSearchTool,
     GoogleEngine, BaiduEngine, BingEngine, SogouEngine, Search360Engine,
     BuiltinMetaEngine, engine_by_id, BUILTIN_ENGINE_IDS,

@@ -105,32 +105,13 @@ impl Tool for SetIdentityTool {
     }
 
     fn description(&self) -> &str {
-        "Overwrite one identity Markdown in the workspace: soul→SOUL.md, user→USER.md, agents→AGENTS.md (persona, user mirror, operating rules). \
-         Full-file replace—read with get_identity, merge offline mentally, then set_identity with the entire new document (same safety model as write_file). \
-         Effects apply on later turns; they cannot alter messages already delivered. \
-         Avoid embedding raw secrets unless the user demanded it—reference secret stores instead. \
-         For general source files, use write_file; set_identity is only for the identity trio. \
-         Anti-pattern: partial Markdown with ellipses implying unchanged sections—those sections are deleted. \
-         Example: {\"file\": \"agents\", \"content\": \"# Rules\\n- Confirm before rm -rf.\\n\"}."
+        "Overwrite one identity Markdown in the workspace."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
         let mut props = HashMap::new();
-        props.insert(
-            "file".to_string(),
-            json!({
-                "type": "string",
-                "enum": ["soul", "user", "agents"],
-                "description": "Exactly one of soul, user, agents (maps to SOUL.md, USER.md, AGENTS.md). No 'all' on write—issue separate calls per file. Use get_identity first if unsure which to edit."
-            }),
-        );
-        props.insert(
-            "content".to_string(),
-            json!({
-                "type": "string",
-                "description": "Full replacement Markdown as one JSON string (use \\n for newlines). Example: \"# User\\n- Prefers concise answers\\n\". Include every section you intend to keep."
-            }),
-        );
+        props.insert("file".to_string(), json!({"type": "string", "enum": ["soul", "user", "agents"]}));
+        props.insert("content".to_string(), json!({"type": "string"}));
         ToolParameterSchema {
             schema_type: "object".to_string(),
             properties: props,
@@ -141,60 +122,103 @@ impl Tool for SetIdentityTool {
     async fn execute(&self, arguments: &str) -> ToolResult {
         let args: serde_json::Value = match serde_json::from_str(arguments) {
             Ok(v) => v,
-            Err(e) => return ToolResult::err(format!(
-                "set_identity: arguments are not valid JSON: {e}. \
-                 Pass {{\"file\": \"soul\"|\"user\"|\"agents\", \"content\": \"...\"}} with double-quoted keys, then retry."
-            )),
+            Err(e) => return ToolResult::err(format!("set_identity: invalid JSON: {e}")),
         };
 
         let file = match args.get("file").and_then(|v| v.as_str()) {
             Some(f) => f,
-            None => return ToolResult::err(
-                "set_identity is missing required string field 'file'. \
-                 Example: {\"file\": \"user\", \"content\": \"# Profile\\n...\"}. \
-                 Allowed values: soul, user, agents."
-                    .to_string(),
-            ),
+            None => return ToolResult::err("set_identity requires 'file': soul, user, or agents.".to_string()),
         };
         let content = match args.get("content").and_then(|v| v.as_str()) {
             Some(c) => c,
-            None => return ToolResult::err(
-                "set_identity is missing required string field 'content'. \
-                 Send the full Markdown document as one JSON string after merging with get_identity output."
-                    .to_string(),
-            ),
+            None => return ToolResult::err("set_identity requires 'content'.".to_string()),
         };
 
         let filename = match file {
             "soul" => "SOUL.md",
             "user" => "USER.md",
             "agents" => "AGENTS.md",
-            other => {
-                return ToolResult::err(format!(
-                    "set_identity: unknown file value '{other}'. \
-                     Use exactly 'soul', 'user', or 'agents' (lowercase). \
-                     To read all three, use get_identity with file 'all'—set_identity does not support 'all'."
-                ))
-            }
+            other => return ToolResult::err(format!("Unknown file '{other}'. Use soul, user, or agents.")),
         };
 
         match self.workspace.write_file(filename, content) {
             Ok(()) => {
-                tracing::info!(
-                    agent_id = %self.workspace.agent_id,
-                    file = filename,
-                    size = content.len(),
-                    "identity file updated via tool"
-                );
-                ToolResult::ok(format!(
-                    "{filename} updated ({} bytes). Changes take effect on the next message.",
-                    content.len()
-                ))
+                tracing::info!(agent_id = %self.workspace.agent_id, file = filename, size = content.len(), "identity updated");
+                ToolResult::ok(format!("{filename} updated ({} bytes).", content.len()))
             }
-            Err(e) => ToolResult::err(format!(
-                "set_identity could not write '{filename}' to the workspace: {e}. \
-                 What to do next: verify the workspace root is writable, disk is not full, and the path is not read-only; retry after fixing permissions or choosing a different workspace."
-            )),
+            Err(e) => ToolResult::err(format!("Could not write '{filename}': {e}")),
+        }
+    }
+}
+
+// ─── Unified Identity Tool ──────────────────────────────────────────
+
+pub struct UnifiedIdentityTool {
+    get: GetIdentityTool,
+    set: SetIdentityTool,
+}
+
+impl UnifiedIdentityTool {
+    pub fn new(workspace: Arc<AgentWorkspace>) -> Self {
+        Self {
+            get: GetIdentityTool::new(workspace.clone()),
+            set: SetIdentityTool::new(workspace),
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for UnifiedIdentityTool {
+    fn name(&self) -> &str { "identity" }
+
+    fn description(&self) -> &str {
+        "Read or write agent identity files (SOUL.md, USER.md, AGENTS.md). \
+         action 'get': read identity files (file: soul|user|agents|all). \
+         action 'set': overwrite one identity file (file + content required). \
+         Always get before set to avoid clobbering existing content."
+    }
+
+    fn parameters_schema(&self) -> ToolParameterSchema {
+        let mut props = HashMap::new();
+        props.insert("action".to_string(), json!({
+            "type": "string",
+            "enum": ["get", "set"],
+            "description": "get: read identity files; set: overwrite one identity file."
+        }));
+        props.insert("file".to_string(), json!({
+            "type": "string",
+            "enum": ["soul", "user", "agents", "all"],
+            "description": "Which file. 'all' only valid for get."
+        }));
+        props.insert("content".to_string(), json!({
+            "type": "string",
+            "description": "Full replacement Markdown (required for set)."
+        }));
+        ToolParameterSchema {
+            schema_type: "object".to_string(),
+            properties: props,
+            required: vec!["action".to_string()],
+        }
+    }
+
+    async fn execute(&self, arguments: &str) -> ToolResult {
+        let args: serde_json::Value = match serde_json::from_str(arguments) {
+            Ok(v) => v,
+            Err(e) => return ToolResult::err(format!("identity: invalid JSON: {e}")),
+        };
+
+        let action = match args.get("action").and_then(|v| v.as_str()) {
+            Some(a) => a,
+            None => return ToolResult::err("identity requires 'action': 'get' or 'set'.".to_string()),
+        };
+
+        match action {
+            "get" => {
+                let inner = json!({"file": args.get("file").and_then(|v| v.as_str()).unwrap_or("all")}).to_string();
+                self.get.execute(&inner).await
+            }
+            "set" => self.set.execute(arguments).await,
+            other => ToolResult::err(format!("identity: unknown action '{other}'. Use 'get' or 'set'.")),
         }
     }
 }

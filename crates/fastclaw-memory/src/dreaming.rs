@@ -15,6 +15,8 @@ pub struct DreamCycleReport {
     pub facts_extracted: usize,
     pub embeddings_backfilled: usize,
     pub importance_rescored: usize,
+    /// High-importance episodes identified as potential skill candidates.
+    pub skill_candidates_found: usize,
 }
 
 pub struct DreamingPipeline<'a> {
@@ -82,6 +84,17 @@ impl DreamingPipeline<'_> {
 
         self.backfill_embeddings(&mut report, limit).await;
         self.rescore_importance(&mut report, limit).await;
+
+        report.skill_candidates_found = self
+            .episodic
+            .high_importance(0.8, 20)
+            .await
+            .map(|eps| {
+                eps.iter()
+                    .filter(|e| is_procedural_episode(&e.summary))
+                    .count()
+            })
+            .unwrap_or(0);
 
         Ok(report)
     }
@@ -237,6 +250,22 @@ fn extract_facts(text: &str) -> Vec<(String, String, String)> {
         }
     }
     out
+}
+
+/// Heuristic: an episode summary is "procedural" (good skill candidate)
+/// if it describes multi-step actions, error fixes, or setup workflows.
+fn is_procedural_episode(summary: &str) -> bool {
+    let lower = summary.to_lowercase();
+    let step_indicators = ["then", "next", "after", "finally", "step", "first",
+        "然后", "接着", "最后", "步骤", "首先"];
+    let action_indicators = ["fix", "setup", "install", "configure", "migrate",
+        "deploy", "build", "修复", "安装", "配置", "迁移", "部署"];
+
+    let has_steps = step_indicators.iter().any(|w| lower.contains(w));
+    let has_actions = action_indicators.iter().any(|w| lower.contains(w));
+    let word_count = summary.split_whitespace().count();
+
+    (has_steps && has_actions) || (has_actions && word_count > 30)
 }
 
 fn normalize_entity(s: &str) -> String {

@@ -34,9 +34,11 @@ use prompt_builder::append_subagent_prompt_to_system;
 use prompt_builder::SKILL_MANAGEMENT_GUIDANCE;
 use stream_engine::LoopState;
 use stream_engine::send_stream_event;
+use tool_executor::dedup_repeated_tool_calls;
 use tool_executor::execute_tool_batch;
 use tool_executor::filter_tool_definitions;
 use tool_executor::microcompact_tool_results;
+use tool_executor::semantic_header;
 use tool_executor::truncate_tool_result_output;
 use trajectory::append_text_to_chat_content;
 use trajectory::last_user_turn_text;
@@ -237,6 +239,10 @@ impl AgentRuntime {
                 );
             }
 
+            if lstate.grace_turn_active {
+                lstate.grace_turn_active = false;
+            }
+
             lstate.iteration += 1;
 
             tracing::info!(
@@ -329,7 +335,7 @@ impl AgentRuntime {
                 tool_calls, tool_registry, &config.behavior, &request.work_dir, "",
             ).await;
 
-            for (tool_name, call_id, _arguments, result) in results {
+            for (tool_name, call_id, arguments, result) in results {
                 lstate.total_tool_calls += 1;
 
                 trajectory_steps.push(TrajectoryStep {
@@ -346,7 +352,9 @@ impl AgentRuntime {
                     lstate.clear_error_streak();
                 }
 
-                let out = truncate_tool_result_output(&result.output, &tool_name);
+                let truncated = truncate_tool_result_output(&result.output, &tool_name);
+                let header = semantic_header(&tool_name, &arguments, &result.output, result.success);
+                let out = format!("{header}\n{truncated}");
                 messages.push(ChatMessage {
                     role: Role::Tool,
                     content: Some(serde_json::Value::String(out)),
@@ -377,13 +385,70 @@ impl AgentRuntime {
                 }
 
                 if lstate.consecutive_errors >= max_errors {
+                    if !lstate.grace_turn_used {
+                        tracing::info!(
+                            agent_id = %config.agent_id,
+                            consecutive_errors = lstate.consecutive_errors,
+                            "consecutive error limit reached — entering grace turn (non-stream)"
+                        );
+                        let failure_summary = lstate.format_failure_summary();
+                        messages.push(ChatMessage {
+                            role: Role::System,
+                            content: Some(serde_json::Value::String(format!(
+                                "[TOOL ERROR LIMIT] You have hit {consecutive_errors} consecutive tool errors. \
+                                 The failing calls were:\n{failure_summary}\n\n\
+                                 STOP calling the tools that keep failing. Instead:\n\
+                                 1. Explain to the user what you were trying to do and what went wrong.\n\
+                                 2. Suggest how to fix the issue (e.g. correct file paths, adjust permissions, change approach).\n\
+                                 3. Ask the user if they want you to try a different approach.\n\n\
+                                 Do NOT retry the same failing tool calls.",
+                                consecutive_errors = lstate.consecutive_errors,
+                                failure_summary = failure_summary,
+                            ))),
+                            name: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                        });
+                        lstate.grace_turn_active = true;
+                        lstate.grace_turn_used = true;
+                        lstate.consecutive_errors = 0;
+                        lstate.failure_streak_traces.clear();
+                        break;
+                    } else {
+                        tracing::warn!(
+                            agent_id = %config.agent_id,
+                            consecutive_errors = lstate.consecutive_errors,
+                            "consecutive error limit reached after grace turn (non-stream)"
+                        );
+                        lstate.error_limit_reached = true;
+                        break;
+                    }
+                }
+            }
+
+            if choice.finish_reason.as_deref() == Some("length") {
+                let has_write_tools = tool_calls.iter().any(|tc| {
+                    let n = tc.function.name.as_str();
+                    n == "write_file" || n == "edit_file" || n == "apply_patch"
+                });
+                if has_write_tools {
                     tracing::warn!(
                         agent_id = %config.agent_id,
-                        consecutive_errors = lstate.consecutive_errors,
-                        "consecutive error limit reached"
+                        "LLM output truncated (finish_reason=length) with write/edit tool calls — injecting retry guidance"
                     );
-                    lstate.error_limit_reached = true;
-                    break;
+                    messages.push(ChatMessage {
+                        role: Role::System,
+                        content: Some(serde_json::Value::String(
+                            "[WARNING] Your previous response was truncated (finish_reason=length). \
+                            The file content you wrote may be incomplete. Please verify the file \
+                            with read_file and fix any truncated content. When writing large files, \
+                            break the work into smaller edit_file calls instead of one large write_file."
+                                .to_string(),
+                        )),
+                        name: None,
+                        tool_calls: None,
+                        tool_call_id: None,
+                    });
                 }
             }
         }
@@ -472,7 +537,17 @@ impl AgentRuntime {
         let t0 = std::time::Instant::now();
         let all_tool_defs = tool_registry.definitions();
         let tool_defs = filter_tool_definitions(&all_tool_defs, config);
-        tracing::info!(elapsed_ms = t0.elapsed().as_millis() as u64, count = tool_defs.len(), "perf: tool_definitions (stream)");
+        let tool_defs_json_chars: usize = tool_defs.iter().map(|td| {
+            serde_json::to_string(td).map(|s| s.len()).unwrap_or(0)
+        }).sum();
+        let tool_defs_est_tokens = tool_defs_json_chars / 4;
+        tracing::info!(
+            elapsed_ms = t0.elapsed().as_millis() as u64,
+            count = tool_defs.len(),
+            json_chars = tool_defs_json_chars,
+            est_tokens = tool_defs_est_tokens,
+            "perf: tool_definitions (stream)"
+        );
         let tools_for_llm = if tool_defs.is_empty() {
             None
         } else {
@@ -503,12 +578,21 @@ impl AgentRuntime {
                     consecutive_errors = lstate.consecutive_errors,
                     "stopping outer stream loop — consecutive error limit reached"
                 );
+                let failure_detail = lstate.format_failure_summary();
+                let user_msg = if failure_detail.is_empty() {
+                    format!(
+                        "执行过程中遇到连续 {} 次工具错误，已自动停止。请检查工具配置或尝试换一种方式描述任务。",
+                        lstate.consecutive_errors
+                    )
+                } else {
+                    format!(
+                        "执行过程中遇到连续工具错误，已自动停止。\n出错的工具调用：\n{}\n\n请检查相关配置或尝试换一种方式。",
+                        failure_detail
+                    )
+                };
                 let _ = send_stream_event(
                     &tx,
-                    StreamEvent::Error(format!(
-                        "agent stopped: {} consecutive tool errors",
-                        lstate.consecutive_errors
-                    )),
+                    StreamEvent::Error(user_msg.clone()),
                     false,
                 )
                 .await;
@@ -520,6 +604,11 @@ impl AgentRuntime {
                 ));
             }
 
+            // Grace turn: skip error-limit check, let the LLM respond once more
+            if lstate.grace_turn_active {
+                lstate.grace_turn_active = false;
+            }
+
             lstate.iteration += 1;
 
             // ── Context window management ───────────────────────────────
@@ -527,8 +616,11 @@ impl AgentRuntime {
                 fastclaw_context::infer_context_window_from_model(&config.model.model),
             );
 
-            // Phase 0a: Microcompact old tool results (keep last 5 intact)
-            microcompact_tool_results(&mut messages, 5);
+            // Phase 0a: Microcompact old tool results (keep last 3 fully, next 3 faded)
+            microcompact_tool_results(&mut messages, 3);
+
+            // Phase 0a-2: Deduplicate repeated tool calls on the same target
+            dedup_repeated_tool_calls(&mut messages);
 
             // Phase 0b: Content filter — truncate oversized tool results, remove
             // empty messages, deduplicate consecutive identical system messages.
@@ -544,9 +636,15 @@ impl AgentRuntime {
                 let _ = fastclaw_context::ContextHook::on_assemble(&reminder, &mut messages).await;
             }
 
-            // Phase 1: LLM-based compression at 70% threshold
-            let pre_compress_tokens = fastclaw_context::estimate_messages_tokens(&messages);
-            tracing::debug!(tokens = pre_compress_tokens, "pre-compact: entering LLM compression");
+            // Phase 1: LLM-based compression at 60% threshold
+            // Use API-reported prompt_tokens from the previous iteration when available;
+            // falls back to chars/4 heuristic on the first iteration.
+            let local_estimate = fastclaw_context::estimate_messages_tokens(&messages);
+            tracing::debug!(
+                local_estimate,
+                api_prompt_tokens = last_estimated_tokens,
+                "pre-compact: entering LLM compression"
+            );
 
             let provider_for_compress = match &llm_override {
                 Some(p) => p.clone(),
@@ -557,6 +655,7 @@ impl AgentRuntime {
                 context_window,
                 &provider_for_compress,
                 &model,
+                last_estimated_tokens,
             ).await;
 
             if compress_result.compressed {
@@ -594,12 +693,15 @@ impl AgentRuntime {
                     false,
                 ).await;
             }
+            let total_est_with_tools = estimated_tokens + tool_defs_est_tokens;
             tracing::info!(
                 agent_id = %config.agent_id,
                 model = %model,
                 iteration = lstate.iteration,
                 msg_count = messages.len(),
-                estimated_tokens,
+                msg_tokens = estimated_tokens,
+                tool_def_tokens = tool_defs_est_tokens,
+                total_est = total_est_with_tools,
                 context_window,
                 "streaming LLM call"
             );
@@ -615,6 +717,7 @@ impl AgentRuntime {
             let mut accumulated_content = String::new();
             let mut tool_call_accum: Vec<ToolCallAccumulator> = Vec::new();
             let mut stream_errored = false;
+            let mut last_finish_reason: Option<String> = None;
 
             'stream_try: loop {
                 let params = CompletionParams {
@@ -682,6 +785,10 @@ impl AgentRuntime {
                             for tc_delta in tc_deltas {
                                 accumulate_tool_call(&mut tool_call_accum, tc_delta);
                             }
+                        }
+
+                        if let Some(ref reason) = choice.finish_reason {
+                            last_finish_reason = Some(reason.clone());
                         }
                     }
 
@@ -921,7 +1028,9 @@ impl AgentRuntime {
                     lstate.clear_error_streak();
                 }
 
-                let llm_out = truncate_tool_result_output(&result.output, &tool_name);
+                let truncated = truncate_tool_result_output(&result.output, &tool_name);
+                let header = semantic_header(&tool_name, &arguments, &result.output, result.success);
+                let llm_out = format!("{header}\n{truncated}");
                 let _ = send_stream_event(
                     &tx,
                     StreamEvent::ToolResult {
@@ -930,6 +1039,7 @@ impl AgentRuntime {
                         output: result.ui_output().to_string(),
                         display_output: result.display_output.clone(),
                         success: result.success,
+                        metadata: result.metadata.clone(),
                     },
                     false,
                 )
@@ -965,13 +1075,72 @@ impl AgentRuntime {
                 }
 
                 if lstate.consecutive_errors >= max_errors {
-                    tracing::warn!(
-                        agent_id = %config.agent_id,
-                        consecutive_errors = lstate.consecutive_errors,
-                        "consecutive error limit reached (stream)"
-                    );
-                    lstate.error_limit_reached = true;
-                    break;
+                    if !lstate.grace_turn_used {
+                        tracing::info!(
+                            agent_id = %config.agent_id,
+                            consecutive_errors = lstate.consecutive_errors,
+                            "consecutive error limit reached — entering grace turn"
+                        );
+                        let failure_summary = lstate.format_failure_summary();
+                        messages.push(ChatMessage {
+                            role: Role::System,
+                            content: Some(serde_json::Value::String(format!(
+                                "[TOOL ERROR LIMIT] You have hit {consecutive_errors} consecutive tool errors. \
+                                 The failing calls were:\n{failure_summary}\n\n\
+                                 STOP calling the tools that keep failing. Instead:\n\
+                                 1. Explain to the user what you were trying to do and what went wrong.\n\
+                                 2. Suggest how to fix the issue (e.g. correct file paths, adjust permissions, change approach).\n\
+                                 3. Ask the user if they want you to try a different approach.\n\n\
+                                 Do NOT retry the same failing tool calls.",
+                                consecutive_errors = lstate.consecutive_errors,
+                                failure_summary = failure_summary,
+                            ))),
+                            name: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                        });
+                        lstate.grace_turn_active = true;
+                        lstate.grace_turn_used = true;
+                        lstate.consecutive_errors = 0;
+                        lstate.failure_streak_traces.clear();
+                        break;
+                    } else {
+                        tracing::warn!(
+                            agent_id = %config.agent_id,
+                            consecutive_errors = lstate.consecutive_errors,
+                            "consecutive error limit reached after grace turn"
+                        );
+                        lstate.error_limit_reached = true;
+                        break;
+                    }
+                }
+            }
+
+            if let Some(ref reason) = last_finish_reason {
+                if reason == "length" {
+                    let has_write_tools = assembled_calls.iter().any(|tc| {
+                        let n = tc.function.name.as_str();
+                        n == "write_file" || n == "edit_file" || n == "apply_patch"
+                    });
+                    if has_write_tools {
+                        tracing::warn!(
+                            agent_id = %config.agent_id,
+                            "LLM output truncated (finish_reason=length) with write/edit tool calls — injecting retry guidance"
+                        );
+                        messages.push(ChatMessage {
+                            role: Role::System,
+                            content: Some(serde_json::Value::String(
+                                "[WARNING] Your previous response was truncated (finish_reason=length). \
+                                The file content you wrote may be incomplete. Please verify the file \
+                                with read_file and fix any truncated content. When writing large files, \
+                                break the work into smaller edit_file calls instead of one large write_file."
+                                    .to_string(),
+                            )),
+                            name: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                        });
+                    }
                 }
             }
         }
@@ -1068,9 +1237,6 @@ impl AgentRuntime {
         steps: &[TrajectoryStep],
         run_succeeded: bool,
     ) {
-        if !run_succeeded {
-            return;
-        }
         let store: Arc<TrajectoryStore> = match (*self.trajectory_store.load()).as_ref() {
             Some(s) => s.clone(),
             None => return,
@@ -1080,13 +1246,26 @@ impl AgentRuntime {
             .session_id
             .clone()
             .unwrap_or_else(|| "default".to_string());
+
+        let outcome = if run_succeeded {
+            TrajectoryOutcome::Success { user_rating: None }
+        } else {
+            let reason = steps
+                .iter()
+                .rev()
+                .find(|s| s.success == Some(false))
+                .map(|s| s.summary.clone())
+                .unwrap_or_else(|| "unknown failure".to_string());
+            TrajectoryOutcome::Failure { reason }
+        };
+
         let trajectory = Trajectory {
             id: uuid::Uuid::new_v4().to_string(),
             agent_id: config.agent_id.to_string(),
             session_id,
             task_type: infer_task_type(steps),
             steps: steps.to_vec(),
-            outcome: TrajectoryOutcome::Success { user_rating: None },
+            outcome,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
 
@@ -1225,6 +1404,7 @@ impl AgentRuntime {
         messages.extend_from_slice(user_messages);
         messages
     }
+
 }
 
 #[cfg(test)]

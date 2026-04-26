@@ -146,6 +146,21 @@ impl EpisodicMemory {
         Ok(n)
     }
 
+    /// Fetch episodes with importance >= threshold, ordered by importance desc.
+    /// Useful for identifying high-value episodes that may be skill candidates.
+    pub async fn high_importance(&self, threshold: f32, limit: i64) -> Result<Vec<Episode>> {
+        let rows = sqlx::query_as::<_, Episode>(
+            "SELECT id, session_id, agent_id, summary, importance, tags, created_at, dreamed_at \
+             FROM episodes WHERE importance >= ? AND dreamed_at IS NOT NULL \
+             ORDER BY importance DESC LIMIT ?",
+        )
+        .bind(threshold)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
     pub async fn record(&self, episode: &Episode) -> Result<()> {
         sqlx::query(
             "INSERT INTO episodes (id, session_id, agent_id, summary, importance, tags, created_at)
