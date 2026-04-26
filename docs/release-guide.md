@@ -277,28 +277,71 @@ git pull origin main
 # 产物输出到 .\dist\
 ```
 
-#### Step 4: 上传产物到 GitHub Release
+#### Step 4: 上传 Linux 产物到 GitHub Release
 
-**在 Linux 机器上：**
+在 Linux 机器上，创建 Release 并上传产物：
+
 ```bash
 # 先创建 Release（只需在一台机器上做一次）
 gh release create v0.1.0 --title "FastClaw v0.1.0" --generate-notes
 
 # 上传 Linux 产物
-gh release upload v0.1.0 dist/*.AppImage dist/*.AppImage.tar.gz dist/*.AppImage.tar.gz.sig dist/*.deb
+gh release upload v0.1.0 \
+  dist/FastClaw_0.1.0_amd64.AppImage \
+  dist/FastClaw_0.1.0_amd64.AppImage.sig \
+  dist/FastClaw_0.1.0_amd64.deb \
+  dist/FastClaw_0.1.0_amd64.deb.sig
 ```
 
-**在 Windows 机器上：**
+#### Step 5: 上传 Windows 产物到同一个 Release
+
+在 Windows 机器上有三种方式将产物上传到 Release：
+
+**方式 A：gh CLI（推荐）**
+
+先安装 gh CLI（如果尚未安装）：
+
 ```powershell
-# 上传 Windows 产物（Release 已存在，直接追加文件）
-gh release upload v0.1.0 dist\*.exe dist\*.nsis.zip dist\*.nsis.zip.sig
+# 安装 GitHub CLI
+winget install GitHub.cli
+
+# 安装后重开 PowerShell，登录
+gh auth login
+# 选择 GitHub.com → HTTPS → Login with a web browser
+# 完成浏览器授权
 ```
 
-> 也可通过 GitHub 网页直接拖拽上传文件到 Release 中。
+上传产物：
 
-#### Step 5: 生成并上传 latest.json
+```powershell
+gh release upload v0.1.0 `
+  dist\FastClaw_0.1.0_x64-setup.exe `
+  dist\FastClaw_0.1.0_x64-setup.nsis.zip `
+  dist\FastClaw_0.1.0_x64-setup.nsis.zip.sig
+```
 
-在**任意**一台能访问 GitHub 的机器上（Linux/macOS/WSL 均可）：
+**方式 B：GitHub 网页上传**
+
+1. 打开 `https://github.com/<owner>/FastClaw/releases/tag/v0.1.0`
+2. 点击 **Edit release**（编辑发布）
+3. 将 `dist\` 目录中的 `.exe`、`.nsis.zip`、`.nsis.zip.sig` 文件拖拽到 Assets 区域
+4. 点击 **Update release** 保存
+
+**方式 C：通过 SCP 传到 Linux 机器再上传**
+
+```powershell
+# Windows 上：传输文件到 Linux
+scp dist\*.exe dist\*.nsis.zip dist\*.nsis.zip.sig user@linux-host:/tmp/fastclaw-win/
+```
+
+```bash
+# Linux 上：上传到 Release
+gh release upload v0.1.0 /tmp/fastclaw-win/*
+```
+
+#### Step 6: 生成并上传 latest.json
+
+两个平台的产物都上传完成后，在**任意**一台能访问 GitHub 的机器上运行：
 
 ```bash
 ./scripts/publish-release.sh v0.1.0
@@ -306,14 +349,28 @@ gh release upload v0.1.0 dist\*.exe dist\*.nsis.zip dist\*.nsis.zip.sig
 # 脚本会自动:
 # 1. 从 GitHub Release 获取文件列表
 # 2. 下载所有 .sig 签名文件
-# 3. 生成 latest.json（包含所有已上传平台的 URL + 签名）
-# 4. 上传 latest.json 到同一个 Release
+# 3. 根据文件名自动匹配平台（.AppImage → linux-x86_64，.nsis.zip → windows-x86_64）
+# 4. 生成 latest.json（包含所有已上传平台的 URL + 签名）
+# 5. 上传 latest.json 到同一个 Release
 ```
 
-#### Step 6: 验证
+> **提示**：如果你分两次上传（先 Linux 后 Windows），可以在每次上传后都运行
+> `publish-release.sh`，它会自动识别当前已上传的所有平台并更新 `latest.json`。
+
+#### Step 7: 验证
 
 ```bash
+# 检查 latest.json 内容
 curl -sL https://github.com/<owner>/FastClaw/releases/latest/download/latest.json | python3 -m json.tool
+
+# 预期包含所有已上传平台：
+# {
+#   "version": "0.1.0",
+#   "platforms": {
+#     "linux-x86_64": { "url": "...", "signature": "..." },
+#     "windows-x86_64": { "url": "...", "signature": "..." }
+#   }
+# }
 ```
 
 ### 5.3 替代方案：自建文件服务器
