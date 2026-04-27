@@ -23,7 +23,6 @@ export function useAgentConfigForm() {
   const [name, setName] = useState(agent?.name ?? "");
   const [selectedModel, setSelectedModel] = useState(agent?.model ?? "");
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
-  const [fileAccessMode, setFileAccessMode] = useState<api.FileAccessMode>("workspace");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
@@ -78,7 +77,6 @@ export function useAgentConfigForm() {
           setSelectedModel(a.model.model);
           setSelectedProvider(a.model.provider);
         }
-        setFileAccessMode(a.behavior?.fileAccess ?? "workspace");
       }
     });
   }, [activeAgentId, gatewayReady]);
@@ -121,7 +119,6 @@ export function useAgentConfigForm() {
       model: modelConfig,
       behavior: {
         ...(backendAgent?.behavior ?? {}),
-        fileAccess: fileAccessMode,
       },
     };
     const ok = await api.updateAgent(activeAgentId, payload);
@@ -135,7 +132,7 @@ export function useAgentConfigForm() {
     setSaving(false);
     setSaveMsg(ok ? "已保存" : "保存失败");
     setTimeout(() => setSaveMsg(""), 2000);
-  }, [activeAgentId, name, selectedModel, selectedProvider, backendAgent, fileAccessMode, models, updateAgentProps]);
+  }, [activeAgentId, name, selectedModel, selectedProvider, backendAgent, models, updateAgentProps]);
 
   const handleToolToggle = useCallback(async (toolId: string, newEnabled: boolean) => {
     setTogglingTool(toolId);
@@ -223,14 +220,12 @@ export function useAgentConfigForm() {
     const currentProvider = typeof backendAgent.model === "object"
       ? backendAgent.model.provider
       : null;
-    const currentFileAccess = backendAgent.behavior?.fileAccess ?? "workspace";
     return (
       name !== currentName ||
       selectedModel !== currentModel ||
-      (selectedProvider ?? "") !== (currentProvider ?? "") ||
-      fileAccessMode !== currentFileAccess
+      (selectedProvider ?? "") !== (currentProvider ?? "")
     );
-  }, [name, selectedModel, selectedProvider, fileAccessMode, backendAgent, agent?.name]);
+  }, [name, selectedModel, selectedProvider, backendAgent, agent?.name]);
 
   const nonMcpTools = useMemo(() => agentTools.filter((t) => !t.name.startsWith("mcp_")), [agentTools]);
   const filteredTools = useMemo(() => {
@@ -256,8 +251,6 @@ export function useAgentConfigForm() {
     setSelectedModel,
     selectedProvider,
     setSelectedProvider,
-    fileAccessMode,
-    setFileAccessMode,
     saving,
     saveMsg,
     models,

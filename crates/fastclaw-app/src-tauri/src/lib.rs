@@ -275,6 +275,7 @@ pub fn run() {
             commands::channel::list_channels,
             commands::channel::bind_agent_channel,
             commands::channel::unbind_agent_channel,
+            commands::channel::reload_channel,
             commands::agent::update_agent_tools,
             commands::chat::chat_stream,
             commands::chat::cancel_chat_stream,

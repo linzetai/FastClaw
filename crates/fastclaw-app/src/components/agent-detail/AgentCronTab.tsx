@@ -8,7 +8,7 @@ function parseUtc(ts: string): Date {
   if (!ts || ts.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(ts)) return new Date(ts);
   return new Date(ts.replace(" ", "T") + "Z");
 }
-import type { CronJob, CronJobAction, CronJobRun } from "../../lib/transport";
+import type { CronJob, CronJobAction, CronJobRun, NotifyChannel } from "../../lib/transport";
 import { FormModal, ListContainer, SectionHeader, Toggle } from "./common";
 
 
@@ -179,6 +179,7 @@ const EMPTY_CRON_JOB: Partial<CronJob> & { schedule: string; action: CronJobActi
   schedule: "0 */5 * * * *",
   action: { type: "agent_chat", agent_id: "", message: "" },
   enabled: true,
+  notify_channels: [],
 };
 
 function CronJobForm({
@@ -203,6 +204,10 @@ function CronJobForm({
     job.action?.type === "webhook" ? "webhook" : "agent_chat",
   );
   const [showLogs, setShowLogs] = useState(!isNew);
+  const [showNotifyChannels, setShowNotifyChannels] = useState(false);
+  const [notifyChannels, setNotifyChannels] = useState<NotifyChannel[]>(job.notify_channels || []);
+  const [newChannel, setNewChannel] = useState<NotifyChannel>({ channel_id: "", target_id: "", target_type: "p2p" });
+  const [duplicateWarning, setDuplicateWarning] = useState(false);
 
   const inputCls = "w-full rounded-[6px] px-3 py-2 text-[13px] outline-none transition-colors focus:ring-1 focus:ring-[var(--fill-quaternary)]";
   const inputStyle = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
@@ -213,7 +218,7 @@ function CronJobForm({
     const action: CronJobAction = actionType === "webhook"
       ? { type: "webhook", url: form.action?.url ?? "", method: form.action?.method ?? "POST", body: form.action?.body }
       : { type: "agent_chat", agent_id: agentId, message: form.action?.message ?? "" };
-    onSave({ ...form, action });
+    onSave({ ...form, action, notify_channels: notifyChannels });
   };
 
   return (
@@ -297,13 +302,165 @@ function CronJobForm({
         </>
       )}
 
-      <div className="flex items-center gap-2 pt-1">
-        <label className={labelCls} style={labelStyle}>启用</label>
-        <Toggle
-          checked={form.enabled !== false}
-          onChange={(v) => setForm((f) => ({ ...f, enabled: v }))}
-        />
+      <div className="flex items-center justify-between pt-1">
+        <div className="flex items-center gap-2">
+          <label className={labelCls} style={labelStyle}>启用</label>
+          <Toggle
+            checked={form.enabled !== false}
+            onChange={(v) => setForm((f) => ({ ...f, enabled: v }))}
+          />
+        </div>
+
+        {/* 通知渠道配置 - 折叠面板 */}
+        <div className="w-2/5">
+          <button
+            type="button"
+            onClick={() => setShowNotifyChannels(!showNotifyChannels)}
+            className="flex cursor-pointer items-center gap-1 text-[11px] font-medium transition-colors"
+            style={{ color: "var(--fill-tertiary)" }}
+          >
+            {showNotifyChannels ? <ChevronDown size={10} strokeWidth={2} /> : <ChevronRight size={10} strokeWidth={2} />}
+            通知渠道 ({notifyChannels.length})
+          </button>
+        </div>
       </div>
+
+      {/* 通知渠道详细内容 - 只在展开时显示 */}
+      {showNotifyChannels && (
+        <div className="pt-2" style={{ paddingLeft: "10px", borderLeft: "2px solid var(--separator-opaque)" }}>
+          <div className="space-y-3">
+            {/* 显示已配置的渠道 */}
+            {notifyChannels.length > 0 && (
+              <div className="space-y-2">
+                {notifyChannels.map((channel, index) => (
+                  <div key={index} className="flex items-center justify-between" style={{ background: "var(--bg-tertiary)", borderRadius: "4px", padding: "8px" }}>
+                    <div className="flex-1">
+                      <div className="text-[12px] font-medium" style={{ color: "var(--fill-primary)" }}>
+                        {channel.channel_id === "feishu" && "飞书"}
+                        {channel.channel_id === "lark" && "Lark"}
+                        {channel.channel_id === "slack" && "Slack"}
+                        {channel.channel_id === "discord" && "Discord"}
+                        {channel.channel_id === "matrix" && "Matrix"}
+                        {channel.channel_id === "msteams" && "Teams"}
+                        {channel.channel_id === "whatsapp" && "WhatsApp"}
+                        {channel.channel_id && !["feishu", "lark", "slack", "discord", "matrix", "msteams", "whatsapp"].includes(channel.channel_id) && channel.channel_id}
+                      </div>
+                      <div className="text-[11px]" style={{ color: "var(--fill-secondary)" }}>
+                        目标ID: {channel.target_id} · 类型: {channel.target_type === "p2p" ? "私聊" : "群组"}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setNotifyChannels(notifyChannels.filter((_, i) => i !== index))}
+                      className="cursor-pointer rounded-[4px] px-2 py-1 text-[10px] transition-colors hover:opacity-80"
+                      style={{ background: "var(--red, #e53e3e)", color: "white" }}
+                    >
+                      删除
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 添加新渠道的表单 */}
+            <div className="space-y-2">
+              <div className="text-[11px] font-medium" style={{ color: "var(--fill-tertiary)" }}>添加新渠道</div>
+              
+              <div className="grid grid-cols-12 gap-2">
+                <div className="col-span-5">
+                  <select
+                    value={newChannel.channel_id}
+                    onChange={(e) => setNewChannel({...newChannel, channel_id: e.target.value})}
+                    className={inputCls + " w-full cursor-pointer pr-6 text-[11px]"}
+                    style={{ ...inputStyle, WebkitAppearance: "none", appearance: "none" } as React.CSSProperties}
+                  >
+                    <option value="">选择渠道类型</option>
+                    <option value="feishu">飞书</option>
+                    <option value="lark">Lark</option>
+                    <option value="slack">Slack</option>
+                    <option value="discord">Discord</option>
+                    <option value="matrix">Matrix</option>
+                    <option value="msteams">Teams</option>
+                    <option value="whatsapp">WhatsApp</option>
+                  </select>
+                </div>
+                
+                <div className="col-span-5">
+                  <input
+                    value={newChannel.target_id}
+                    onChange={(e) => setNewChannel({...newChannel, target_id: e.target.value})}
+                    placeholder="输入目标ID"
+                    className={inputCls + " text-[11px]"}
+                    style={inputStyle}
+                  />
+                </div>
+                
+                <div className="col-span-2">
+                  <select
+                    value={newChannel.target_type}
+                    onChange={(e) => setNewChannel({...newChannel, target_type: e.target.value as "p2p" | "group"})}
+                    className={inputCls + " w-full cursor-pointer pr-6 text-[11px]"}
+                    style={{ ...inputStyle, WebkitAppearance: "none", appearance: "none" } as React.CSSProperties}
+                  >
+                    <option value="p2p">私聊</option>
+                    <option value="group">群组</option>
+                  </select>
+                </div>
+              </div>
+              
+              {(!newChannel.channel_id || !newChannel.target_id) && (
+                <p className="text-[10px]" style={{ color: "var(--red, #e53e3e)" }}>
+                  请选择渠道类型并输入目标ID
+                </p>
+              )}
+              
+              {duplicateWarning && (
+                <p className="text-[10px]" style={{ color: "var(--red, #e53e3e)" }}>
+                  此渠道配置已存在
+                </p>
+              )}
+              
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (newChannel.channel_id && newChannel.target_id) {
+                      // 检查是否已存在相同的配置
+                      const exists = notifyChannels.some(
+                        ch => ch.channel_id === newChannel.channel_id && 
+                              ch.target_id === newChannel.target_id &&
+                              ch.target_type === newChannel.target_type
+                      );
+                      
+                      if (!exists) {
+                        setNotifyChannels([...notifyChannels, { ...newChannel }]);
+                        setNewChannel({ channel_id: "", target_id: "", target_type: "p2p" });
+                        setDuplicateWarning(false); // 重置警告状态
+                      } else {
+                        // 显示重复配置警告
+                        setDuplicateWarning(true);
+                        setTimeout(() => setDuplicateWarning(false), 3000); // 3秒后自动隐藏警告
+                      }
+                    }
+                  }}
+                  disabled={!newChannel.channel_id || !newChannel.target_id}
+                  className="cursor-pointer rounded-[4px] px-3 py-1.5 text-[11px] transition-colors hover:opacity-90 disabled:opacity-50"
+                  style={{ 
+                    background: (!newChannel.channel_id || !newChannel.target_id) ? "var(--fill-quaternary)" : "var(--fill-primary)", 
+                    color: "var(--fill-inverse)" 
+                  }}
+                >
+                  添加渠道
+                </button>
+              </div>
+            </div>
+            
+            <p className="text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
+              任务完成或失败时将发送通知到以上渠道
+            </p>
+          </div>
+        </div>
+      )}
 
       {!isNew && job.id && (
         <div className="pt-1">
@@ -393,6 +550,7 @@ export function CronTab() {
         last_run: null,
         next_run: null,
         last_error: null,
+        notify_channels: job.notify_channels ?? [],
       } as CronJob & { schedule: string; action: CronJobAction });
       setAdding(false);
       await loadJobs();
@@ -411,6 +569,7 @@ export function CronTab() {
         await api.upsertCronJob({
           ...existing,
           ...job,
+          notify_channels: job.notify_channels ?? existing.notify_channels,
         } as CronJob & { schedule: string; action: CronJobAction });
       }
       setEditing(null);

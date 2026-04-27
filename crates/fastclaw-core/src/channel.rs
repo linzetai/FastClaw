@@ -163,6 +163,13 @@ pub trait ChannelPlugin: Send + Sync {
         Ok(())
     }
 
+    /// Stop any background tasks and clean up resources.
+    /// Called when a channel is being replaced or removed.
+    /// Default implementation does nothing.
+    async fn stop(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     /// Connection mode this channel uses. Informational.
     fn connection_mode(&self) -> &str {
         "webhook"
@@ -185,6 +192,15 @@ impl ChannelRegistry {
         let id = channel.meta().id.clone();
         tracing::info!(channel_id = %id, name = %channel.meta().name, "registered channel plugin");
         self.channels.insert(id, channel);
+    }
+
+    /// Remove a channel from the registry. Returns the removed plugin if it existed.
+    pub fn unregister(&mut self, channel_id: &str) -> Option<Arc<dyn ChannelPlugin>> {
+        let removed = self.channels.remove(channel_id);
+        if removed.is_some() {
+            tracing::info!(channel_id = channel_id, "unregistered channel plugin");
+        }
+        removed
     }
 
     pub fn get(&self, channel_id: &str) -> Option<&Arc<dyn ChannelPlugin>> {

@@ -341,6 +341,16 @@ export async function deleteAgentIpc(agentId: string): Promise<boolean> {
   return false;
 }
 
+// ─── Channel reload ───
+
+export async function reloadChannelIpc(channelId: string): Promise<boolean> {
+  if (isTauri) {
+    const resp = await tauriInvoke<{ ok: boolean }>("reload_channel", { channelId });
+    return resp.ok;
+  }
+  return false;
+}
+
 // ─── Avatar upload ───
 
 export async function uploadAgentAvatarIpc(
@@ -550,6 +560,28 @@ export async function onSessionChanged(
   });
 }
 
+export function onChannelsChanged(
+  handler: (channelId: string, action: string) => void,
+): UnsubscribeFn {
+  if (isTauri) {
+    let unlisten: (() => void) | null = null;
+    ensureTauriEvents().then(() => {
+      _listen!<{ channelId?: string; action?: string }>(
+        "channels-changed",
+        (event) => {
+          const { channelId, action } = event.payload ?? {};
+          if (channelId) handler(channelId, action ?? "updated");
+        },
+      ).then((fn) => { unlisten = fn; });
+    });
+    return () => { unlisten?.(); };
+  }
+  return wsClient.on("channels.changed", (msg: unknown) => {
+    const data = (msg as { data?: { channelId?: string; action?: string } })?.data;
+    if (data?.channelId) handler(data.channelId, data.action ?? "updated");
+  });
+}
+
 // ─── MCP server management ───
 
 export interface McpServerStatus {
@@ -617,6 +649,12 @@ export interface CronJobAction {
   input?: unknown;
 }
 
+export interface NotifyChannel {
+  channel_id: string;
+  target_id: string;
+  target_type: "p2p" | "group";
+}
+
 export interface CronJob {
   id: string;
   name: string;
@@ -630,6 +668,7 @@ export interface CronJob {
   run_count: number;
   error_count: number;
   last_error: string | null;
+  notify_channels: NotifyChannel[];
 }
 
 export async function cronListJobs(
@@ -811,7 +850,7 @@ export async function importData(data: Uint8Array, options: ImportOptions): Prom
 export function connectWs(url: string, token?: string): Promise<void> {
   return wsClient.connect(url, token).then(() => {
     // Subscribe to push events that should be delivered to this client.
-    wsClient.send("subscribe", { events: ["cron.job.complete", "cron.job.failed", "notification.new", "notification.read"] }).catch(() => {});
+    wsClient.send("subscribe", { events: ["cron.job.complete", "cron.job.failed", "notification.new", "notification.read", "channels.changed"] }).catch(() => {});
   });
 }
 

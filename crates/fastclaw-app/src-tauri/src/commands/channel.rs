@@ -4,6 +4,24 @@ use crate::AppData;
 use serde_json::json;
 use super::helpers::{get_state, validate_agent_id};
 
+// ─── Hot-reload channel ───
+
+#[tauri::command]
+pub async fn reload_channel(
+    state: tauri::State<'_, AppData>,
+    channel_id: String,
+) -> Result<serde_json::Value, String> {
+    tracing::info!(channel_id = %channel_id, "IPC reload_channel");
+    let gw = state.gateway.lock().await;
+    let app = get_state(&gw)?;
+
+    app.reload_channel(&channel_id)
+        .await
+        .map_err(|e| format!("reload channel: {e}"))?;
+
+    Ok(json!({ "ok": true, "channelId": channel_id }))
+}
+
 // ─── Channel bindings ───
 
 #[tauri::command]

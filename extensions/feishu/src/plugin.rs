@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 
 use fastclaw_core::channel::{
     ChannelCapabilities, ChannelMeta, ChannelPlugin, InboundMessage, OutboundMessage, WebhookResult,
@@ -93,6 +93,8 @@ pub struct FeishuPlugin {
     meta: ChannelMeta,
     config: FeishuPluginConfig,
     client: Arc<FeishuClient>,
+    /// WebSocket client for long-connection mode (None in webhook mode)
+    ws_client: Arc<Mutex<Option<Arc<ws::FeishuWsClient>>>>,
 }
 
 impl FeishuPlugin {
@@ -125,6 +127,7 @@ impl FeishuPlugin {
             },
             config,
             client,
+            ws_client: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -393,6 +396,12 @@ impl ChannelPlugin for FeishuPlugin {
             event_tx,
         )?);
 
+        // Store reference for graceful shutdown
+        {
+            let mut guard = self.ws_client.lock().await;
+            *guard = Some(Arc::clone(&ws_client));
+        }
+
         let ws_client_clone = Arc::clone(&ws_client);
         tokio::spawn(async move {
             tracing::info!("feishu ws: background task started, connecting...");
@@ -408,6 +417,21 @@ impl ChannelPlugin for FeishuPlugin {
             ws::run_event_bridge(event_rx, inbound_tx, bot_open_id, reply_mode).await;
         });
 
+        Ok(())
+    }
+
+    async fn stop(&self) -> anyhow::Result<()> {
+        if self.config.connection_mode != "websocket" {
+            return Ok(());
+        }
+        let ws = {
+            let mut guard = self.ws_client.lock().await;
+            guard.take()
+        };
+        if let Some(ws) = ws {
+            tracing::info!("feishu channel: stopping WebSocket connection");
+            ws.stop();
+        }
         Ok(())
     }
 

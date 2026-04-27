@@ -6,7 +6,7 @@ use chrono::Utc;
 use cron::Schedule;
 use tokio::sync::Notify;
 
-use crate::store::{CronJob, CronJobStore, JobAction};
+use crate::store::{CronJob, CronJobStore, JobAction, NotifyChannel};
 
 /// Callback trait for executing job actions.
 #[async_trait::async_trait]
@@ -37,11 +37,19 @@ pub trait JobTrigger: Send + Sync + 'static {
         _job_id: &str,
         _job_name: &str,
         _output: Option<&str>,
+        _notify_channels: &[NotifyChannel],
     ) {
     }
 
     /// Called after a job fails. Override to send in-app notifications.
-    async fn on_job_failed(&self, _job_id: &str, _job_name: &str, _error: &str) {}
+    async fn on_job_failed(
+        &self,
+        _job_id: &str,
+        _job_name: &str,
+        _error: &str,
+        _notify_channels: &[NotifyChannel],
+    ) {
+    }
 }
 
 pub struct CronScheduler {
@@ -176,7 +184,7 @@ async fn execute_job(store: &CronJobStore, trigger: &dyn JobTrigger, job: CronJo
                 let _ = store.complete_run(run_id, output.as_deref()).await;
             }
             trigger
-                .on_job_completed(&job_id, &job.name, output.as_deref())
+                .on_job_completed(&job_id, &job.name, output.as_deref(), &job.notify_channels)
                 .await;
         }
         Err(e) => {
@@ -187,7 +195,9 @@ async fn execute_job(store: &CronJobStore, trigger: &dyn JobTrigger, job: CronJo
             if run_id >= 0 {
                 let _ = store.fail_run(run_id, &safe_msg).await;
             }
-            trigger.on_job_failed(&job_id, &job.name, &safe_msg).await;
+            trigger
+                .on_job_failed(&job_id, &job.name, &safe_msg, &job.notify_channels)
+                .await;
         }
     }
 

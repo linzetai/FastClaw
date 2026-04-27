@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
+use base64::Engine as _;
+use chardetng::EncodingDetector;
+use encoding_rs::Encoding;
 use fastclaw_core::agent_config::FileAccessMode;
 use fastclaw_core::tool::{Tool, ToolErrorType, ToolKind, ToolParameterSchema, ToolResult};
 use regex::RegexBuilder;
@@ -49,11 +52,13 @@ fn current_file_access_mode() -> FileAccessMode {
 }
 
 fn ensure_within_workspace(path: &Path, must_exist: bool) -> std::io::Result<PathBuf> {
-    match current_file_access_mode() {
+    let mode = current_file_access_mode();
+    match mode {
         FileAccessMode::None => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                "file access is disabled by agent policy (file_access=none)",
+                "file access is disabled (execution mode = Plan). \
+                 The user can change the execution mode in Settings → Security.",
             ))
         }
         FileAccessMode::Full => {
@@ -64,11 +69,25 @@ fn ensure_within_workspace(path: &Path, must_exist: bool) -> std::io::Result<Pat
                 cwd.join(path)
             };
             if must_exist {
-                return absolute.canonicalize();
+                return absolute.canonicalize().map_err(|e| {
+                    std::io::Error::new(
+                        e.kind(),
+                        format!(
+                            "cannot access '{}' (full access mode): {}",
+                            absolute.display(),
+                            e
+                        ),
+                    )
+                });
             }
             return if absolute.exists() {
                 absolute.canonicalize()
             } else {
+                if let Some(parent) = absolute.parent() {
+                    if !parent.exists() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                }
                 Ok(absolute)
             };
         }
@@ -109,7 +128,9 @@ fn ensure_within_workspace(path: &Path, must_exist: bool) -> std::io::Result<Pat
     Err(std::io::Error::new(
         std::io::ErrorKind::PermissionDenied,
         format!(
-            "path '{}' resolves outside workspace root '{}'",
+            "path '{}' resolves outside workspace root '{}'. \
+             Current execution mode restricts access to workspace only. \
+             Change to YOLO mode in Settings → Security to allow full filesystem access.",
             path.display(),
             root.display()
         ),
@@ -124,17 +145,453 @@ const DEFAULT_READ_FILE_MAX_LINES: usize = 2000;
 
 #[derive(Debug, Deserialize)]
 struct ReadFileArgs {
-    path: String,
+    #[serde(alias = "path")]
+    file_path: String,
     offset: Option<i64>,
     limit: Option<usize>,
     #[serde(default)]
     number_lines: bool,
     max_chars: Option<usize>,
+    pages: Option<String>,
+}
+
+#[derive(Debug, PartialEq)]
+enum DetectedFileType {
+    Text,
+    Image { mime: &'static str },
+    Pdf,
+    JupyterNotebook,
+    Binary,
+}
+
+fn detect_file_type(path: &Path, bytes: &[u8]) -> DetectedFileType {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    match ext.as_str() {
+        "ipynb" => return DetectedFileType::JupyterNotebook,
+        "png" => return DetectedFileType::Image { mime: "image/png" },
+        "jpg" | "jpeg" => return DetectedFileType::Image { mime: "image/jpeg" },
+        "gif" => return DetectedFileType::Image { mime: "image/gif" },
+        "webp" => return DetectedFileType::Image { mime: "image/webp" },
+        "svg" => return DetectedFileType::Image { mime: "image/svg+xml" },
+        "bmp" => return DetectedFileType::Image { mime: "image/bmp" },
+        "ico" => return DetectedFileType::Image { mime: "image/x-icon" },
+        "pdf" => return DetectedFileType::Pdf,
+        _ => {}
+    }
+
+    if bytes.len() >= 4 {
+        if bytes.starts_with(b"%PDF") {
+            return DetectedFileType::Pdf;
+        }
+        if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+            return DetectedFileType::Image { mime: "image/png" };
+        }
+        if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+            return DetectedFileType::Image { mime: "image/jpeg" };
+        }
+        if bytes.starts_with(b"GIF8") {
+            return DetectedFileType::Image { mime: "image/gif" };
+        }
+        if bytes.starts_with(b"RIFF") && bytes.len() >= 12 && &bytes[8..12] == b"WEBP" {
+            return DetectedFileType::Image { mime: "image/webp" };
+        }
+        if bytes.starts_with(b"BM") {
+            return DetectedFileType::Image { mime: "image/bmp" };
+        }
+    }
+
+    if looks_like_binary(bytes, 8192) {
+        DetectedFileType::Binary
+    } else {
+        DetectedFileType::Text
+    }
+}
+
+fn decode_bytes_to_string(raw: &[u8]) -> Result<(String, &'static str), String> {
+    if raw.is_empty() {
+        return Ok((String::new(), "utf-8"));
+    }
+
+    if let Some((content, bom_enc)) = try_decode_with_bom(raw) {
+        return Ok((content, bom_enc));
+    }
+
+    if let Ok(s) = std::str::from_utf8(raw) {
+        return Ok((s.to_string(), "utf-8"));
+    }
+
+    let mut detector = EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
+    detector.feed(raw, true);
+    let encoding = detector.guess(None, chardetng::Utf8Detection::Allow);
+
+    let (decoded, _enc_used, had_errors) = encoding.decode(raw);
+    if had_errors {
+        let name = encoding.name();
+        return Err(format!(
+            "detected encoding '{name}' but decoding produced errors. \
+             The file may use a mixed or unsupported encoding."
+        ));
+    }
+
+    Ok((decoded.into_owned(), encoding.name()))
+}
+
+fn try_decode_with_bom(raw: &[u8]) -> Option<(String, &'static str)> {
+    if raw.len() >= 3 && raw[..3] == [0xEF, 0xBB, 0xBF] {
+        return std::str::from_utf8(&raw[3..])
+            .ok()
+            .map(|s| (s.to_string(), "utf-8-bom"));
+    }
+
+    if raw.len() >= 4 {
+        if raw[..4] == [0x00, 0x00, 0xFE, 0xFF] {
+            let encoding = Encoding::for_label(b"utf-32be")?;
+            let (decoded, _, _) = encoding.decode(&raw[4..]);
+            return Some((decoded.into_owned(), "utf-32be"));
+        }
+        if raw[..4] == [0xFF, 0xFE, 0x00, 0x00] {
+            let encoding = Encoding::for_label(b"utf-32le")?;
+            let (decoded, _, _) = encoding.decode(&raw[4..]);
+            return Some((decoded.into_owned(), "utf-32le"));
+        }
+    }
+
+    if raw.len() >= 2 {
+        if raw[..2] == [0xFE, 0xFF] {
+            let (decoded, _, _) = encoding_rs::UTF_16BE.decode(&raw[2..]);
+            return Some((decoded.into_owned(), "utf-16be"));
+        }
+        if raw[..2] == [0xFF, 0xFE] {
+            let (decoded, _, _) = encoding_rs::UTF_16LE.decode(&raw[2..]);
+            return Some((decoded.into_owned(), "utf-16le"));
+        }
+    }
+
+    None
+}
+
+fn handle_image_file(path: &str, raw_bytes: &[u8], mime: &str) -> ToolResult {
+    let encoded = base64::engine::general_purpose::STANDARD.encode(raw_bytes);
+    let size_kb = raw_bytes.len() as f64 / 1024.0;
+
+    let dims = guess_image_dimensions(raw_bytes, mime);
+
+    let info = if let Some((w, h)) = dims {
+        format!(
+            "Image file: {path}\nType: {mime}\nSize: {size_kb:.1} KB\nDimensions: {w}x{h}\n\nbase64:{mime};{encoded}"
+        )
+    } else {
+        format!(
+            "Image file: {path}\nType: {mime}\nSize: {size_kb:.1} KB\n\nbase64:{mime};{encoded}"
+        )
+    };
+
+    let mut result = ToolResult::ok(info);
+    result.metadata = Some(serde_json::json!({
+        "fileType": "image",
+        "mimeType": mime,
+        "fileSize": raw_bytes.len(),
+        "dimensions": dims.map(|(w,h)| serde_json::json!({"width": w, "height": h})),
+    }));
+    result
+}
+
+fn guess_image_dimensions(bytes: &[u8], mime: &str) -> Option<(u32, u32)> {
+    match mime {
+        "image/png" if bytes.len() >= 24 => {
+            let w = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+            let h = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+            Some((w, h))
+        }
+        "image/jpeg" => parse_jpeg_dimensions(bytes),
+        "image/gif" if bytes.len() >= 10 => {
+            let w = u16::from_le_bytes([bytes[6], bytes[7]]) as u32;
+            let h = u16::from_le_bytes([bytes[8], bytes[9]]) as u32;
+            Some((w, h))
+        }
+        "image/bmp" if bytes.len() >= 26 => {
+            let w = u32::from_le_bytes([bytes[18], bytes[19], bytes[20], bytes[21]]);
+            let h = u32::from_le_bytes([bytes[22], bytes[23], bytes[24], bytes[25]]);
+            Some((w, h))
+        }
+        _ => None,
+    }
+}
+
+fn parse_jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    let mut i = 2;
+    while i + 4 < bytes.len() {
+        if bytes[i] != 0xFF {
+            return None;
+        }
+        let marker = bytes[i + 1];
+        if marker == 0xC0 || marker == 0xC2 {
+            if i + 9 < bytes.len() {
+                let h = u16::from_be_bytes([bytes[i + 5], bytes[i + 6]]) as u32;
+                let w = u16::from_be_bytes([bytes[i + 7], bytes[i + 8]]) as u32;
+                return Some((w, h));
+            }
+            return None;
+        }
+        let seg_len = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
+        i += 2 + seg_len;
+    }
+    None
+}
+
+fn handle_pdf_file(path: &str, raw_bytes: &[u8], pages_arg: Option<&str>) -> ToolResult {
+    let text = match pdf_extract::extract_text_from_mem(raw_bytes) {
+        Ok(t) => t,
+        Err(e) => {
+            return ToolResult::typed_err(
+                ToolErrorType::ReadContentFailure,
+                format!(
+                    "Failed to extract text from PDF '{path}': {e}. \
+                     The PDF may be image-based (scanned) or encrypted. \
+                     Try shell_exec with `pdftotext {path} -` for alternative extraction."
+                ),
+            );
+        }
+    };
+
+    let all_pages: Vec<&str> = text.split('\u{000C}').collect();
+    let total_pages = all_pages.len();
+
+    let (selected_text, page_range_desc) = if let Some(range_str) = pages_arg {
+        match parse_page_range(range_str, total_pages) {
+            Ok(indices) => {
+                let selected: Vec<&str> = indices.iter().map(|&i| all_pages[i]).collect();
+                let desc = format!("pages {range_str} of {total_pages}");
+                (selected.join("\n--- Page Break ---\n"), desc)
+            }
+            Err(e) => {
+                return ToolResult::typed_err(
+                    ToolErrorType::InvalidToolParams,
+                    format!("Invalid pages parameter '{range_str}': {e}. Use formats like '1-5', '3', '10-20'. Pages are 1-indexed, max 20 per request."),
+                );
+            }
+        }
+    } else {
+        let capped = all_pages.len().min(20);
+        let text = all_pages[..capped].join("\n--- Page Break ---\n");
+        let desc = if total_pages > 20 {
+            format!("pages 1-20 of {total_pages} (use 'pages' parameter for more)")
+        } else {
+            format!("all {total_pages} pages")
+        };
+        (text, desc)
+    };
+
+    let total_chars = selected_text.chars().count();
+    let truncated = total_chars > ABSOLUTE_READ_FILE_MAX_CHARS;
+    let output = if truncated {
+        let head: String = selected_text.chars().take(ABSOLUTE_READ_FILE_MAX_CHARS).collect();
+        format!(
+            "PDF: {path} ({page_range_desc})\n\n{head}\n\n\
+             [Content truncated: showing {ABSOLUTE_READ_FILE_MAX_CHARS} of {total_chars} chars. \
+             Use 'pages' parameter to read specific page ranges.]"
+        )
+    } else {
+        format!("PDF: {path} ({page_range_desc})\n\n{selected_text}")
+    };
+
+    let mut result = ToolResult::ok(output);
+    result.metadata = Some(serde_json::json!({
+        "fileType": "pdf",
+        "totalPages": total_pages,
+        "fileSize": raw_bytes.len(),
+        "truncated": truncated,
+    }));
+    result
+}
+
+fn parse_page_range(range_str: &str, total: usize) -> Result<Vec<usize>, String> {
+    let mut indices = Vec::new();
+    for part in range_str.split(',') {
+        let part = part.trim();
+        if let Some(dash_pos) = part.find('-') {
+            let start: usize = part[..dash_pos]
+                .trim()
+                .parse()
+                .map_err(|_| format!("invalid page number in '{part}'"))?;
+            let end: usize = part[dash_pos + 1..]
+                .trim()
+                .parse()
+                .map_err(|_| format!("invalid page number in '{part}'"))?;
+            if start == 0 || end == 0 {
+                return Err("page numbers are 1-indexed".to_string());
+            }
+            if start > end {
+                return Err(format!("start ({start}) > end ({end})"));
+            }
+            for p in start..=end {
+                if p > total {
+                    return Err(format!("page {p} exceeds total {total} pages"));
+                }
+                indices.push(p - 1);
+            }
+        } else {
+            let p: usize = part
+                .parse()
+                .map_err(|_| format!("invalid page number '{part}'"))?;
+            if p == 0 {
+                return Err("page numbers are 1-indexed".to_string());
+            }
+            if p > total {
+                return Err(format!("page {p} exceeds total {total} pages"));
+            }
+            indices.push(p - 1);
+        }
+    }
+    if indices.len() > 20 {
+        return Err(format!("requested {} pages, max 20 per request", indices.len()));
+    }
+    Ok(indices)
+}
+
+#[derive(Debug, Deserialize)]
+struct NotebookCell {
+    cell_type: String,
+    source: serde_json::Value,
+    #[serde(default)]
+    outputs: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct JupyterNotebook {
+    cells: Vec<NotebookCell>,
+    #[serde(default)]
+    metadata: serde_json::Value,
+}
+
+fn handle_jupyter_notebook(path: &str, raw_bytes: &[u8]) -> ToolResult {
+    let nb: JupyterNotebook = match serde_json::from_slice(raw_bytes) {
+        Ok(n) => n,
+        Err(e) => {
+            return ToolResult::typed_err(
+                ToolErrorType::ReadContentFailure,
+                format!("Failed to parse Jupyter notebook '{path}': {e}"),
+            );
+        }
+    };
+
+    let kernel = nb
+        .metadata
+        .get("kernelspec")
+        .and_then(|k| k.get("language"))
+        .and_then(|l| l.as_str())
+        .unwrap_or("python");
+
+    let mut output = format!("Jupyter Notebook: {path} ({} cells, kernel: {kernel})\n", nb.cells.len());
+    output.push_str("═".repeat(60).as_str());
+    output.push('\n');
+
+    for (i, cell) in nb.cells.iter().enumerate() {
+        let source = extract_notebook_source(&cell.source);
+        let cell_label = match cell.cell_type.as_str() {
+            "code" => format!("In [{i}]"),
+            "markdown" => format!("Markdown [{i}]"),
+            "raw" => format!("Raw [{i}]"),
+            other => format!("{other} [{i}]"),
+        };
+        output.push_str(&format!("\n── {cell_label} "));
+        output.push_str("─".repeat(40usize.saturating_sub(cell_label.len())).as_str());
+        output.push('\n');
+        output.push_str(&source);
+        if !source.ends_with('\n') {
+            output.push('\n');
+        }
+
+        if cell.cell_type == "code" && !cell.outputs.is_empty() {
+            output.push_str("── Output ──\n");
+            for out_val in &cell.outputs {
+                let rendered = render_notebook_output(out_val);
+                if !rendered.is_empty() {
+                    output.push_str(&rendered);
+                    if !rendered.ends_with('\n') {
+                        output.push('\n');
+                    }
+                }
+            }
+        }
+    }
+
+    let total_chars = output.chars().count();
+    let truncated = total_chars > ABSOLUTE_READ_FILE_MAX_CHARS;
+    let output = if truncated {
+        let head: String = output.chars().take(ABSOLUTE_READ_FILE_MAX_CHARS).collect();
+        format!(
+            "{head}\n\n[Notebook content truncated: showing {ABSOLUTE_READ_FILE_MAX_CHARS} of {total_chars} chars]"
+        )
+    } else {
+        output
+    };
+
+    let mut result = ToolResult::ok(output);
+    result.metadata = Some(serde_json::json!({
+        "fileType": "jupyter",
+        "totalCells": nb.cells.len(),
+        "kernel": kernel,
+        "fileSize": raw_bytes.len(),
+        "truncated": truncated,
+    }));
+    result
+}
+
+fn extract_notebook_source(val: &serde_json::Value) -> String {
+    match val {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
+}
+
+fn render_notebook_output(out: &serde_json::Value) -> String {
+    if let Some(text) = out.get("text") {
+        return extract_notebook_source(text);
+    }
+    if let Some(data) = out.get("data") {
+        if let Some(text) = data.get("text/plain") {
+            return extract_notebook_source(text);
+        }
+        if data.get("image/png").is_some() {
+            return "[image/png output omitted]".to_string();
+        }
+        if let Some(html) = data.get("text/html") {
+            let html_str = extract_notebook_source(html);
+            if html_str.len() > 500 {
+                return format!("[HTML output: {} chars, truncated]", html_str.len());
+            }
+            return html_str;
+        }
+    }
+    if let Some(ename) = out.get("ename") {
+        let evalue = out
+            .get("evalue")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        return format!(
+            "{}: {}",
+            ename.as_str().unwrap_or("Error"),
+            evalue
+        );
+    }
+    String::new()
 }
 
 #[derive(Debug, Deserialize)]
 struct WriteFileArgs {
-    path: String,
+    #[serde(alias = "path")]
+    file_path: String,
     content: String,
     mode: Option<String>,
     expected_content: Option<String>,
@@ -142,7 +599,8 @@ struct WriteFileArgs {
 
 #[derive(Debug, Deserialize)]
 struct EditFileArgs {
-    path: String,
+    #[serde(alias = "path")]
+    file_path: String,
     old_string: String,
     new_string: String,
     #[serde(default)]
@@ -162,7 +620,8 @@ struct SearchInFilesArgs {
 
 #[derive(Debug, Deserialize)]
 struct ApplyPatchArgs {
-    path: String,
+    #[serde(alias = "path")]
+    file_path: String,
     edits: Vec<ApplyPatchEdit>,
     expected_content: Option<String>,
 }
@@ -258,6 +717,18 @@ fn normalize_whitespace(s: &str) -> String {
         .join("\n")
 }
 
+fn maybe_augment_old_string_for_deletion<'a>(file_content: &str, old_string: &'a str, new_string: &str) -> std::borrow::Cow<'a, str> {
+    if old_string.is_empty() || !new_string.is_empty() || old_string.ends_with('\n') {
+        return std::borrow::Cow::Borrowed(old_string);
+    }
+    let candidate = format!("{old_string}\n");
+    if file_content.contains(&candidate) {
+        std::borrow::Cow::Owned(candidate)
+    } else {
+        std::borrow::Cow::Borrowed(old_string)
+    }
+}
+
 /// Try fuzzy matching when exact match fails.
 /// Returns (normalized_file_content, start_byte, end_byte) if a unique fuzzy match is found.
 enum FuzzyMatchResult {
@@ -271,10 +742,23 @@ enum FuzzyMatchResult {
     MultipleMatches(usize),
 }
 
+fn normalize_unicode_char(ch: char) -> char {
+    match ch {
+        '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}' | '\u{2212}' => '-',
+        '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}' => '\'',
+        '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{201F}' => '"',
+        '\u{00A0}' | '\u{2002}' | '\u{2003}' | '\u{2004}' | '\u{2005}' | '\u{2006}'
+        | '\u{2007}' | '\u{2008}' | '\u{2009}' | '\u{200A}' | '\u{202F}' | '\u{205F}'
+        | '\u{3000}' => ' ',
+        other => other,
+    }
+}
+
 fn normalize_line(line: &str) -> String {
     let mut result = String::with_capacity(line.len());
     let mut prev_ws = false;
     for ch in line.chars() {
+        let ch = normalize_unicode_char(ch);
         if ch == ' ' || ch == '\t' {
             if !prev_ws { result.push(' '); }
             prev_ws = true;
@@ -286,54 +770,130 @@ fn normalize_line(line: &str) -> String {
     result.trim().to_string()
 }
 
-fn try_fuzzy_match(file_content: &str, old_string: &str) -> FuzzyMatchResult {
-    let file_lines: Vec<&str> = file_content.lines().collect();
-    let norm_file_lines: Vec<String> = file_lines.iter().map(|l| normalize_line(l)).collect();
-    let norm_old_lines: Vec<String> = old_string.lines().map(|l| normalize_line(l)).collect();
-    let old_line_count = norm_old_lines.len();
-    if old_line_count == 0 || norm_old_lines.iter().all(|l| l.is_empty()) {
-        return FuzzyMatchResult::NoMatch;
-    }
+fn normalize_unicode_text(text: &str) -> String {
+    text.chars().map(normalize_unicode_char).collect()
+}
 
-    // Count line-based fuzzy matches and find the first match position
-    let mut match_count = 0usize;
-    let mut first_match_line: Option<usize> = None;
-    for start_line in 0..file_lines.len() {
-        if start_line + old_line_count > file_lines.len() {
-            break;
-        }
-        let all_match = (0..old_line_count)
-            .all(|i| norm_file_lines[start_line + i] == norm_old_lines[i]);
-        if all_match {
-            match_count += 1;
-            if first_match_line.is_none() {
-                first_match_line = Some(start_line);
+fn seek_line_sequence<F>(file_lines: &[&str], pattern_lines: &[&str], transform: F) -> Option<usize>
+where
+    F: Fn(&str) -> String,
+{
+    if pattern_lines.is_empty() {
+        return Some(0);
+    }
+    if pattern_lines.len() > file_lines.len() {
+        return None;
+    }
+    'outer: for i in 0..=file_lines.len() - pattern_lines.len() {
+        for p in 0..pattern_lines.len() {
+            if transform(file_lines[i + p]) != transform(pattern_lines[p]) {
+                continue 'outer;
             }
         }
+        return Some(i);
     }
+    None
+}
 
-    if match_count == 0 {
+fn count_line_sequence<F>(file_lines: &[&str], pattern_lines: &[&str], transform: F) -> (usize, Option<usize>)
+where
+    F: Fn(&str) -> String,
+{
+    if pattern_lines.is_empty() || pattern_lines.len() > file_lines.len() {
+        return (0, None);
+    }
+    let mut count = 0usize;
+    let mut first = None;
+    'outer: for i in 0..=file_lines.len() - pattern_lines.len() {
+        for p in 0..pattern_lines.len() {
+            if transform(file_lines[i + p]) != transform(pattern_lines[p]) {
+                continue 'outer;
+            }
+        }
+        count += 1;
+        if first.is_none() {
+            first = Some(i);
+        }
+    }
+    (count, first)
+}
+
+fn compute_byte_range(file_lines: &[&str], start_line: usize, line_count: usize, old_ends_with_newline: bool, file_len: usize) -> (usize, usize) {
+    let mut byte_offset = 0usize;
+    for line in file_lines.iter().take(start_line) {
+        byte_offset += line.len() + 1;
+    }
+    let start_byte = byte_offset;
+    for line in file_lines.iter().skip(start_line).take(line_count) {
+        byte_offset += line.len() + 1;
+    }
+    let end_byte = if old_ends_with_newline {
+        byte_offset.min(file_len)
+    } else {
+        byte_offset.saturating_sub(1).min(file_len)
+    };
+    (start_byte, end_byte)
+}
+
+fn try_fuzzy_match(file_content: &str, old_string: &str) -> FuzzyMatchResult {
+    let file_lines: Vec<&str> = file_content.lines().collect();
+    let old_lines: Vec<&str> = old_string.lines().collect();
+
+    if old_lines.is_empty() || old_lines.iter().all(|l| l.trim().is_empty()) {
         return FuzzyMatchResult::NoMatch;
     }
-    if match_count > 1 {
-        return FuzzyMatchResult::MultipleMatches(match_count);
+
+    let build_result = |start_line: usize, line_count: usize| -> FuzzyMatchResult {
+        let (start, end) = compute_byte_range(&file_lines, start_line, line_count, old_string.ends_with('\n'), file_content.len());
+        FuzzyMatchResult::UniqueMatch { start, end }
+    };
+
+    // Pass 1: trimEnd per line (trailing whitespace tolerance)
+    let (count, first) = count_line_sequence(&file_lines, &old_lines, |l| l.trim_end().to_string());
+    if count == 1 {
+        return build_result(first.unwrap(), old_lines.len());
+    }
+    if count > 1 {
+        // Continue to more aggressive normalization — if it finds unique, use it
     }
 
-    if let Some(start_line) = first_match_line {
-        let mut byte_offset = 0usize;
-        for line in file_lines.iter().take(start_line) {
-            byte_offset += line.len() + 1;
-        }
-        let start_byte = byte_offset;
-        for line in file_lines.iter().skip(start_line).take(old_line_count) {
-            byte_offset += line.len() + 1;
-        }
-        let end_byte = byte_offset.saturating_sub(1);
-        if old_string.ends_with('\n') {
-            return FuzzyMatchResult::UniqueMatch { start: start_byte, end: byte_offset.min(file_content.len()) };
-        }
-        return FuzzyMatchResult::UniqueMatch { start: start_byte, end: end_byte.min(file_content.len()) };
+    // Pass 2: Unicode normalization + trimEnd
+    let (count2, first2) = count_line_sequence(&file_lines, &old_lines, |l| {
+        normalize_unicode_text(l).trim_end().to_string()
+    });
+    if count2 == 1 {
+        return build_result(first2.unwrap(), old_lines.len());
     }
+    if count2 > 1 {
+        return FuzzyMatchResult::MultipleMatches(count2);
+    }
+
+    // Pass 3: Full whitespace normalization (collapse internal whitespace + trim)
+    let (count3, first3) = count_line_sequence(&file_lines, &old_lines, |l| normalize_line(l));
+    if count3 == 1 {
+        return build_result(first3.unwrap(), old_lines.len());
+    }
+    if count3 > 1 {
+        return FuzzyMatchResult::MultipleMatches(count3);
+    }
+
+    // Pass 4: Handle trailing empty line in old_string
+    if old_lines.last().map_or(false, |l| l.is_empty()) && old_lines.len() > 1 {
+        let trimmed_old: Vec<&str> = old_lines[..old_lines.len() - 1].to_vec();
+        let (count4, first4) = count_line_sequence(&file_lines, &trimmed_old, |l| l.trim_end().to_string());
+        if count4 == 1 {
+            return build_result(first4.unwrap(), trimmed_old.len());
+        }
+        let (count5, first5) = count_line_sequence(&file_lines, &trimmed_old, |l| normalize_line(l));
+        if count5 == 1 {
+            return build_result(first5.unwrap(), trimmed_old.len());
+        }
+    }
+
+    if count > 1 {
+        return FuzzyMatchResult::MultipleMatches(count);
+    }
+
     FuzzyMatchResult::NoMatch
 }
 
@@ -380,7 +940,7 @@ fn create_user_friendly_error(error_type: ToolErrorType, path: &str) -> String {
             format!(
                 "Permission denied accessing '{}'. \
                  Possible causes: \
-                 (1) The file_access mode is set to 'none' — the user can change this in the agent settings panel under '文件访问权限'. \
+                 (1) The execution mode is set to Plan (read-only) — the user can change this in Settings → Security → Execution Mode. \
                  (2) OS-level file permissions prevent access — suggest the user check ownership/permissions. \
                  (3) The file is locked by another process.",
                 path,
@@ -398,7 +958,7 @@ fn create_user_friendly_error(error_type: ToolErrorType, path: &str) -> String {
                  Solutions: \
                  (1) Use a path relative to the workspace root. \
                  (2) Ask the user to change the working directory via the folder icon (工作目录) at the bottom of the chat input. \
-                 (3) If full filesystem access is needed, the user can set file_access to 'full' in the agent settings panel under '文件访问权限'.",
+                 (3) If full filesystem access is needed, the user can switch to YOLO execution mode in Settings → Security.",
                 path,
             )
         }
@@ -590,7 +1150,7 @@ fn collect_text_files_filtered(
     Ok(files)
 }
 
-async fn atomic_write_text(path: &Path, content: &str) -> std::io::Result<()> {
+async fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path
         .parent()
         .map(Path::to_path_buf)
@@ -603,10 +1163,112 @@ async fn atomic_write_text(path: &Path, content: &str) -> std::io::Result<()> {
     let tmp_path = parent.join(tmp_name);
 
     let mut tmp = tokio::fs::File::create(&tmp_path).await?;
-    tmp.write_all(content.as_bytes()).await?;
+    tmp.write_all(bytes).await?;
     tmp.flush().await?;
     drop(tmp);
     tokio::fs::rename(&tmp_path, path).await
+}
+
+#[derive(Debug, Clone)]
+struct FileEncodingMeta {
+    encoding: &'static str,
+    has_bom: bool,
+    line_ending: &'static str,
+}
+
+impl Default for FileEncodingMeta {
+    fn default() -> Self {
+        Self {
+            encoding: "utf-8",
+            has_bom: false,
+            line_ending: "lf",
+        }
+    }
+}
+
+fn detect_file_encoding_meta(raw_bytes: &[u8]) -> (String, FileEncodingMeta) {
+    if raw_bytes.is_empty() {
+        return (String::new(), FileEncodingMeta::default());
+    }
+
+    let (content, enc_name, has_bom) = if let Some((decoded, bom_enc)) = try_decode_with_bom(raw_bytes) {
+        let is_bom = bom_enc.contains("bom") || bom_enc.starts_with("utf-16") || bom_enc.starts_with("utf-32");
+        (decoded, bom_enc, is_bom)
+    } else if let Ok(s) = std::str::from_utf8(raw_bytes) {
+        (s.to_string(), "utf-8", false)
+    } else {
+        let mut detector = EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
+        detector.feed(raw_bytes, true);
+        let encoding = detector.guess(None, chardetng::Utf8Detection::Allow);
+        let (decoded, _, _) = encoding.decode(raw_bytes);
+        (decoded.into_owned(), encoding.name(), false)
+    };
+
+    let line_ending = detect_line_ending(&content);
+    let meta = FileEncodingMeta {
+        encoding: match enc_name {
+            "utf-8" => "utf-8",
+            "utf-8-bom" => "utf-8",
+            "utf-16be" => "utf-16be",
+            "utf-16le" => "utf-16le",
+            "utf-32be" => "utf-32be",
+            "utf-32le" => "utf-32le",
+            _ => "utf-8",
+        },
+        has_bom,
+        line_ending,
+    };
+
+    (content, meta)
+}
+
+fn encode_with_meta(content: &str, meta: &FileEncodingMeta) -> Vec<u8> {
+    let content_with_endings = if meta.line_ending == "crlf" {
+        let lf_content = content.replace("\r\n", "\n");
+        lf_content.replace('\n', "\r\n")
+    } else {
+        content.to_string()
+    };
+
+    let mut bytes = Vec::new();
+
+    match meta.encoding {
+        "utf-16be" => {
+            if meta.has_bom {
+                bytes.extend_from_slice(&[0xFE, 0xFF]);
+            }
+            for ch in content_with_endings.encode_utf16() {
+                bytes.extend_from_slice(&ch.to_be_bytes());
+            }
+        }
+        "utf-16le" => {
+            if meta.has_bom {
+                bytes.extend_from_slice(&[0xFF, 0xFE]);
+            }
+            for ch in content_with_endings.encode_utf16() {
+                bytes.extend_from_slice(&ch.to_le_bytes());
+            }
+        }
+        _ => {
+            if meta.has_bom {
+                bytes.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+            }
+            bytes.extend_from_slice(content_with_endings.as_bytes());
+        }
+    }
+
+    bytes
+}
+
+const UTF8_BOM_EXTENSIONS: &[&str] = &[".ps1", ".psm1", ".psd1", ".ps1xml", ".csv"];
+
+fn needs_utf8_bom(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    let dotted = format!(".{}", ext.to_ascii_lowercase());
+    UTF8_BOM_EXTENSIONS.contains(&dotted.as_str())
 }
 
 /// Read a file and return its contents.
@@ -620,54 +1282,64 @@ impl Tool for ReadFileTool {
     }
 
     fn description(&self) -> &str {
-        "Read a file's content. Large files auto-truncated to 2000 lines by default. \
-         Use offset/limit to read specific line ranges for large files. \
-         Handles text files; binary and non-UTF-8 files return an error. \
-         Also truncated if content exceeds max_chars (default 32768, max 256000). \
-         Use number_lines=true to get line-numbered output for precise references."
+        "Reads and returns the content of a specified file. If the file is large, the content \
+         will be truncated with details on how to read more using 'offset' and 'limit' parameters. \
+         Handles text files (with automatic encoding detection for non-UTF-8), images (PNG, JPG, GIF, \
+         WEBP, SVG, BMP — returned as base64), PDF files (text extraction, use 'pages' for specific \
+         page ranges, max 20 per request), and Jupyter notebooks (.ipynb — structured cell content \
+         with outputs). For text files, use offset/limit to read specific line ranges."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
         let mut props = HashMap::new();
         props.insert(
-            "path".to_string(),
+            "file_path".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "File path (absolute or relative to cwd)."
+                "description": "The absolute path to the file to read (e.g., '/home/user/project/file.txt'). \
+                                Relative paths are resolved against the workspace root but absolute paths are preferred."
             }),
         );
         props.insert(
             "offset".to_string(),
             serde_json::json!({
                 "type": "integer",
-                "description": "Optional starting line (1-indexed). Negative values count from file end (-1 is last line). If omitted, starts from line 1."
+                "description": "Optional: starting line number (1-indexed). Negative values count from end (-1 = last line). Requires 'limit' to be set for pagination."
             }),
         );
         props.insert(
             "limit".to_string(),
             serde_json::json!({
                 "type": "integer",
-                "description": "Optional maximum number of lines to return (used with offset). If omitted, returns all remaining lines."
+                "description": "Optional: maximum number of lines to return. Use with 'offset' to paginate through large files."
             }),
         );
         props.insert(
             "number_lines".to_string(),
             serde_json::json!({
                 "type": "boolean",
-                "description": "Optional. When true, prefixes each returned line as '<line>|<content>'. Useful for precise references."
+                "description": "Optional. When true, prefixes each line as '<line_number>|<content>' for precise referencing."
             }),
         );
         props.insert(
             "max_chars".to_string(),
             serde_json::json!({
                 "type": "integer",
-                "description": "Optional output cap in characters for non-sliced reads. Defaults to 32768, hard max 256000."
+                "description": "Optional: output cap in characters. Defaults to 32768, hard max 256000."
+            }),
+        );
+        props.insert(
+            "pages".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Optional: for PDF files, the page range to extract (e.g., '1-5', '3', '10-20'). \
+                                Pages are 1-indexed. Max 20 pages per request. Comma-separated for multiple ranges."
             }),
         );
         ToolParameterSchema {
             schema_type: "object".to_string(),
             properties: props,
-            required: vec!["path".to_string()],
+            required: vec!["file_path".to_string()],
         }
     }
 
@@ -676,10 +1348,11 @@ impl Tool for ReadFileTool {
             Ok(v) => v,
             Err(e) => return ToolResult::err(format!(
                 "read_file arguments are not valid JSON: {e}. \
-                 Pass a JSON object like {{\"path\": \"path/to/file.rs\"}}; optional fields: offset, limit, number_lines, max_chars."
+                 Pass a JSON object like {{\"file_path\": \"/absolute/path/to/file.rs\"}}; \
+                 optional fields: offset, limit, number_lines, max_chars, pages."
             )),
         };
-        let path = args.path.as_str();
+        let path = args.file_path.as_str();
 
         let validated = match ensure_within_workspace(Path::new(path), true) {
             Ok(p) => p,
@@ -708,8 +1381,8 @@ impl Tool for ReadFileTool {
                          Recovery: {recovery}",
                         recovery = match err_type {
                             ToolErrorType::FileNotFound => "Run list_directory on the parent to find the correct filename.",
-                            ToolErrorType::PermissionDenied => "The user may need to adjust file_access in agent settings ('文件访问权限'), or set a different working directory via the folder icon at the bottom of the chat.",
-                            _ => "The file may be binary or locked—do not retry read_file on binary content."
+                            ToolErrorType::PermissionDenied => "The user may need to switch execution mode in Settings → Security, or set a different working directory via the folder icon at the bottom of the chat.",
+                            _ => "Check file permissions or retry. For binary files, use shell_exec to inspect."
                         }
                     ),
                 );
@@ -717,28 +1390,37 @@ impl Tool for ReadFileTool {
         };
 
         let file_size = raw_bytes.len();
+        let file_type = detect_file_type(&validated, &raw_bytes);
 
-        if looks_like_binary(&raw_bytes, 8192) {
-            return ToolResult::typed_err(
-                ToolErrorType::ReadContentFailure,
-                format!(
-                    "read_file: '{path}' appears to be a binary file ({file_size} bytes). \
-                     Binary files are not supported. Use shell_exec to inspect binary content \
-                     (e.g. `file {path}`, `hexdump -C {path} | head`) or request a text export."
-                ),
-            );
-        }
-
-        let content = match String::from_utf8(raw_bytes) {
-            Ok(s) => s,
-            Err(_) => {
+        match file_type {
+            DetectedFileType::Image { mime } => {
+                return handle_image_file(path, &raw_bytes, mime);
+            }
+            DetectedFileType::Pdf => {
+                return handle_pdf_file(path, &raw_bytes, args.pages.as_deref());
+            }
+            DetectedFileType::JupyterNotebook => {
+                return handle_jupyter_notebook(path, &raw_bytes);
+            }
+            DetectedFileType::Binary => {
                 return ToolResult::typed_err(
                     ToolErrorType::ReadContentFailure,
                     format!(
-                        "read_file: '{path}' contains invalid UTF-8 ({file_size} bytes). \
-                         The file may use a non-UTF-8 encoding. \
-                         Try shell_exec with iconv or file to check encoding."
+                        "read_file: '{path}' appears to be a binary file ({file_size} bytes). \
+                         Binary files are not supported. Use shell_exec to inspect binary content \
+                         (e.g. `file {path}`, `hexdump -C {path} | head`) or request a text export."
                     ),
+                );
+            }
+            DetectedFileType::Text => {}
+        }
+
+        let (content, encoding) = match decode_bytes_to_string(&raw_bytes) {
+            Ok(pair) => pair,
+            Err(msg) => {
+                return ToolResult::typed_err(
+                    ToolErrorType::ReadContentFailure,
+                    format!("read_file: '{path}' encoding error ({file_size} bytes): {msg}"),
                 );
             }
         };
@@ -747,12 +1429,20 @@ impl Tool for ReadFileTool {
         let line_ending = detect_line_ending(&content);
 
         if args.offset.is_some() || args.limit.is_some() || args.number_lines {
-            return ToolResult::ok(render_line_slice(
+            let mut result = ToolResult::ok(render_line_slice(
                 &content,
                 args.offset,
                 args.limit,
                 args.number_lines,
             ));
+            result.metadata = Some(serde_json::json!({
+                "fileType": "text",
+                "totalLines": total_lines,
+                "fileSize": file_size,
+                "lineEnding": line_ending,
+                "encoding": encoding,
+            }));
+            return result;
         }
 
         let max_chars = args
@@ -760,9 +1450,10 @@ impl Tool for ReadFileTool {
             .unwrap_or(DEFAULT_READ_FILE_MAX_CHARS)
             .clamp(1, ABSOLUTE_READ_FILE_MAX_CHARS);
 
-        // Apply default line limit for large files (like Qwen Code's 2000-line default)
+        let lines_shown;
         let line_truncated = total_lines > DEFAULT_READ_FILE_MAX_LINES;
         let content = if line_truncated {
+            lines_shown = DEFAULT_READ_FILE_MAX_LINES;
             let truncated_text: String = content
                 .lines()
                 .take(DEFAULT_READ_FILE_MAX_LINES)
@@ -774,6 +1465,7 @@ impl Tool for ReadFileTool {
                  Use offset/limit parameters to read remaining content.]"
             )
         } else {
+            lines_shown = total_lines;
             content
         };
 
@@ -790,10 +1482,13 @@ impl Tool for ReadFileTool {
 
         let mut result = ToolResult::ok(text);
         result.metadata = Some(serde_json::json!({
+            "fileType": "text",
             "totalLines": total_lines,
+            "linesShown": lines_shown,
             "fileSize": file_size,
             "lineEnding": line_ending,
-            "truncated": is_truncated,
+            "encoding": encoding,
+            "isTruncated": is_truncated,
         }));
         result
     }
@@ -810,18 +1505,21 @@ impl Tool for WriteFileTool {
     }
 
     fn description(&self) -> &str {
-        "Write content to a file. Modes: overwrite (default), append, create_new. \
+        "Writes content to a specified file in the local filesystem. \
+         Modes: overwrite (default), append, create_new. \
          Parent directories are created automatically. \
+         Preserves existing file encoding (BOM, UTF-16, line endings) when overwriting. \
          Use expected_content for optimistic locking (write only if current content matches)."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
         let mut props = HashMap::new();
         props.insert(
-            "path".to_string(),
+            "file_path".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "File path (absolute or relative to cwd). Parent dirs auto-created."
+                "description": "The absolute path to the file to write to (e.g., '/home/user/project/file.txt'). \
+                                Relative paths are resolved against the workspace root. Parent dirs auto-created."
             }),
         );
         props.insert(
@@ -848,7 +1546,7 @@ impl Tool for WriteFileTool {
         ToolParameterSchema {
             schema_type: "object".to_string(),
             properties: props,
-            required: vec!["path".to_string(), "content".to_string()],
+            required: vec!["file_path".to_string(), "content".to_string()],
         }
     }
 
@@ -857,10 +1555,10 @@ impl Tool for WriteFileTool {
             Ok(v) => v,
             Err(e) => return ToolResult::err(format!(
                 "write_file arguments are not valid JSON: {e}. \
-                 Pass {{\"path\": \"...\", \"content\": \"...\"}}; optional fields: mode, expected_content."
+                 Pass {{\"file_path\": \"/absolute/path\", \"content\": \"...\"}}; optional fields: mode, expected_content."
             )),
         };
-        let path = args.path.as_str();
+        let path = args.file_path.as_str();
         let content = args.content.as_str();
         let mode = args.mode.as_deref().unwrap_or("overwrite");
         if !matches!(mode, "overwrite" | "append" | "create_new") {
@@ -880,7 +1578,7 @@ impl Tool for WriteFileTool {
         };
         let file_path = validated.as_path();
         if let Some(parent) = file_path.parent() {
-            if let Err(_) = tokio::fs::create_dir_all(parent).await {
+            if tokio::fs::create_dir_all(parent).await.is_err() {
                 return ToolResult::typed_err(
                     ToolErrorType::FileWriteFailure,
                     format!("Could not create parent directories for '{path}'. Check directory permissions."),
@@ -906,8 +1604,33 @@ impl Tool for WriteFileTool {
             }
         }
 
+        let existing_meta = if validated.exists() && mode == "overwrite" {
+            match tokio::fs::read(&validated).await {
+                Ok(raw) => {
+                    let (_, meta) = detect_file_encoding_meta(&raw);
+                    Some(meta)
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
         let write_result = match mode {
-            "overwrite" => atomic_write_text(&validated, content).await,
+            "overwrite" => {
+                if let Some(ref meta) = existing_meta {
+                    let bytes = encode_with_meta(content, meta);
+                    atomic_write_bytes(&validated, &bytes).await
+                } else {
+                    let meta = if needs_utf8_bom(&validated) {
+                        FileEncodingMeta { has_bom: true, ..FileEncodingMeta::default() }
+                    } else {
+                        FileEncodingMeta::default()
+                    };
+                    let bytes = encode_with_meta(content, &meta);
+                    atomic_write_bytes(&validated, &bytes).await
+                }
+            }
             "append" => async {
                 let mut f = tokio::fs::OpenOptions::new()
                     .create(true)
@@ -925,7 +1648,13 @@ impl Tool for WriteFileTool {
                         "target file already exists",
                     ))
                 } else {
-                    atomic_write_text(&validated, content).await
+                    let meta = if needs_utf8_bom(&validated) {
+                        FileEncodingMeta { has_bom: true, ..FileEncodingMeta::default() }
+                    } else {
+                        FileEncodingMeta::default()
+                    };
+                    let bytes = encode_with_meta(content, &meta);
+                    atomic_write_bytes(&validated, &bytes).await
                 }
             }
             _ => unreachable!(),
@@ -937,12 +1666,14 @@ impl Tool for WriteFileTool {
                     Ok(meta) => meta.len() as usize,
                     Err(_) => content.len(),
                 };
+                let enc_info = existing_meta.as_ref().map_or("utf-8", |m| m.encoding);
                 ToolResult::ok(
                     serde_json::json!({
                         "written": true,
-                        "path": path,
+                        "file_path": path,
                         "mode": mode,
                         "bytes": final_bytes,
+                        "encoding": enc_info,
                     })
                     .to_string(),
                 )
@@ -975,34 +1706,36 @@ impl Tool for EditFileTool {
     }
 
     fn description(&self) -> &str {
-        "Replace text in a file, or create a new file (empty old_string). \
-         old_string should match exactly one location (include 3+ lines of context for uniqueness). \
-         Set replace_all=true to replace every occurrence. Line endings auto-preserved. \
-         If exact match fails, falls back to whitespace-normalized fuzzy matching. \
-         CRITICAL: old_string must be the literal text from the file including indentation."
+        "Replaces text within a file. By default, replaces a single occurrence. \
+         Set replace_all=true to replace every instance. Use empty old_string to create a new file. \
+         old_string MUST be the exact literal text from the file including all whitespace and indentation. \
+         Include at least 3 lines of context BEFORE and AFTER for unique identification. \
+         Preserves file encoding (BOM, line endings) automatically. \
+         Falls back to Unicode-normalized and whitespace-normalized fuzzy matching if exact match fails."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
         let mut props = HashMap::new();
         props.insert(
-            "path".to_string(),
+            "file_path".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Target file path (absolute or relative to cwd)."
+                "description": "The absolute path to the file to modify. Must start with '/'."
             }),
         );
         props.insert(
             "old_string".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Exact existing text to locate in the file."
+                "description": "The exact literal text to replace. Include at least 3 lines of context BEFORE and AFTER \
+                                the target text, matching whitespace and indentation precisely. Empty string = create new file."
             }),
         );
         props.insert(
             "new_string".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": "Replacement text."
+                "description": "The exact literal text to replace old_string with. Ensure the resulting code is correct."
             }),
         );
         props.insert(
@@ -1023,7 +1756,7 @@ impl Tool for EditFileTool {
             schema_type: "object".to_string(),
             properties: props,
             required: vec![
-                "path".to_string(),
+                "file_path".to_string(),
                 "old_string".to_string(),
                 "new_string".to_string(),
             ],
@@ -1036,12 +1769,11 @@ impl Tool for EditFileTool {
             Err(e) => {
                 return ToolResult::err(format!(
                     "edit_file arguments are not valid JSON: {e}. \
-                     Pass {{\"path\":\"...\", \"old_string\":\"...\", \"new_string\":\"...\"}}."
+                     Pass {{\"file_path\":\"/absolute/path\", \"old_string\":\"...\", \"new_string\":\"...\"}}."
                 ))
             }
         };
 
-        // When old_string is empty, this is a "create new file" operation
         if args.old_string.is_empty() {
             if args.new_string.is_empty() {
                 return ToolResult::typed_err(
@@ -1049,37 +1781,43 @@ impl Tool for EditFileTool {
                     "edit_file: both old_string and new_string are empty. Nothing to do.",
                 );
             }
-            let validated = match ensure_within_workspace(Path::new(&args.path), false) {
+            let validated = match ensure_within_workspace(Path::new(&args.file_path), false) {
                 Ok(p) => p,
                 Err(_) => {
                     return ToolResult::typed_err(
                         ToolErrorType::PathNotInWorkspace,
-                        create_user_friendly_error(ToolErrorType::PathNotInWorkspace, &args.path),
+                        create_user_friendly_error(ToolErrorType::PathNotInWorkspace, &args.file_path),
                     )
                 }
             };
             if validated.exists() {
                 return ToolResult::typed_err(
                     ToolErrorType::AttemptToCreateExistingFile,
-                    create_user_friendly_error(ToolErrorType::AttemptToCreateExistingFile, &args.path),
+                    create_user_friendly_error(ToolErrorType::AttemptToCreateExistingFile, &args.file_path),
                 );
             }
             if let Some(parent) = validated.parent() {
-                if let Err(_) = tokio::fs::create_dir_all(parent).await {
+                if tokio::fs::create_dir_all(parent).await.is_err() {
                     return ToolResult::typed_err(
                         ToolErrorType::FileWriteFailure,
-                        format!("Could not create parent directories for '{}'. Check directory permissions.", args.path),
+                        format!("Could not create parent directories for '{}'. Check directory permissions.", args.file_path),
                     );
                 }
             }
             let new_lines = args.new_string.lines().count();
-            return match atomic_write_text(&validated, &args.new_string).await {
+            let meta = if needs_utf8_bom(&validated) {
+                FileEncodingMeta { has_bom: true, ..FileEncodingMeta::default() }
+            } else {
+                FileEncodingMeta::default()
+            };
+            let bytes = encode_with_meta(&args.new_string, &meta);
+            return match atomic_write_bytes(&validated, &bytes).await {
                 Ok(()) => {
                     ToolResult::ok(
                         serde_json::json!({
                             "created": true,
-                            "path": args.path,
-                            "bytes": args.new_string.len(),
+                            "file_path": args.file_path,
+                            "bytes": bytes.len(),
                             "linesAdded": new_lines,
                             "linesRemoved": 0,
                             "diffStat": format!("+{new_lines} -0 lines"),
@@ -1089,7 +1827,7 @@ impl Tool for EditFileTool {
                 }
                 Err(e) => ToolResult::typed_err(
                     ToolErrorType::FileWriteFailure,
-                    format!("edit_file failed to create '{}': {e}", args.path),
+                    format!("edit_file failed to create '{}': {e}", args.file_path),
                 ),
             };
         }
@@ -1097,16 +1835,16 @@ impl Tool for EditFileTool {
         if args.old_string == args.new_string {
             return ToolResult::typed_err(
                 ToolErrorType::EditNoChange,
-                create_user_friendly_error(ToolErrorType::EditNoChange, &args.path),
+                create_user_friendly_error(ToolErrorType::EditNoChange, &args.file_path),
             );
         }
 
-        let validated = match ensure_within_workspace(Path::new(&args.path), true) {
+        let validated = match ensure_within_workspace(Path::new(&args.file_path), true) {
             Ok(p) => p,
             Err(_) => {
                 return ToolResult::typed_err(
                     ToolErrorType::PathNotInWorkspace,
-                    create_user_friendly_error(ToolErrorType::PathNotInWorkspace, &args.path),
+                    create_user_friendly_error(ToolErrorType::PathNotInWorkspace, &args.file_path),
                 )
             }
         };
@@ -1121,44 +1859,53 @@ impl Tool for EditFileTool {
                 } else {
                     ToolErrorType::ReadContentFailure
                 };
-                
-                return ToolResult::typed_err(err_type, create_user_friendly_error(err_type, &args.path));
+                return ToolResult::typed_err(err_type, create_user_friendly_error(err_type, &args.file_path));
             }
         };
 
-        let current = match String::from_utf8(raw_bytes) {
-            Ok(s) => s,
-            Err(_) => {
-                return ToolResult::typed_err(
-                    ToolErrorType::ReadContentFailure,
-                    format!("File '{}' contains binary data which cannot be edited. Use appropriate tools for binary files.", args.path),
-                );
-            }
-        };
+        let (current, enc_meta) = detect_file_encoding_meta(&raw_bytes);
 
-        let original_line_ending = detect_line_ending(&current);
+        if current.is_empty() && !raw_bytes.is_empty() {
+            return ToolResult::typed_err(
+                ToolErrorType::ReadContentFailure,
+                format!("File '{}' contains binary data which cannot be edited. Use appropriate tools for binary files.", args.file_path),
+            );
+        }
 
-        // Normalize to LF for matching, then restore original line ending
         let normalized = current.replace("\r\n", "\n");
         let old_normalized = args.old_string.replace("\r\n", "\n");
         let new_normalized = args.new_string.replace("\r\n", "\n");
 
-        let match_count = normalized.matches(&old_normalized).count();
+        let old_augmented = maybe_augment_old_string_for_deletion(&normalized, &old_normalized, &new_normalized);
+
+        let mut match_count = normalized.matches(old_augmented.as_ref()).count();
+
+        let unicode_match = if match_count == 0 {
+            let norm_hay = normalize_unicode_text(&normalized);
+            let norm_needle = normalize_unicode_text(&old_augmented);
+            let c = norm_hay.matches(&norm_needle).count();
+            if c > 0 {
+                match_count = c;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
         if let Some(expected) = args.expected_replacements {
             if match_count != expected {
                 return ToolResult::typed_err(
                     ToolErrorType::EditMultipleOccurrences,
-                    create_user_friendly_error(ToolErrorType::EditMultipleOccurrences, &args.path),
+                    create_user_friendly_error(ToolErrorType::EditMultipleOccurrences, &args.file_path),
                 );
             }
         }
 
-        // --- Fuzzy matching fallback (inspired by Qwen Code's multi-stage correction) ---
-        // If exact match fails, try whitespace-normalized matching before giving up.
         let (updated_normalized, replaced, fuzzy_used) = if match_count == 0 {
             match try_fuzzy_match(&normalized, &old_normalized) {
                 FuzzyMatchResult::UniqueMatch { start, end } => {
-                    // Replace the original text range with new_string
                     let mut result = String::with_capacity(normalized.len());
                     result.push_str(&normalized[..start]);
                     result.push_str(&new_normalized);
@@ -1166,7 +1913,6 @@ impl Tool for EditFileTool {
                     (result, 1usize, true)
                 }
                 FuzzyMatchResult::NoMatch => {
-                    // Provide helpful context: show the first few lines of the file
                     let file_preview: String = normalized.lines().take(20)
                         .enumerate()
                         .map(|(i, l)| format!("{}|{}", i + 1, l))
@@ -1176,12 +1922,12 @@ impl Tool for EditFileTool {
                         ToolErrorType::EditNoOccurrenceFound,
                         format!(
                             "In file '{}': Could not find the specified text to replace \
-                             (neither exact nor whitespace-normalized match). \
+                             (neither exact nor whitespace/Unicode-normalized match). \
                              The file may have changed or the old_string is incorrect.\n\
                              Hint: re-read the file with read_file to get the current content, \
                              then retry with the exact text.\n\
                              File preview (first 20 lines):\n{file_preview}",
-                            args.path
+                            args.file_path
                         ),
                     );
                 }
@@ -1193,7 +1939,7 @@ impl Tool for EditFileTool {
                              (exact match found 0). Provide more surrounding context \
                              to uniquely identify the location to edit, \
                              or set replace_all=true to replace all occurrences.",
-                            args.path
+                            args.file_path
                         ),
                     );
                 }
@@ -1202,46 +1948,69 @@ impl Tool for EditFileTool {
             return ToolResult::typed_err(
                 ToolErrorType::EditMultipleOccurrences,
                 format!(
-                    "In file '{}': Found {} exact matches. Provide more surrounding context \
+                    "In file '{}': Found {} {} matches. Provide more surrounding context \
                      to uniquely identify the location, or set replace_all=true.",
-                    args.path, match_count
+                    args.file_path, match_count,
+                    if unicode_match { "Unicode-normalized" } else { "exact" }
                 ),
             );
+        } else if unicode_match {
+            match try_fuzzy_match(&normalized, &old_augmented) {
+                FuzzyMatchResult::UniqueMatch { start, end } => {
+                    let mut result = String::with_capacity(normalized.len());
+                    result.push_str(&normalized[..start]);
+                    result.push_str(&new_normalized);
+                    result.push_str(&normalized[end..]);
+                    (result, 1usize, true)
+                }
+                FuzzyMatchResult::NoMatch => {
+                    return ToolResult::typed_err(
+                        ToolErrorType::EditNoOccurrenceFound,
+                        format!(
+                            "In file '{}': Unicode-normalized count found matches but fuzzy replace failed.",
+                            args.file_path
+                        ),
+                    );
+                }
+                FuzzyMatchResult::MultipleMatches(n) => {
+                    return ToolResult::typed_err(
+                        ToolErrorType::EditMultipleOccurrences,
+                        format!(
+                            "In file '{}': Found {n} Unicode-normalized matches. Provide more context.",
+                            args.file_path
+                        ),
+                    );
+                }
+            }
         } else {
             let result = if args.replace_all {
-                normalized.replace(&old_normalized, &new_normalized)
+                normalized.replace(old_augmented.as_ref(), &new_normalized)
             } else {
-                normalized.replacen(&old_normalized, &new_normalized, 1)
+                normalized.replacen(old_augmented.as_ref(), &new_normalized, 1)
             };
             let count = if args.replace_all { match_count } else { 1 };
             (result, count, false)
         };
 
-        // Restore original line ending style
-        let updated = if original_line_ending == "crlf" {
-            updated_normalized.replace('\n', "\r\n")
-        } else {
-            updated_normalized
-        };
-
         let old_lines = normalized.lines().count();
-        let new_lines = updated.lines().count();
+        let new_lines = updated_normalized.lines().count();
         let added = new_lines.saturating_sub(old_lines);
         let removed = old_lines.saturating_sub(new_lines);
 
-        // Build both a context snippet and a unified-diff snippet for verification
-        let snippet = build_edit_snippet(&updated, &new_normalized, 4);
-        let diff = build_diff_snippet(&old_normalized, &new_normalized, &args.path);
+        let snippet = build_edit_snippet(&updated_normalized, &new_normalized, 4);
+        let diff = build_diff_snippet(&old_normalized, &new_normalized, &args.file_path);
 
-        match atomic_write_text(&validated, &updated).await {
+        let write_bytes = encode_with_meta(&updated_normalized, &enc_meta);
+
+        match atomic_write_bytes(&validated, &write_bytes).await {
             Ok(()) => {
                 let diff_stat = format!("+{} -{} lines", added, removed);
                 let mut result = ToolResult::ok(
                     serde_json::json!({
                         "edited": true,
-                        "path": args.path,
+                        "file_path": args.file_path,
                         "replacements": replaced,
-                        "bytes": updated.len(),
+                        "bytes": write_bytes.len(),
                         "diffStat": diff_stat,
                         "linesAdded": added,
                         "linesRemoved": removed,
@@ -1253,7 +2022,7 @@ impl Tool for EditFileTool {
                 result.display_output = Some(
                     serde_json::json!({
                         "edited": true,
-                        "path": args.path,
+                        "file_path": args.file_path,
                         "replacements": replaced,
                         "diffStat": diff_stat,
                         "fuzzyMatch": fuzzy_used,
@@ -1263,7 +2032,8 @@ impl Tool for EditFileTool {
                     .to_string(),
                 );
                 result.metadata = Some(serde_json::json!({
-                    "lineEnding": original_line_ending,
+                    "lineEnding": enc_meta.line_ending,
+                    "encoding": enc_meta.encoding,
                     "totalLines": new_lines,
                     "fuzzyMatch": fuzzy_used,
                 }));
@@ -1271,7 +2041,7 @@ impl Tool for EditFileTool {
             }
             Err(_) => ToolResult::typed_err(
                 ToolErrorType::FileWriteFailure,
-                format!("Could not write to file '{}'. Check file permissions or disk space.", args.path),
+                format!("Could not write to file '{}'. Check file permissions or disk space.", args.file_path),
             ),
         }
     }
@@ -1726,7 +2496,7 @@ impl Tool for ApplyPatchTool {
         ToolParameterSchema {
             schema_type: "object".to_string(),
             properties: props,
-            required: vec!["path".to_string(), "edits".to_string()],
+            required: vec!["file_path".to_string(), "edits".to_string()],
         }
     }
 
@@ -1736,7 +2506,7 @@ impl Tool for ApplyPatchTool {
             Err(e) => {
                 return ToolResult::err(format!(
                     "apply_patch arguments are not valid JSON: {e}. \
-                     Pass {{\"path\":\"...\", \"edits\":[{{\"old_string\":\"...\", \"new_string\":\"...\"}}]}}."
+                     Pass {{\"file_path\":\"/absolute/path\", \"edits\":[{{\"old_string\":\"...\", \"new_string\":\"...\"}}]}}."
                 ))
             }
         };
@@ -1745,18 +2515,18 @@ impl Tool for ApplyPatchTool {
             return ToolResult::err("apply_patch requires at least one edit.".to_string());
         }
 
-        let validated = match ensure_within_workspace(Path::new(&args.path), true) {
+        let validated = match ensure_within_workspace(Path::new(&args.file_path), true) {
             Ok(p) => p,
             Err(_) => {
                 return ToolResult::typed_err(
                     ToolErrorType::PathNotInWorkspace,
-                    create_user_friendly_error(ToolErrorType::PathNotInWorkspace, &args.path),
+                    create_user_friendly_error(ToolErrorType::PathNotInWorkspace, &args.file_path),
                 )
             }
         };
 
-        let mut current = match tokio::fs::read_to_string(&validated).await {
-            Ok(c) => c,
+        let raw_bytes = match tokio::fs::read(&validated).await {
+            Ok(b) => b,
             Err(e) => {
                 let err_type = if e.kind() == std::io::ErrorKind::NotFound {
                     ToolErrorType::FileNotFound
@@ -1765,24 +2535,24 @@ impl Tool for ApplyPatchTool {
                 } else {
                     ToolErrorType::ReadContentFailure
                 };
-                
                 return ToolResult::typed_err(
                     err_type,
-                    create_user_friendly_error(err_type, &args.path),
+                    create_user_friendly_error(err_type, &args.file_path),
                 );
             }
         };
+
+        let (current, enc_meta) = detect_file_encoding_meta(&raw_bytes);
 
         if let Some(expected) = args.expected_content.as_deref() {
             if current != expected {
                 return ToolResult::err(format!(
                     "apply_patch optimistic lock failed for '{}': content differs from expected_content.",
-                    args.path
+                    args.file_path
                 ));
             }
         }
 
-        let original_line_ending = detect_line_ending(&current);
         let mut working = current.replace("\r\n", "\n");
 
         let mut applied = Vec::new();
@@ -1858,25 +2628,22 @@ impl Tool for ApplyPatchTool {
             }));
         }
 
-        let final_content = if original_line_ending == "crlf" {
-            working.replace('\n', "\r\n")
-        } else {
-            working
-        };
+        let write_bytes = encode_with_meta(&working, &enc_meta);
 
-        match atomic_write_text(&validated, &final_content).await {
+        match atomic_write_bytes(&validated, &write_bytes).await {
             Ok(()) => ToolResult::ok(
                 serde_json::json!({
                     "patched": true,
-                    "path": args.path,
+                    "file_path": args.file_path,
                     "edits_applied": applied,
-                    "bytes": final_content.len(),
+                    "bytes": write_bytes.len(),
+                    "encoding": enc_meta.encoding,
                 })
                 .to_string(),
             ),
             Err(_) => ToolResult::typed_err(
                 ToolErrorType::FileWriteFailure,
-                format!("Could not write to file '{}'. Check file permissions or disk space.", args.path),
+                format!("Could not write to file '{}'. Check file permissions or disk space.", args.file_path),
             ),
         }
     }
@@ -2126,7 +2893,8 @@ struct MultiEditArgs {
 
 #[derive(Debug, Deserialize)]
 struct MultiEditFileEntry {
-    path: String,
+    #[serde(alias = "path")]
+    file_path: String,
     changes: Vec<MultiEditChange>,
 }
 
@@ -2185,15 +2953,14 @@ impl Tool for MultiEditTool {
             return ToolResult::err("multi_edit requires at least one file entry.".to_string());
         }
 
-        // Phase 1: Read all files and compute edits in memory
-        let mut staged: Vec<(PathBuf, String, String, Vec<serde_json::Value>)> = Vec::new();
+        let mut staged: Vec<(PathBuf, String, Vec<u8>, Vec<serde_json::Value>)> = Vec::new();
 
         for (file_idx, entry) in args.edits.iter().enumerate() {
-            let validated = match ensure_within_workspace(Path::new(&entry.path), true) {
+            let validated = match ensure_within_workspace(Path::new(&entry.file_path), true) {
                 Ok(p) => p,
                 Err(_) => return ToolResult::err(format!(
                     "multi_edit: file #{file_idx} '{}' is outside the workspace. Transaction aborted, no files modified.",
-                    entry.path
+                    entry.file_path
                 )),
             };
 
@@ -2201,19 +2968,18 @@ impl Tool for MultiEditTool {
                 Ok(b) => b,
                 Err(e) => return ToolResult::err(format!(
                     "multi_edit: could not read file #{file_idx} '{}': {e}. Transaction aborted, no files modified.",
-                    entry.path
+                    entry.file_path
                 )),
             };
 
-            let original = match String::from_utf8(raw_bytes) {
-                Ok(s) => s,
-                Err(_) => return ToolResult::err(format!(
-                    "multi_edit: file #{file_idx} '{}' contains non-UTF8 data. Transaction aborted.",
-                    entry.path
-                )),
-            };
+            let (original, enc_meta) = detect_file_encoding_meta(&raw_bytes);
+            if original.is_empty() && !raw_bytes.is_empty() {
+                return ToolResult::err(format!(
+                    "multi_edit: file #{file_idx} '{}' contains binary data. Transaction aborted.",
+                    entry.file_path
+                ));
+            }
 
-            let line_ending = detect_line_ending(&original);
             let mut current = original.replace("\r\n", "\n");
             let mut change_log = Vec::new();
 
@@ -2221,7 +2987,7 @@ impl Tool for MultiEditTool {
                 if change.old_string.is_empty() {
                     return ToolResult::err(format!(
                         "multi_edit: file #{file_idx} '{}', change #{change_idx} has empty old_string. Transaction aborted.",
-                        entry.path
+                        entry.file_path
                     ));
                 }
 
@@ -2233,7 +2999,7 @@ impl Tool for MultiEditTool {
                     return ToolResult::err(format!(
                         "multi_edit: file #{file_idx} '{}', change #{change_idx}: old_string not found. \
                          Transaction aborted, no files modified. Re-read the file to get current content.",
-                        entry.path
+                        entry.file_path
                     ));
                 }
 
@@ -2241,7 +3007,7 @@ impl Tool for MultiEditTool {
                     return ToolResult::err(format!(
                         "multi_edit: file #{file_idx} '{}', change #{change_idx}: found {match_count} matches. \
                          Set replace_all=true or provide more context. Transaction aborted.",
-                        entry.path
+                        entry.file_path
                     ));
                 }
 
@@ -2258,23 +3024,17 @@ impl Tool for MultiEditTool {
                 }));
             }
 
-            let final_content = if line_ending == "crlf" {
-                current.replace('\n', "\r\n")
-            } else {
-                current
-            };
+            let final_bytes = encode_with_meta(&current, &enc_meta);
 
-            staged.push((validated, entry.path.clone(), final_content, change_log));
+            staged.push((validated, entry.file_path.clone(), final_bytes, change_log));
         }
 
-        // Phase 2: Write all files (only if all edits succeeded)
         if args.dry_run {
-            let results: Vec<serde_json::Value> = staged.iter().map(|(_, path, content, log)| {
+            let results: Vec<serde_json::Value> = staged.iter().map(|(_, fp, bytes, log)| {
                 serde_json::json!({
-                    "path": path,
+                    "file_path": fp,
                     "changes_applied": log,
-                    "result_bytes": content.len(),
-                    "result_lines": content.lines().count(),
+                    "result_bytes": bytes.len(),
                 })
             }).collect();
 
@@ -2287,14 +3047,13 @@ impl Tool for MultiEditTool {
         }
 
         let mut written = Vec::new();
-        for (validated_path, display_path, content, change_log) in &staged {
-            match atomic_write_text(validated_path, content).await {
+        for (validated_path, display_path, bytes, change_log) in &staged {
+            match atomic_write_bytes(validated_path, bytes).await {
                 Ok(()) => {
                     written.push(serde_json::json!({
-                        "path": display_path,
+                        "file_path": display_path,
                         "changes_applied": change_log,
-                        "bytes": content.len(),
-                        "lines": content.lines().count(),
+                        "bytes": bytes.len(),
                     }));
                 }
                 Err(e) => {
@@ -2305,7 +3064,7 @@ impl Tool for MultiEditTool {
                         display_path,
                         written.len(),
                         written.iter()
-                            .filter_map(|w| w.get("path").and_then(|p| p.as_str()))
+                            .filter_map(|w| w.get("file_path").and_then(|p| p.as_str()))
                             .collect::<Vec<_>>()
                             .join(", ")
                     ));
@@ -2415,7 +3174,7 @@ mod tests {
         tokio::fs::write(&file_path, "blocked\n").await.expect("write sample");
 
         let tool = ReadFileTool;
-        let args = serde_json::json!({ "path": file_path.to_string_lossy() }).to_string();
+        let args = serde_json::json!({ "file_path": file_path.to_string_lossy() }).to_string();
         let out = with_file_access_mode(FileAccessMode::None, Tool::execute(&tool, &args)).await;
         assert!(!out.success, "read_file should be blocked in none mode");
         assert!(
@@ -2426,13 +3185,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_file_backward_compat_path_alias() {
+        let cwd = std::env::current_dir().expect("current dir");
+        let tmp = tempdir_in(&cwd).expect("temp dir in workspace");
+        let file_path = tmp.path().join("compat.txt");
+        tokio::fs::write(&file_path, "backward-compat\n").await.expect("write sample");
+
+        let tool = ReadFileTool;
+        let args = serde_json::json!({ "path": file_path.to_string_lossy() }).to_string();
+        let out = Tool::execute(&tool, &args).await;
+        assert!(out.success, "old 'path' param should still work: {}", out.output);
+        assert!(out.output.contains("backward-compat"));
+    }
+
+    #[tokio::test]
     async fn read_file_workspace_blocks_outside_path() {
         let mut temp = tempfile::NamedTempFile::new().expect("tmp file");
         writeln!(temp, "outside").expect("write outside file");
         let outside_path = temp.path().to_string_lossy().to_string();
 
         let tool = ReadFileTool;
-        let args = serde_json::json!({ "path": outside_path }).to_string();
+        let args = serde_json::json!({ "file_path": outside_path }).to_string();
         let out = with_file_access_mode(FileAccessMode::Workspace, Tool::execute(&tool, &args)).await;
         assert!(!out.success, "workspace mode should block outside path");
         assert!(
@@ -2449,7 +3222,7 @@ mod tests {
         let outside_path = temp.path().to_string_lossy().to_string();
 
         let tool = ReadFileTool;
-        let args = serde_json::json!({ "path": outside_path }).to_string();
+        let args = serde_json::json!({ "file_path": outside_path }).to_string();
         let out = with_file_access_mode(FileAccessMode::Full, Tool::execute(&tool, &args)).await;
         assert!(out.success, "full mode should allow outside path: {}", out.output);
         assert!(out.output.contains("outside-ok"));
@@ -2579,7 +3352,7 @@ mod new_feature_tests {
         tokio::fs::write(&file_path, &content).await.expect("write");
 
         let tool = ReadFileTool;
-        let args = serde_json::json!({ "path": file_path.to_string_lossy() }).to_string();
+        let args = serde_json::json!({ "file_path": file_path.to_string_lossy() }).to_string();
         let out = Tool::execute(&tool, &args).await;
         assert!(out.success, "read should succeed: {}", out.output);
         assert!(
@@ -2587,10 +3360,11 @@ mod new_feature_tests {
             "should contain truncation message: ...{}...",
             &out.output[out.output.len().saturating_sub(200)..],
         );
-        // Verify metadata indicates truncation
         if let Some(meta) = &out.metadata {
-            assert_eq!(meta["truncated"], true);
+            assert_eq!(meta["isTruncated"], true);
             assert_eq!(meta["totalLines"], 3000);
+            assert_eq!(meta["linesShown"], 2000);
+            assert_eq!(meta["encoding"], "utf-8");
         }
     }
 
@@ -2661,12 +3435,12 @@ mod user_friendly_error_tests {
 
         let perm_msg = create_user_friendly_error(ToolErrorType::PermissionDenied, path);
         assert!(perm_msg.contains("Permission denied"), "should mention denial: {perm_msg}");
-        assert!(perm_msg.contains("文件访问权限"), "should guide user to setting: {perm_msg}");
+        assert!(perm_msg.contains("Execution Mode"), "should guide user to execution mode setting: {perm_msg}");
 
         let workspace_msg = create_user_friendly_error(ToolErrorType::PathNotInWorkspace, path);
         assert!(workspace_msg.contains("outside the current workspace root"), "should explain boundary: {workspace_msg}");
         assert!(workspace_msg.contains("工作目录"), "should guide user to work_dir: {workspace_msg}");
-        assert!(workspace_msg.contains("文件访问权限"), "should guide user to setting: {workspace_msg}");
+        assert!(workspace_msg.contains("YOLO"), "should guide user to YOLO mode: {workspace_msg}");
     }
 }
 

@@ -208,6 +208,14 @@ impl Tool for AddChannelTool {
         match self.state.reload_channel(&channel).await {
             Ok(()) => {
                 status_parts.push("Plugin started successfully.".to_string());
+
+                // Register channel-specific tools so agents can use them
+                let registry = self.state.ext.channel_registry.read().await;
+                if let Some(plugin) = registry.get(&channel) {
+                    for tool in plugin.tools() {
+                        self.state.rt.tool_registry.register(tool);
+                    }
+                }
             }
             Err(e) => {
                 status_parts.push(format!(
@@ -216,6 +224,14 @@ impl Tool for AddChannelTool {
             }
         }
         status_parts.push(format!("Webhook URL: /webhook/{channel}"));
+
+        // Broadcast event so the UI refreshes channel lists
+        let event = json!({
+            "type": "event",
+            "event": "channels.changed",
+            "data": { "channelId": channel, "action": "added" }
+        });
+        let _ = self.state.strm.ws_broadcast.send(event.to_string());
 
         tracing::info!(channel = %channel, "channel added/updated via tool");
         ToolResult::ok(status_parts.join(" "))
@@ -330,10 +346,27 @@ impl Tool for RemoveChannelTool {
             ));
         }
 
+        // Stop the running plugin if any
+        {
+            let mut reg = self.state.ext.channel_registry.write().await;
+            if let Some(plugin) = reg.get(&channel) {
+                if let Err(e) = plugin.stop().await {
+                    tracing::warn!(channel = %channel, error = %e, "failed to stop channel plugin on remove");
+                }
+                reg.unregister(&channel);
+            }
+        }
+
+        let event = json!({
+            "type": "event",
+            "event": "channels.changed",
+            "data": { "channelId": channel, "action": "removed" }
+        });
+        let _ = self.state.strm.ws_broadcast.send(event.to_string());
+
         tracing::info!(channel = %channel, "channel removed via tool");
         ToolResult::ok(format!(
-            "Channel '{channel}' disabled and saved. It will not reconnect on restart. \
-             Note: an already running plugin continues until the process restarts."
+            "Channel '{channel}' disabled, stopped, and saved. It will not reconnect on restart."
         ))
     }
 }

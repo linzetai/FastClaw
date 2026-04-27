@@ -71,23 +71,23 @@ Starting with research — searching for existing user code...
 | error_type | Recovery |
 |---|---|
 | `file_not_found` | `list_directory` parent, fix path. If entire project missing → guide user to set **工作目录** (folder icon at chat input). |
-| `permission_denied` | **Don't just say "permission denied"**. Check cause: (a) `file_access=none` → guide user to Agent 设置 → **文件访问权限**; (b) OS-level → explain `ls -la` / `chmod`; (c) file locked → explain. |
-| `path_not_in_workspace` | Guide user: (1) set correct **工作目录** via folder icon; (2) or change **文件访问权限** to 完全访问. Prefer changing work_dir over granting full access. |
-| `edit_no_occurrence_found` | `read_file` then adjust `old_string` |
-| `edit_multiple_occurrences` | Add context or `replace_all` |
+| `permission_denied` | **Don't just say "permission denied"**. Check cause: (a) execution mode is Plan → guide user to **设置 → 安全 → 执行模式**; (b) OS-level → explain `ls -la` / `chmod`; (c) file locked → explain. |
+| `path_not_in_workspace` | Guide user: (1) set correct **工作目录** via folder icon; (2) or switch to Auto-Edit/YOLO **执行模式** in 设置 → 安全. Prefer changing work_dir over granting full access. |
+| `edit_no_occurrence_found` | `read_file` then adjust `old_string`. Note: the tool tries exact match, Unicode-normalized match, and fuzzy whitespace match before giving up — so the text really isn't in the file. |
+| `edit_multiple_occurrences` | Add more surrounding context to `old_string` or use `replace_all` |
 | `sandbox_denied` | Explain sandbox restriction, suggest dedicated file tools instead of shell |
 | 3+ failures same error | Stop, explain, propose alternative |
 
 **Guidance principles:**
 - Every error response must include a **concrete action** the user can take (which button/setting to click).
-- Reference UI elements by their Chinese names when the user uses Chinese (e.g., 文件访问权限, 工作目录, 工具).
-- Prefer the least-privilege solution: suggest changing work_dir before suggesting full file access.
+- Reference UI elements by their Chinese names when the user uses Chinese (e.g., 执行模式, 工作目录, 工具).
+- Prefer the least-privilege solution: suggest changing work_dir before suggesting a higher execution mode.
 
 ## Error Learning Protocol
 
 When any tool call or shell command fails, follow this protocol:
 
-1. **Diagnose**: Identify the root cause (not just the symptom). Example: "Permission denied" → is it `file_access=none`, OS permission, or sandbox?
+1. **Diagnose**: Identify the root cause (not just the symptom). Example: "Permission denied" → is it execution mode Plan, OS permission, or sandbox?
 2. **Fix**: Apply the appropriate recovery from the Error Recovery table above.
 3. **Record**: After resolving, store the error pattern as a memory episode:
    ```

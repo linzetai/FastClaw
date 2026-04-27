@@ -29,6 +29,12 @@
     "endpoint": "/metrics"
   },
 
+  "channels": {
+    "feishu_main": {
+      "enabled": true
+    }
+  },
+
   "agents": {
     "defaults": {
       "model": "dashscope/qwen3.5-plus"
@@ -37,7 +43,19 @@
       {
         "id": "main",
         "name": "FastClaw 助手",
-        "default": true
+        "default": true,
+        "channels": {
+          "feishu_main": {
+            "enabled": true,
+            "app_id": "",
+            "app_secret": "",
+            "verification_token": "",
+            "encrypt_key": "",
+            "connectionMode": "websocket",
+            "replyMode": "mention_only",
+            "domain": "https://open.feishu.cn"
+          }
+        }
       }
     ]
   },
@@ -45,7 +63,7 @@
   "bindings": [
     {
       "agentId": "main",
-      "match": { "channel": "feishu" }
+      "match": { "channel": "feishu_main" }
     }
   ],
 
@@ -174,14 +192,6 @@
     "autoActivate": false
   },
 
-  "channels": {
-    "feishu": {
-      "enabled": true,
-      "connectionMode": "websocket",
-      "replyMode": "mention_only",
-      "domain": "https://open.feishu.cn"
-    }
-  },
 
   "security": {
     "promptInjectionDetection": true,

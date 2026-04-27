@@ -21,6 +21,24 @@ pub struct CronJob {
     #[serde(default)]
     pub error_count: i64,
     pub last_error: Option<String>,
+    /// Channels to notify when the job completes or fails.
+    /// Each entry specifies a channel id and a target (chat/group) id.
+    #[serde(default)]
+    pub notify_channels: Vec<NotifyChannel>,
+}
+
+/// A channel + target to receive cron job completion/failure notifications.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotifyChannel {
+    pub channel_id: String,
+    pub target_id: String,
+    /// "p2p" or "group". Defaults to "p2p".
+    #[serde(default = "default_target_type")]
+    pub target_type: String,
+}
+
+fn default_target_type() -> String {
+    "p2p".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,11 +152,19 @@ impl CronJobStore {
                 created_at TEXT NOT NULL,
                 run_count INTEGER NOT NULL DEFAULT 0,
                 error_count INTEGER NOT NULL DEFAULT 0,
-                last_error TEXT
+                last_error TEXT,
+                notify_channels TEXT NOT NULL DEFAULT '[]'
             )",
         )
         .execute(&pool)
         .await?;
+
+        // Migration: add notify_channels column to existing tables
+        let _ = sqlx::query(
+            "ALTER TABLE cron_jobs ADD COLUMN notify_channels TEXT NOT NULL DEFAULT '[]'",
+        )
+        .execute(&pool)
+        .await;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS cron_job_runs (
@@ -165,9 +191,10 @@ impl CronJobStore {
 
     pub async fn upsert(&self, job: &CronJob) -> anyhow::Result<()> {
         let action_json = serde_json::to_string(&job.action)?;
+        let notify_json = serde_json::to_string(&job.notify_channels)?;
         sqlx::query(
-            "INSERT INTO cron_jobs (id, name, schedule, action, enabled, last_run, next_run, status, created_at, run_count, error_count, last_error)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO cron_jobs (id, name, schedule, action, enabled, last_run, next_run, status, created_at, run_count, error_count, last_error, notify_channels)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 schedule = excluded.schedule,
@@ -178,7 +205,8 @@ impl CronJobStore {
                 status = excluded.status,
                 run_count = excluded.run_count,
                 error_count = excluded.error_count,
-                last_error = excluded.last_error",
+                last_error = excluded.last_error,
+                notify_channels = excluded.notify_channels",
         )
         .bind(&job.id)
         .bind(&job.name)
@@ -192,6 +220,7 @@ impl CronJobStore {
         .bind(job.run_count)
         .bind(job.error_count)
         .bind(&job.last_error)
+        .bind(&notify_json)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -400,11 +429,18 @@ struct CronJobRow {
     run_count: i64,
     error_count: i64,
     last_error: Option<String>,
+    #[sqlx(default)]
+    notify_channels: String,
 }
 
 impl CronJobRow {
     fn into_job(self) -> anyhow::Result<CronJob> {
         let action: JobAction = serde_json::from_str(&self.action)?;
+        let notify_channels: Vec<NotifyChannel> = if self.notify_channels.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str(&self.notify_channels).unwrap_or_default()
+        };
         Ok(CronJob {
             id: self.id,
             name: self.name,
@@ -418,6 +454,7 @@ impl CronJobRow {
             run_count: self.run_count,
             error_count: self.error_count,
             last_error: self.last_error,
+            notify_channels,
         })
     }
 }
@@ -460,6 +497,7 @@ mod tests {
             run_count: 0,
             error_count: 0,
             last_error: None,
+            notify_channels: vec![],
         };
 
         store.upsert(&job).await.unwrap();
@@ -509,6 +547,7 @@ mod tests {
             run_count: 0,
             error_count: 0,
             last_error: None,
+            notify_channels: vec![],
         };
         store.upsert(&job).await.unwrap();
         store.mark_running("stale-1").await.unwrap();
@@ -538,6 +577,7 @@ mod tests {
             run_count: 0,
             error_count: 0,
             last_error: None,
+            notify_channels: vec![],
         }
     }
 
@@ -567,6 +607,7 @@ mod tests {
             run_count: 0,
             error_count: 0,
             last_error: None,
+            notify_channels: vec![],
         };
         store.upsert(&webhook_job).await.unwrap();
 
@@ -612,5 +653,52 @@ mod tests {
         let deleted = store.delete_by_agent("nonexistent").await.unwrap();
         assert_eq!(deleted, 0);
         assert_eq!(store.list().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn notify_channels_round_trip() {
+        let pool = test_pool().await;
+        let store = CronJobStore::open(pool).await.unwrap();
+
+        let job = CronJob {
+            id: "nc-1".into(),
+            name: "Notify Test".into(),
+            schedule: "0 * * * * *".into(),
+            action: JobAction::AgentChat {
+                agent_id: "main".into(),
+                message: "test".into(),
+                session_id: None,
+            },
+            enabled: true,
+            last_run: None,
+            next_run: None,
+            status: JobStatus::Idle,
+            created_at: Utc::now().to_rfc3339(),
+            run_count: 0,
+            error_count: 0,
+            last_error: None,
+            notify_channels: vec![
+                NotifyChannel {
+                    channel_id: "feishu".into(),
+                    target_id: "oc_abc123".into(),
+                    target_type: "group".into(),
+                },
+                NotifyChannel {
+                    channel_id: "slack".into(),
+                    target_id: "C01234".into(),
+                    target_type: "p2p".into(),
+                },
+            ],
+        };
+
+        store.upsert(&job).await.unwrap();
+
+        let fetched = store.get("nc-1").await.unwrap().unwrap();
+        assert_eq!(fetched.notify_channels.len(), 2);
+        assert_eq!(fetched.notify_channels[0].channel_id, "feishu");
+        assert_eq!(fetched.notify_channels[0].target_id, "oc_abc123");
+        assert_eq!(fetched.notify_channels[0].target_type, "group");
+        assert_eq!(fetched.notify_channels[1].channel_id, "slack");
+        assert_eq!(fetched.notify_channels[1].target_type, "p2p");
     }
 }

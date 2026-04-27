@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolResult};
-use fastclaw_cron::{CronJob, CronJobStore, JobAction, JobStatus};
+use fastclaw_cron::{CronJob, CronJobStore, JobAction, JobStatus, NotifyChannel};
 
 /// Built-in tool allowing agents to manage their own cron jobs at runtime.
 pub struct ManageCronTool {
@@ -33,7 +33,9 @@ impl Tool for ManageCronTool {
          The schedule uses 6-field cron syntax: 'sec min hour day_of_month month day_of_week'. \
          Examples: '0 */5 * * * *' = every 5 minutes, '0 0 9 * * 1-5' = 9am weekdays, '0 30 8 1 * *' = 8:30am on the 1st. \
          For agent_chat action, 'message' is the prompt sent to the agent. \
-         For webhook action, 'url', optional 'method' (POST/GET/PUT/DELETE), and optional 'body' (JSON) are supported."
+         For webhook action, 'url', optional 'method' (POST/GET/PUT/DELETE), and optional 'body' (JSON) are supported. \
+         Use 'notify_channels' to send completion/failure notifications to messaging channels (e.g. Feishu, Slack). \
+         Each entry needs channel_id (e.g. 'feishu') and target_id (chat/group ID to send to)."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -122,6 +124,22 @@ impl Tool for ManageCronTool {
             serde_json::json!({
                 "type": "object",
                 "description": "Optional JSON body for webhook."
+            }),
+        );
+        props.insert(
+            "notify_channels".to_string(),
+            serde_json::json!({
+                "type": "array",
+                "description": "Channels to notify when the job completes or fails. Each item: {channel_id, target_id, target_type?}. channel_id is the channel type (e.g. 'feishu', 'slack'). target_id is the chat/group ID to send to. target_type defaults to 'p2p'.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "channel_id": {"type": "string"},
+                        "target_id": {"type": "string"},
+                        "target_type": {"type": "string", "enum": ["p2p", "group"]}
+                    },
+                    "required": ["channel_id", "target_id"]
+                }
             }),
         );
         ToolParameterSchema {
@@ -241,6 +259,11 @@ impl ManageCronTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
+        let notify_channels: Vec<NotifyChannel> = args
+            .get("notify_channels")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
         let job = CronJob {
             id: uuid::Uuid::new_v4().to_string(),
             name,
@@ -254,6 +277,7 @@ impl ManageCronTool {
             run_count: 0,
             error_count: 0,
             last_error: None,
+            notify_channels,
         };
 
         match self.store.upsert(&job).await {
@@ -297,6 +321,11 @@ impl ManageCronTool {
             } = job.action
             {
                 *message = new_message.to_string();
+            }
+        }
+        if let Some(nc) = args.get("notify_channels") {
+            if let Ok(channels) = serde_json::from_value::<Vec<NotifyChannel>>(nc.clone()) {
+                job.notify_channels = channels;
             }
         }
 

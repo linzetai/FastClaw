@@ -121,13 +121,42 @@ pub(super) async fn get_agent(
     Path(agent_id): Path<String>,
 ) -> Result<impl axum::response::IntoResponse, AppError> {
     validate_agent_id_param(&agent_id)?;
-    let cfg = {
+    let mut cfg = {
         let router = state.rt.router.read().await;
         router
             .agent_by_id(&agent_id)
             .cloned()
             .ok_or_else(|| AppError::NotFound(format!("agent not found: {agent_id}")))?
     };
+
+    // Merge channels from global config_live bound to this agent
+    let live_snapshot = state.cfg.config_live.load();
+    if let Some(bindings) = live_snapshot.get("bindings").and_then(|v| v.as_array()) {
+        let global_channels = live_snapshot.get("channels").and_then(|v| v.as_object());
+        if let Some(ch_obj) = global_channels {
+            for binding in bindings {
+                let bound_agent = binding
+                    .get("agentId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("main");
+                if bound_agent != agent_id {
+                    continue;
+                }
+                let ch_id = binding
+                    .get("match")
+                    .and_then(|m| m.get("channel"))
+                    .and_then(|v| v.as_str());
+                if let Some(ch_id) = ch_id {
+                    if !cfg.channels.contains_key(ch_id) {
+                        if let Ok(ch_cfg) = serde_json::from_value(ch_obj.get(ch_id).cloned().unwrap_or_default()) {
+                            cfg.channels.insert(ch_id.to_string(), ch_cfg);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Ok(Json(cfg))
 }
 

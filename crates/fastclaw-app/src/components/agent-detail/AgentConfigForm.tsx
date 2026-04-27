@@ -1,5 +1,6 @@
 import { AlertTriangle, Trash2 } from "lucide-react";
 import { SectionHeader, ListContainer } from "./common";
+import * as api from "../../lib/api";
 import { AgentBasicInfo } from "./AgentBasicInfo";
 import { AgentIdentity } from "./AgentIdentity";
 import { AgentTools } from "./AgentTools";
@@ -19,8 +20,7 @@ export function AgentConfigForm({ section }: { section: ConfigSection }) {
     agent,
     gatewayReady,
     name, setName, models, selectedModel, setSelectedModel, selectedProvider, setSelectedProvider,
-    fileAccessMode, setFileAccessMode,
-    saving, saveMsg, isDirty, backendAgent,
+    saving, saveMsg, isDirty, backendAgent, setBackendAgent,
     toolQuery, setToolQuery, skillQuery, setSkillQuery,
     handleSave, handleToolToggle, handleSkillToggle, handleDelete,
     handleRefreshSkills, handleUploadSkillFolder, handleUploadSkillZip,
@@ -55,7 +55,14 @@ export function AgentConfigForm({ section }: { section: ConfigSection }) {
             effectiveModel={effectiveModel}
             effectiveProvider={effectiveProvider}
           />
-          <ChannelManager agentId={activeAgentId} backendAgent={backendAgent} ready={gatewayReady} />
+          <ChannelManager
+            agentId={activeAgentId}
+            backendAgent={backendAgent}
+            ready={gatewayReady}
+            onRefresh={() => {
+              api.getAgent(activeAgentId).then((a) => { if (a) setBackendAgent(a); });
+            }}
+          />
         </>
       )}
 
@@ -65,8 +72,6 @@ export function AgentConfigForm({ section }: { section: ConfigSection }) {
 
       {section === "tools" && (
         <AgentTools
-          fileAccessMode={fileAccessMode}
-          onFileAccessModeChange={setFileAccessMode}
           nonMcpTools={nonMcpTools}
           filteredTools={filteredTools}
           toolQuery={toolQuery}

@@ -356,6 +356,25 @@ pub struct ChannelConfig {
     pub user_access_token: Option<String>,
 }
 
+impl ChannelConfig {
+    /// Fill `None` fields with sensible defaults so they survive a
+    /// serialize→deserialize round-trip (e.g. when persisted to `default.json`).
+    pub fn fill_defaults(&mut self) {
+        if self.enabled.is_none() {
+            self.enabled = Some(true);
+        }
+        if self.connection_mode.is_none() {
+            self.connection_mode = Some("websocket".to_string());
+        }
+        if self.domain.is_none() {
+            self.domain = Some("https://open.feishu.cn".to_string());
+        }
+        if self.reply_mode.is_none() {
+            self.reply_mode = Some("mention_only".to_string());
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum BindMode {

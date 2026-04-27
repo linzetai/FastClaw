@@ -394,7 +394,13 @@ fn spawn_cron_scheduler(state: AppState) {
             Ok(())
         }
 
-        async fn on_job_completed(&self, _job_id: &str, job_name: &str, output: Option<&str>) {
+        async fn on_job_completed(
+            &self,
+            _job_id: &str,
+            job_name: &str,
+            output: Option<&str>,
+            notify_channels: &[fastclaw_cron::NotifyChannel],
+        ) {
             let preview: String = output.unwrap_or("").chars().take(120).collect();
 
             let nid = uuid::Uuid::new_v4().to_string();
@@ -433,9 +439,20 @@ fn spawn_cron_scheduler(state: AppState) {
                 }
             });
             let _ = self.state.strm.ws_broadcast.send(event.to_string());
+
+            if !notify_channels.is_empty() {
+                let msg = format!("✅ 定时任务「{job_name}」执行完成\n{}", if preview.is_empty() { String::new() } else { format!("输出：{preview}") });
+                send_to_channels(&self.state, notify_channels, &msg).await;
+            }
         }
 
-        async fn on_job_failed(&self, job_id: &str, job_name: &str, error: &str) {
+        async fn on_job_failed(
+            &self,
+            job_id: &str,
+            job_name: &str,
+            error: &str,
+            notify_channels: &[fastclaw_cron::NotifyChannel],
+        ) {
             let nid = uuid::Uuid::new_v4().to_string();
             let body = format!("失败：{error}");
             let detail = Some(format!("Job ID: {job_id}\nError: {error}"));
@@ -469,6 +486,50 @@ fn spawn_cron_scheduler(state: AppState) {
                 }
             });
             let _ = self.state.strm.ws_broadcast.send(event.to_string());
+
+            if !notify_channels.is_empty() {
+                let safe_error: String = error.chars().take(200).collect();
+                let msg = format!("❌ 定时任务「{job_name}」执行失败\n错误：{safe_error}");
+                send_to_channels(&self.state, notify_channels, &msg).await;
+            }
+        }
+    }
+
+    async fn send_to_channels(
+        state: &AppState,
+        channels: &[fastclaw_cron::NotifyChannel],
+        text: &str,
+    ) {
+        let registry = state.ext.channel_registry.read().await;
+        for nc in channels {
+            if let Some(channel) = registry.get(&nc.channel_id) {
+                let msg = fastclaw_core::channel::OutboundMessage {
+                    target_id: nc.target_id.clone(),
+                    target_type: nc.target_type.clone(),
+                    text: text.to_string(),
+                    reply_to: None,
+                    image_key: None,
+                };
+                if let Err(e) = channel.send_message(&msg).await {
+                    tracing::warn!(
+                        channel = %nc.channel_id,
+                        target = %nc.target_id,
+                        error = %e,
+                        "cron: failed to send notification to channel"
+                    );
+                } else {
+                    tracing::info!(
+                        channel = %nc.channel_id,
+                        target = %nc.target_id,
+                        "cron: sent job notification to channel"
+                    );
+                }
+            } else {
+                tracing::warn!(
+                    channel = %nc.channel_id,
+                    "cron: channel not found in registry, skipping notification"
+                );
+            }
         }
     }
 

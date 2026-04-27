@@ -69,13 +69,45 @@ pub async fn get_agent(
     validate_agent_id(&agent_id)?;
     let gw = state.gateway.lock().await;
     let app = get_state(&gw)?;
-    let agent = {
+    let mut agent = {
         let router = app.rt.router.read().await;
         router
             .agent_by_id(&agent_id)
             .cloned()
             .ok_or_else(|| format!("agent not found: {agent_id}"))?
     };
+
+    // Merge channels from global config_live that are bound to this agent.
+    // This ensures channels added via the `add_channel` tool are visible.
+    let live_snapshot = app.cfg.config_live.load();
+    if let Some(bindings) = live_snapshot.get("bindings").and_then(|v| v.as_array()) {
+        let global_channels = live_snapshot.get("channels").and_then(|v| v.as_object());
+        if let Some(ch_obj) = global_channels {
+            for binding in bindings {
+                let bound_agent = binding
+                    .get("agentId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("main");
+                if bound_agent != agent_id {
+                    continue;
+                }
+                let ch_id = binding
+                    .get("match")
+                    .and_then(|m| m.get("channel"))
+                    .and_then(|v| v.as_str());
+                if let Some(ch_id) = ch_id {
+                    if !agent.channels.contains_key(ch_id) {
+                        if let Some(ch_val) = ch_obj.get(ch_id) {
+                            if let Ok(ch_cfg) = serde_json::from_value(ch_val.clone()) {
+                                agent.channels.insert(ch_id.to_string(), ch_cfg);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     serde_json::to_value(&agent).map_err(|e| format!("serialize: {e}"))
 }
 
@@ -161,6 +193,10 @@ pub async fn update_agent(
         serde_json::from_value(config).map_err(|e| format!("invalid agent config: {e}"))?;
     if agent.agent_id.as_str() != agent_id {
         agent.agent_id = agent_id.clone().into();
+    }
+    // Fill channel defaults before persisting so key fields survive round-trip.
+    for ch_cfg in agent.channels.values_mut() {
+        ch_cfg.fill_defaults();
     }
 
     let dir = fastclaw_core::paths::resolve_agents_dir_from(Some(&app.cfg.config.paths));

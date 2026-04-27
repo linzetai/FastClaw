@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { CheckCircle, XCircle, X, Plus } from "lucide-react";
 import * as api from "../../lib/api";
+import { useAgentStore } from "../../lib/stores";
 import { SectionTitle } from "./SettingsShared";
 
 type DangerousOpsPolicy = "deny" | "allow" | "confirm";
+type ExecutionMode = "plan" | "default" | "auto-edit" | "yolo";
 
 const POLICY_OPTIONS: { value: DangerousOpsPolicy; label: string; desc: string }[] = [
   { value: "deny", label: "拒绝", desc: "直接阻止所有危险操作" },
@@ -11,12 +13,55 @@ const POLICY_OPTIONS: { value: DangerousOpsPolicy; label: string; desc: string }
   { value: "allow", label: "允许", desc: "不做任何检查，直接执行" },
 ];
 
+const MANAGED_PATTERNS = ["write_file", "edit_file", "apply_patch", "multi_edit", "shell_exec"];
+
+const EXECUTION_MODE_OPTIONS: { value: ExecutionMode; label: string; desc: string }[] = [
+  { value: "plan", label: "Plan（只读）", desc: "禁止写文件与 shell，仅允许工作区内读取，适合分析与规划" },
+  { value: "default", label: "Default（确认）", desc: "写文件与 shell 需确认，仅访问工作区内文件" },
+  { value: "auto-edit", label: "Auto-Edit", desc: "文件编辑自动通过且可访问全文件系统，shell 仍需确认" },
+  { value: "yolo", label: "YOLO", desc: "所有操作自动通过，可访问全文件系统，仅限可信环境" },
+];
+
+function dedupe(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function stripManaged(values: string[] | undefined): string[] {
+  return (values ?? []).filter((item) => !MANAGED_PATTERNS.includes(item));
+}
+
+function hasAll(haystack: string[] | undefined, needles: string[]): boolean {
+  const set = new Set(haystack ?? []);
+  return needles.every((item) => set.has(item));
+}
+
+function inferMode(behavior?: api.AgentBehaviorConfig): ExecutionMode {
+  const ask = behavior?.toolsAsk ?? behavior?.requireConfirmationFor ?? [];
+  const deny = behavior?.toolsDeny ?? [];
+  const fileAccess = behavior?.fileAccess ?? "workspace";
+
+  if (hasAll(deny, MANAGED_PATTERNS)) return "plan";
+
+  const writePatternsInAsk = hasAll(ask, MANAGED_PATTERNS);
+  const shellInAsk = ask.includes("shell_exec");
+  const writeToolsInAsk = hasAll(ask, ["write_file", "edit_file", "apply_patch", "multi_edit"]);
+
+  if (writePatternsInAsk) return "default";
+  if (shellInAsk && !writeToolsInAsk && fileAccess === "full") return "auto-edit";
+  if (!writePatternsInAsk && !shellInAsk && fileAccess === "full") return "yolo";
+  if (shellInAsk && !writeToolsInAsk) return "auto-edit";
+  return "default";
+}
+
 export function SecurityTab() {
+  const activeAgentId = useAgentStore((s) => s.activeAgentId);
   const [allowedHosts, setAllowedHosts] = useState<string[]>([]);
   const [newHost, setNewHost] = useState("");
   const [opsPolicy, setOpsPolicy] = useState<DangerousOpsPolicy>("confirm");
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>("default");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [modeSaving, setModeSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
 
   const showToast = useCallback((msg: string, type: "ok" | "err") => {
@@ -36,6 +81,15 @@ export function SecurityTab() {
       }
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!activeAgentId) return;
+    api.getAgent(activeAgentId)
+      .then((agent) => setExecutionMode(inferMode(agent?.behavior)))
+      .catch(() => {
+        setExecutionMode("default");
+      });
+  }, [activeAgentId]);
 
   const persistSecurity = useCallback(async (patch: Record<string, unknown>) => {
     setSaving(true);
@@ -58,6 +112,56 @@ export function SecurityTab() {
     setOpsPolicy(policy);
     await persistSecurity({ dangerousOpsPolicy: policy });
   }, [persistSecurity]);
+
+  const handleExecutionModeChange = useCallback(async (mode: ExecutionMode) => {
+    if (!activeAgentId) return;
+    setExecutionMode(mode);
+    setModeSaving(true);
+    try {
+      const agent = await api.getAgent(activeAgentId);
+      if (!agent) throw new Error("agent not found");
+
+      const behavior = agent.behavior ?? {};
+      const cleanAsk = stripManaged(behavior.toolsAsk ?? behavior.requireConfirmationFor);
+      const cleanDeny = stripManaged(behavior.toolsDeny);
+
+      let nextAsk = cleanAsk;
+      let nextDeny = cleanDeny;
+      let nextFileAccess: api.FileAccessMode;
+
+      if (mode === "plan") {
+        nextDeny = dedupe([...cleanDeny, ...MANAGED_PATTERNS]);
+        nextFileAccess = "workspace";
+      } else if (mode === "default") {
+        nextAsk = dedupe([...cleanAsk, ...MANAGED_PATTERNS]);
+        nextFileAccess = "workspace";
+      } else if (mode === "auto-edit") {
+        nextAsk = dedupe([...cleanAsk, "shell_exec"]);
+        nextFileAccess = "full";
+      } else {
+        // YOLO: no restrictions
+        nextFileAccess = "full";
+      }
+
+      const ok = await api.updateAgent(activeAgentId, {
+        ...agent,
+        behavior: {
+          ...behavior,
+          fileAccess: nextFileAccess,
+          toolsAsk: nextAsk,
+          requireConfirmationFor: nextAsk,
+          toolsDeny: nextDeny,
+        },
+      });
+
+      if (!ok) throw new Error("update failed");
+      showToast("执行模式已更新", "ok");
+    } catch {
+      showToast("执行模式更新失败", "err");
+    } finally {
+      setModeSaving(false);
+    }
+  }, [activeAgentId, showToast]);
 
   const handleAdd = () => {
     const trimmed = newHost.trim();
@@ -104,6 +208,40 @@ export function SecurityTab() {
           {toast.msg}
         </div>
       )}
+
+      <div>
+        <SectionTitle>执行模式</SectionTitle>
+        <p className="mb-3 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
+          统一控制 Agent 的工具权限与文件系统访问范围。决定写文件、shell 执行的审批策略，以及是否允许访问工作区外的文件。
+        </p>
+        <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
+          {EXECUTION_MODE_OPTIONS.map((opt, idx) => (
+            <button
+              key={opt.value}
+              onClick={() => handleExecutionModeChange(opt.value)}
+              disabled={modeSaving || !activeAgentId}
+              className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+              style={idx < EXECUTION_MODE_OPTIONS.length - 1 ? { borderBottom: "0.5px solid var(--separator)" } : undefined}
+            >
+              <span
+                className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full transition-all duration-150"
+                style={{
+                  border: executionMode === opt.value ? "none" : "1.5px solid var(--fill-quaternary)",
+                  background: executionMode === opt.value ? "var(--tint)" : "transparent",
+                }}
+              >
+                {executionMode === opt.value && (
+                  <CheckCircle size={14} strokeWidth={2.5} style={{ color: "#fff" }} />
+                )}
+              </span>
+              <div>
+                <div className="text-[13px] font-medium" style={{ color: "var(--fill-primary)" }}>{opt.label}</div>
+                <div className="text-[11px]" style={{ color: "var(--fill-tertiary)" }}>{opt.desc}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div>
         <SectionTitle>危险操作保护</SectionTitle>

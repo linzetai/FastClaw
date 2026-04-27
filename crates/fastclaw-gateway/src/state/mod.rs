@@ -1152,7 +1152,7 @@ impl AppState {
     }
 
     /// Hot-reload a single channel from the live config. Starts the plugin if config is
-    /// valid and not already running.
+    /// valid. If the channel is already running, stops the old instance first.
     pub async fn reload_channel(&self, channel_id: &str) -> anyhow::Result<()> {
         let parsed: FastClawConfig = {
             let live = self.cfg.config_live.load();
@@ -1162,29 +1162,46 @@ impl AppState {
             .channels
             .get(channel_id)
             .ok_or_else(|| anyhow::anyhow!("channel '{channel_id}' not in config"))?;
+
+        tracing::info!(
+            channel_id,
+            app_id = ?ch.app_id,
+            app_secret_len = ch.app_secret.as_ref().map(|s| s.len()).unwrap_or(0),
+            enabled = ?ch.enabled,
+            domain = ?ch.domain,
+            connection_mode = ?ch.connection_mode,
+            reply_mode = ?ch.reply_mode,
+            "reload_channel: config snapshot"
+        );
+
         if ch.enabled == Some(false) {
             return Err(anyhow::anyhow!("channel '{channel_id}' is disabled"));
         }
 
+        // Stop and remove existing channel if running
         {
-            let reg = self.ext.channel_registry.read().await;
-            if reg.get(channel_id).is_some() {
-                tracing::info!(
-                    channel = channel_id,
-                    "channel already running, skipping reload"
-                );
-                return Ok(());
+            let mut reg = self.ext.channel_registry.write().await;
+            if let Some(old_plugin) = reg.get(channel_id) {
+                tracing::info!(channel = channel_id, "stopping existing channel for reload");
+                if let Err(e) = old_plugin.stop().await {
+                    tracing::warn!(channel = channel_id, error = %e, "failed to stop old channel");
+                }
+                reg.unregister(channel_id);
             }
         }
 
         let tx = self.ext.channel_inbound_tx.clone();
-        match channel_id {
+        let started = match channel_id {
             "feishu" => {
                 if let Some(cfg) = fastclaw_feishu::FeishuPluginConfig::from_channel_config(ch) {
                     let plugin = Arc::new(fastclaw_feishu::FeishuPlugin::new(cfg));
                     plugin.start(tx).await?;
                     self.ext.channel_registry.write().await.register(plugin);
                     tracing::info!("feishu channel hot-reloaded");
+                    true
+                } else {
+                    tracing::warn!("feishu: config missing required fields (appId/appSecret)");
+                    false
                 }
             }
             "telegram" => {
@@ -1194,6 +1211,10 @@ impl AppState {
                     plugin.start(tx).await?;
                     self.ext.channel_registry.write().await.register(plugin);
                     tracing::info!("telegram channel hot-reloaded");
+                    true
+                } else {
+                    tracing::warn!("telegram: config missing required fields");
+                    false
                 }
             }
             "discord" => {
@@ -1202,6 +1223,10 @@ impl AppState {
                     plugin.start(tx).await?;
                     self.ext.channel_registry.write().await.register(plugin);
                     tracing::info!("discord channel hot-reloaded");
+                    true
+                } else {
+                    tracing::warn!("discord: config missing required fields");
+                    false
                 }
             }
             "slack" => {
@@ -1210,6 +1235,10 @@ impl AppState {
                     plugin.start(tx).await?;
                     self.ext.channel_registry.write().await.register(plugin);
                     tracing::info!("slack channel hot-reloaded");
+                    true
+                } else {
+                    tracing::warn!("slack: config missing required fields");
+                    false
                 }
             }
             "whatsapp" => {
@@ -1219,6 +1248,10 @@ impl AppState {
                     plugin.start(tx).await?;
                     self.ext.channel_registry.write().await.register(plugin);
                     tracing::info!("whatsapp channel hot-reloaded");
+                    true
+                } else {
+                    tracing::warn!("whatsapp: config missing required fields");
+                    false
                 }
             }
             "matrix" => {
@@ -1227,6 +1260,10 @@ impl AppState {
                     plugin.start(tx).await?;
                     self.ext.channel_registry.write().await.register(plugin);
                     tracing::info!("matrix channel hot-reloaded");
+                    true
+                } else {
+                    tracing::warn!("matrix: config missing required fields");
+                    false
                 }
             }
             "msteams" => {
@@ -1235,9 +1272,18 @@ impl AppState {
                     plugin.start(tx).await?;
                     self.ext.channel_registry.write().await.register(plugin);
                     tracing::info!("msteams channel hot-reloaded");
+                    true
+                } else {
+                    tracing::warn!("msteams: config missing required fields");
+                    false
                 }
             }
             other => return Err(anyhow::anyhow!("unknown channel type: {other}")),
+        };
+        if !started {
+            return Err(anyhow::anyhow!(
+                "channel '{channel_id}' config is incomplete — check appId/appSecret"
+            ));
         }
         Ok(())
     }

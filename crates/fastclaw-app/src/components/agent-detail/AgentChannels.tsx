@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
-import { ChevronDown, Link2, Plus, Pencil } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { ChevronDown, Link2, Plus, Pencil, Eye, EyeOff } from "lucide-react";
 import * as api from "../../lib/api";
+import { onChannelsChanged } from "../../lib/transport";
 import { FormModal, ListContainer, Toggle } from "./common";
 
 const CHANNEL_TYPES = [
@@ -44,6 +45,9 @@ function ChannelForm({
 }) {
   const [id, setId] = useState(channelId);
   const [form, setForm] = useState(config);
+  const [showAppSecret, setShowAppSecret] = useState(false);
+  const [showVerificationToken, setShowVerificationToken] = useState(false);
+  const [showEncryptKey, setShowEncryptKey] = useState(false);
   const patch = (k: keyof api.AgentChannelConfig, v: string | boolean | undefined) =>
     setForm((f) => ({ ...f, [k]: v }));
 
@@ -145,39 +149,84 @@ function ChannelForm({
         </div>
         <div>
           <label className={labelCls} style={labelStyle}>App Secret</label>
-          <input
-            type="password"
-            value={form.appSecret ?? ""}
-            onChange={(e) => patch("appSecret", e.target.value)}
-            placeholder="••••••••"
-            className={inputCls + " font-mono"}
-            style={inputStyle}
-          />
+          <div className="relative">
+            <input
+              type={showAppSecret ? "text" : "password"}
+              value={form.appSecret ?? ""}
+              onChange={(e) => patch("appSecret", e.target.value)}
+              placeholder="••••••••"
+              className={inputCls + " pr-10 font-mono"}
+              style={inputStyle}
+            />
+            <div className="absolute top-1/2 right-2 flex -translate-y-1/2 items-center">
+              <button
+                type="button"
+                onClick={() => setShowAppSecret((v) => !v)}
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[4px] transition-colors hover:bg-[var(--bg-hover)]"
+                title={showAppSecret ? "隐藏密钥" : "显示密钥"}
+              >
+                {showAppSecret
+                  ? <EyeOff size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                  : <Eye size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                }
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className={labelCls} style={labelStyle}>Verification Token</label>
-          <input
-            type="password"
-            value={form.verificationToken ?? ""}
-            onChange={(e) => patch("verificationToken", e.target.value)}
-            placeholder="可选"
-            className={inputCls + " font-mono"}
-            style={inputStyle}
-          />
+          <div className="relative">
+            <input
+              type={showVerificationToken ? "text" : "password"}
+              value={form.verificationToken ?? ""}
+              onChange={(e) => patch("verificationToken", e.target.value)}
+              placeholder="可选"
+              className={inputCls + " pr-10 font-mono"}
+              style={inputStyle}
+            />
+            <div className="absolute top-1/2 right-2 flex -translate-y-1/2 items-center">
+              <button
+                type="button"
+                onClick={() => setShowVerificationToken((v) => !v)}
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[4px] transition-colors hover:bg-[var(--bg-hover)]"
+                title={showVerificationToken ? "隐藏令牌" : "显示令牌"}
+              >
+                {showVerificationToken
+                  ? <EyeOff size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                  : <Eye size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                }
+              </button>
+            </div>
+          </div>
         </div>
         <div>
           <label className={labelCls} style={labelStyle}>Encrypt Key</label>
-          <input
-            type="password"
-            value={form.encryptKey ?? ""}
-            onChange={(e) => patch("encryptKey", e.target.value)}
-            placeholder="可选"
-            className={inputCls + " font-mono"}
-            style={inputStyle}
-          />
+          <div className="relative">
+            <input
+              type={showEncryptKey ? "text" : "password"}
+              value={form.encryptKey ?? ""}
+              onChange={(e) => patch("encryptKey", e.target.value)}
+              placeholder="可选"
+              className={inputCls + " pr-10 font-mono"}
+              style={inputStyle}
+            />
+            <div className="absolute top-1/2 right-2 flex -translate-y-1/2 items-center">
+              <button
+                type="button"
+                onClick={() => setShowEncryptKey((v) => !v)}
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[4px] transition-colors hover:bg-[var(--bg-hover)]"
+                title={showEncryptKey ? "隐藏密钥" : "显示密钥"}
+              >
+                {showEncryptKey
+                  ? <EyeOff size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                  : <Eye size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                }
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -217,15 +266,18 @@ function ChannelForm({
   );
 }
 
-export function ChannelManager({ agentId, backendAgent, ready }: {
+export function ChannelManager({ agentId, backendAgent, ready, onRefresh }: {
   agentId: string;
   backendAgent: api.BackendAgent | null;
   ready: boolean;
+  onRefresh?: () => void;
 }) {
   const [channels, setChannels] = useState<Record<string, api.AgentChannelConfig>>({});
   const [editing, setEditing] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
+  const refreshRef = useRef(onRefresh);
+  refreshRef.current = onRefresh;
 
   useEffect(() => {
     setChannels(backendAgent?.channels ?? {});
@@ -233,12 +285,32 @@ export function ChannelManager({ agentId, backendAgent, ready }: {
     setAdding(false);
   }, [backendAgent]);
 
+  // Re-fetch agent data when channels change externally (e.g. via add_channel tool)
+  useEffect(() => {
+    if (!ready) return;
+    const unsub = onChannelsChanged(() => {
+      api.getAgent(agentId).then((agent) => {
+        if (agent) setChannels(agent.channels ?? {});
+      });
+      refreshRef.current?.();
+    });
+    return unsub;
+  }, [agentId, ready]);
+
   const saveChannels = useCallback(async (newChannels: Record<string, api.AgentChannelConfig>) => {
     if (!backendAgent) return false;
     setSaving(true);
     const ok = await api.updateAgent(agentId, { ...backendAgent, channels: newChannels });
+    if (ok) {
+      // Hot-reload each modified/added channel
+      for (const [chId, cfg] of Object.entries(newChannels)) {
+        if (cfg.enabled !== false && cfg.appId && cfg.appSecret) {
+          await api.reloadChannel(chId);
+        }
+      }
+      setChannels(newChannels);
+    }
     setSaving(false);
-    if (ok) setChannels(newChannels);
     return ok;
   }, [agentId, backendAgent]);
 
@@ -356,7 +428,7 @@ export function ChannelManager({ agentId, backendAgent, ready }: {
 
       {entries.length > 0 && (
         <p className="mt-1.5 text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
-          渠道凭据变更需重启应用后生效
+          渠道凭据变更通过热重载立即生效
         </p>
       )}
     </div>

@@ -1,11 +1,11 @@
 # Tool Usage Guide
 
 ## File Operations
-- **read_file**: Read file by path. Auto-detects binary. Returns `totalLines`, `fileSize`, `lineEnding`, `truncated`. Use `offset`/`limit` for large files, `number_lines: true` for line refs.
-- **write_file**: Create/overwrite file. Modes: `overwrite`/`append`/`create_new`. Supports `expected_content` for optimistic locking.
-- **edit_file**: Find-and-replace edits. `old_string` + `new_string`. Empty `old_string` = create new file. Auto-detects line endings. Multiple matches → add context or `replace_all=true`.
+- **read_file**: Read file by `file_path` (absolute path required). Auto-detects encoding (BOM → UTF-8 → chardetng fallback) and file type. Supports text, images (base64), PDF (text extraction with `pages` parameter), and Jupyter notebooks (.ipynb). Returns `totalLines`, `fileSize`, `lineEnding`, `truncated`, `encoding`, `fileType`. Use `offset`/`limit` for large files, `number_lines: true` for line refs.
+- **write_file**: Create/overwrite file by `file_path`. Modes: `overwrite`/`append`/`create_new`. Preserves original encoding, BOM, and line endings (CRLF/LF) when overwriting. Supports `expected_content` for optimistic locking.
+- **edit_file**: Find-and-replace edits by `file_path`. `old_string` + `new_string`. Empty `old_string` = create new file. Preserves original encoding, BOM, and line endings. Multi-pass matching: exact → Unicode-normalized → whitespace-fuzzy. When deleting (`new_string` empty), auto-appends trailing newline to `old_string` if needed to avoid leaving blank lines. Multiple matches → add context or `replace_all=true`.
 - **search_in_files**: Regex search across workspace. `context_lines` (0-5) for surrounding context. Respects `.gitignore`.
-- **apply_patch**: Multiple string replacements on one file atomically.
+- **apply_patch**: Multiple string replacements on one file atomically by `file_path`. Preserves encoding/BOM/line endings. Uses same multi-pass matching as edit_file.
 - **glob**: Find files by name pattern. Examples: `*.rs`, `src/**/*.tsx`, `**/Cargo.toml`. Returns up to 100 results sorted by modification time.
 - **list_directory**: List immediate children with name, type, size.
 
@@ -61,14 +61,19 @@
 - **mcp_***: Tools from external MCP servers (`mcp_{serverId}_{toolName}`).
 - **manage_mcp_server**: Add/remove/list/reload MCP servers at runtime.
 
+## Cron Jobs
+- **manage_cron**: Manage scheduled cron jobs. Actions: "list" — list all cron jobs for this agent; "create" — create a new cron job; "update" — update an existing cron job by id; "delete" — delete a cron job by id. Cron jobs can trigger an agent chat message on a schedule, or call a webhook URL. The schedule uses 6-field cron syntax: 'sec min hour day_of_month month day_of_week'. Examples: '0 */5 * * * *' = every 5 minutes, '0 0 9 * * 1-5' = 9am weekdays, '0 30 8 1 * *' = 8:30am on the 1st. For agent_chat action, 'message' is the prompt sent to the agent. For webhook action, 'url', optional 'method' (POST/GET/PUT/DELETE), and optional 'body' (JSON) are supported. Use 'notify_channels' to send completion/failure notifications to messaging channels (e.g. Feishu, Slack). Each entry needs channel_id (e.g. 'feishu') and target_id (chat/group ID to send to).
+
 ## Best Practices
 
 ### File Operations
 - Always `read_file` before editing to get current content. Use `offset`/`limit` for large files — don't read entire huge files repeatedly.
+- Use absolute paths for `file_path` in all file tools. The legacy `path` parameter is still accepted for backward compatibility.
 - Prefer `search_in_files` or `glob` for locating files/symbols — don't `read_file` in a loop to search.
 - If a path doesn't exist, `list_directory` the parent to confirm spelling before retrying.
 - `write_file` with `expected_content` for safe concurrent edits. Read-then-write for important files.
 - `edit_file` `old_string` must be unique — include enough surrounding context. Prefer `edit_file` over `write_file` for targeted changes.
+- `edit_file` and `apply_patch` use multi-pass matching (exact → Unicode-normalized → fuzzy) — curly quotes, em-dashes, and similar Unicode variants are auto-normalized. If exact match fails, whitespace-flexible fuzzy match is attempted.
 
 ### Shell
 - Use dedicated tools (`read_file`, `write_file`, `list_directory`) for file operations instead of `shell_exec` + cat/echo/ls.
@@ -106,8 +111,8 @@ When you encounter errors, provide **actionable** guidance pointing the user to 
 
 | Error | Likely Cause | What to Tell the User |
 |---|---|---|
-| **PathNotInWorkspace** — "outside the allowed workspace" | The file is outside the current working directory and `file_access` is `workspace` | "这个路径在当前工作目录之外。你可以：(1) 点击聊天输入框底部的 **文件夹图标（工作目录）** 切换到目标目录；(2) 在 Agent 设置面板的「**文件访问权限**」中改为「完全访问文件系统」。" |
-| **PermissionDenied** — "file access is disabled" | `file_access` mode is `none` | "文件访问被禁用了。请在 Agent 设置面板的「**文件访问权限**」中选择「仅访问工作区」或「完全访问文件系统」。" |
+| **PathNotInWorkspace** — "outside the allowed workspace" | The file is outside the current working directory and execution mode restricts to workspace | "这个路径在当前工作目录之外。你可以：(1) 点击聊天输入框底部的 **文件夹图标（工作目录）** 切换到目标目录；(2) 在 **设置 → 安全 → 执行模式** 中切换到 Auto-Edit 或 YOLO 模式以获得全文件系统访问权限。" |
+| **PermissionDenied** — "file access is disabled" | Execution mode is Plan (read-only) | "当前执行模式为 Plan（只读），文件写入被禁止。请在 **设置 → 安全 → 执行模式** 中切换到 Default 或更高权限的模式。" |
 | **PermissionDenied** — OS-level | File owned by root or read-protected | "这个文件的系统权限不允许读写。你可以在终端用 `ls -la <path>` 查看权限，或用 `chmod`/`chown` 调整。" |
 | **FileNotFound** | Typo or wrong working directory | Use `list_directory` on the parent. If the entire project is missing, the user likely needs to set the correct **工作目录**. |
 | **SandboxBlocked** | Sandbox policy prevents the command | "当前处于沙箱模式，该操作被限制。你可以改用专用文件工具代替 shell 命令，或联系管理员调整沙箱策略。" |
@@ -115,16 +120,20 @@ When you encounter errors, provide **actionable** guidance pointing the user to 
 ### Key UI Controls to Reference
 
 - **工作目录 (Working Directory)**: Folder icon at the bottom-left of the chat input area. Click to set or change the project root.
-- **文件访问权限 (File Access Mode)**: In the agent detail/settings panel → "文件访问权限" dropdown. Options: 禁止访问 / 仅访问工作区 / 完全访问.
+- **执行模式 (Execution Mode)**: In Settings → Security → Execution Mode. Controls tool permissions and file access scope:
+  - Plan: read-only, workspace only
+  - Default: write/shell need confirmation, workspace only
+  - Auto-Edit: file edits auto-approved with full filesystem access, shell needs confirmation
+  - YOLO: all operations auto-approved with full filesystem access
 - **工具开关 (Tool Toggle)**: In the agent detail/settings panel → "工具" section. Each tool can be individually enabled/disabled.
 - **新对话 (New Chat)**: Creates a fresh chat that can have its own working directory.
 
 ### Guidance Principles
 
 1. **Never just report the error** — always include a concrete next step the user can take.
-2. **Prefer the least-privilege solution** — suggest changing `work_dir` before suggesting `file_access=full`.
+2. **Prefer the least-privilege solution** — suggest changing `work_dir` before suggesting a higher execution mode.
 3. **Use Chinese** for UI element names (matching the app interface) when the user communicates in Chinese.
-4. **Reference the specific setting path** — e.g., "Agent 设置面板 → 文件访问权限" not just "settings".
+4. **Reference the specific setting path** — e.g., "设置 → 安全 → 执行模式" not just "settings".
 
 ## Self-Evolution
 

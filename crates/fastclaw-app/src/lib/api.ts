@@ -238,6 +238,7 @@ export interface AgentBehaviorConfig {
   maxToolCallsPerTurn?: number;
   maxConsecutiveErrors?: number;
   requireConfirmationFor?: string[];
+  toolsAsk?: string[];
   toolsAllow?: string[];
   toolsDeny?: string[];
   fileAccess?: FileAccessMode;
@@ -360,6 +361,17 @@ export async function getIdentityFiles(agentId: string): Promise<IdentityFiles> 
   } catch (e) {
     console.warn("[api] getIdentityFiles error:", e);
     return { soul: null, user: null, agents: null };
+  }
+}
+
+// ─── Channel reload ───
+
+export async function reloadChannel(channelId: string): Promise<boolean> {
+  try {
+    return await transport.reloadChannelIpc(channelId);
+  } catch (e) {
+    console.warn("[api] reloadChannel error:", e);
+    return false;
   }
 }
 

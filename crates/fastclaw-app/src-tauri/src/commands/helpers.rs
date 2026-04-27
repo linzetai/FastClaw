@@ -100,19 +100,32 @@ pub fn sync_agent_channels_to_live(
     let mut live_val: serde_json::Value = (**app.cfg.config_live.load()).clone();
 
     // Merge channels into global config_live.channels
+    // Fill defaults before serializing so key fields survive round-trip.
     if let Some(obj) = live_val
         .get_mut("channels")
         .and_then(|v: &mut serde_json::Value| v.as_object_mut())
     {
         for (ch_id, ch_cfg) in channels {
-            if let Ok(val) = serde_json::to_value(ch_cfg) {
+            let mut cfg = ch_cfg.clone();
+            cfg.fill_defaults();
+            if let Ok(val) = serde_json::to_value(&cfg) {
+                tracing::debug!(
+                    channel_id = %ch_id,
+                    app_id = ?cfg.app_id,
+                    app_secret_len = cfg.app_secret.as_ref().map(|s| s.len()).unwrap_or(0),
+                    domain = ?cfg.domain,
+                    connection_mode = ?cfg.connection_mode,
+                    "syncing channel to config_live"
+                );
                 obj.insert(ch_id.clone(), val);
             }
         }
     } else if !channels.is_empty() {
         let mut obj = serde_json::Map::new();
         for (ch_id, ch_cfg) in channels {
-            if let Ok(val) = serde_json::to_value(ch_cfg) {
+            let mut cfg = ch_cfg.clone();
+            cfg.fill_defaults();
+            if let Ok(val) = serde_json::to_value(&cfg) {
                 obj.insert(ch_id.clone(), val);
             }
         }
@@ -140,6 +153,14 @@ pub fn sync_agent_channels_to_live(
                 "match": { "channel": ch_id }
             }));
         }
+    }
+
+    // Persist to config file
+    let cfg_dir = fastclaw_core::paths::resolve_config_dir_from(Some(&app.cfg.config.paths));
+    let cfg_path = cfg_dir.join("default.json");
+    let serialized = serde_json::to_vec_pretty(&live_val).unwrap_or_default();
+    if let Err(e) = std::fs::write(&cfg_path, &serialized) {
+        tracing::warn!(path = %cfg_path.display(), error = %e, "failed to persist config_live");
     }
 
     app.cfg.config_live.store(Arc::new(live_val));
