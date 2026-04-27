@@ -5,9 +5,9 @@ use fastclaw_core::types::{ChatMessage, Role};
 use crate::llm::{CompletionParams, LlmProvider};
 
 /// Fraction of context window at which LLM compression triggers.
-/// Lowered from 0.70 to 0.60 — compressing earlier gives the agent more
-/// headroom and avoids the hard-truncation cliff.
-pub const COMPRESSION_THRESHOLD: f32 = 0.60;
+/// Set to 0.50 — compressing at half-full gives the agent substantial
+/// headroom and avoids the hard-truncation cliff that causes 100% stuck states.
+pub const COMPRESSION_THRESHOLD: f32 = 0.50;
 
 /// Fraction of recent history to preserve (the rest gets compressed).
 const PRESERVE_FRACTION: f32 = 0.30;
@@ -32,6 +32,63 @@ pub struct CompressionResult {
     pub original_tokens: usize,
     pub new_tokens: usize,
     pub messages: Vec<ChatMessage>,
+    /// If compression occurred, the path to the saved full history file.
+    /// The agent can search this file to recover details lost in summarization.
+    pub history_file: Option<String>,
+}
+
+/// Save the pre-compression chat history to a file so the agent can search it
+/// after compression to recover details lost in summarization.
+/// Returns the file path on success.
+fn save_history_file(messages: &[ChatMessage]) -> Option<String> {
+    let dir = std::env::temp_dir().join("fastclaw_history");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return None;
+    }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let path = dir.join(format!("chat_history_{ts}.md"));
+
+    let mut content = String::new();
+    content.push_str("# Chat History (pre-compression snapshot)\n\n");
+    for msg in messages {
+        let role = match msg.role {
+            Role::System => "SYSTEM",
+            Role::User => "USER",
+            Role::Assistant => "ASSISTANT",
+            Role::Tool => "TOOL",
+        };
+        let name_suffix = msg.name.as_deref().map(|n| format!(" ({n})")).unwrap_or_default();
+        content.push_str(&format!("## {role}{name_suffix}\n\n"));
+
+        if let Some(ref c) = msg.content {
+            match c {
+                serde_json::Value::String(s) => {
+                    content.push_str(s);
+                }
+                other => {
+                    content.push_str(&serde_json::to_string_pretty(other).unwrap_or_default());
+                }
+            }
+            content.push_str("\n\n");
+        }
+
+        if let Some(ref tcs) = msg.tool_calls {
+            for tc in tcs {
+                content.push_str(&format!(
+                    "**Tool Call**: {} ({})\nArgs: {}\n\n",
+                    tc.function.name, tc.id, tc.function.arguments
+                ));
+            }
+        }
+    }
+
+    match std::fs::write(&path, &content) {
+        Ok(()) => Some(path.to_string_lossy().to_string()),
+        Err(_) => None,
+    }
 }
 
 /// Find the split point: preserve the last `preserve_fraction` of non-system messages.
@@ -98,6 +155,7 @@ pub async fn try_compress_chat(
             original_tokens: estimated,
             new_tokens: estimated,
             messages: messages.clone(),
+            history_file: None,
         };
     }
 
@@ -128,6 +186,7 @@ pub async fn try_compress_chat(
             original_tokens: estimated,
             new_tokens: estimated,
             messages: messages.clone(),
+            history_file: None,
         };
     }
 
@@ -138,6 +197,7 @@ pub async fn try_compress_chat(
             original_tokens: estimated,
             new_tokens: estimated,
             messages: messages.clone(),
+            history_file: None,
         };
     }
 
@@ -158,6 +218,7 @@ pub async fn try_compress_chat(
             original_tokens: estimated,
             new_tokens: estimated,
             messages: messages.clone(),
+            history_file: None,
         };
     }
 
@@ -202,6 +263,7 @@ pub async fn try_compress_chat(
                 original_tokens: estimated,
                 new_tokens: estimated,
                 messages: messages.clone(),
+                history_file: None,
             };
         }
     };
@@ -213,6 +275,7 @@ pub async fn try_compress_chat(
             original_tokens: estimated,
             new_tokens: estimated,
             messages: messages.clone(),
+            history_file: None,
         };
     }
 
@@ -258,7 +321,26 @@ pub async fn try_compress_chat(
             original_tokens: estimated,
             new_tokens: estimated,
             messages: messages.clone(),
+            history_file: None,
         };
+    }
+
+    // Save full pre-compression history to a file so the agent can search it later.
+    let history_file = save_history_file(messages);
+    if let Some(ref path) = history_file {
+        tracing::info!(path, "saved pre-compression chat history to file");
+    }
+
+    // If we saved a history file, add a reference in the assistant message
+    // so the agent knows it can search for details.
+    if let Some(ref path) = history_file {
+        if let Some(last_asst) = new_messages.iter_mut().rev().find(|m| matches!(m.role, Role::Assistant)) {
+            if let Some(serde_json::Value::String(ref mut text)) = last_asst.content {
+                text.push_str(&format!(
+                    " Full conversation history saved to: {path} — use read_file or grep to recover any details."
+                ));
+            }
+        }
     }
 
     tracing::info!(
@@ -266,6 +348,7 @@ pub async fn try_compress_chat(
         new_tokens = new_estimated,
         evicted_messages = to_compress.len(),
         kept_messages = to_keep.len(),
+        history_file = ?history_file,
         "LLM compression successful"
     );
 
@@ -276,6 +359,7 @@ pub async fn try_compress_chat(
         original_tokens: estimated,
         new_tokens: new_estimated,
         messages: new_messages,
+        history_file,
     }
 }
 

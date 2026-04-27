@@ -6,6 +6,10 @@ use fastclaw_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolProgressUpdat
 /// Default output truncation limit (raised from 8KB to 64KB to capture more useful output).
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 65536;
 
+/// Threshold: if combined stdout+stderr exceeds this, write to a terminal file
+/// and return a compact summary instead of full output in context.
+const TERMINAL_FILE_THRESHOLD: usize = 800;
+
 /// Truncate output string at a char boundary, adding a note about total size.
 fn truncate_output(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
@@ -18,6 +22,115 @@ fn truncate_output(s: &str, max_bytes: usize) -> String {
         .last()
         .unwrap_or(0);
     format!("{}... [truncated, {} bytes total]", &s[..end], s.len())
+}
+
+/// Write shell output to a persistent terminal file and return a compact
+/// summary for the LLM context. The full output is retrievable via
+/// `read_file` or `grep` on the returned path.
+///
+/// Inspired by Cursor's approach: long shell output is written to files,
+/// keeping context lean while the agent can search/tail for details.
+fn write_terminal_file(command: &str, stdout: &str, stderr: &str, exit_code: i32) -> Option<String> {
+    let dir = std::env::temp_dir().join("fastclaw_terminals");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return None;
+    }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let filename = format!("shell_{ts}.txt");
+    let path = dir.join(&filename);
+
+    let mut content = String::new();
+    content.push_str(&format!("--- command: {} ---\n", command));
+    content.push_str(&format!("--- exit_code: {} ---\n", exit_code));
+    content.push_str(&format!("--- stdout ({} lines, {} bytes) ---\n", stdout.lines().count(), stdout.len()));
+    content.push_str(stdout);
+    if !stdout.ends_with('\n') && !stdout.is_empty() {
+        content.push('\n');
+    }
+    if !stderr.is_empty() {
+        content.push_str(&format!("--- stderr ({} lines, {} bytes) ---\n", stderr.lines().count(), stderr.len()));
+        content.push_str(stderr);
+        if !stderr.ends_with('\n') {
+            content.push('\n');
+        }
+    }
+
+    match std::fs::write(&path, &content) {
+        Ok(()) => Some(path.to_string_lossy().to_string()),
+        Err(_) => None,
+    }
+}
+
+/// Build a compact LLM-friendly summary of shell output, referencing a file
+/// for the full content. Keeps only the last few lines (tail) which typically
+/// contain the final status, errors, or results.
+fn compact_shell_summary(stdout: &str, stderr: &str, exit_code: i32, file_path: &str) -> String {
+    let stdout_lines: Vec<&str> = stdout.lines().collect();
+    let stderr_lines: Vec<&str> = stderr.lines().collect();
+    let total_lines = stdout_lines.len() + stderr_lines.len();
+    let total_bytes = stdout.len() + stderr.len();
+
+    let mut summary = String::new();
+    summary.push_str(&format!("exit_code={exit_code}, {total_lines} lines, {total_bytes} bytes\n"));
+
+    let tail_count = 15;
+    if !stderr.is_empty() && exit_code != 0 {
+        let tail: Vec<&str> = stderr_lines.iter().rev().take(tail_count).rev().copied().collect();
+        summary.push_str("stderr (last lines):\n");
+        for line in tail {
+            summary.push_str(line);
+            summary.push('\n');
+        }
+    }
+    if !stdout.is_empty() {
+        let tail: Vec<&str> = stdout_lines.iter().rev().take(tail_count).rev().copied().collect();
+        summary.push_str("stdout (last lines):\n");
+        for line in tail {
+            summary.push_str(line);
+            summary.push('\n');
+        }
+    }
+
+    summary.push_str(&format!(
+        "\n[Full output saved to: {file_path} — use read_file or grep to inspect]"
+    ));
+    summary
+}
+
+/// Process shell output: if large, write to file and return compact summary;
+/// otherwise return the full output inline.
+fn process_shell_output(command: &str, stdout: &str, stderr: &str, exit_code: i32) -> (String, Option<String>) {
+    let combined_size = stdout.len() + stderr.len();
+
+    if combined_size <= TERMINAL_FILE_THRESHOLD {
+        let inline = serde_json::json!({
+            "exit_code": exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+        });
+        return (inline.to_string(), None);
+    }
+
+    let file_path = write_terminal_file(command, stdout, stderr, exit_code);
+    match file_path {
+        Some(ref path) => {
+            let summary = compact_shell_summary(stdout, stderr, exit_code, path);
+            (summary, file_path)
+        }
+        None => {
+            let truncated_stdout = truncate_output(stdout, DEFAULT_MAX_OUTPUT_BYTES);
+            let truncated_stderr = truncate_output(stderr, DEFAULT_MAX_OUTPUT_BYTES);
+            let inline = serde_json::json!({
+                "exit_code": exit_code,
+                "stdout": truncated_stdout,
+                "stderr": truncated_stderr,
+            });
+            (inline.to_string(), None)
+        }
+    }
 }
 
 /// Detect the preferred shell on Unix (bash if available, else sh).
@@ -34,6 +147,60 @@ fn preferred_shell() -> &'static str {
             "sh"
         }
     })
+}
+
+/// Detect whether PowerShell Core (`pwsh`) is available; fall back to `powershell`.
+#[cfg(windows)]
+fn powershell_exe() -> &'static str {
+    use std::sync::OnceLock;
+    static PS: OnceLock<&str> = OnceLock::new();
+    *PS.get_or_init(|| {
+        if std::process::Command::new("pwsh")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok()
+        {
+            "pwsh"
+        } else {
+            "powershell"
+        }
+    })
+}
+
+/// Build a `tokio::process::Command` for the given shell and command string.
+/// `shell_hint` is the optional "shell" parameter from tool arguments.
+fn build_shell_command(command: &str, shell_hint: Option<&str>) -> tokio::process::Command {
+    #[cfg(windows)]
+    {
+        match shell_hint {
+            Some("powershell") | Some("pwsh") => {
+                let exe = powershell_exe();
+                let mut c = tokio::process::Command::new(exe);
+                c.args(["-NoProfile", "-NonInteractive", "-Command", command]);
+                c.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                c
+            }
+            _ => {
+                let mut c = tokio::process::Command::new("cmd.exe");
+                c.args(["/C", command]);
+                c.creation_flags(0x08000000);
+                c
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let shell = match shell_hint {
+            Some("sh") => "sh",
+            Some("bash") => "bash",
+            _ => preferred_shell(),
+        };
+        let mut c = tokio::process::Command::new(shell);
+        c.arg("-c").arg(command);
+        c
+    }
 }
 
 /// Build common shell parameter schema.
@@ -58,6 +225,15 @@ fn shell_parameter_schema(include_is_background: bool) -> ToolParameterSchema {
         serde_json::json!({
             "type": "string",
             "description": "Optional working directory (relative to project root or absolute). Must exist."
+        }),
+    );
+    props.insert(
+        "shell".to_string(),
+        serde_json::json!({
+            "type": "string",
+            "enum": ["bash", "sh", "cmd", "powershell"],
+            "description": "Shell to use. On Windows: 'cmd' (default) or 'powershell'. \
+             On Unix: 'bash' (default) or 'sh'. Omit to use the platform default."
         }),
     );
     if include_is_background {
@@ -102,10 +278,15 @@ impl Tool for ShellTool {
 
     fn description(&self) -> &str {
         "Run a shell command. Returns exit_code, stdout, stderr, and signal info. \
-         Uses bash -c (Unix) or cmd.exe /C (Windows). \
-         Set is_background=true for long-running processes (dev servers, watchers); \
-         set is_background=false for one-time commands. \
-         stdout/stderr truncated at ~64KB. Non-zero exit_code returned as tool error."
+         Default shell: bash (Unix) or cmd.exe (Windows). \
+         Use the 'shell' parameter to choose: 'bash'/'sh' on Unix, 'cmd'/'powershell' on Windows. \
+         Set is_background=true for dev servers, watchers, and processes you don't need to wait for; \
+         set is_background=false for commands you want to wait for (timeout: 5 minutes). \
+         stdout/stderr truncated at ~64KB. Non-zero exit_code returned as tool error. \
+         For very long tasks (>5min), use background mode with output redirection, \
+         then poll with 'sleep N' + 'read_file' to monitor progress. \
+         For moderate tasks (builds, tests) that run under 5min, foreground mode is fine — \
+         use 'sleep' freely in shell pipelines (e.g. 'sleep 30 && cat result.txt')."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -159,13 +340,8 @@ impl ShellTool {
         if !user_confirmed {
             match fastclaw_security::dangerous_ops::check_dangerous_command(command) {
                 Ok(()) => {}
-                Err(fastclaw_security::dangerous_ops::CheckResult::Denied(msg)) => {
-                    return ToolResult::err(format!(
-                        "BLOCKED by dangerous-ops policy (deny): {msg}. \
-                         Change the command or ask an admin to adjust security.dangerousOpsPolicy."
-                    ));
-                }
-                Err(fastclaw_security::dangerous_ops::CheckResult::NeedsConfirmation(msg)) => {
+                Err(fastclaw_security::dangerous_ops::CheckResult::Denied(msg))
+                | Err(fastclaw_security::dangerous_ops::CheckResult::NeedsConfirmation(msg)) => {
                     return ToolResult::needs_confirm(format!(
                         "This command requires user confirmation: {msg}"
                     ));
@@ -173,20 +349,8 @@ impl ShellTool {
             }
         }
 
-        #[cfg(windows)]
-        let mut cmd = {
-            let mut c = tokio::process::Command::new("cmd.exe");
-            c.args(["/C", command]);
-            c.creation_flags(0x08000000); // CREATE_NO_WINDOW
-            c
-        };
-        #[cfg(not(windows))]
-        let mut cmd = {
-            let shell = preferred_shell();
-            let mut c = tokio::process::Command::new(shell);
-            c.arg("-c").arg(command);
-            c
-        };
+        let shell_hint = args.get("shell").and_then(|v| v.as_str());
+        let mut cmd = build_shell_command(command, shell_hint);
 
         if let Some(dir) = args.get("working_dir").and_then(|v| v.as_str()) {
             cmd.current_dir(dir);
@@ -240,33 +404,19 @@ impl ShellTool {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     let code = output.status.code().unwrap_or(-1);
 
-                    #[cfg(unix)]
-                    let signal = {
-                        use std::os::unix::process::ExitStatusExt;
-                        output.status.signal()
-                    };
-                    #[cfg(not(unix))]
-                    let signal: Option<i32> = None;
+                    let (llm_out, terminal_file) = process_shell_output(command, &stdout, &stderr, code);
 
-                    let result = serde_json::json!({
+                    let full_display = serde_json::json!({
                         "exit_code": code,
                         "stdout": truncate_output(&stdout, DEFAULT_MAX_OUTPUT_BYTES),
                         "stderr": truncate_output(&stderr, DEFAULT_MAX_OUTPUT_BYTES),
-                        "signal": signal,
-                    });
+                        "terminal_file": terminal_file,
+                    }).to_string();
 
-                    let full_display = result.to_string();
                     if code == 0 {
-                        let llm_summary = format!(
-                            "{{\"exit_code\":0,\"stdout\":{},\"stderr\":{}}}",
-                            serde_json::Value::String(truncate_output(&stdout, DEFAULT_MAX_OUTPUT_BYTES)),
-                            serde_json::Value::String(truncate_output(&stderr, DEFAULT_MAX_OUTPUT_BYTES)),
-                        );
-                        ToolResult::ok_split(llm_summary, full_display)
+                        ToolResult::ok_split(llm_out, full_display)
                     } else {
-                        ToolResult::err(format!(
-                            "exit_code={code}: {}", result
-                        ))
+                        ToolResult::err(llm_out)
                     }
                 }
                 Ok(Err(e)) => ToolResult::err(format!(
@@ -283,7 +433,7 @@ impl ShellTool {
     async fn execute_with_streaming(
         &self,
         mut cmd: tokio::process::Command,
-        _command: &str,
+        command: &str,
         timeout: tokio::time::Duration,
         progress: ProgressSender,
     ) -> ToolResult {
@@ -349,31 +499,19 @@ impl ShellTool {
                     partial_output: None,
                 }).await;
 
-                #[cfg(unix)]
-                let signal = {
-                    use std::os::unix::process::ExitStatusExt;
-                    status.signal()
-                };
-                #[cfg(not(unix))]
-                let signal: Option<i32> = None;
+                let (llm_out, terminal_file) = process_shell_output(command, &stdout_out, &stderr_out, code);
 
-                let result = serde_json::json!({
+                let full_display = serde_json::json!({
                     "exit_code": code,
                     "stdout": truncate_output(&stdout_out, DEFAULT_MAX_OUTPUT_BYTES),
                     "stderr": truncate_output(&stderr_out, DEFAULT_MAX_OUTPUT_BYTES),
-                    "signal": signal,
-                });
+                    "terminal_file": terminal_file,
+                }).to_string();
 
-                let full_display = result.to_string();
                 if code == 0 {
-                    let llm_summary = format!(
-                        "{{\"exit_code\":0,\"stdout\":{},\"stderr\":{}}}",
-                        serde_json::Value::String(truncate_output(&stdout_out, DEFAULT_MAX_OUTPUT_BYTES)),
-                        serde_json::Value::String(truncate_output(&stderr_out, DEFAULT_MAX_OUTPUT_BYTES)),
-                    );
-                    ToolResult::ok_split(llm_summary, full_display)
+                    ToolResult::ok_split(llm_out, full_display)
                 } else {
-                    ToolResult::err(format!("exit_code={code}: {}", result))
+                    ToolResult::err(llm_out)
                 }
             }
             Ok((_, _, Err(e))) => ToolResult::err(format!("shell_exec wait failed: {e}")),
@@ -453,7 +591,7 @@ impl Default for ShellSandboxConfig {
         let patterns = default_denied_patterns();
         let denied_regexes = Self::compile_denied_regexes(&patterns);
         Self {
-            timeout_secs: 30,
+            timeout_secs: 300,
             max_output_bytes: 65536,
             denied_commands: vec![
                 // rm, rmdir, chmod, chown, chgrp are handled by the dangerous_ops policy
@@ -614,11 +752,14 @@ impl Tool for SandboxedShellTool {
 
     fn description(&self) -> &str {
         "Sandboxed shell_exec — commands validated against allow/deny rules before execution. \
-         Uses bash -c (Unix) or cmd.exe /C (Windows). \
-         Set is_background=true for long-running processes (dev servers, watchers); \
-         set is_background=false for one-time commands. \
+         Default shell: bash (Unix) or cmd.exe (Windows). \
+         Use the 'shell' parameter to choose: 'bash'/'sh' on Unix, 'cmd'/'powershell' on Windows. \
+         Set is_background=true for dev servers, watchers, and processes you don't need to wait for; \
+         set is_background=false for commands you want to wait for (timeout: 5 minutes). \
          Blocked commands (sudo, mkfs, dd, etc.) return SANDBOX BLOCKED. \
-         Destructive ops (rm, chmod) follow the dangerous_ops security policy."
+         Destructive ops (rm, chmod) follow the dangerous_ops security policy. \
+         For very long tasks (>5min), use background mode with output redirection, \
+         then poll with 'sleep N' + 'read_file' to monitor progress."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -663,13 +804,8 @@ impl Tool for SandboxedShellTool {
         if !user_confirmed {
             match fastclaw_security::dangerous_ops::check_dangerous_command(command) {
                 Ok(()) => {}
-                Err(fastclaw_security::dangerous_ops::CheckResult::Denied(msg)) => {
-                    return ToolResult::err(format!(
-                        "BLOCKED by dangerous-ops policy (deny): {msg}. \
-                         Change the command or ask an admin to adjust security.dangerousOpsPolicy."
-                    ));
-                }
-                Err(fastclaw_security::dangerous_ops::CheckResult::NeedsConfirmation(msg)) => {
+                Err(fastclaw_security::dangerous_ops::CheckResult::Denied(msg))
+                | Err(fastclaw_security::dangerous_ops::CheckResult::NeedsConfirmation(msg)) => {
                     return ToolResult::needs_confirm(format!(
                         "This command requires user confirmation: {msg}"
                     ));
@@ -686,37 +822,25 @@ impl Tool for SandboxedShellTool {
             }
         }
 
+        let shell_hint = args.get("shell").and_then(|v| v.as_str());
         let mut cmd = if self.config.use_namespace {
             #[cfg(not(windows))]
             {
-                let shell = preferred_shell();
+                let shell = match shell_hint {
+                    Some("sh") => "sh",
+                    Some("bash") => "bash",
+                    _ => preferred_shell(),
+                };
                 let mut c = tokio::process::Command::new("unshare");
                 c.args(["--mount", "--pid", "--fork", "--", shell, "-c", command]);
                 c
             }
             #[cfg(windows)]
             {
-                // Namespace sandboxing via unshare is Linux-only; fallback to cmd on Windows.
-                let mut c = tokio::process::Command::new("cmd.exe");
-                c.args(["/C", command]);
-                c.creation_flags(0x08000000); // CREATE_NO_WINDOW
-                c
+                build_shell_command(command, shell_hint)
             }
         } else {
-            #[cfg(windows)]
-            {
-                let mut c = tokio::process::Command::new("cmd.exe");
-                c.args(["/C", command]);
-                c.creation_flags(0x08000000); // CREATE_NO_WINDOW
-                c
-            }
-            #[cfg(not(windows))]
-            {
-                let shell = preferred_shell();
-                let mut c = tokio::process::Command::new(shell);
-                c.arg("-c").arg(command);
-                c
-            }
+            build_shell_command(command, shell_hint)
         };
 
         if let Some(dir) = args.get("working_dir").and_then(|v| v.as_str()) {
@@ -767,26 +891,21 @@ impl Tool for SandboxedShellTool {
                     #[cfg(not(unix))]
                     let signal: Option<i32> = None;
 
-                    let result = serde_json::json!({
+                    let (llm_out, terminal_file) = process_shell_output(command, &stdout, &stderr, code);
+
+                    let full_display = serde_json::json!({
                         "exit_code": code,
                         "stdout": truncate_output(&stdout, max_out),
                         "stderr": truncate_output(&stderr, max_out),
                         "signal": signal,
                         "sandboxed": true,
-                    });
+                        "terminal_file": terminal_file,
+                    }).to_string();
 
-                    let full_display = result.to_string();
                     if code == 0 {
-                        let llm_summary = format!(
-                            "{{\"exit_code\":0,\"stdout\":{},\"stderr\":{}}}",
-                            serde_json::Value::String(truncate_output(&stdout, max_out)),
-                            serde_json::Value::String(truncate_output(&stderr, max_out)),
-                        );
-                        ToolResult::ok_split(llm_summary, full_display)
+                        ToolResult::ok_split(llm_out, full_display)
                     } else {
-                        ToolResult::err(format!(
-                            "exit_code={code}: {}", result
-                        ))
+                        ToolResult::err(llm_out)
                     }
                 }
                 Ok(Err(e)) => ToolResult::err(format!(

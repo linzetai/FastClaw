@@ -11,33 +11,33 @@ use super::prompt_builder::memory_tool_suffix;
 
 /// Default max characters of tool output embedded in chat history.
 /// Individual tools override this via `tool_output_char_limit`.
-pub const MAX_TOOL_RESULT_CHARS: usize = 2000;
+pub const MAX_TOOL_RESULT_CHARS: usize = 1500;
 
 /// Per-tool character limits.
-/// Tools that produce large but low-density output get tighter limits;
-/// tools whose output is highly actionable get more room.
+/// Aggressive limits to prevent context exhaustion. Full output is saved
+/// to temp files and can be re-read with `read_file` if needed.
 fn tool_output_char_limit(tool_name: &str) -> usize {
     match tool_name {
         // Write/edit tools: the LLM already knows what it wrote; keep only the status.
-        "write_file" | "edit_file" | "apply_patch" | "create_directory" => 300,
+        "write_file" | "edit_file" | "apply_patch" | "create_directory" => 200,
 
         // Search tools: only the first few matches matter; rest can be re-searched.
-        "grep" | "ripgrep" | "glob" | "web_search" => 1200,
+        "grep" | "ripgrep" | "glob" | "web_search" => 800,
 
         // Directory listing: compact structure.
-        "list_dir" | "list_directory" => 800,
+        "list_dir" | "list_directory" => 600,
 
         // File reading: key content, but agent can re-read specific sections.
-        "read_file" => 1500,
+        "read_file" => 1200,
 
         // Shell execution: tail-heavy (errors/results at end).
-        "shell_exec" | "shell" | "run_command" => 1500,
+        "shell_exec" | "shell" | "run_command" => 1200,
 
         // Web fetch: often huge HTML; extract only key text.
-        "web_fetch" | "fetch_url" => 2000,
+        "web_fetch" | "fetch_url" => 1500,
 
         // Memory/todo tools are already compact.
-        "memory_store" | "memory_search" | "todo_write" => 1500,
+        "memory_store" | "memory_search" | "todo_write" => 1000,
 
         // Default: use the global limit.
         _ => MAX_TOOL_RESULT_CHARS,
@@ -47,9 +47,11 @@ fn tool_output_char_limit(tool_name: &str) -> usize {
 /// Per-tool line limits (same principle).
 fn tool_output_line_limit(tool_name: &str) -> usize {
     match tool_name {
-        "write_file" | "edit_file" | "apply_patch" | "create_directory" => 15,
-        "grep" | "ripgrep" | "glob" | "web_search" => 60,
-        "list_dir" | "list_directory" => 40,
+        "write_file" | "edit_file" | "apply_patch" | "create_directory" => 10,
+        "grep" | "ripgrep" | "glob" | "web_search" => 40,
+        "list_dir" | "list_directory" => 30,
+        "read_file" => 80,
+        "shell_exec" | "shell" | "run_command" => 60,
         _ => MAX_TOOL_RESULT_LINES,
     }
 }
@@ -77,7 +79,7 @@ fn safe_char_boundary_ceil(s: &str, idx: usize) -> usize {
 }
 
 /// Max lines of tool output before triggering line-based truncation.
-const MAX_TOOL_RESULT_LINES: usize = 200;
+const MAX_TOOL_RESULT_LINES: usize = 100;
 
 const TRUNCATION_SEPARATOR: &str = "\n\n---\n... [CONTENT TRUNCATED] ...\n---\n\n";
 
@@ -714,9 +716,11 @@ async fn execute_single_tool(
     let arguments = tc.function.arguments.clone();
 
     if !is_tool_allowed(&tool_name, behavior) {
-        tracing::warn!(tool = %tool_name, "tool blocked by allow/deny policy{log_suffix}");
-        let msg = format!("tool '{}' is not allowed by agent policy", tool_name);
-        return (tool_name, call_id, arguments, fastclaw_core::tool::ToolResult::err(msg));
+        tracing::warn!(tool = %tool_name, "tool blocked by allow/deny policy — forwarding to user for confirmation{log_suffix}");
+        let result = fastclaw_core::tool::ToolResult::needs_confirm(
+            format!("Tool '{}' is not in the allowed tool list. Allow this tool to proceed?", tool_name),
+        );
+        return (tool_name, call_id, arguments, result);
     }
     if behavior.requires_confirmation(&tool_name) {
         tracing::info!(tool = %tool_name, "tool requires user confirmation (tools_ask){log_suffix}");

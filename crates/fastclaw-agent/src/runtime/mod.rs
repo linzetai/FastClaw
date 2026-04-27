@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
@@ -699,6 +698,23 @@ impl AgentRuntime {
             );
             let estimated_tokens = last_estimated_tokens;
 
+            // Emit live context usage update to frontend
+            let tokens_saved = if compress_result.compressed {
+                compress_result.original_tokens.saturating_sub(compress_result.new_tokens) as u32
+            } else {
+                0
+            };
+            let _ = send_stream_event(
+                &tx,
+                StreamEvent::ContextUsageUpdate {
+                    used_tokens: estimated_tokens as u32,
+                    limit_tokens: context_window,
+                    compressed: compress_result.compressed,
+                    tokens_saved,
+                },
+                false,
+            ).await;
+
             // Phase 3: Warn if context usage is critically high (>90%)
             let usage_ratio = estimated_tokens as f32 / context_window.max(1) as f32;
             if usage_ratio > 0.90 {
@@ -1005,22 +1021,18 @@ impl AgentRuntime {
                                     AskQuestionOption { id: "allow".into(), label: "Allow".into() },
                                     AskQuestionOption { id: "deny".into(), label: "Deny".into() },
                                 ],
-                                timeout_secs: 60,
+                                timeout_secs: 0,
                                 allow_multiple: false,
                             },
                             true,
                         )
                         .await;
 
-                        let user_answer = tokio::time::timeout(
-                            Duration::from_secs(60),
-                            answer_rx,
-                        )
-                        .await;
+                        let user_answer = answer_rx.await;
 
                         pending_map.remove(&confirm_request_id);
 
-                        let approved = matches!(user_answer, Ok(Ok(ref a)) if a == "allow");
+                        let approved = matches!(user_answer, Ok(ref a) if a == "allow");
 
                         if approved {
                             let mut args: serde_json::Value =

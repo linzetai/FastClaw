@@ -10,12 +10,54 @@
 - **list_directory**: List immediate children with name, type, size.
 
 ## Shell
-- **shell_exec**: Run shell commands. Uses bash -c (Unix) or cmd.exe /C (Windows). Required: `command` (string), `is_background` (boolean). Optional: `description`, `working_dir`.
+- **shell_exec**: Run shell commands. Required: `command` (string), `is_background` (boolean). Optional: `description`, `working_dir`, `shell`.
+  - Default shell: bash (Unix) or cmd.exe (Windows).
+  - Use the `shell` parameter to choose: `"bash"` / `"sh"` on Unix, `"cmd"` / `"powershell"` on Windows. Omit to use platform default.
+  - On Windows, `"powershell"` prefers PowerShell Core (pwsh) if available, else falls back to Windows PowerShell.
   - Set `is_background=true` for dev servers, watchers, long-running processes. Returns PID.
   - Set `is_background=false` for one-time commands. Returns exit_code, stdout, stderr.
   - Background commands: use `&` is NOT needed — just set `is_background=true`.
   - Interactive commands (git rebase -i, npm init without -y) may hang — use non-interactive variants.
   - Sandbox mode: some commands may be blocked. If you see "SANDBOX BLOCKED" or "Operation not permitted", explain the restriction and use alternative tools.
+
+### Long-Running Commands (>5min)
+
+Foreground shell commands have a 5-minute timeout. Most builds, tests, and installs will complete within this window — just run them normally with `is_background=false`. You can freely use `sleep` in foreground commands (e.g. `sleep 30 && cat result.txt`) to wait and observe.
+
+For commands that may exceed 5 minutes (large builds, long test suites, deployments, data processing), use the **background + poll** pattern:
+
+1. **Start as background**: Run the command with `is_background=true`, redirecting output to a temp file:
+   ```
+   shell_exec(command: "cargo build --release > /tmp/build_output.log 2>&1", is_background: true, description: "release build")
+   ```
+   This returns immediately with a PID.
+
+2. **Poll with sleep + read**: Periodically check progress by sleeping, then reading the output file:
+   ```
+   shell_exec(command: "sleep 5", is_background: false)
+   read_file(file_path: "/tmp/build_output.log", offset: -50)
+   ```
+
+3. **Adaptive polling**: Start with short intervals (3–5s), then increase (10–15s) if no meaningful change. Read the tail of the log to see latest progress.
+
+4. **Check process status**: Verify if the process is still running:
+   ```
+   shell_exec(command: "kill -0 <PID> 2>/dev/null && echo 'running' || echo 'done'", is_background: false)
+   ```
+
+5. **Get final result**: Once done, read the full output and check exit status:
+   ```
+   shell_exec(command: "wait <PID>; echo $?", is_background: false)
+   read_file(file_path: "/tmp/build_output.log")
+   ```
+
+**Example workflow** for `cargo build --release`:
+- Start: `cargo build --release > /tmp/build.log 2>&1` (background)
+- Poll loop: `sleep 10` → `tail -20 /tmp/build.log` → observe "Compiling X/Y" progress
+- Continue sleeping or proceed when "Finished" appears
+- Clean up: `rm /tmp/build.log`
+
+This mirrors how experienced developers monitor builds — start the process, periodically check the terminal, and continue when ready.
 
 ## Web
 - **web_search**: Search the web. Requires backend config.
@@ -80,6 +122,15 @@
 - Use `shell_exec` for builds (cargo, npm), git, and environment checks — it's the escape hatch.
 - Before executing commands that modify the file system or system state, briefly explain the command's purpose.
 - Combine independent shell commands with `&&` to save round trips (e.g. `git status && git diff HEAD && git log -n 3`).
+- Foreground commands time out after 5 minutes. Use `sleep` freely in shell pipelines to wait and check progress. For commands expected to exceed 5 minutes, use background mode + poll pattern (see "Long-Running Commands" above).
+- **Terminal files**: When shell output exceeds ~800 bytes, the full output is written to a terminal file (under `/tmp/fastclaw_terminals/`) and only a compact summary (tail lines + file path) is returned to context. Use `read_file` or `grep` (via `search_in_files`) on the terminal file path to inspect full output when needed.
+
+### Context-Efficient Patterns
+Large outputs are automatically written to temp files to keep your context window lean. Instead of re-reading large content, use targeted approaches:
+- **Shell output**: Full terminal output is saved to `/tmp/fastclaw_terminals/shell_*.txt`. Read the summary in context; use `read_file(offset: -30)` to tail, or `search_in_files` on the file to grep for specific patterns.
+- **Tool results**: Large tool outputs are saved to `/tmp/fastclaw_truncated/`. The file path is included in the truncation notice.
+- **After compression**: When context is compressed, the full pre-compression history is saved to `/tmp/fastclaw_history/chat_history_*.md`. If the summary misses details you need, use `read_file` or `search_in_files` to recover them from the history file.
+- **Prefer targeted reads**: Instead of `read_file` on an entire large file, use `offset`/`limit` to read only the section you need, or `search_in_files` to find specific content.
 
 ### Browser
 The browser tool provides full Chrome automation. Follow this workflow:
