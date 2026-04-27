@@ -51,9 +51,9 @@ pub fn is_private_ipv4(v4: &std::net::Ipv4Addr) -> bool {
         || v4.is_link_local()
         || v4.is_broadcast()
         || v4.is_unspecified()
-        || v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64 // 100.64.0.0/10 (CGN)
-        || v4.octets()[0] == 169 && v4.octets()[1] == 254        // 169.254.0.0/16
-        || v4.octets()[0] == 0                                    // 0.0.0.0/8
+        || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64) // 100.64.0.0/10 (CGN)
+        || (v4.octets()[0] == 169 && v4.octets()[1] == 254)         // 169.254.0.0/16
+        || v4.octets()[0] == 0                                       // 0.0.0.0/8
 }
 
 pub fn ssrf_check_url(url_str: &str) -> Result<(), String> {

@@ -146,7 +146,15 @@ impl LlmExtractionCallback for LlmSkillExtraction {
             .trim_end_matches("```")
             .trim();
 
-        let parsed: serde_json::Value = serde_json::from_str(cleaned)?;
+        let parsed: serde_json::Value = serde_json::from_str(cleaned).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "LlmSkillExtraction: LLM returned non-JSON, using raw text as strategy_template");
+            serde_json::json!({
+                "name": "unnamed",
+                "task_pattern": "",
+                "strategy_template": cleaned,
+                "parameters": []
+            })
+        });
         Ok(LlmExtractedPattern {
             name: parsed["name"].as_str().unwrap_or("unnamed").to_string(),
             task_pattern: parsed["task_pattern"].as_str().unwrap_or("").to_string(),

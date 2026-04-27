@@ -410,9 +410,9 @@ mod tests {
         let p50 = extract("quantile=\"0.5\"");
         let p95 = extract("quantile=\"0.95\"");
         let p99 = extract("quantile=\"0.99\"");
-        assert!(p50 >= 45.0 && p50 <= 55.0, "p50 out of range: {p50}");
-        assert!(p95 >= 90.0 && p95 <= 100.0, "p95 out of range: {p95}");
-        assert!(p99 >= 95.0 && p99 <= 100.0, "p99 out of range: {p99}");
+        assert!((45.0..=55.0).contains(&p50), "p50 out of range: {p50}");
+        assert!((90.0..=100.0).contains(&p95), "p95 out of range: {p95}");
+        assert!((95.0..=100.0).contains(&p99), "p99 out of range: {p99}");
     }
 
     #[test]
