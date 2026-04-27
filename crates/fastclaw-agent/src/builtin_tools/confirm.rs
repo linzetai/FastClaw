@@ -54,7 +54,7 @@ impl Tool for ConfirmTool {
             "timeout_secs".to_string(),
             serde_json::json!({
                 "type": "integer",
-                "description": "Seconds to wait for user response (default 60)"
+                "description": "Seconds to wait for user response. Omit or set to 0 for no timeout (waits indefinitely)."
             }),
         );
         ToolParameterSchema {
@@ -78,7 +78,7 @@ impl Tool for ConfirmTool {
         let timeout_secs = args
             .get("timeout_secs")
             .and_then(|v| v.as_u64())
-            .unwrap_or(60) as u32;
+            .unwrap_or(0) as u32;
 
         let stream_key = match ASK_QUESTION_STREAM_KEY.try_with(|k| k.clone()) {
             Ok(k) => k,
@@ -117,16 +117,34 @@ impl Tool for ConfirmTool {
                 .await;
         }
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs as u64),
-            answer_rx,
-        )
-        .await;
+        let result = if timeout_secs == 0 {
+            answer_rx.await.map_err(|_| ())
+        } else {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(timeout_secs as u64),
+                answer_rx,
+            )
+            .await
+            {
+                Ok(inner) => inner.map_err(|_| ()),
+                Err(_) => {
+                    self.pending.remove(&request_id);
+                    return ToolResult::ok(
+                        serde_json::json!({
+                            "confirmed": false,
+                            "timed_out": true,
+                            "message": message,
+                        })
+                        .to_string(),
+                    );
+                }
+            }
+        };
 
         self.pending.remove(&request_id);
 
         match result {
-            Ok(Ok(answer)) => {
+            Ok(answer) => {
                 let confirmed = answer == "allow";
                 ToolResult::ok(
                     serde_json::json!({
@@ -137,15 +155,7 @@ impl Tool for ConfirmTool {
                     .to_string(),
                 )
             }
-            Ok(Err(_)) => ToolResult::err("confirmation channel closed unexpectedly"),
-            Err(_) => ToolResult::ok(
-                serde_json::json!({
-                    "confirmed": false,
-                    "timed_out": true,
-                    "message": message,
-                })
-                .to_string(),
-            ),
+            Err(_) => ToolResult::err("confirmation channel closed unexpectedly"),
         }
     }
 }

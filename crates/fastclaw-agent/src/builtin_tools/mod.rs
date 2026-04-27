@@ -66,7 +66,7 @@ pub fn register_builtin_tools_with_sandbox(registry: &ToolRegistry, sandboxed: b
             ShellSandboxConfig::default(),
         )));
     } else {
-        registry.register(Arc::new(ShellTool::new(30)));
+        registry.register(Arc::new(ShellTool::new(300)));
     }
     registry.register(Arc::new(ReadFileTool));
     registry.register(Arc::new(WriteFileTool));
