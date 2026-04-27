@@ -2,6 +2,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 use async_trait::async_trait;
 use base64::Engine as _;
 use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolRegistry, ToolResult};
@@ -103,26 +106,45 @@ impl BrowserTool {
 
     /// Try to connect to an existing Chrome that uses our profile dir by
     /// scanning its `--remote-debugging-port` and hitting `/json/version`.
+    ///
+    /// Times out after 8 seconds total to avoid blocking the main launch path.
     fn try_reuse_existing(profile: &std::path::Path) -> Option<headless_chrome::Browser> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
         let profile_str = profile.to_string_lossy();
 
         #[cfg(target_os = "windows")]
         let pids_and_ports = {
             let wql_pattern = profile_str.replace('\\', "\\\\");
-            let output = std::process::Command::new("wmic")
-                .args([
-                    "process",
-                    "where",
+            // Prefer PowerShell Get-CimInstance over deprecated wmic for speed
+            let ps_result = {
+                let mut cmd = std::process::Command::new("powershell");
+                cmd.args([
+                    "-NoProfile", "-NonInteractive", "-Command",
                     &format!(
-                        "commandline like '%{wql_pattern}%' and name='chrome.exe'"
+                        "Get-CimInstance Win32_Process -Filter \"name='chrome.exe' AND commandline LIKE '%{}%'\" | Select-Object -ExpandProperty CommandLine",
+                        wql_pattern
                     ),
-                    "get",
-                    "commandline",
-                    "/format:list",
-                ])
-                .output()
-                .ok()?;
-            let text = String::from_utf8_lossy(&output.stdout);
+                ]);
+                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                cmd.output().ok()
+            };
+            let text = match ps_result {
+                Some(ref out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
+                _ => {
+                    // Fallback to wmic if PowerShell fails
+                    let mut cmd = std::process::Command::new("wmic");
+                    cmd.args([
+                        "process", "where",
+                        &format!("commandline like '%{wql_pattern}%' and name='chrome.exe'"),
+                        "get", "commandline", "/format:list",
+                    ]);
+                    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                    match cmd.output() {
+                        Ok(out) => String::from_utf8_lossy(&out.stdout).to_string(),
+                        Err(_) => return None,
+                    }
+                }
+            };
             Self::extract_debug_ports(&text)
         };
 
@@ -137,12 +159,16 @@ impl BrowserTool {
         };
 
         for port in pids_and_ports {
+            if std::time::Instant::now() > deadline {
+                tracing::debug!("browser: try_reuse_existing timed out scanning ports");
+                break;
+            }
             if let Some(body) = Self::http_get(&format!("127.0.0.1:{port}"), "/json/version") {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&body) {
                     if let Some(ws_url) = val["webSocketDebuggerUrl"].as_str() {
                         if let Ok(browser) = headless_chrome::Browser::connect_with_timeout(
                             ws_url.to_string(),
-                            Duration::from_secs(120),
+                            Duration::from_secs(10),
                         ) {
                             return Some(browser);
                         }
@@ -185,7 +211,11 @@ impl BrowserTool {
     }
 
     fn extract_debug_ports(text: &str) -> Vec<u16> {
-        let re_port = regex::Regex::new(r"--remote-debugging-port=(\d+)").unwrap();
+        static RE_PORT: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let re_port = RE_PORT.get_or_init(|| {
+            regex::Regex::new(r"--remote-debugging-port=(\d+)")
+                .expect("static regex must compile")
+        });
         let mut ports: Vec<u16> = re_port
             .captures_iter(text)
             .filter_map(|c| c[1].parse().ok())
@@ -202,63 +232,76 @@ impl BrowserTool {
                  What to do next: retry once; if this repeats, the gateway process may need restart—report to the operator."
             )
         })?;
-        if guard.is_none() {
-            let profile = Self::profile_dir();
-            std::fs::create_dir_all(&profile).ok();
 
-            // Phase 1: try to reuse an existing Chrome with our profile
-            if let Some(browser) = Self::try_reuse_existing(&profile) {
-                *guard = Some(BrowserState {
-                    browser,
-                    persistent_tab: None,
-                });
+        if let Some(state) = guard.as_ref() {
+            if Self::is_browser_dead(state) {
+                tracing::warn!("browser: existing Chrome connection is dead, will rebuild");
+                *guard = None;
+            } else {
                 return Ok(());
             }
+        }
 
-            // Phase 2: kill orphans, clean locks, launch fresh
-            Self::cleanup_profile(&profile);
-            let headless = Self::is_headless();
-            let chrome_path = Self::find_chrome();
-            let mut builder = headless_chrome::LaunchOptions::default_builder();
-            builder
-                .headless(headless)
-                .sandbox(false)
-                .window_size(Some((1280, 900)))
-                .user_data_dir(Some(profile));
-            if let Some(ref p) = chrome_path {
-                builder.path(Some(p.clone()));
-            }
-            let launch_options = builder.build().map_err(|e| {
-                format!(
-                    "browser: invalid Chrome launch options: {e}. \
-                     What to do next: check headless_chrome defaults and OS limits; ask the operator if custom flags are required."
-                )
-            })?;
+        let profile = Self::profile_dir();
+        std::fs::create_dir_all(&profile).ok();
 
-            let (tx, rx) = std::sync::mpsc::channel();
-            let opts = launch_options;
-            std::thread::spawn(move || {
-                let _ = tx.send(headless_chrome::Browser::new(opts));
-            });
-            let browser = rx
-                .recv_timeout(BROWSER_LAUNCH_TIMEOUT)
-                .map_err(|_| {
-                    "browser: Chrome launch timed out (30s). \
-                     What to do next: ensure Chrome/Chromium is installed and on PATH; \
-                     check that no other process holds the profile lock at the FASTCLAW_BROWSER_PROFILE directory."
-                        .to_string()
-                })?
-                .map_err(|e| {
-                    format!(
-                        "browser: could not start Chrome/Chromium: {e}. \
-                         What to do next: ensure google-chrome or chromium is installed and on PATH, the gateway user may launch browsers, and no sandbox policy blocks it; see operator docs for FASTCLAW_BROWSER dependencies."
-                    )
-                })?;
+        if let Some(browser) = Self::try_reuse_existing(&profile) {
             *guard = Some(BrowserState {
                 browser,
                 persistent_tab: None,
             });
+            return Ok(());
         }
+
+        Self::cleanup_profile(&profile);
+        Self::launch_fresh_browser(&mut guard, &profile)
+    }
+
+    fn launch_fresh_browser(
+        guard: &mut std::sync::MutexGuard<'_, Option<BrowserState>>,
+        profile: &std::path::Path,
+    ) -> Result<(), String> {
+        let headless = Self::is_headless();
+        let chrome_path = Self::find_chrome();
+        let mut builder = headless_chrome::LaunchOptions::default_builder();
+        builder
+            .headless(headless)
+            .sandbox(false)
+            .window_size(Some((1280, 900)))
+            .user_data_dir(Some(profile.to_path_buf()));
+        if let Some(ref p) = chrome_path {
+            builder.path(Some(p.clone()));
+        }
+        let launch_options = builder.build().map_err(|e| {
+            format!(
+                "browser: invalid Chrome launch options: {e}. \
+                 What to do next: check headless_chrome defaults and OS limits; ask the operator if custom flags are required."
+            )
+        })?;
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let opts = launch_options;
+        std::thread::spawn(move || {
+            let _ = tx.send(headless_chrome::Browser::new(opts));
+        });
+        let browser = rx
+            .recv_timeout(BROWSER_LAUNCH_TIMEOUT)
+            .map_err(|_| {
+                "browser: Chrome launch timed out (30s). \
+                 What to do next: ensure Chrome/Chromium is installed and on PATH; \
+                 check that no other process holds the profile lock at the FASTCLAW_BROWSER_PROFILE directory."
+                    .to_string()
+            })?
+            .map_err(|e| {
+                format!(
+                    "browser: could not start Chrome/Chromium: {e}. \
+                     What to do next: ensure google-chrome or chromium is installed and on PATH, the gateway user may launch browsers, and no sandbox policy blocks it; see operator docs for FASTCLAW_BROWSER dependencies."
+                )
+            })?;
+        **guard = Some(BrowserState {
+            browser,
+            persistent_tab: None,
+        });
         Ok(())
     }
 
@@ -286,24 +329,26 @@ impl BrowserTool {
     fn kill_orphan_chrome(profile: &std::path::Path) {
         let profile_str = profile.to_string_lossy().replace('/', "\\");
         let wql_pattern = profile_str.replace('\\', "\\\\");
-        let output = std::process::Command::new("wmic")
-            .args([
-                "process",
-                "where",
-                &format!(
-                    "commandline like '%{wql_pattern}%' and name='chrome.exe'"
-                ),
-                "get",
-                "processid",
-            ])
-            .output();
+        let mut cmd = std::process::Command::new("wmic");
+        cmd.args([
+            "process",
+            "where",
+            &format!(
+                "commandline like '%{wql_pattern}%' and name='chrome.exe'"
+            ),
+            "get",
+            "processid",
+        ]);
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        let output = cmd.output();
         if let Ok(out) = output {
             let text = String::from_utf8_lossy(&out.stdout);
             for line in text.lines() {
                 if let Ok(pid) = line.trim().parse::<u32>() {
-                    let _ = std::process::Command::new("taskkill")
-                        .args(["/F", "/PID", &pid.to_string()])
-                        .output();
+                    let mut kill_cmd = std::process::Command::new("taskkill");
+                    kill_cmd.args(["/F", "/PID", &pid.to_string()]);
+                    kill_cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                    let _ = kill_cmd.output();
                 }
             }
         }
@@ -479,16 +524,57 @@ impl BrowserTool {
             return Self::dispatch_action(state, action, args);
         }
 
-        Self::dispatch_action(state, action, args)
+        let result = Self::dispatch_action(state, action, args);
+
+        if let Err(ref e) = result {
+            let lower = e.to_lowercase();
+            let is_cdp_dead = lower.contains("could not open a new tab")
+                || lower.contains("websocket")
+                || lower.contains("channel closed")
+                || lower.contains("not connected")
+                || lower.contains("browser process")
+                || lower.contains("pipe error")
+                || lower.contains("broken pipe");
+            if is_cdp_dead {
+                tracing::warn!("browser: dispatch_action failed with CDP connection error, attempting reconnect: {e}");
+                drop(guard);
+                if Self::reset_and_relaunch(inner).is_ok() {
+                    let mut guard = inner.lock().map_err(|e| format!("browser: re-lock after reconnect failed: {e}"))?;
+                    if let Some(state) = guard.as_mut() {
+                        return Self::dispatch_action(state, action, args);
+                    }
+                }
+            }
+        }
+
+        result
     }
 
     fn is_browser_dead(state: &BrowserState) -> bool {
-        state
-            .persistent_tab
-            .as_ref()
-            .map(|t| t.get_url().is_empty() && t.get_title().is_err())
-            .unwrap_or(false)
-            || state.browser.get_tabs().lock().map(|tabs| tabs.is_empty()).unwrap_or(true)
+        // Use try_lock to avoid hanging if headless_chrome holds the lock
+        // during a crashed CDP operation
+        match state.browser.get_tabs().try_lock() {
+            Ok(tabs) => {
+                if tabs.is_empty() {
+                    return true;
+                }
+                if let Some(tab) = tabs.first() {
+                    if tab.get_title().is_err() && tab.get_url().is_empty() {
+                        return true;
+                    }
+                }
+            }
+            Err(std::sync::TryLockError::Poisoned(_)) => return true,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                // Another thread is using the tabs — browser is likely alive
+            }
+        }
+        if let Some(ref tab) = state.persistent_tab {
+            if tab.get_title().is_err() && tab.get_url().is_empty() {
+                return true;
+            }
+        }
+        false
     }
 
     fn reset_and_relaunch(inner: &Mutex<Option<BrowserState>>) -> Result<(), String> {
