@@ -732,5 +732,21 @@ pub fn event_to_response(
             })),
             error: None,
         },
+        StreamEvent::ContextUsageUpdate {
+            used_tokens,
+            limit_tokens,
+            compressed,
+            tokens_saved,
+        } => WsResponse {
+            id: req_id.clone(),
+            msg_type: "chat.context.usage".into(),
+            data: Some(json!({
+                "usedTokens": used_tokens,
+                "limitTokens": limit_tokens,
+                "compressed": compressed,
+                "tokensSaved": tokens_saved,
+            })),
+            error: None,
+        },
     }
 }

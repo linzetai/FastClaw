@@ -215,13 +215,15 @@ export function QuestionPanel({
   onAnswer: (answer: string) => void;
   onTimeout: () => void;
 }) {
-  const [remaining, setRemaining] = useState(() => Math.max(0, Math.ceil((question.expiresAt - Date.now()) / 1000)));
+  const hasTimeout = question.timeoutSecs > 0 && question.expiresAt > 0;
+  const [remaining, setRemaining] = useState(() => hasTimeout ? Math.max(0, Math.ceil((question.expiresAt - Date.now()) / 1000)) : 0);
   const [freeText, setFreeText] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitted, setSubmitted] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!hasTimeout) return;
     const timer = setInterval(() => {
       const left = Math.max(0, Math.ceil((question.expiresAt - Date.now()) / 1000));
       setRemaining(left);
@@ -231,9 +233,9 @@ export function QuestionPanel({
       }
     }, 200);
     return () => clearInterval(timer);
-  }, [question.expiresAt, onTimeout]);
+  }, [hasTimeout, question.expiresAt, onTimeout]);
 
-  const progress = Math.max(0, remaining / question.timeoutSecs);
+  const progress = hasTimeout ? Math.max(0, remaining / question.timeoutSecs) : 1;
   const multi = question.allowMultiple ?? false;
 
   const handleOptionClick = useCallback((optId: string) => {
@@ -294,18 +296,22 @@ export function QuestionPanel({
         animation: reducedMotion ? "none" : "slide-up 0.2s ease-out",
       }}
     >
-      <div className="relative h-[2px] w-full" style={{ background: "var(--bg-tertiary)" }}>
-        <div
-          className="absolute inset-y-0 left-0 transition-all duration-200"
-          style={{ width: `${progress * 100}%`, background: remaining <= 10 ? "var(--fill-warning, #ED8936)" : "var(--fill-accent, #4299E1)" }}
-        />
-      </div>
+      {hasTimeout && (
+        <div className="relative h-[2px] w-full" style={{ background: "var(--bg-tertiary)" }}>
+          <div
+            className="absolute inset-y-0 left-0 transition-all duration-200"
+            style={{ width: `${progress * 100}%`, background: remaining <= 10 ? "var(--fill-warning, #ED8936)" : "var(--fill-accent, #4299E1)" }}
+          />
+        </div>
+      )}
       <div className="px-4 py-3">
         <div className="mb-3 flex items-center justify-between gap-2">
           <p className="text-[13px] font-medium" style={{ color: "var(--fill-primary)" }}>{question.question}</p>
-          <span className="shrink-0 text-[11px] tabular-nums" style={{ color: remaining <= 10 ? "var(--fill-warning, #ED8936)" : "var(--fill-tertiary)" }}>
-            {remaining}s
-          </span>
+          {hasTimeout && (
+            <span className="shrink-0 text-[11px] tabular-nums" style={{ color: remaining <= 10 ? "var(--fill-warning, #ED8936)" : "var(--fill-tertiary)" }}>
+              {remaining}s
+            </span>
+          )}
         </div>
         {multi && (
           <p className="mb-2 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>可多选，选完后点击"确认"&nbsp;·&nbsp;按键盘 A-{OPTION_LETTERS[Math.min(question.options.length, OPTION_LETTERS.length) - 1]} 快速选择</p>

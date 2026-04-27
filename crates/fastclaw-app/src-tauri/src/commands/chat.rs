@@ -391,6 +391,12 @@ pub async fn chat_stream(
                     "data": {"usedTokens": used_tokens, "limitTokens": limit_tokens, "message": message}
                 }));
             }
+            StreamEvent::ContextUsageUpdate { used_tokens, limit_tokens, compressed, tokens_saved } => {
+                let _ = channel.send(json!({
+                    "type": "chat.context.usage",
+                    "data": {"usedTokens": used_tokens, "limitTokens": limit_tokens, "compressed": compressed, "tokensSaved": tokens_saved}
+                }));
+            }
             StreamEvent::SubAgentComplete { run_id, status, result, tool_calls_made, iterations, usage, elapsed_ms } => {
                 let mut data = json!({
                     "runId": run_id, "status": status, "result": result,

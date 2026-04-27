@@ -428,6 +428,17 @@ pub enum StreamEvent {
         message: String,
     },
 
+    /// Emitted after each iteration's context management phase to keep
+    /// the frontend updated on live context token usage.
+    ContextUsageUpdate {
+        used_tokens: u32,
+        limit_tokens: u32,
+        /// Whether LLM-based compression was applied this iteration.
+        compressed: bool,
+        /// Tokens saved by compression (0 if not compressed).
+        tokens_saved: u32,
+    },
+
     // ── Sub-agent streaming events ──────────────────────────────────
 
     /// A sub-agent has been spawned and is starting execution.

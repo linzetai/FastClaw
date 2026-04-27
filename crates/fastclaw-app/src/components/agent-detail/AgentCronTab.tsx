@@ -302,163 +302,141 @@ function CronJobForm({
         </>
       )}
 
-      <div className="flex items-center justify-between pt-1">
-        <div className="flex items-center gap-2">
-          <label className={labelCls} style={labelStyle}>启用</label>
-          <Toggle
-            checked={form.enabled !== false}
-            onChange={(v) => setForm((f) => ({ ...f, enabled: v }))}
-          />
-        </div>
-
-        {/* 通知渠道配置 - 折叠面板 */}
-        <div className="w-2/5">
-          <button
-            type="button"
-            onClick={() => setShowNotifyChannels(!showNotifyChannels)}
-            className="flex cursor-pointer items-center gap-1 text-[11px] font-medium transition-colors"
-            style={{ color: "var(--fill-tertiary)" }}
-          >
-            {showNotifyChannels ? <ChevronDown size={10} strokeWidth={2} /> : <ChevronRight size={10} strokeWidth={2} />}
-            通知渠道 ({notifyChannels.length})
-          </button>
-        </div>
+      <div className="flex items-center gap-2 pt-1">
+        <label className={labelCls} style={labelStyle}>启用</label>
+        <Toggle
+          checked={form.enabled !== false}
+          onChange={(v) => setForm((f) => ({ ...f, enabled: v }))}
+        />
       </div>
 
-      {/* 通知渠道详细内容 - 只在展开时显示 */}
-      {showNotifyChannels && (
-        <div className="pt-2" style={{ paddingLeft: "10px", borderLeft: "2px solid var(--separator-opaque)" }}>
-          <div className="space-y-3">
-            {/* 显示已配置的渠道 */}
-            {notifyChannels.length > 0 && (
-              <div className="space-y-2">
-                {notifyChannels.map((channel, index) => (
-                  <div key={index} className="flex items-center justify-between" style={{ background: "var(--bg-tertiary)", borderRadius: "4px", padding: "8px" }}>
-                    <div className="flex-1">
-                      <div className="text-[12px] font-medium" style={{ color: "var(--fill-primary)" }}>
-                        {channel.channel_id === "feishu" && "飞书"}
-                        {channel.channel_id === "lark" && "Lark"}
-                        {channel.channel_id === "slack" && "Slack"}
-                        {channel.channel_id === "discord" && "Discord"}
-                        {channel.channel_id === "matrix" && "Matrix"}
-                        {channel.channel_id === "msteams" && "Teams"}
-                        {channel.channel_id === "whatsapp" && "WhatsApp"}
-                        {channel.channel_id && !["feishu", "lark", "slack", "discord", "matrix", "msteams", "whatsapp"].includes(channel.channel_id) && channel.channel_id}
-                      </div>
-                      <div className="text-[11px]" style={{ color: "var(--fill-secondary)" }}>
-                        目标ID: {channel.target_id} · 类型: {channel.target_type === "p2p" ? "私聊" : "群组"}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setNotifyChannels(notifyChannels.filter((_, i) => i !== index))}
-                      className="cursor-pointer rounded-[4px] px-2 py-1 text-[10px] transition-colors hover:opacity-80"
-                      style={{ background: "var(--red, #e53e3e)", color: "white" }}
-                    >
-                      删除
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+      {/* 通知渠道配置 - 独立段落 */}
+      <div className="pt-1">
+        <button
+          type="button"
+          onClick={() => setShowNotifyChannels(!showNotifyChannels)}
+          className="flex w-full cursor-pointer items-center gap-1 text-[11px] font-medium transition-colors"
+          style={{ color: "var(--fill-tertiary)" }}
+        >
+          {showNotifyChannels ? <ChevronDown size={10} strokeWidth={2} /> : <ChevronRight size={10} strokeWidth={2} />}
+          通知渠道 {notifyChannels.length > 0 && <span className="rounded-full px-1.5 text-[10px]" style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}>{notifyChannels.length}</span>}
+        </button>
+      </div>
 
-            {/* 添加新渠道的表单 */}
-            <div className="space-y-2">
-              <div className="text-[11px] font-medium" style={{ color: "var(--fill-tertiary)" }}>添加新渠道</div>
-              
-              <div className="grid grid-cols-12 gap-2">
-                <div className="col-span-5">
-                  <select
-                    value={newChannel.channel_id}
-                    onChange={(e) => setNewChannel({...newChannel, channel_id: e.target.value})}
-                    className={inputCls + " w-full cursor-pointer pr-6 text-[11px]"}
-                    style={{ ...inputStyle, WebkitAppearance: "none", appearance: "none" } as React.CSSProperties}
+      {showNotifyChannels && (
+        <div className="rounded-[6px] p-3 space-y-3" style={{ background: "var(--bg-tertiary)", border: "0.5px solid var(--separator-opaque)" }}>
+          {notifyChannels.length > 0 && (
+            <div className="space-y-1.5">
+              {notifyChannels.map((channel, index) => (
+                <div key={index} className="flex items-center gap-2 rounded-[4px] px-2.5 py-2" style={{ background: "var(--bg-base)", border: "0.5px solid var(--separator-opaque)" }}>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 text-[12px] font-medium" style={{ color: "var(--fill-primary)" }}>
+                      <span>
+                        {channel.channel_id === "feishu" ? "飞书" :
+                         channel.channel_id === "lark" ? "Lark" :
+                         channel.channel_id === "slack" ? "Slack" :
+                         channel.channel_id === "discord" ? "Discord" :
+                         channel.channel_id === "matrix" ? "Matrix" :
+                         channel.channel_id === "msteams" ? "Teams" :
+                         channel.channel_id === "whatsapp" ? "WhatsApp" :
+                         channel.channel_id}
+                      </span>
+                      <span className="rounded-[3px] px-1 text-[9px]" style={{ background: "var(--bg-tertiary)", color: "var(--fill-quaternary)" }}>
+                        {channel.target_type === "p2p" ? "私聊" : "群组"}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 truncate font-mono text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
+                      {channel.target_id}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setNotifyChannels(notifyChannels.filter((_, i) => i !== index))}
+                    className="shrink-0 cursor-pointer rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors hover:opacity-80"
+                    style={{ color: "var(--red, #e53e3e)" }}
                   >
-                    <option value="">选择渠道类型</option>
-                    <option value="feishu">飞书</option>
-                    <option value="lark">Lark</option>
-                    <option value="slack">Slack</option>
-                    <option value="discord">Discord</option>
-                    <option value="matrix">Matrix</option>
-                    <option value="msteams">Teams</option>
-                    <option value="whatsapp">WhatsApp</option>
-                  </select>
+                    移除
+                  </button>
                 </div>
-                
-                <div className="col-span-5">
-                  <input
-                    value={newChannel.target_id}
-                    onChange={(e) => setNewChannel({...newChannel, target_id: e.target.value})}
-                    placeholder="输入目标ID"
-                    className={inputCls + " text-[11px]"}
-                    style={inputStyle}
-                  />
-                </div>
-                
-                <div className="col-span-2">
-                  <select
-                    value={newChannel.target_type}
-                    onChange={(e) => setNewChannel({...newChannel, target_type: e.target.value as "p2p" | "group"})}
-                    className={inputCls + " w-full cursor-pointer pr-6 text-[11px]"}
-                    style={{ ...inputStyle, WebkitAppearance: "none", appearance: "none" } as React.CSSProperties}
-                  >
-                    <option value="p2p">私聊</option>
-                    <option value="group">群组</option>
-                  </select>
-                </div>
-              </div>
-              
-              {(!newChannel.channel_id || !newChannel.target_id) && (
-                <p className="text-[10px]" style={{ color: "var(--red, #e53e3e)" }}>
-                  请选择渠道类型并输入目标ID
-                </p>
-              )}
-              
-              {duplicateWarning && (
-                <p className="text-[10px]" style={{ color: "var(--red, #e53e3e)" }}>
-                  此渠道配置已存在
-                </p>
-              )}
-              
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (newChannel.channel_id && newChannel.target_id) {
-                      // 检查是否已存在相同的配置
-                      const exists = notifyChannels.some(
-                        ch => ch.channel_id === newChannel.channel_id && 
-                              ch.target_id === newChannel.target_id &&
-                              ch.target_type === newChannel.target_type
-                      );
-                      
-                      if (!exists) {
-                        setNotifyChannels([...notifyChannels, { ...newChannel }]);
-                        setNewChannel({ channel_id: "", target_id: "", target_type: "p2p" });
-                        setDuplicateWarning(false); // 重置警告状态
-                      } else {
-                        // 显示重复配置警告
-                        setDuplicateWarning(true);
-                        setTimeout(() => setDuplicateWarning(false), 3000); // 3秒后自动隐藏警告
-                      }
-                    }
-                  }}
-                  disabled={!newChannel.channel_id || !newChannel.target_id}
-                  className="cursor-pointer rounded-[4px] px-3 py-1.5 text-[11px] transition-colors hover:opacity-90 disabled:opacity-50"
-                  style={{ 
-                    background: (!newChannel.channel_id || !newChannel.target_id) ? "var(--fill-quaternary)" : "var(--fill-primary)", 
-                    color: "var(--fill-inverse)" 
-                  }}
+              ))}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <select
+                  value={newChannel.channel_id}
+                  onChange={(e) => setNewChannel({...newChannel, channel_id: e.target.value})}
+                  className={inputCls + " cursor-pointer pr-6 text-[11px]"}
+                  style={{ ...inputStyle, WebkitAppearance: "none", appearance: "none" } as React.CSSProperties}
                 >
-                  添加渠道
-                </button>
+                  <option value="">渠道类型</option>
+                  <option value="feishu">飞书</option>
+                  <option value="lark">Lark</option>
+                  <option value="slack">Slack</option>
+                  <option value="discord">Discord</option>
+                  <option value="matrix">Matrix</option>
+                  <option value="msteams">Teams</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="telegram">Telegram</option>
+                </select>
+                <ChevronDown size={9} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2" style={labelStyle} />
+              </div>
+              <div className="relative" style={{ width: "80px" }}>
+                <select
+                  value={newChannel.target_type}
+                  onChange={(e) => setNewChannel({...newChannel, target_type: e.target.value as "p2p" | "group"})}
+                  className={inputCls + " cursor-pointer pr-5 text-[11px]"}
+                  style={{ ...inputStyle, WebkitAppearance: "none", appearance: "none" } as React.CSSProperties}
+                >
+                  <option value="p2p">私聊</option>
+                  <option value="group">群组</option>
+                </select>
+                <ChevronDown size={9} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2" style={labelStyle} />
               </div>
             </div>
-            
-            <p className="text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
-              任务完成或失败时将发送通知到以上渠道
-            </p>
+            <div className="flex items-center gap-2">
+              <input
+                value={newChannel.target_id}
+                onChange={(e) => setNewChannel({...newChannel, target_id: e.target.value})}
+                placeholder="目标 ID（chat_id / open_id）"
+                className={inputCls + " flex-1 text-[11px]"}
+                style={inputStyle}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (newChannel.channel_id && newChannel.target_id) {
+                    const exists = notifyChannels.some(
+                      ch => ch.channel_id === newChannel.channel_id && 
+                            ch.target_id === newChannel.target_id &&
+                            ch.target_type === newChannel.target_type
+                    );
+                    if (!exists) {
+                      setNotifyChannels([...notifyChannels, { ...newChannel }]);
+                      setNewChannel({ channel_id: "", target_id: "", target_type: "p2p" });
+                      setDuplicateWarning(false);
+                    } else {
+                      setDuplicateWarning(true);
+                      setTimeout(() => setDuplicateWarning(false), 3000);
+                    }
+                  }
+                }}
+                disabled={!newChannel.channel_id || !newChannel.target_id}
+                className="shrink-0 cursor-pointer rounded-[6px] px-3 py-2 text-[11px] font-medium transition-colors hover:opacity-90 disabled:opacity-40"
+                style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
+              >
+                <Plus size={11} strokeWidth={2} />
+              </button>
+            </div>
+            {duplicateWarning && (
+              <p className="text-[10px]" style={{ color: "var(--red, #e53e3e)" }}>此渠道配置已存在</p>
+            )}
           </div>
+          <p className="text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
+            任务完成或失败时发送通知
+          </p>
         </div>
       )}
 

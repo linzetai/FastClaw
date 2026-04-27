@@ -106,6 +106,7 @@ export function useMessageStreamChat({
       });
       currentStreamChatRef.current = null;
       setStreaming(false);
+      setPendingQuestion(null);
       segmentsRef.current = [];
       setStreamSegments([]);
       pendingBottomScrollBehaviorRef.current = null;
@@ -279,6 +280,7 @@ export function useMessageStreamChat({
               currentStreamChatRef.current = null;
               setStreamSegments([]);
               setStreaming(false);
+              setPendingQuestion(null);
             }
 
             addMessage(capturedAgentId, {
@@ -365,13 +367,13 @@ export function useMessageStreamChat({
           case "chat.ask_question": {
             const d = event.data;
             if (d?.requestId && d?.question && isActive()) {
-              const timeoutSecs = (d.timeoutSecs as number) ?? 60;
+              const timeoutSecs = (d.timeoutSecs as number) ?? 0;
               setPendingQuestion({
                 requestId: d.requestId as string,
                 question: d.question as string,
                 options: (d.options as Array<{ id: string; label: string }>) ?? [],
                 timeoutSecs,
-                expiresAt: Date.now() + timeoutSecs * 1000,
+                expiresAt: timeoutSecs > 0 ? Date.now() + timeoutSecs * 1000 : 0,
                 allowMultiple: d.allowMultiple as boolean | undefined,
               });
             }
@@ -385,6 +387,28 @@ export function useMessageStreamChat({
                 content: d.message as string,
                 timestamp: new Date(),
               }, capturedChatId);
+            }
+            break;
+          }
+          case "chat.context.usage": {
+            const d = event.data;
+            if (d?.usedTokens != null && d?.limitTokens != null && isActive()) {
+              const resolvedChatId = capturedChatId;
+              updateChatUsage(capturedAgentId, resolvedChatId, {
+                promptTokens: 0,
+                completionTokens: 0,
+                totalTokens: 0,
+                elapsedMs: 0,
+                contextTokens: d.usedTokens as number,
+                contextWindow: d.limitTokens as number,
+              });
+              if (d.compressed && (d.tokensSaved as number) > 0) {
+                addMessage(capturedAgentId, {
+                  role: "system",
+                  content: `上下文已压缩，节省了约 ${Math.round((d.tokensSaved as number) / 1000 * 10) / 10}k tokens`,
+                  timestamp: new Date(),
+                }, resolvedChatId);
+              }
             }
             break;
           }
@@ -460,6 +484,7 @@ export function useMessageStreamChat({
               currentStreamChatRef.current = null;
               setStreamSegments([]);
               setStreaming(false);
+              setPendingQuestion(null);
             }
             addMessage(capturedAgentId, { role: "system", content: `错误: ${e}`, timestamp: new Date() }, capturedChatId);
             const ds = detachedStreams.get(capturedChatId);
@@ -478,7 +503,7 @@ export function useMessageStreamChat({
     cleanupRef.current = cleanup;
 
     chatPromise.catch(() => {
-      if (isActive()) { setStreaming(false); }
+      if (isActive()) { setStreaming(false); setPendingQuestion(null); }
       cleanup();
     });
   };
@@ -528,6 +553,7 @@ export function useMessageStreamChat({
     }
     currentStreamChatRef.current = null;
     setStreaming(false);
+    setPendingQuestion(null);
   }, [activeAgentId, addMessage]);
 
   const handleNewTopic = useCallback(() => {
