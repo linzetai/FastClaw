@@ -295,6 +295,8 @@ impl Tool for ShellTool {
 
     fn supports_progress(&self) -> bool { true }
 
+    fn max_result_size_chars(&self) -> usize { 8000 }
+
     async fn execute(&self, arguments: &str) -> ToolResult {
         self.execute_shell(arguments, None).await
     }

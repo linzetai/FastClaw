@@ -56,7 +56,7 @@ use tool_executor::execute_tool_batch;
 use tool_executor::filter_tool_definitions;
 use tool_executor::microcompact_tool_results;
 use tool_executor::semantic_header;
-use tool_executor::truncate_tool_result_output;
+use tool_executor::truncate_tool_result_output_with_limit;
 #[cfg(any(feature = "evolution", feature = "self-iter"))]
 use trajectory::append_text_to_chat_content;
 #[cfg(feature = "evolution")]
@@ -403,7 +403,12 @@ impl AgentRuntime {
                     lstate.clear_error_streak();
                 }
 
-                let truncated = truncate_tool_result_output(&result.output, &tool_name);
+                let tool_char_limit = tool_registry
+                    .get(&tool_name)
+                    .map(|t| t.max_result_size_chars());
+                let truncated = truncate_tool_result_output_with_limit(
+                    &result.output, &tool_name, tool_char_limit,
+                );
                 let header = semantic_header(&tool_name, &arguments, &result.output, result.success);
                 let out = format!("{header}\n{truncated}");
                 let content = tool_result_content(&out, &result);
@@ -1139,7 +1144,12 @@ impl AgentRuntime {
                     lstate.clear_error_streak();
                 }
 
-                let truncated = truncate_tool_result_output(&result.output, &tool_name);
+                let tool_char_limit = tool_registry
+                    .get(&tool_name)
+                    .map(|t| t.max_result_size_chars());
+                let truncated = truncate_tool_result_output_with_limit(
+                    &result.output, &tool_name, tool_char_limit,
+                );
                 let header = semantic_header(&tool_name, &arguments, &result.output, result.success);
                 let llm_out = format!("{header}\n{truncated}");
                 let _ = send_stream_event(

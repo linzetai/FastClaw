@@ -302,6 +302,13 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    /// Maximum characters to keep in tool result output before truncation.
+    /// Tools producing large output (e.g. shell, browser) should override
+    /// this with a larger value.
+    fn max_result_size_chars(&self) -> usize {
+        1500
+    }
+
     fn to_definition(&self) -> ToolDefinition {
         ToolDefinition {
             tool_type: "function".to_string(),

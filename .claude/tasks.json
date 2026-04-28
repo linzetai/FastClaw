@@ -616,7 +616,7 @@
             "tool_executor 截断时使用工具自声明的 max_result_size_chars",
             "现有截断行为向后兼容"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P2-08",

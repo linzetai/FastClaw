@@ -110,8 +110,20 @@ fn save_truncated_output(tool_name: &str, output: &str) -> Option<String> {
 ///
 /// If truncation occurs, the full output is saved to a temp file and the
 /// agent is told it can use `read_file` to retrieve the complete content.
+#[cfg(test)]
 pub(crate) fn truncate_tool_result_output(output: &str, tool_name: &str) -> String {
-    let char_limit = tool_output_char_limit(tool_name);
+    truncate_tool_result_output_with_limit(output, tool_name, None)
+}
+
+/// Truncate with an explicit char-limit override from the tool's
+/// `max_result_size_chars()`. Falls back to the per-tool hardcoded limit
+/// when `char_limit_override` is `None`.
+pub(crate) fn truncate_tool_result_output_with_limit(
+    output: &str,
+    tool_name: &str,
+    char_limit_override: Option<usize>,
+) -> String {
+    let char_limit = char_limit_override.unwrap_or_else(|| tool_output_char_limit(tool_name));
     let line_limit = tool_output_line_limit(tool_name);
 
     let total_chars = output.chars().count();
