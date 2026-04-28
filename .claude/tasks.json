@@ -621,7 +621,7 @@
         {
           "id": "P2-08",
           "title": "为 ToolRegistry 添加 deferred 工具支持",
-          "description": "ToolRegistry 新增 register_deferred()、eager_definitions()、search_deferred(query) 方法。",
+          "description": "ToolRegistry 新增 register_deferred()、eager_definitions()、search_deferred(query)、activate_deferred() 方法。",
           "target_file": "crates/fastclaw-core/src/tool.rs",
           "cc_references": [
             "claude-code/packages/builtin-tools/src/tools/ToolSearchTool/ToolSearchTool.ts"
@@ -632,12 +632,12 @@
             "激活后工具移入 eager 集合，后续 eager_definitions 包含它",
             "prompt 构建时使用 eager_definitions 而非全部工具"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P2-09",
           "title": "实现 ToolSearchTool",
-          "description": "tool_search 工具：query 关键词匹配或 select:tool_name 直接激活。",
+          "description": "tool_search 工具：query 关键词匹配或 select:tool_name 直接激活。注意：P2-08 已添加 register_deferred/eager_definitions/search_deferred/activate_deferred 方法到 ToolRegistry。本任务需要：(1) 实现 ToolSearchTool 调用这些方法，(2) 将 prompt 构建中的 definitions() 替换为 eager_definitions()。",
           "target_file": "crates/fastclaw-agent/src/builtin_tools/tool_search.rs",
           "cc_references": [
             "claude-code/packages/builtin-tools/src/tools/ToolSearchTool/ToolSearchTool.ts"

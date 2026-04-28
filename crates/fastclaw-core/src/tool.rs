@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::error::{FastClawError, FastClawResult};
@@ -329,6 +329,7 @@ pub trait Tool: Send + Sync {
 /// Tool definitions are cached and only rebuilt when the registry changes (version bump).
 pub struct ToolRegistry {
     tools: std::sync::RwLock<HashMap<String, Arc<dyn Tool>>>,
+    deferred: std::sync::RwLock<HashSet<String>>,
     version: std::sync::atomic::AtomicU64,
     def_cache: std::sync::RwLock<(u64, Arc<Vec<ToolDefinition>>)>,
 }
@@ -336,10 +337,12 @@ pub struct ToolRegistry {
 impl Clone for ToolRegistry {
     fn clone(&self) -> Self {
         let guard = self.tools.read().expect("ToolRegistry poisoned");
+        let deferred = self.deferred.read().expect("deferred set poisoned");
         let ver = self.version.load(std::sync::atomic::Ordering::Relaxed);
         let cache = self.def_cache.read().expect("def_cache poisoned");
         Self {
             tools: std::sync::RwLock::new(guard.clone()),
+            deferred: std::sync::RwLock::new(deferred.clone()),
             version: std::sync::atomic::AtomicU64::new(ver),
             def_cache: std::sync::RwLock::new(cache.clone()),
         }
@@ -350,6 +353,7 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: std::sync::RwLock::new(HashMap::new()),
+            deferred: std::sync::RwLock::new(HashSet::new()),
             version: std::sync::atomic::AtomicU64::new(0),
             def_cache: std::sync::RwLock::new((u64::MAX, Arc::new(Vec::new()))),
         }
@@ -426,6 +430,64 @@ impl ToolRegistry {
         guard.len()
     }
 
+    /// Register a tool as deferred. Deferred tools are stored in the
+    /// registry but excluded from `eager_definitions()`. They become
+    /// visible after `activate_deferred()`.
+    pub fn register_deferred(&self, tool: Arc<dyn Tool>) {
+        let name = tool.name().to_string();
+        self.register(tool);
+        let mut guard = self.deferred.write().expect("deferred set poisoned");
+        guard.insert(name);
+    }
+
+    /// Returns definitions for tools that are **not** deferred (eager tools).
+    pub fn eager_definitions(&self) -> Vec<ToolDefinition> {
+        let deferred = self.deferred.read().expect("deferred set poisoned");
+        let tools = self.tools.read().expect("ToolRegistry poisoned");
+        tools
+            .values()
+            .filter(|t| !deferred.contains(t.name()))
+            .map(|t| t.to_definition())
+            .collect()
+    }
+
+    /// Search deferred tools by matching `query` against name, description,
+    /// and `search_hint`. Returns matching tool definitions.
+    pub fn search_deferred(&self, query: &str) -> Vec<ToolDefinition> {
+        let deferred = self.deferred.read().expect("deferred set poisoned");
+        let tools = self.tools.read().expect("ToolRegistry poisoned");
+        let q = query.to_lowercase();
+        tools
+            .values()
+            .filter(|t| {
+                deferred.contains(t.name()) && {
+                    let haystack = format!(
+                        "{} {} {}",
+                        t.name(),
+                        t.description(),
+                        t.search_hint()
+                    )
+                    .to_lowercase();
+                    q.split_whitespace().all(|word| haystack.contains(word))
+                }
+            })
+            .map(|t| t.to_definition())
+            .collect()
+    }
+
+    /// Move a deferred tool into the eager set so it appears in
+    /// `eager_definitions()` going forward. Returns `true` if the tool
+    /// was found in the deferred set.
+    pub fn activate_deferred(&self, name: &str) -> bool {
+        let mut guard = self.deferred.write().expect("deferred set poisoned");
+        let removed = guard.remove(name);
+        if removed {
+            drop(guard);
+            self.bump_version();
+        }
+        removed
+    }
+
     /// Execute a registered tool by name.
     ///
     /// Returns [`FastClawError::ToolNotFound`] when the name is missing.
@@ -495,5 +557,100 @@ pub trait ToolHook: Send + Sync {
         _ctx: &ToolHookContext,
         _info: &PostToolInfo,
     ) {
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct FakeTool {
+        name: &'static str,
+        hint: &'static str,
+    }
+
+    #[async_trait]
+    impl Tool for FakeTool {
+        fn name(&self) -> &str { self.name }
+        fn description(&self) -> &str { "A fake tool for testing" }
+        fn parameters_schema(&self) -> ToolParameterSchema {
+            ToolParameterSchema {
+                schema_type: "object".into(),
+                properties: HashMap::new(),
+                required: vec![],
+            }
+        }
+        fn search_hint(&self) -> &str { self.hint }
+        async fn execute(&self, _arguments: &str) -> ToolResult {
+            ToolResult::ok("ok")
+        }
+    }
+
+    fn make_tool(name: &'static str, hint: &'static str) -> Arc<dyn Tool> {
+        Arc::new(FakeTool { name, hint })
+    }
+
+    #[test]
+    fn deferred_not_in_eager_definitions() {
+        let reg = ToolRegistry::new();
+        reg.register(make_tool("eager_a", ""));
+        reg.register_deferred(make_tool("deferred_b", ""));
+
+        let eager = reg.eager_definitions();
+        assert_eq!(eager.len(), 1);
+        assert_eq!(eager[0].function.name, "eager_a");
+    }
+
+    #[test]
+    fn search_deferred_matches_name_description_hint() {
+        let reg = ToolRegistry::new();
+        reg.register_deferred(make_tool("web_fetch", "http download"));
+        reg.register_deferred(make_tool("grep_tool", "regex search"));
+        reg.register(make_tool("eager_x", ""));
+
+        let results = reg.search_deferred("http");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].function.name, "web_fetch");
+
+        let results = reg.search_deferred("regex");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].function.name, "grep_tool");
+
+        let results = reg.search_deferred("eager");
+        assert!(results.is_empty(), "eager tools not in deferred search");
+    }
+
+    #[test]
+    fn activate_moves_to_eager() {
+        let reg = ToolRegistry::new();
+        reg.register_deferred(make_tool("lazy_tool", ""));
+
+        assert!(reg.eager_definitions().is_empty());
+        assert!(reg.activate_deferred("lazy_tool"));
+        assert_eq!(reg.eager_definitions().len(), 1);
+        assert_eq!(reg.eager_definitions()[0].function.name, "lazy_tool");
+    }
+
+    #[test]
+    fn activate_nonexistent_returns_false() {
+        let reg = ToolRegistry::new();
+        assert!(!reg.activate_deferred("nope"));
+    }
+
+    #[test]
+    fn deferred_tool_still_accessible_via_get() {
+        let reg = ToolRegistry::new();
+        reg.register_deferred(make_tool("hidden", ""));
+        assert!(reg.get("hidden").is_some());
+    }
+
+    #[test]
+    fn search_deferred_multi_word_query() {
+        let reg = ToolRegistry::new();
+        reg.register_deferred(make_tool("web_fetch", "http download curl"));
+        let results = reg.search_deferred("http curl");
+        assert_eq!(results.len(), 1);
+        let results = reg.search_deferred("http missing");
+        assert!(results.is_empty());
     }
 }
