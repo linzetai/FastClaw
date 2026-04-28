@@ -114,6 +114,15 @@ impl TokenBudgetTracker {
         self.budget_tokens
     }
 
+    /// Reset consumed tokens and delta history, optionally setting a new budget.
+    pub fn reset(&mut self, new_budget: Option<usize>) {
+        if let Some(b) = new_budget {
+            self.budget_tokens = b;
+        }
+        self.consumed = 0;
+        self.deltas.clear();
+    }
+
     fn is_diminishing(&self) -> bool {
         let w = self.diminishing_window;
         if self.deltas.len() < w {
@@ -273,5 +282,94 @@ mod tests {
             }
             other => panic!("expected Continue with nudge, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn reset_clears_state() {
+        let mut tracker = TokenBudgetTracker::new(10_000);
+        tracker.record(8_000);
+        assert_eq!(tracker.consumed(), 8_000);
+        assert_eq!(tracker.remaining(), 2_000);
+
+        tracker.reset(None);
+        assert_eq!(tracker.consumed(), 0);
+        assert_eq!(tracker.remaining(), 10_000);
+        assert_eq!(tracker.budget(), 10_000);
+
+        // Should behave as fresh — no diminishing history.
+        let d = tracker.record(1_000);
+        assert_eq!(d, BudgetDecision::Continue { nudge_message: None });
+    }
+
+    #[test]
+    fn reset_with_new_budget() {
+        let mut tracker = TokenBudgetTracker::new(10_000);
+        tracker.record(9_500); // 95% — nudge
+        tracker.reset(Some(50_000));
+        assert_eq!(tracker.budget(), 50_000);
+        assert_eq!(tracker.consumed(), 0);
+
+        let d = tracker.record(5_000);
+        assert_eq!(d, BudgetDecision::Continue { nudge_message: None });
+    }
+
+    #[test]
+    fn reset_clears_diminishing_history() {
+        let mut tracker = TokenBudgetTracker::new(100_000);
+        tracker.record(100);
+        tracker.record(100);
+        // Next small turn would trigger diminishing — but reset first.
+        tracker.reset(None);
+        // Now we need a full window of small turns again.
+        assert!(matches!(
+            tracker.record(100),
+            BudgetDecision::Continue { .. }
+        ));
+        assert!(matches!(
+            tracker.record(100),
+            BudgetDecision::Continue { .. }
+        ));
+        let d = tracker.record(100); // 3rd small turn
+        assert_eq!(
+            d,
+            BudgetDecision::Stop {
+                reason: StopReason::DiminishingReturns
+            }
+        );
+    }
+
+    #[test]
+    fn incremental_accumulation_crosses_nudge_threshold() {
+        let mut tracker = TokenBudgetTracker::new(10_000);
+        for _ in 0..8 {
+            let d = tracker.record(1_000);
+            assert_eq!(d, BudgetDecision::Continue { nudge_message: None });
+        }
+        assert_eq!(tracker.consumed(), 8_000); // 80%
+
+        // 9th turn pushes to 90% — nudge
+        let d = tracker.record(1_000);
+        match d {
+            BudgetDecision::Continue { nudge_message } => {
+                assert!(nudge_message.is_some(), "should nudge at 90%");
+            }
+            other => panic!("expected Continue with nudge, got {other:?}"),
+        }
+
+        // 10th turn pushes to 100% — exhausted
+        let d = tracker.record(1_000);
+        assert_eq!(
+            d,
+            BudgetDecision::Stop {
+                reason: StopReason::Exhausted
+            }
+        );
+    }
+
+    #[test]
+    fn just_below_nudge_threshold() {
+        let mut tracker = TokenBudgetTracker::new(10_000);
+        let d = tracker.record(8_999); // 89.99% — just below 90%
+        assert_eq!(d, BudgetDecision::Continue { nudge_message: None });
     }
 }
