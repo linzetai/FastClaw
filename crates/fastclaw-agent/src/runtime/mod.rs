@@ -9,10 +9,22 @@ use fastclaw_core::types::{
     ChatMessage, ChatRequest, ChatResponse, Role, StreamEvent, ToolCall,
 };
 use fastclaw_core::workspace::default_runtime_system_prompt_for_agent;
+#[cfg(feature = "evolution")]
 use fastclaw_evolution::{
     format_candidate_skills_for_prompt, format_skills_for_prompt, infer_task_type, SkillStatus,
     SkillStore, Trajectory, TrajectoryOutcome, TrajectoryStep, TrajectoryStore,
 };
+
+#[cfg(not(feature = "evolution"))]
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+struct TrajectoryStep {
+    role: String,
+    action_type: String,
+    tool_name: Option<String>,
+    summary: String,
+    success: Option<bool>,
+}
 use fastclaw_self_iter::{SelfIterEngine, ToolCallTrace};
 use futures::StreamExt;
 
@@ -31,6 +43,7 @@ pub use prompt_builder::{build_subagent_prompt_block, SubAgentPromptContext};
 
 use accumulator::{accumulate_tool_call, ToolCallAccumulator};
 use prompt_builder::append_subagent_prompt_to_system;
+#[cfg(feature = "evolution")]
 use prompt_builder::SKILL_MANAGEMENT_GUIDANCE;
 use stream_engine::LoopState;
 use stream_engine::send_stream_event;
@@ -41,6 +54,7 @@ use tool_executor::microcompact_tool_results;
 use tool_executor::semantic_header;
 use tool_executor::truncate_tool_result_output;
 use trajectory::append_text_to_chat_content;
+#[cfg(feature = "evolution")]
 use trajectory::last_user_turn_text;
 use trajectory::truncate_for_trajectory;
 
@@ -97,7 +111,9 @@ pub struct AgentRuntime {
     agent_providers: ArcSwap<HashMap<String, Arc<dyn LlmProvider>>>,
     self_iter_engine: Option<Arc<SelfIterEngine>>,
     self_iter_max_recovery_attempts: u32,
+    #[cfg(feature = "evolution")]
     skill_store: ArcSwap<Option<Arc<SkillStore>>>,
+    #[cfg(feature = "evolution")]
     trajectory_store: ArcSwap<Option<Arc<TrajectoryStore>>>,
 }
 
@@ -108,26 +124,26 @@ impl AgentRuntime {
             agent_providers: ArcSwap::new(Arc::new(HashMap::new())),
             self_iter_engine: None,
             self_iter_max_recovery_attempts: 3,
+            #[cfg(feature = "evolution")]
             skill_store: ArcSwap::new(Arc::new(None)),
+            #[cfg(feature = "evolution")]
             trajectory_store: ArcSwap::new(Arc::new(None)),
         }
     }
 
-    /// Optional Hermes-style skill store: matching **active** skills are injected into the system prompt.
+    #[cfg(feature = "evolution")]
     pub fn with_skill_store(self, store: Arc<SkillStore>) -> Self {
         self.skill_store.store(Arc::new(Some(store)));
         self
     }
 
-    /// Optional trajectory store: successful runs append [`Trajectory`] rows for evolution.
+    #[cfg(feature = "evolution")]
     pub fn with_trajectory_store(self, store: Arc<TrajectoryStore>) -> Self {
         self.trajectory_store.store(Arc::new(Some(store)));
         self
     }
 
-    /// Late-bind evolution stores after the runtime is already wrapped in [`Arc`] (production gateway wiring).
-    ///
-    /// Equivalent to calling [`Self::with_skill_store`] and [`Self::with_trajectory_store`] before wrapping.
+    #[cfg(feature = "evolution")]
     pub fn attach_evolution_stores(&self, skill: Arc<SkillStore>, trajectory: Arc<TrajectoryStore>) {
         self.skill_store.store(Arc::new(Some(skill)));
         self.trajectory_store.store(Arc::new(Some(trajectory)));
@@ -214,15 +230,19 @@ impl AgentRuntime {
         }
         tracing::info!(elapsed_ms = t0.elapsed().as_millis() as u64, "perf: build_messages");
 
-        let t0 = std::time::Instant::now();
+        #[allow(unused_mut)]
         let mut injected_skill_ids: Vec<String> = Vec::new();
-        if let Err(e) = self
-            .inject_relevant_skills(&mut messages, request, &mut injected_skill_ids)
-            .await
+        #[cfg(feature = "evolution")]
         {
-            tracing::warn!(error = %e, "skill injection skipped");
+            let t0_skills = std::time::Instant::now();
+            if let Err(e) = self
+                .inject_relevant_skills(&mut messages, request, &mut injected_skill_ids)
+                .await
+            {
+                tracing::warn!(error = %e, "skill injection skipped");
+            }
+            tracing::info!(elapsed_ms = t0_skills.elapsed().as_millis() as u64, "perf: inject_relevant_skills");
         }
-        tracing::info!(elapsed_ms = t0.elapsed().as_millis() as u64, "perf: inject_relevant_skills");
 
         let mut trajectory_steps: Vec<TrajectoryStep> = Vec::new();
         let t0 = std::time::Instant::now();
@@ -1255,6 +1275,7 @@ impl AgentRuntime {
         true
     }
 
+    #[cfg(feature = "evolution")]
     async fn finalize_injected_skills(&self, injected_skill_ids: &[String], success: bool) {
         let store: Arc<SkillStore> = match (*self.skill_store.load()).as_ref() {
             Some(s) => s.clone(),
@@ -1267,6 +1288,10 @@ impl AgentRuntime {
         }
     }
 
+    #[cfg(not(feature = "evolution"))]
+    async fn finalize_injected_skills(&self, _injected_skill_ids: &[String], _success: bool) {}
+
+    #[cfg(feature = "evolution")]
     async fn record_completed_trajectory(
         &self,
         request: &ChatRequest,
@@ -1311,7 +1336,16 @@ impl AgentRuntime {
         }
     }
 
-    /// Loads matching **active** skills (plus a few **candidate** skills) and appends guidance.
+    #[cfg(not(feature = "evolution"))]
+    async fn record_completed_trajectory(
+        &self,
+        _request: &ChatRequest,
+        _config: &AgentConfig,
+        _steps: &[TrajectoryStep],
+        _run_succeeded: bool,
+    ) {}
+
+    #[cfg(feature = "evolution")]
     async fn inject_relevant_skills(
         &self,
         messages: &mut Vec<ChatMessage>,
@@ -1374,6 +1408,17 @@ impl AgentRuntime {
         Ok(())
     }
 
+    #[cfg(not(feature = "evolution"))]
+    async fn inject_relevant_skills(
+        &self,
+        _messages: &mut Vec<ChatMessage>,
+        _request: &ChatRequest,
+        _injected_skill_ids: &mut Vec<String>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    #[cfg(feature = "evolution")]
     fn inject_skill_block_into_system(messages: &mut Vec<ChatMessage>, block: &str) {
         if block.trim().is_empty() {
             return;

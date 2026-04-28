@@ -18,6 +18,7 @@ pub(crate) fn append_text_to_chat_content(content: &mut Option<serde_json::Value
     };
 }
 
+#[cfg(feature = "evolution")]
 pub(crate) fn last_user_turn_text(messages: &[ChatMessage]) -> String {
     messages
         .iter()

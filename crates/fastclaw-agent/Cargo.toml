@@ -4,13 +4,14 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = []
+default = ["evolution"]
+evolution = ["dep:fastclaw-evolution"]
 browser = ["dep:headless_chrome"]
 
 [dependencies]
 fastclaw-core = { path = "../fastclaw-core" }
 fastclaw-context = { path = "../fastclaw-context" }
-fastclaw-evolution = { path = "../fastclaw-evolution" }
+fastclaw-evolution = { path = "../fastclaw-evolution", optional = true }
 fastclaw-session = { path = "../fastclaw-session" }
 fastclaw-self-iter = { path = "../fastclaw-self-iter" }
 fastclaw-memory = { path = "../fastclaw-memory", default-features = false }

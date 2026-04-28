@@ -230,7 +230,7 @@
             "无 evolution 时 Agent 正常运行，跳过 skill injection 和 trajectory 追踪",
             "有 evolution 时行为与改造前完全一致"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P0-18",

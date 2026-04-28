@@ -131,6 +131,7 @@ fn build_child_agent_block(ctx: &SubAgentPromptContext<'_>, remaining: u32) -> S
     block
 }
 
+#[cfg(feature = "evolution")]
 pub(crate) const SKILL_MANAGEMENT_GUIDANCE: &str = "\n\n\
 [Skill Management]\n\
 When you successfully complete a complex, multi-step task:\n\
