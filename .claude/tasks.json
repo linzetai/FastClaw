@@ -761,8 +761,8 @@
         {
           "id": "P3-04",
           "title": "实现会话标签页组件",
-          "description": "顶部标签页：多会话切换、新建、关闭。",
-          "target_file": "crates/fastclaw-app/src/components/SessionTabs.tsx",
+          "description": "顶部标签页：多会话切换、新建、关闭。已实现为 ChatTabsBar 组件（crates/fastclaw-app/src/components/message-stream/ChatTabsBar.tsx），集成在 MessageStream 中，支持拖拽重排和双击重命名。",
+          "target_file": "crates/fastclaw-app/src/components/message-stream/ChatTabsBar.tsx",
           "cc_references": [],
           "acceptance_criteria": [
             "支持多个标签页同时存在",
@@ -770,7 +770,7 @@
             "关闭标签页释放对应 QueryEngine",
             "新建标签页创建新 session"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P3-05",
