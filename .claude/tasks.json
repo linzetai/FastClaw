@@ -33,7 +33,7 @@
             "cargo check -p fastclaw-gateway 编译通过",
             "extensions/telegram/ 目录不存在"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P0-03",

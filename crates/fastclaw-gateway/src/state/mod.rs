@@ -547,22 +547,6 @@ impl AppState {
             tracing::debug!("feishu channel not configured, plugin not loaded");
         }
 
-        let telegram_config = config.channels.get("telegram").and_then(|ch| {
-            if ch.enabled == Some(false) {
-                None
-            } else {
-                fastclaw_telegram::TelegramPluginConfig::from_channel_config(ch)
-            }
-        });
-        if let Some(tg) = telegram_config.map(fastclaw_telegram::TelegramPlugin::new) {
-            let tg = Arc::new(tg);
-            if let Err(e) = tg.start(inbound_tx.clone()).await {
-                tracing::error!(error = %e, "failed to start Telegram channel plugin");
-            }
-            channel_registry.register(tg);
-            tracing::info!("Telegram channel plugin registered");
-        }
-
         let discord_config = config.channels.get("discord").and_then(|ch| {
             if ch.enabled == Some(false) {
                 None
@@ -1201,19 +1185,6 @@ impl AppState {
                     true
                 } else {
                     tracing::warn!("feishu: config missing required fields (appId/appSecret)");
-                    false
-                }
-            }
-            "telegram" => {
-                if let Some(cfg) = fastclaw_telegram::TelegramPluginConfig::from_channel_config(ch)
-                {
-                    let plugin = Arc::new(fastclaw_telegram::TelegramPlugin::new(cfg));
-                    plugin.start(tx).await?;
-                    self.ext.channel_registry.write().await.register(plugin);
-                    tracing::info!("telegram channel hot-reloaded");
-                    true
-                } else {
-                    tracing::warn!("telegram: config missing required fields");
                     false
                 }
             }

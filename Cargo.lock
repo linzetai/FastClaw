@@ -2374,7 +2374,6 @@ dependencies = [
  "fastclaw-self-iter",
  "fastclaw-session",
  "fastclaw-slack",
- "fastclaw-telegram",
  "fastclaw-whatsapp",
  "futures",
  "http-body-util",
@@ -2559,20 +2558,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "fastclaw-telegram"
-version = "0.0.4"
-dependencies = [
- "anyhow",
- "async-trait",
- "fastclaw-core",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
  "tokio",
  "tracing",
 ]
