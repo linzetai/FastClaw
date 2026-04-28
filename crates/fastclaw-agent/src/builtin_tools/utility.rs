@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use fastclaw_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolResult};
@@ -92,6 +93,79 @@ impl Tool for CalculatorTool {
     }
 }
 
+const SLEEP_MAX_SECONDS: f64 = 300.0;
+
+/// Pauses execution for the requested number of seconds. Useful for rate-limit
+/// back-off or waiting for external state changes. Capped at 300 s.
+pub struct SleepTool;
+
+#[async_trait]
+impl Tool for SleepTool {
+    fn kind(&self) -> ToolKind {
+        ToolKind::Think
+    }
+
+    fn name(&self) -> &str {
+        "sleep"
+    }
+
+    fn description(&self) -> &str {
+        "Wait for a specified number of seconds (max 300). \
+         Input: {\"seconds\": <positive number>}. \
+         Returns JSON {\"slept_seconds\": <actual>} on success."
+    }
+
+    fn parameters_schema(&self) -> ToolParameterSchema {
+        let mut props = HashMap::new();
+        props.insert(
+            "seconds".to_string(),
+            serde_json::json!({
+                "type": "number",
+                "description": "Number of seconds to sleep (0 < seconds <= 300)."
+            }),
+        );
+        ToolParameterSchema {
+            schema_type: "object".to_string(),
+            properties: props,
+            required: vec!["seconds".to_string()],
+        }
+    }
+
+    async fn execute(&self, arguments: &str) -> ToolResult {
+        let args: serde_json::Value = match serde_json::from_str(arguments) {
+            Ok(v) => v,
+            Err(e) => {
+                return ToolResult::err(format!(
+                    "sleep arguments are not valid JSON: {e}. \
+                     Pass exactly {{\"seconds\": 5}}."
+                ))
+            }
+        };
+
+        let seconds = match args.get("seconds").and_then(|v| v.as_f64()) {
+            Some(s) => s,
+            None => {
+                return ToolResult::err(
+                    "sleep is missing required numeric field 'seconds'. \
+                     Example: {\"seconds\": 5}."
+                        .to_string(),
+                )
+            }
+        };
+
+        if seconds <= 0.0 {
+            return ToolResult::err(format!(
+                "seconds must be positive, got {seconds}. \
+                 Provide a value > 0 and <= {SLEEP_MAX_SECONDS}."
+            ));
+        }
+
+        let clamped = seconds.min(SLEEP_MAX_SECONDS);
+        tokio::time::sleep(Duration::from_secs_f64(clamped)).await;
+        ToolResult::ok(format!("{{\"slept_seconds\": {clamped}}}"))
+    }
+}
+
 fn eval_simple_expr(expr: &str) -> Option<f64> {
     let expr = expr.trim();
     let mut result: f64 = 0.0;
@@ -133,4 +207,57 @@ fn eval_simple_expr(expr: &str) -> Option<f64> {
     }
 
     Some(result + term_result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn sleep_normal() {
+        let tool = SleepTool;
+        let t0 = std::time::Instant::now();
+        let result = tool.execute(r#"{"seconds": 0.1}"#).await;
+        assert!(result.success);
+        assert!(result.output.contains("0.1"));
+        assert!(t0.elapsed().as_millis() >= 80);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sleep_clamped_to_max() {
+        let tool = SleepTool;
+        let result = tool.execute(r#"{"seconds": 999}"#).await;
+        assert!(result.success);
+        assert!(result.output.contains("300"));
+    }
+
+    #[tokio::test]
+    async fn sleep_zero_is_error() {
+        let tool = SleepTool;
+        let result = tool.execute(r#"{"seconds": 0}"#).await;
+        assert!(!result.success);
+        assert!(result.output.contains("positive"));
+    }
+
+    #[tokio::test]
+    async fn sleep_negative_is_error() {
+        let tool = SleepTool;
+        let result = tool.execute(r#"{"seconds": -5}"#).await;
+        assert!(!result.success);
+        assert!(result.output.contains("positive"));
+    }
+
+    #[tokio::test]
+    async fn sleep_missing_field() {
+        let tool = SleepTool;
+        let result = tool.execute(r#"{}"#).await;
+        assert!(!result.success);
+        assert!(result.output.contains("missing"));
+    }
+
+    #[tokio::test]
+    async fn sleep_kind_is_think() {
+        let tool = SleepTool;
+        assert!(matches!(tool.kind(), ToolKind::Think));
+    }
 }

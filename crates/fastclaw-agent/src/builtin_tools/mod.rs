@@ -44,7 +44,7 @@ pub use ask_question::{AskQuestionTool, with_stream_context};
 pub use confirm::ConfirmTool;
 pub use todo::{TodoStore, TodoWriteTool, TodoStatus, TodoItem};
 pub use code_intel::{FindReferencesTool, GoToDefinitionTool, UnifiedLspTool, WorkspaceSymbolsTool, FileOutlineTool, CodeChunkTool};
-pub use utility::{CalculatorTool, CurrentTimeTool};
+pub use utility::{CalculatorTool, CurrentTimeTool, SleepTool};
 
 #[cfg(feature = "browser")]
 pub use browser::{register_browser_tool, BrowserTool};
@@ -58,6 +58,7 @@ pub fn register_builtin_tools(registry: &ToolRegistry) {
 pub fn register_builtin_tools_with_sandbox(registry: &ToolRegistry, sandboxed: bool) {
     registry.register(Arc::new(CurrentTimeTool));
     registry.register(Arc::new(CalculatorTool));
+    registry.register(Arc::new(SleepTool));
     registry.register(Arc::new(HttpFetchTool::new()));
     registry.register(Arc::new(WebSearchTool::unconfigured()));
     registry.register(Arc::new(WebFetchTool::with_defaults()));

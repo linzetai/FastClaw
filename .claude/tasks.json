@@ -584,7 +584,7 @@
             "输入 <= 0 返回错误",
             "工具 kind 为 Think（concurrent-safe）"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P2-06",
