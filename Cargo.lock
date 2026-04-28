@@ -2312,6 +2312,7 @@ dependencies = [
  "fastclaw-evolution",
  "fastclaw-feishu",
  "fastclaw-gateway",
+ "fastclaw-mcp",
  "fastclaw-memory",
  "fastclaw-model-router",
  "fastclaw-observe",

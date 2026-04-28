@@ -192,7 +192,7 @@ pub struct ExtensionState {
     pub message_bus: Arc<MessageBus>,
     pub mcp_status:
         Arc<ArcSwap<std::collections::HashMap<String, fastclaw_core::types::McpServerStatus>>>,
-    pub mcp_handles: Arc<tokio::sync::Mutex<std::collections::HashMap<String, fastclaw_collab::mcp::SharedMcpClient>>>,
+    pub mcp_handles: Arc<tokio::sync::Mutex<std::collections::HashMap<String, fastclaw_mcp::SharedMcpClient>>>,
     pub channel_inbound_tx: tokio::sync::mpsc::UnboundedSender<fastclaw_core::channel::InboundMessage>,
 }
 
@@ -293,7 +293,7 @@ impl AppState {
             let args_ref: Vec<&str> = cfg.args.iter().map(|s| s.as_str()).collect();
             let prefix = format!("mcp_{}_", cfg.id);
             let tool_count_before = self.rt.tool_registry.len();
-            match fastclaw_collab::mcp::register_mcp_tools(
+            match fastclaw_mcp::register_mcp_tools(
                 &cfg.command,
                 &args_ref,
                 &self.rt.tool_registry,
@@ -634,7 +634,7 @@ impl AppState {
         tool_registry: &ToolRegistry,
     ) -> anyhow::Result<(
         std::collections::HashMap<String, fastclaw_core::types::McpServerStatus>,
-        std::collections::HashMap<String, fastclaw_collab::mcp::SharedMcpClient>,
+        std::collections::HashMap<String, fastclaw_mcp::SharedMcpClient>,
     )> {
         use fastclaw_core::types::{McpServerStatus, McpStatus};
 
@@ -642,7 +642,7 @@ impl AppState {
             std::collections::HashMap::new();
         let mut handles_map: std::collections::HashMap<
             String,
-            fastclaw_collab::mcp::SharedMcpClient,
+            fastclaw_mcp::SharedMcpClient,
         > = std::collections::HashMap::new();
         let mut registered_ids = std::collections::HashSet::new();
 
@@ -689,7 +689,7 @@ impl AppState {
             let args_ref: Vec<&str> = mcp_cfg.args.iter().map(|s| s.as_str()).collect();
             let prefix = format!("mcp_{}_", mcp_cfg.id);
             let tool_count_before = tool_registry.len();
-            match fastclaw_collab::mcp::register_mcp_tools(
+            match fastclaw_mcp::register_mcp_tools(
                 &mcp_cfg.command,
                 &args_ref,
                 tool_registry,

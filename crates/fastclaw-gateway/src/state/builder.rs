@@ -58,7 +58,7 @@ struct BuildPhase4 {
     >,
     ask_question_pending: Arc<DashMap<String, tokio::sync::oneshot::Sender<String>>>,
     mcp_status_init: std::collections::HashMap<String, fastclaw_core::types::McpServerStatus>,
-    mcp_handles_init: std::collections::HashMap<String, fastclaw_collab::mcp::SharedMcpClient>,
+    mcp_handles_init: std::collections::HashMap<String, fastclaw_mcp::SharedMcpClient>,
 }
 
 struct BuildPhase2Memory {

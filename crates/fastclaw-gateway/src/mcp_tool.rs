@@ -9,7 +9,7 @@ use fastclaw_core::types::{McpServerStatus, McpStatus};
 
 type ConfigLive = Arc<ArcSwap<serde_json::Value>>;
 type McpStatusMap = Arc<ArcSwap<HashMap<String, McpServerStatus>>>;
-type McpHandles = Arc<tokio::sync::Mutex<HashMap<String, fastclaw_collab::mcp::SharedMcpClient>>>;
+type McpHandles = Arc<tokio::sync::Mutex<HashMap<String, fastclaw_mcp::SharedMcpClient>>>;
 
 /// Built-in tool allowing the LLM agent to manage MCP servers at runtime:
 /// add, remove, list, reload.
@@ -259,11 +259,11 @@ impl ManageMcpServerTool {
             let tc_before = self.tool_registry.len();
             let connect_result = if cfg.transport == "sse" {
                 let url = cfg.url.as_deref().unwrap_or("");
-                fastclaw_collab::mcp::register_mcp_tools_sse(url, &self.tool_registry, &prefix)
+                fastclaw_mcp::register_mcp_tools_sse(url, &self.tool_registry, &prefix)
                     .await
             } else {
                 let args_ref: Vec<&str> = cfg.args.iter().map(|s| s.as_str()).collect();
-                fastclaw_collab::mcp::register_mcp_tools(
+                fastclaw_mcp::register_mcp_tools(
                     &cfg.command,
                     &args_ref,
                     &self.tool_registry,

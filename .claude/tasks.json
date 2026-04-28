@@ -177,7 +177,7 @@
             "cargo check -p fastclaw-gateway 编译通过",
             "MCP 功能不受影响（register_mcp_tools 调用链完整）"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P0-14",
