@@ -2250,24 +2250,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fastclaw-dag"
-version = "0.0.4"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "fastclaw-core",
- "futures",
- "petgraph",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "fastclaw-evolution"
 version = "0.0.4"
 dependencies = [
@@ -2327,7 +2309,6 @@ dependencies = [
  "fastclaw-context",
  "fastclaw-core",
  "fastclaw-cron",
- "fastclaw-dag",
  "fastclaw-evolution",
  "fastclaw-feishu",
  "fastclaw-gateway",

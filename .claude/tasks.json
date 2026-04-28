@@ -150,7 +150,7 @@
             "workspace Cargo.toml members 中无 fastclaw-dag",
             "cargo check --workspace 编译通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P0-12",

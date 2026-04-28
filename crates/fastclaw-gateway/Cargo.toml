@@ -11,7 +11,6 @@ fastclaw-security = { path = "../fastclaw-security" }
 fastclaw-memory = { path = "../fastclaw-memory" }
 fastclaw-evolution = { path = "../fastclaw-evolution" }
 fastclaw-context = { path = "../fastclaw-context" }
-fastclaw-dag = { path = "../fastclaw-dag" }
 fastclaw-self-iter = { path = "../fastclaw-self-iter" }
 fastclaw-plugin = { path = "../fastclaw-plugin" }
 fastclaw-observe = { path = "../fastclaw-observe" }

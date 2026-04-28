@@ -398,14 +398,6 @@ fn spawn_cron_scheduler(state: AppState) {
             Ok((reply, sent))
         }
 
-        async fn trigger_dag_execute(
-            &self,
-            _dag: &serde_json::Value,
-            _input: Option<&serde_json::Value>,
-        ) -> anyhow::Result<serde_json::Value> {
-            anyhow::bail!("DAG execution has been removed")
-        }
-
         async fn trigger_webhook(
             &self,
             url: &str,

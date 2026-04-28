@@ -50,11 +50,6 @@ pub enum JobAction {
         #[serde(default)]
         session_id: Option<String>,
     },
-    DagExecute {
-        dag: serde_json::Value,
-        #[serde(default)]
-        input: Option<serde_json::Value>,
-    },
     Webhook {
         url: String,
         #[serde(default)]

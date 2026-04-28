@@ -24,12 +24,6 @@ pub trait JobTrigger: Send + Sync + 'static {
         notify_channels: &[NotifyChannel],
     ) -> anyhow::Result<(String, bool)>;
 
-    async fn trigger_dag_execute(
-        &self,
-        dag: &serde_json::Value,
-        input: Option<&serde_json::Value>,
-    ) -> anyhow::Result<serde_json::Value>;
-
     async fn trigger_webhook(
         &self,
         url: &str,
@@ -172,10 +166,6 @@ async fn execute_job(store: &CronJobStore, trigger: &dyn JobTrigger, job: CronJo
             .trigger_agent_chat(agent_id, message, session_id.as_deref(), &job.notify_channels)
             .await
             .map(|(reply, sent)| (Some(reply), sent)),
-        JobAction::DagExecute { dag, input } => trigger
-            .trigger_dag_execute(dag, input.as_ref())
-            .await
-            .map(|v| (Some(v.to_string()), false)),
         JobAction::Webhook { url, method, body } => trigger
             .trigger_webhook(url, method.as_deref(), body.as_ref())
             .await

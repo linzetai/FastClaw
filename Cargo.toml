@@ -5,7 +5,6 @@ members = [
     "crates/fastclaw-gateway",
     "crates/fastclaw-agent",
     "crates/fastclaw-session",
-    "crates/fastclaw-dag",
     "crates/fastclaw-memory",
     "crates/fastclaw-plugin",
     "crates/fastclaw-evolution",
