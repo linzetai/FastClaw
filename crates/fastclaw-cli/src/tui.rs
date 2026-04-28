@@ -288,7 +288,7 @@ pub async fn run_tui(
 
     let agents_req = json!({"id": "init-agents", "method": "agents"});
     let _ = ws_tx
-        .send(Message::Text(agents_req.to_string().into()))
+        .send(Message::Text(agents_req.to_string()))
         .await;
 
     for _ in 0..5 {
@@ -409,7 +409,7 @@ async fn handle_key_event(app: &mut TuiApp, ws_tx: &mut WsTx, key: KeyEvent) {
                             "method": "chat.answer",
                             "params": {"requestId": request_id, "answer": answer_id}
                         });
-                        let _ = ws_tx.send(Message::Text(req.to_string().into())).await;
+                        let _ = ws_tx.send(Message::Text(req.to_string())).await;
                         app.push_system(format!("Answered: {answer_label}"));
                         app.show_popup = None;
                         app.status = "Streaming...".into();
@@ -514,7 +514,7 @@ async fn handle_key_event(app: &mut TuiApp, ws_tx: &mut WsTx, key: KeyEvent) {
             if let Some(rid) = app.last_request_id.take() {
                 let cancel_id = app.next_id();
                 let cancel_req = json!({"id": cancel_id, "method": "chat.cancel", "params": {"requestId": rid}});
-                let _ = ws_tx.send(Message::Text(cancel_req.to_string().into())).await;
+                let _ = ws_tx.send(Message::Text(cancel_req.to_string())).await;
             }
             app.streaming = false;
             app.status = "Cancelled".into();
@@ -599,7 +599,7 @@ async fn handle_slash_command(app: &mut TuiApp, ws_tx: &mut WsTx, text: &str) {
         }
         "/doctor" => {
             run_preflight_checks(app);
-            if app.messages.last().map_or(true, |m| m.role != "system") {
+            if app.messages.last().is_none_or(|m| m.role != "system") {
                 app.push_system("All checks passed.".into());
             }
         }
@@ -608,7 +608,7 @@ async fn handle_slash_command(app: &mut TuiApp, ws_tx: &mut WsTx, text: &str) {
                 if let Some(rid) = app.last_request_id.take() {
                     let cancel_id = app.next_id();
                     let cancel_req = json!({"id": cancel_id, "method": "chat.cancel", "params": {"requestId": rid}});
-                    let _ = ws_tx.send(Message::Text(cancel_req.to_string().into())).await;
+                    let _ = ws_tx.send(Message::Text(cancel_req.to_string())).await;
                 }
                 app.streaming = false;
                 app.status = "Cancelled".into();
@@ -620,7 +620,7 @@ async fn handle_slash_command(app: &mut TuiApp, ws_tx: &mut WsTx, text: &str) {
             let id = app.next_id();
             let ping_start = Instant::now();
             let req = json!({"id": id, "method": "ping"});
-            let _ = ws_tx.send(Message::Text(req.to_string().into())).await;
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
             // Latency will be estimated by the TUI (pong handled elsewhere)
             app.push_system(format!(
                 "Ping sent... (local send took {}μs)",
@@ -630,13 +630,13 @@ async fn handle_slash_command(app: &mut TuiApp, ws_tx: &mut WsTx, text: &str) {
         "/models" => {
             let id = app.next_id();
             let req = json!({"id": id, "method": "models.list"});
-            let _ = ws_tx.send(Message::Text(req.to_string().into())).await;
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
             app.status = "Loading models...".into();
         }
         "/mcp" => {
             let id = app.next_id();
             let req = json!({"id": id, "method": "mcp.status"});
-            let _ = ws_tx.send(Message::Text(req.to_string().into())).await;
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
             app.status = "Loading MCP status...".into();
         }
         "/export" => {
@@ -667,7 +667,7 @@ async fn handle_slash_command(app: &mut TuiApp, ws_tx: &mut WsTx, text: &str) {
         "/sessions" => {
             let id = app.next_id();
             let req = json!({"id": id, "method": "sessions.list", "params": {"limit": 10}});
-            let _ = ws_tx.send(Message::Text(req.to_string().into())).await;
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
             app.status = "Loading sessions...".into();
         }
         "/resume" if !arg.is_empty() => {
@@ -679,12 +679,12 @@ async fn handle_slash_command(app: &mut TuiApp, ws_tx: &mut WsTx, text: &str) {
             let claim_id = app.next_id();
             let claim_req =
                 json!({"id": claim_id, "method": "sessions.claim", "params": {"sessionId": arg}});
-            let _ = ws_tx.send(Message::Text(claim_req.to_string().into())).await;
+            let _ = ws_tx.send(Message::Text(claim_req.to_string())).await;
 
             let id = app.next_id();
             let req =
                 json!({"id": id, "method": "sessions.messages", "params": {"sessionId": arg}});
-            let _ = ws_tx.send(Message::Text(req.to_string().into())).await;
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
             app.push_system(format!("Resuming session: {}", &arg[..arg.len().min(12)]));
         }
         "/resume" => {
@@ -807,7 +807,7 @@ async fn send_chat(app: &mut TuiApp, ws_tx: &mut WsTx) {
     }
 
     let req = json!({"id": id, "method": "chat", "params": params});
-    let _ = ws_tx.send(Message::Text(req.to_string().into())).await;
+    let _ = ws_tx.send(Message::Text(req.to_string())).await;
 
     app.last_request_id = Some(id);
     app.chat_start_time = Some(Instant::now());
@@ -949,10 +949,10 @@ fn handle_ws_message(app: &mut TuiApp, text: &str) {
                         .map(|s| {
                             // Extract HH:MM:SS from ISO or space-separated timestamps
                             s.split('T')
-                                .last()
+                                .next_back()
                                 .unwrap_or(s)
                                 .split(' ')
-                                .last()
+                                .next_back()
                                 .unwrap_or(s)
                                 .split('.')
                                 .next()

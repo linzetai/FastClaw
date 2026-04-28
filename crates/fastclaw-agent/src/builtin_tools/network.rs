@@ -47,6 +47,12 @@ fn parse_http_fetch_method(
     }
 }
 
+impl Default for HttpFetchTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HttpFetchTool {
     pub fn new() -> Self {
         Self {
@@ -459,6 +465,12 @@ pub struct GoogleEngine {
     client: reqwest::Client,
 }
 
+impl Default for GoogleEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GoogleEngine {
     pub fn new() -> Self {
         Self { client: build_scraper_client() }
@@ -491,7 +503,7 @@ impl SearchEngine for GoogleEngine {
             let title = chunk.split("<h3").nth(1)
                 .and_then(|s| s.split('>').nth(1))
                 .and_then(|s| s.split("</").next())
-                .map(|s| strip_html_tags(s))
+                .map(strip_html_tags)
                 .unwrap_or_default();
 
             let snippet = chunk.split("data-sncf=\"")
@@ -499,7 +511,7 @@ impl SearchEngine for GoogleEngine {
                 .or_else(|| chunk.split("<span class=\"").nth(2))
                 .and_then(|s| s.split('>').nth(1).or_else(|| s.split('>').next()))
                 .and_then(|s| s.split("</").next())
-                .map(|s| strip_html_tags(s))
+                .map(strip_html_tags)
                 .unwrap_or_default();
 
             if !title.is_empty() || !url.is_empty() {
@@ -519,7 +531,7 @@ impl SearchEngine for GoogleEngine {
 
                 let title = chunk.split('>').nth(1)
                     .and_then(|s| s.split('<').next())
-                    .map(|s| strip_html_tags(s))
+                    .map(strip_html_tags)
                     .unwrap_or_default();
 
                 if !title.is_empty() {
@@ -535,6 +547,12 @@ impl SearchEngine for GoogleEngine {
 /// Baidu (百度) web search scraper.
 pub struct BaiduEngine {
     client: reqwest::Client,
+}
+
+impl Default for BaiduEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BaiduEngine {
@@ -569,7 +587,7 @@ impl SearchEngine for BaiduEngine {
             let title = chunk.split("class=\"t\"").nth(1)
                 .or_else(|| chunk.split("<h3").nth(1))
                 .and_then(|s| {
-                    let after_tag = s.split('>').skip(1).next()?;
+                    let after_tag = s.split('>').nth(1)?;
                     // May have an <a> inside
                     if after_tag.starts_with("<a") {
                         after_tag.split('>').nth(1)?.split("</").next()
@@ -577,7 +595,7 @@ impl SearchEngine for BaiduEngine {
                         after_tag.split("</").next()
                     }
                 })
-                .map(|s| strip_html_tags(s))
+                .map(strip_html_tags)
                 .unwrap_or_default();
 
             let snippet = chunk.split("class=\"c-abstract\"")
@@ -585,7 +603,7 @@ impl SearchEngine for BaiduEngine {
                 .or_else(|| chunk.split("class=\"content-right_").nth(1))
                 .and_then(|s| s.split('>').nth(1))
                 .and_then(|s| s.split("</div").next())
-                .map(|s| strip_html_tags(s))
+                .map(strip_html_tags)
                 .unwrap_or_default();
 
             if !title.is_empty() || !url.is_empty() {
@@ -603,7 +621,7 @@ impl SearchEngine for BaiduEngine {
                     .to_string();
                 let title = chunk.split('>').nth(2)
                     .and_then(|s| s.split('<').next())
-                    .map(|s| strip_html_tags(s))
+                    .map(strip_html_tags)
                     .unwrap_or_default();
                 if !title.is_empty() && !url.is_empty() {
                     results.push(SearchResult { title, url, snippet: String::new() });
@@ -618,6 +636,12 @@ impl SearchEngine for BaiduEngine {
 /// Bing web search scraper.
 pub struct BingEngine {
     client: reqwest::Client,
+}
+
+impl Default for BingEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BingEngine {
@@ -652,13 +676,13 @@ impl SearchEngine for BingEngine {
             let title = chunk.split("<h2").nth(1)
                 .and_then(|s| s.split('>').nth(1).or_else(|| s.split('>').nth(2)))
                 .and_then(|s| s.split("</").next())
-                .map(|s| strip_html_tags(s))
+                .map(strip_html_tags)
                 .unwrap_or_default();
 
             let snippet = chunk.split("<p").nth(1)
                 .and_then(|s| s.split('>').nth(1))
                 .and_then(|s| s.split("</p").next())
-                .map(|s| strip_html_tags(s))
+                .map(strip_html_tags)
                 .unwrap_or_default();
 
             if !title.is_empty() || !url.is_empty() {
@@ -673,6 +697,12 @@ impl SearchEngine for BingEngine {
 /// Sogou (搜狗) web search scraper.
 pub struct SogouEngine {
     client: reqwest::Client,
+}
+
+impl Default for SogouEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SogouEngine {
@@ -706,14 +736,14 @@ impl SearchEngine for SogouEngine {
 
             let title = chunk.split("<h3").nth(1)
                 .and_then(|s| {
-                    let after = s.split('>').skip(1).next()?;
+                    let after = s.split('>').nth(1)?;
                     if after.starts_with("<a") {
                         after.split('>').nth(1)?.split("</").next()
                     } else {
                         after.split("</").next()
                     }
                 })
-                .map(|s| strip_html_tags(s))
+                .map(strip_html_tags)
                 .unwrap_or_default();
 
             let snippet = chunk.split("class=\"space-txt\"")
@@ -721,7 +751,7 @@ impl SearchEngine for SogouEngine {
                 .or_else(|| chunk.split("class=\"star-wiki\"").nth(1))
                 .and_then(|s| s.split('>').nth(1))
                 .and_then(|s| s.split("</").next())
-                .map(|s| strip_html_tags(s))
+                .map(strip_html_tags)
                 .unwrap_or_default();
 
             if !title.is_empty() || !url.is_empty() {
@@ -736,6 +766,12 @@ impl SearchEngine for SogouEngine {
 /// 360 Search (好搜) web search scraper.
 pub struct Search360Engine {
     client: reqwest::Client,
+}
+
+impl Default for Search360Engine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Search360Engine {
@@ -769,14 +805,14 @@ impl SearchEngine for Search360Engine {
 
             let title = chunk.split("<h3").nth(1)
                 .and_then(|s| {
-                    let after = s.split('>').skip(1).next()?;
+                    let after = s.split('>').nth(1)?;
                     if after.starts_with("<a") {
                         after.split('>').nth(1)?.split("</").next()
                     } else {
                         after.split("</").next()
                     }
                 })
-                .map(|s| strip_html_tags(s))
+                .map(strip_html_tags)
                 .unwrap_or_default();
 
             let snippet = chunk.split("class=\"res-desc\"")
@@ -784,7 +820,7 @@ impl SearchEngine for Search360Engine {
                 .or_else(|| chunk.split("class=\"res-rich\"").nth(1))
                 .and_then(|s| s.split('>').nth(1))
                 .and_then(|s| s.split("</").next())
-                .map(|s| strip_html_tags(s))
+                .map(strip_html_tags)
                 .unwrap_or_default();
 
             if !title.is_empty() || !url.is_empty() {
@@ -1332,8 +1368,8 @@ pub(crate) fn strip_html_tags(html: &str) -> String {
 }
 
 fn html_to_markdown(html: &str) -> String {
-    let text = strip_html_tags(html);
-    text
+    
+    strip_html_tags(html)
 }
 
 pub(crate) fn truncate_text(text: &str, max_bytes: usize) -> String {

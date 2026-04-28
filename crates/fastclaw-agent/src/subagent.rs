@@ -237,7 +237,7 @@ impl Tool for SubAgentTool {
 
         if !self.policy.allowed_types.is_empty() {
             let type_str = subagent_type.to_string();
-            if !self.policy.allowed_types.iter().any(|t| *t == type_str) {
+            if !self.policy.allowed_types.contains(&type_str) {
                 return ToolResult::err(format!(
                     "sub-agent type '{}' not allowed. Allowed: {:?}",
                     type_str, self.policy.allowed_types
@@ -246,7 +246,7 @@ impl Tool for SubAgentTool {
         }
 
         if !self.policy.allowed_agents.is_empty()
-            && !self.policy.allowed_agents.iter().any(|a| *a == params.agent_id)
+            && !self.policy.allowed_agents.contains(&params.agent_id)
         {
             return ToolResult::err(format!(
                 "agent '{}' not in allowed delegation targets: {:?}",

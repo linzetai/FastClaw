@@ -138,7 +138,7 @@ fn process_shell_output(command: &str, stdout: &str, stderr: &str, exit_code: i3
 fn preferred_shell() -> &'static str {
     use std::sync::OnceLock;
     static SHELL: OnceLock<&str> = OnceLock::new();
-    *SHELL.get_or_init(|| {
+    SHELL.get_or_init(|| {
         if std::path::Path::new("/bin/bash").exists()
             || std::path::Path::new("/usr/bin/bash").exists()
         {
@@ -665,8 +665,8 @@ impl SandboxedShellTool {
         let first_token = trimmed.split_whitespace().next().unwrap_or("");
         let base_cmd = first_token.rsplit('/').next().unwrap_or(first_token);
 
-        if !self.config.allowed_commands.is_empty() {
-            if !self.config.allowed_commands.iter().any(|c| c == base_cmd) {
+        if !self.config.allowed_commands.is_empty()
+            && !self.config.allowed_commands.iter().any(|c| c == base_cmd) {
                 return Err(format!(
                     "Sandbox allowlist rejects first command '{base_cmd}'. \
                      Allowed base commands: {}. \
@@ -674,7 +674,6 @@ impl SandboxedShellTool {
                     self.config.allowed_commands.join(", ")
                 ));
             }
-        }
 
         if self.config.denied_commands.iter().any(|c| c == base_cmd) {
             return Err(format!(

@@ -14,7 +14,7 @@ pub enum FeishuEventType {
 }
 
 impl FeishuEventType {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "url_verification" => Self::UrlVerification,
             "im.message.receive_v1" => Self::ImMessageReceive,
@@ -43,7 +43,7 @@ pub fn parse_event(payload: &serde_json::Value) -> FeishuEventType {
         .or_else(|| payload.get("type").and_then(|v| v.as_str()))
         .unwrap_or("");
 
-    FeishuEventType::from_str(event_type)
+    FeishuEventType::parse(event_type)
 }
 
 #[cfg(test)]

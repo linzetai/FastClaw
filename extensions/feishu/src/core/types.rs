@@ -1,17 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 /// Feishu brand variant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LarkBrand {
+    #[default]
     Feishu,
     Lark,
-}
-
-impl Default for LarkBrand {
-    fn default() -> Self {
-        Self::Feishu
-    }
 }
 
 impl LarkBrand {
@@ -57,9 +52,10 @@ pub struct FeishuProbeResult {
 }
 
 /// Feishu message content types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageType {
+    #[default]
     Text,
     Image,
     Interactive,
@@ -70,12 +66,6 @@ pub enum MessageType {
     File,
     Sticker,
     Post,
-}
-
-impl Default for MessageType {
-    fn default() -> Self {
-        Self::Text
-    }
 }
 
 /// Chat type enum.

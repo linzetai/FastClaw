@@ -51,11 +51,17 @@ pub struct BrowserTool {
     inner: Arc<Mutex<Option<BrowserState>>>,
 }
 
-impl BrowserTool {
-    pub fn new() -> Self {
+impl Default for BrowserTool {
+    fn default() -> Self {
         Self {
             inner: Arc::new(Mutex::new(None)),
         }
+    }
+}
+
+impl BrowserTool {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn is_headless() -> bool {
@@ -380,7 +386,7 @@ impl BrowserTool {
 
     fn get_or_create_tab(state: &mut BrowserState) -> Result<Arc<headless_chrome::Tab>, String> {
         if let Some(ref tab) = state.persistent_tab {
-            if tab.get_url().len() > 0 || tab.get_title().is_ok() {
+            if !tab.get_url().is_empty() || tab.get_title().is_ok() {
                 return Ok(tab.clone());
             }
         }
@@ -952,7 +958,7 @@ impl BrowserTool {
                         })?;
                         tab.wait_until_navigated().ok();
                     }
-                    "url" | _ => {
+                    _ => {
                         let url = args.get("url").and_then(|v| v.as_str()).ok_or(
                             "browser navigate: 'type' is 'url' but missing 'url' field."
                                 .to_string(),

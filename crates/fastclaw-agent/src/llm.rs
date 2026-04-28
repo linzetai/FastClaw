@@ -964,8 +964,8 @@ impl LlmProvider for AnthropicProvider {
                         let line: String = line_buf.drain(..=pos).collect();
                         let line = line.trim().to_string();
 
-                        if line.starts_with("event: ") {
-                            current_event = line[7..].to_string();
+                        if let Some(event) = line.strip_prefix("event: ") {
+                            current_event = event.to_string();
                             continue;
                         }
 

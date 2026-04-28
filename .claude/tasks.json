@@ -272,7 +272,7 @@
             "cargo build -p fastclaw-gateway --all-features 通过",
             "cargo clippy --workspace -- -D warnings 零警告"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P0-21",

@@ -108,6 +108,7 @@ pub struct FeishuWsClient {
     reconnect_count: Arc<Mutex<i32>>,
 
     shutdown: Arc<Notify>,
+    #[allow(clippy::type_complexity)]
     fragment_cache: Arc<Mutex<HashMap<String, Vec<Option<Vec<u8>>>>>>,
 }
 
@@ -388,16 +389,13 @@ impl FeishuWsClient {
 
     async fn handle_control_frame(&self, frame: &Frame) -> anyhow::Result<()> {
         let msg_type = frame.get_header(HEADER_TYPE).unwrap_or("");
-        match msg_type {
-            MSG_TYPE_PONG => {
-                tracing::debug!("feishu ws: received pong");
-                if !frame.payload.is_empty() {
-                    if let Ok(conf) = serde_json::from_slice::<ClientConfig>(&frame.payload) {
-                        self.apply_config(&conf).await;
-                    }
+        if msg_type == MSG_TYPE_PONG {
+            tracing::debug!("feishu ws: received pong");
+            if !frame.payload.is_empty() {
+                if let Ok(conf) = serde_json::from_slice::<ClientConfig>(&frame.payload) {
+                    self.apply_config(&conf).await;
                 }
             }
-            _ => {}
         }
         Ok(())
     }
@@ -487,7 +485,7 @@ impl FeishuWsClient {
         let mut w = self.writer.lock().await;
         match w.as_mut() {
             Some(writer) => {
-                writer.send(WsMessage::Binary(data.into())).await?;
+                writer.send(WsMessage::Binary(data)).await?;
                 Ok(())
             }
             None => anyhow::bail!("feishu ws: not connected"),

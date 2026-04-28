@@ -109,7 +109,9 @@ pub fn api_routes() -> Router<AppState> {
             post(evolution::reject_candidate),
         );
 
-        let router = router
+        
+
+    router
         .route("/api/v1/cron/jobs", get(cron::list_cron_jobs))
         .route("/api/v1/cron/jobs", post(cron::upsert_cron_job))
         .route("/api/v1/cron/jobs/:job_id", get(cron::get_cron_job))
@@ -128,7 +130,5 @@ pub fn api_routes() -> Router<AppState> {
         .route(
             "/api/v1/subagents/runs/:run_id",
             get(subagent::get_subagent_run).delete(subagent::cancel_subagent_run),
-        );
-
-    router
+        )
 }

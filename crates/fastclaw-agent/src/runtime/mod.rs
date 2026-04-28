@@ -540,8 +540,7 @@ impl AgentRuntime {
         self.execute_stream_inner(&exec, stream).await
     }
 
-    /// Same as `execute_stream` but accepts an optional `confirm_pending` map so the runtime
-    /// can automatically present user-confirmation dialogs when tools return `needs_confirmation`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute_stream_with_confirm(
         &self,
         config: &AgentConfig,
@@ -642,7 +641,7 @@ impl AgentRuntime {
                     )
                 };
                 let _ = send_stream_event(
-                    &tx,
+                    tx,
                     StreamEvent::Error(user_msg.clone()),
                     false,
                 )
@@ -733,7 +732,7 @@ impl AgentRuntime {
                 0
             };
             let _ = send_stream_event(
-                &tx,
+                tx,
                 StreamEvent::ContextUsageUpdate {
                     used_tokens: estimated_tokens as u32,
                     limit_tokens: context_window,
@@ -747,7 +746,7 @@ impl AgentRuntime {
             let usage_ratio = estimated_tokens as f32 / context_window.max(1) as f32;
             if usage_ratio > 0.90 {
                 let _ = send_stream_event(
-                    &tx,
+                    tx,
                     StreamEvent::ContextLimitWarning {
                         used_tokens: estimated_tokens as u32,
                         limit_tokens: context_window,
@@ -834,7 +833,7 @@ impl AgentRuntime {
                                 break;
                             }
                             let _ = send_stream_event(
-                                &tx,
+                                tx,
                                 StreamEvent::Error(e.to_string()),
                                 false,
                             )
@@ -870,7 +869,7 @@ impl AgentRuntime {
                     }
 
                     if tool_call_accum.is_empty() {
-                        let _ = send_stream_event(&tx, StreamEvent::Delta(delta), true).await;
+                        let _ = send_stream_event(tx, StreamEvent::Delta(delta), true).await;
                     }
                 }
 
@@ -908,7 +907,7 @@ impl AgentRuntime {
 
             if !has_valid_tool_calls {
                 let _ = send_stream_event(
-                    &tx,
+                    tx,
                     StreamEvent::Done {
                         session_id: request.session_id.clone(),
                         tool_calls_made: lstate.total_tool_calls,
@@ -940,7 +939,7 @@ impl AgentRuntime {
                     .map(|a| a.to_tool_call())
                     .collect();
                 let _ = send_stream_event(
-                    &tx,
+                    tx,
                     StreamEvent::Done {
                         session_id: request.session_id.clone(),
                         tool_calls_made: lstate.total_tool_calls,
@@ -969,7 +968,7 @@ impl AgentRuntime {
             if assembled_calls.is_empty() {
                 tracing::warn!("stream tool call deltas produced no valid tool calls, stopping");
                 let _ = send_stream_event(
-                    &tx,
+                    tx,
                     StreamEvent::Done {
                         session_id: request.session_id.clone(),
                         tool_calls_made: lstate.total_tool_calls,
@@ -1005,7 +1004,7 @@ impl AgentRuntime {
             for tc in &assembled_calls {
                 let args_str = if tc.function.arguments.is_empty() { None } else { Some(tc.function.arguments.clone()) };
                 let _ = send_stream_event(
-                    &tx,
+                    tx,
                     StreamEvent::ToolExecuting {
                         tool_name: tc.function.name.clone(),
                         call_id: tc.id.clone(),
@@ -1041,7 +1040,7 @@ impl AgentRuntime {
                         pending_map.insert(confirm_request_id.clone(), answer_tx);
 
                         let _ = send_stream_event(
-                            &tx,
+                            tx,
                             StreamEvent::AskQuestion {
                                 request_id: confirm_request_id.clone(),
                                 question: result.output.clone(),
@@ -1096,7 +1095,7 @@ impl AgentRuntime {
                 let header = semantic_header(&tool_name, &arguments, &result.output, result.success);
                 let llm_out = format!("{header}\n{truncated}");
                 let _ = send_stream_event(
-                    &tx,
+                    tx,
                     StreamEvent::ToolResult {
                         tool_name: tool_name.clone(),
                         call_id: call_id.clone(),
@@ -1237,6 +1236,7 @@ impl AgentRuntime {
     }
 
     #[cfg(feature = "self-iter")]
+    #[allow(clippy::too_many_arguments)]
     fn try_self_iter_tool_recovery(
         &self,
         messages: &mut Vec<ChatMessage>,

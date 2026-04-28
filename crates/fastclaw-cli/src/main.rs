@@ -631,7 +631,7 @@ fn set_json_path(
             current[*part] = value;
             return Ok(());
         }
-        if !current.get(*part).map_or(false, |v| v.is_object()) {
+        if !current.get(*part).is_some_and(|v| v.is_object()) {
             current[*part] = serde_json::json!({});
         }
         current = current
@@ -680,7 +680,7 @@ async fn cmd_doctor(mode: &fastclaw_core::config::ConfigMode, as_json: bool) -> 
     let agent_count = if agents_dir.exists() {
         std::fs::read_dir(&agents_dir)?
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
             .count()
     } else {
         0
@@ -755,10 +755,7 @@ async fn cmd_doctor(mode: &fastclaw_core::config::ConfigMode, as_json: bool) -> 
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
     let gateway_url = format!("http://localhost:{gateway_port}/health");
-    let gateway_ok = match client.get(&gateway_url).send().await {
-        Ok(resp) if resp.status().is_success() => true,
-        _ => false,
-    };
+    let gateway_ok = matches!(client.get(&gateway_url).send().await, Ok(resp) if resp.status().is_success());
     checks.push((
         "gateway",
         gateway_ok,
@@ -975,7 +972,7 @@ async fn cmd_sessions(
                 if sessions.is_empty() {
                     println!("No sessions found.");
                 } else {
-                    println!("{:<40} {:<10} {:<6} {}", "ID", "Agent", "Msgs", "Updated");
+                    println!("{:<40} {:<10} {:<6} Updated", "ID", "Agent", "Msgs");
                     println!("{}", "-".repeat(80));
                     for s in &sessions {
                         println!(
@@ -1093,7 +1090,7 @@ fn cmd_agents(action: AgentAction, as_json: bool) -> anyhow::Result<()> {
                 if agents.is_empty() {
                     println!("No agents configured in config/agents/.");
                 } else {
-                    println!("{:<15} {:<25} {:<15} {}", "ID", "Name", "Provider", "Model");
+                    println!("{:<15} {:<25} {:<15} Model", "ID", "Name", "Provider");
                     println!("{}", "-".repeat(70));
                     for a in &agents {
                         let name = a.name.as_deref().unwrap_or("(unnamed)");
@@ -1211,7 +1208,7 @@ fn cmd_tools(action: ToolAction, as_json: bool) -> anyhow::Result<()> {
                     }))?
                 );
             } else {
-                println!("{:<25} {}", "Name", "Description");
+                println!("{:<25} Description", "Name");
                 println!("{}", "-".repeat(70));
                 for t in tools.iter() {
                     println!("{:<25} {}", t.function.name, t.function.description);
@@ -1540,7 +1537,7 @@ async fn cmd_trace(
             } else if traces.is_empty() {
                 println!("No traces found. Enable tracing with `tracing.conversationTrace: true` in config.");
             } else {
-                println!("{:<40} {:<12} {:<12} {:<6} {}", "Trace ID", "Agent", "Model", "Turns", "Started");
+                println!("{:<40} {:<12} {:<12} {:<6} Started", "Trace ID", "Agent", "Model", "Turns");
                 println!("{}", "-".repeat(90));
                 for t in &traces {
                     println!(
@@ -1612,6 +1609,6 @@ async fn cmd_mcp_server() -> anyhow::Result<()> {
     );
 
     let tool_registry = std::sync::Arc::new(registry);
-    let server = fastclaw_mcp::create_fastclaw_mcp_server(tool_registry);
+    let server = fastclaw_mcp::create_fastclaw_mcp_server(&tool_registry);
     server.run_stdio().await
 }

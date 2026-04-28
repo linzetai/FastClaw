@@ -37,7 +37,7 @@ pub async fn notification_get(
         .await
         .map_err(|e| format!("{e}"))?
         .ok_or_else(|| format!("notification not found: {id}"))?;
-    Ok(serde_json::to_value(n).map_err(|e| format!("{e}"))?)
+    serde_json::to_value(n).map_err(|e| format!("{e}"))
 }
 
 #[tauri::command]

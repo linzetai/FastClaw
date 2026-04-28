@@ -149,6 +149,7 @@ fn build_compact_context(messages: &[ChatMessage]) -> String {
     buf
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_consolidation(
     llm: &dyn LlmProvider,
     model: &str,
@@ -239,7 +240,7 @@ async fn run_consolidation(
                 predicate: pred.clone(),
                 object: obj.clone(),
                 category: FactCategory::UserPreference.as_str().to_string(),
-                confidence: importance.clamp(0.0, 1.0) as f32,
+                confidence: importance.clamp(0.0, 1.0),
                 source_session: Some(session_id.to_string()),
                 created_at: now.clone(),
                 updated_at: now,

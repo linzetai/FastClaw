@@ -52,7 +52,7 @@ async fn send_resp(
     resp: &WsResponse,
 ) -> bool {
     match serde_json::to_string(resp) {
-        Ok(json) => sender.send(Message::Text(json.into())).await.is_ok(),
+        Ok(json) => sender.send(Message::Text(json)).await.is_ok(),
         Err(e) => {
             tracing::error!(error = %e, "failed to serialize WsResponse");
             false
@@ -149,7 +149,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, auth: ApiKeyAuth, pre
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(&event_json) {
                     let name = event.get("event").and_then(|v| v.as_str()).unwrap_or("");
                     if subscriptions.contains(name) {
-                        let _ = sender.send(Message::Text(event_json.into())).await;
+                        let _ = sender.send(Message::Text(event_json)).await;
                     }
                 }
             }
@@ -241,6 +241,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, auth: ApiKeyAuth, pre
     tracing::info!(conn_id, "websocket session ended");
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn dispatch(
     sender: &mut futures::stream::SplitSink<WebSocket, Message>,
     state: &AppState,

@@ -21,6 +21,7 @@ pub struct SubAgentManager {
     runs: Arc<DashMap<String, SubAgentRun>>,
     cancel_tokens: Arc<DashMap<String, CancellationToken>>,
     concurrency: Arc<Semaphore>,
+    #[allow(dead_code)]
     default_policy: SubAgentPolicy,
 }
 
@@ -83,6 +84,7 @@ impl SubAgentManager {
     /// as `StreamEvent::SubAgent*` variants. The caller (usually `SubAgentTool`)
     /// collects the final result from the `SubAgentComplete` event or queries
     /// `get_run()`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         &self,
         agent_config: AgentConfig,
@@ -252,7 +254,7 @@ impl SubAgentManager {
         Ok(run_id)
     }
 
-    /// Execute the child agent's agentic loop, forwarding stream events to parent.
+    #[allow(clippy::too_many_arguments)]
     async fn run_subagent(
         runtime: &AgentRuntime,
         config: &AgentConfig,
@@ -406,7 +408,7 @@ impl SubAgentManager {
             .iter()
             .filter(|r| {
                 parent_session_id
-                    .map_or(true, |sid| r.parent_session_id == sid)
+                    .is_none_or(|sid| r.parent_session_id == sid)
             })
             .map(|r| r.value().clone())
             .collect()
@@ -417,7 +419,7 @@ impl SubAgentManager {
         let cutoff = Self::now_ms().saturating_sub(max_age.as_millis() as u64);
         self.runs.retain(|_, r| {
             if r.status.is_terminal() {
-                r.completed_at.map_or(true, |t| t > cutoff)
+                r.completed_at.is_none_or(|t| t > cutoff)
             } else {
                 true
             }

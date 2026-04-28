@@ -207,15 +207,19 @@ type McpResourceFuture =
 type McpPromptFuture =
     std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>>;
 
+type ToolHandlerFn = Box<dyn Fn(&serde_json::Value) -> McpToolFuture + Send + Sync>;
+type ResourceHandlerFn = Box<dyn Fn(&serde_json::Value) -> McpResourceFuture + Send + Sync>;
+type PromptHandlerFn = Box<dyn Fn(&serde_json::Value) -> McpPromptFuture + Send + Sync>;
+
 /// An MCP server that exposes FastClaw's tools, resources, and prompts over JSON-RPC 2.0.
 pub struct McpServer {
     server_info: ServerInfo,
     pub tools: Vec<McpTool>,
-    tool_handlers: HashMap<String, Box<dyn Fn(&serde_json::Value) -> McpToolFuture + Send + Sync>>,
+    tool_handlers: HashMap<String, ToolHandlerFn>,
     pub resources: Vec<McpResource>,
-    resource_handlers: HashMap<String, Box<dyn Fn(&serde_json::Value) -> McpResourceFuture + Send + Sync>>,
+    resource_handlers: HashMap<String, ResourceHandlerFn>,
     pub prompts: Vec<McpPrompt>,
-    prompt_handlers: HashMap<String, Box<dyn Fn(&serde_json::Value) -> McpPromptFuture + Send + Sync>>,
+    prompt_handlers: HashMap<String, PromptHandlerFn>,
 }
 
 type McpToolFuture =
@@ -514,8 +518,7 @@ fn companion_post_url(sse: &reqwest::Url) -> anyhow::Result<reqwest::Url> {
         }
     } else {
         anyhow::bail!(
-            "SSE url path must end with /sse (e.g. http://host/mcp/sse), got {}",
-            path
+            "SSE url path must end with /sse (e.g. http://host/mcp/sse), got {path}",
         );
     };
     let mut u = sse.clone();
@@ -539,7 +542,7 @@ fn extract_sse_data_lines(block: &str) -> Vec<String> {
 
 enum McpTransport {
     Stdio {
-        process: tokio::process::Child,
+        process: Box<tokio::process::Child>,
         stdin: tokio::process::ChildStdin,
         reader: tokio::io::BufReader<tokio::process::ChildStdout>,
     },
@@ -565,10 +568,10 @@ impl McpClient {
     /// `extra_env` is merged into the inherited environment before spawning.
     /// On Windows, if the direct spawn fails (e.g. `npx` resolves to `npx.cmd`),
     /// automatically retries via `cmd.exe /C` so that `.cmd`/`.bat` wrappers are found.
-    pub async fn connect_stdio(
+    pub async fn connect_stdio<S: std::hash::BuildHasher>(
         command: &str,
         args: &[&str],
-        extra_env: &std::collections::HashMap<String, String>,
+        extra_env: &std::collections::HashMap<String, String, S>,
     ) -> anyhow::Result<Self> {
         tracing::info!(command, ?args, "spawning MCP server subprocess");
 
@@ -633,7 +636,7 @@ impl McpClient {
             server_name: command.to_string(),
             tools: Vec::new(),
             transport: McpTransport::Stdio {
-                process,
+                process: Box::new(process),
                 stdin,
                 reader,
             },
@@ -707,11 +710,7 @@ impl McpClient {
             if std::str::from_utf8(&byte_buf).is_err() {
                 continue;
             }
-            loop {
-                let text = match std::str::from_utf8(&byte_buf) {
-                    Ok(s) => s,
-                    Err(_) => break,
-                };
+            while let Ok(text) = std::str::from_utf8(&byte_buf) {
                 let Some(pos) = text.find("\n\n") else {
                     break;
                 };
@@ -934,7 +933,7 @@ impl Drop for McpClient {
 
 /// Create an MCP server pre-populated with FastClaw's built-in tools.
 pub fn create_fastclaw_mcp_server(
-    tool_registry: Arc<fastclaw_core::tool::ToolRegistry>,
+    tool_registry: &Arc<fastclaw_core::tool::ToolRegistry>,
 ) -> McpServer {
     let mut server = McpServer::new("FastClaw", env!("CARGO_PKG_VERSION"));
 
@@ -1018,7 +1017,6 @@ impl fastclaw_core::tool::Tool for McpToolBridge {
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .map(|(k, v)| (k, v))
             .collect();
         let required = self
             .schema
@@ -1084,12 +1082,12 @@ impl fastclaw_core::tool::Tool for McpToolBridge {
 /// Returns the shared McpClient handle so it can be managed/closed later.
 ///
 /// Tools are registered with a `server_prefix` to avoid name collisions (e.g. `"mcp_myserver_"`).
-pub async fn register_mcp_tools(
+pub async fn register_mcp_tools<S: std::hash::BuildHasher>(
     command: &str,
     args: &[&str],
     registry: &fastclaw_core::tool::ToolRegistry,
     server_prefix: &str,
-    extra_env: &std::collections::HashMap<String, String>,
+    extra_env: &std::collections::HashMap<String, String, S>,
 ) -> anyhow::Result<SharedMcpClient> {
     let client = McpClient::connect_stdio(command, args, extra_env).await?;
     let tools = client.tools().to_vec();

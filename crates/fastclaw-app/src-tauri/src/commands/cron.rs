@@ -36,7 +36,7 @@ pub async fn cron_get_job(
         .await
         .map_err(|e| format!("{e}"))?
         .ok_or_else(|| format!("cron job not found: {job_id}"))?;
-    Ok(serde_json::to_value(job).map_err(|e| format!("{e}"))?)
+    serde_json::to_value(job).map_err(|e| format!("{e}"))
 }
 
 #[tauri::command]

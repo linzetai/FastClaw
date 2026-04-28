@@ -100,9 +100,7 @@ fn ensure_within_workspace(path: &Path, must_exist: bool) -> std::io::Result<Pat
     } else {
         root.join(path)
     };
-    let resolved = if must_exist {
-        absolute.canonicalize()?
-    } else if absolute.exists() {
+    let resolved = if must_exist || absolute.exists() {
         absolute.canonicalize()?
     } else {
         let parent = absolute
@@ -774,6 +772,7 @@ fn normalize_unicode_text(text: &str) -> String {
     text.chars().map(normalize_unicode_char).collect()
 }
 
+#[allow(dead_code)]
 fn seek_line_sequence<F>(file_lines: &[&str], pattern_lines: &[&str], transform: F) -> Option<usize>
 where
     F: Fn(&str) -> String,
@@ -869,7 +868,7 @@ fn try_fuzzy_match(file_content: &str, old_string: &str) -> FuzzyMatchResult {
     }
 
     // Pass 3: Full whitespace normalization (collapse internal whitespace + trim)
-    let (count3, first3) = count_line_sequence(&file_lines, &old_lines, |l| normalize_line(l));
+    let (count3, first3) = count_line_sequence(&file_lines, &old_lines, normalize_line);
     if count3 == 1 {
         return build_result(first3.unwrap(), old_lines.len());
     }
@@ -878,13 +877,13 @@ fn try_fuzzy_match(file_content: &str, old_string: &str) -> FuzzyMatchResult {
     }
 
     // Pass 4: Handle trailing empty line in old_string
-    if old_lines.last().map_or(false, |l| l.is_empty()) && old_lines.len() > 1 {
+    if old_lines.last().is_some_and(|l| l.is_empty()) && old_lines.len() > 1 {
         let trimmed_old: Vec<&str> = old_lines[..old_lines.len() - 1].to_vec();
         let (count4, first4) = count_line_sequence(&file_lines, &trimmed_old, |l| l.trim_end().to_string());
         if count4 == 1 {
             return build_result(first4.unwrap(), trimmed_old.len());
         }
-        let (count5, first5) = count_line_sequence(&file_lines, &trimmed_old, |l| normalize_line(l));
+        let (count5, first5) = count_line_sequence(&file_lines, &trimmed_old, normalize_line);
         if count5 == 1 {
             return build_result(first5.unwrap(), trimmed_old.len());
         }
@@ -1053,8 +1052,8 @@ fn gitignore_pattern_matches(pattern: &str, rel_path: &str) -> bool {
     let pat = pattern.trim_end_matches('/');
     
     // Handle absolute patterns (starting with /) - only match relative to root
-    if pat.starts_with('/') {
-        let clean_pat = &pat[1..];  // Remove leading slash
+    if let Some(clean_pat) = pat.strip_prefix('/') {
+        // Remove leading slash
         return simple_glob_match(clean_pat, rel_path);
     }
     
@@ -1087,9 +1086,9 @@ fn gitignore_pattern_matches(pattern: &str, rel_path: &str) -> bool {
         let parts: Vec<&str> = pat.split("**").collect();
         if parts.len() == 2 {
             let (prefix, suffix) = (parts[0], parts[1]);
-            if prefix.is_empty() && rel_path.contains(suffix) {
-                return true;
-            } else if suffix.is_empty() && rel_path.starts_with(prefix) {
+            if (prefix.is_empty() && rel_path.contains(suffix))
+                || (suffix.is_empty() && rel_path.starts_with(prefix))
+            {
                 return true;
             } else if !prefix.is_empty() && !suffix.is_empty() {
                 if let Some(pos) = rel_path.find(prefix) {
@@ -2215,17 +2214,17 @@ fn search_builtin(
 
                 if context_lines > 0 {
                     let ctx_start = line_no.saturating_sub(context_lines);
-                    for i in ctx_start..line_no {
-                        text_output.push_str(&format!("{rel}-{}-{}\n", i + 1, all_lines[i]));
+                    for (i, ctx_line) in all_lines[ctx_start..line_no].iter().enumerate() {
+                        text_output.push_str(&format!("{rel}-{}-{ctx_line}\n", ctx_start + i + 1));
                     }
                 }
 
-                text_output.push_str(&format!("{rel}:{}:{}\n", line_no + 1, line));
+                text_output.push_str(&format!("{rel}:{}:{line}\n", line_no + 1));
 
                 if context_lines > 0 {
                     let ctx_end = (line_no + context_lines + 1).min(all_lines.len());
-                    for i in (line_no + 1)..ctx_end {
-                        text_output.push_str(&format!("{rel}-{}-{}\n", i + 1, all_lines[i]));
+                    for (i, ctx_line) in all_lines[(line_no + 1)..ctx_end].iter().enumerate() {
+                        text_output.push_str(&format!("{rel}-{}-{ctx_line}\n", line_no + 2 + i));
                     }
                 }
 

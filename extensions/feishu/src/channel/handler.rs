@@ -112,8 +112,8 @@ impl FeishuMessageHandler for FeishuChannel {
             .read()
             .map_err(|_| anyhow::anyhow!("router lock poisoned"))?
             .resolve(&request)
-            .map(|c| c.clone())
-            .map_err(|e| anyhow::anyhow!("agent resolve failed: {}", e))?;
+            .cloned()
+            .map_err(|e| anyhow::anyhow!("agent resolve failed: {e}"))?;
 
         let result = self
             .runtime

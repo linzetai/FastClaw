@@ -431,7 +431,7 @@ pub(crate) fn dedup_repeated_tool_calls(
             .find_map(|m| {
                 m.tool_calls.as_ref()?.iter().find_map(|tc| {
                     if tc.id == *call_id {
-                        extract_target_key(&tool_name, &tc.function.arguments)
+                        extract_target_key(tool_name, &tc.function.arguments)
                     } else {
                         None
                     }
@@ -610,6 +610,7 @@ pub(crate) async fn execute_tool_batch_with_hooks(
     ).await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_batch_with_hooks_and_stream(
     tool_calls: &[ToolCall],
     tool_registry: &Arc<ToolRegistry>,
@@ -701,6 +702,7 @@ pub(crate) async fn execute_tool_batch_with_hooks_and_stream(
     results.into_iter().map(|r| r.expect("all slots filled")).collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_single_tool(
     tc: &ToolCall,
     tool_registry: &Arc<ToolRegistry>,
@@ -765,8 +767,8 @@ async fn execute_single_tool(
     let result = match tool_registry.get(&tool_name) {
         Some(tool) => {
             let work_dir_path = work_dir.as_ref().map(std::path::PathBuf::from);
-            if tool.supports_progress() && stream_tx.is_some() {
-                let stream_tx = stream_tx.unwrap().clone();
+            if let (true, Some(stx)) = (tool.supports_progress(), stream_tx) {
+                let stream_tx = stx.clone();
                 let tn = tool_name.clone();
                 let ci = call_id.clone();
                 let (progress_tx, mut progress_rx) =

@@ -6,6 +6,7 @@ use super::helpers::get_state;
 // ─── Chat streaming via Tauri Channel ───
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn chat_stream(
     state: tauri::State<'_, AppData>,
     app_handle: tauri::AppHandle,
@@ -19,7 +20,6 @@ pub async fn chat_stream(
     work_dir: Option<String>,
     request_id: Option<String>,
 ) -> Result<(), String> {
-    let work_dir = work_dir;
     use fastclaw_core::types::{ChatMessage, ChatRequest, Role, StreamEvent};
     use fastclaw_gateway::chat_pipeline::{
         after_chat, maybe_spawn_smart_title_background, setup_chat, SetupChatOptions,
@@ -170,7 +170,7 @@ pub async fn chat_stream(
     let mut pending_question_ids: Vec<String> = Vec::new();
     let mut last_checkpoint = std::time::Instant::now();
     let checkpoint_interval = std::time::Duration::from_secs(5);
-    // (call_id, tool_name, args_json, result_output, success)
+    #[allow(clippy::type_complexity)]
     let mut accumulated_tool_calls: Vec<(String, String, Option<String>, Option<String>, bool)> = Vec::new();
     while let Some(event) = rx.recv().await {
         match &event {

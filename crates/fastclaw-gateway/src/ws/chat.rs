@@ -213,7 +213,6 @@ pub async fn spawn_chat(
                 propagate_context_ingest_errors: false,
                 set_resolved_session_on_request: true,
                 record_chat_observe: false,
-                ..Default::default()
             },
         )
         .await

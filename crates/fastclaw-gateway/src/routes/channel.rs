@@ -327,8 +327,7 @@ pub(crate) async fn handle_channel_message(
             tools: None,
             slash_intent: None,
             work_dir: None,
-        })
-        .map(|c| c.clone())
+        }).cloned()
         .map_err(|e| anyhow::anyhow!("agent resolve: {}", e))?;
     drop(router);
 

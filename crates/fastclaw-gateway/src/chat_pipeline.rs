@@ -81,8 +81,7 @@ pub async fn setup_chat(
     let agent_config = {
         let router = state.rt.router.read().await;
         router
-            .resolve(request)
-            .map(|c| c.clone())
+            .resolve(request).cloned()
             .map_err(map_router_resolve_err)?
     };
     let agent_id = agent_config.agent_id.clone();
@@ -704,7 +703,7 @@ fn spawn_trace_write(state: &AppState, setup: &ChatSetup, assistant: &ChatMessag
         .user_messages
         .last()
         .cloned()
-        .unwrap_or_else(|| ChatMessage {
+        .unwrap_or(ChatMessage {
             role: Role::User,
             content: None,
             name: None,

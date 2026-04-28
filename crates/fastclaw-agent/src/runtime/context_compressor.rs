@@ -27,13 +27,12 @@ const COMPRESSION_SYSTEM_PROMPT: &str = r#"You are a conversation compression en
 
 Rules: no code blocks, no raw tool output, no filler. Pure information density."#;
 
+#[allow(dead_code)]
 pub struct CompressionResult {
     pub compressed: bool,
     pub original_tokens: usize,
     pub new_tokens: usize,
     pub messages: Vec<ChatMessage>,
-    /// If compression occurred, the path to the saved full history file.
-    /// The agent can search this file to recover details lost in summarization.
     pub history_file: Option<String>,
 }
 
