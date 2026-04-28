@@ -428,7 +428,7 @@
             "snip 释放足够 tokens 时，autocompact 不触发",
             "snip_tokens_freed = 0 时行为与原来一致"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P1-10",

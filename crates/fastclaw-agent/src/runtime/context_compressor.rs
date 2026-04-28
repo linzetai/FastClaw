@@ -405,9 +405,29 @@ impl AutoCompactor {
         self.consecutive_failures
     }
 
+    /// Check whether auto-compaction should trigger, accounting for tokens
+    /// already freed by a prior snip pass.
+    ///
+    /// The effective token count is `estimated_tokens - snip_tokens_freed`.
+    /// If this is below the threshold, compaction is skipped.
+    pub fn should_compact(
+        &self,
+        estimated_tokens: usize,
+        context_window: u32,
+        snip_tokens_freed: usize,
+    ) -> bool {
+        let effective = estimated_tokens.saturating_sub(snip_tokens_freed);
+        let threshold = (context_window as f32 * COMPRESSION_THRESHOLD) as usize;
+        effective > threshold
+    }
+
     /// Attempt compression if needed. Returns immediately with
     /// [`AutoCompactOutcome::CircuitBreakerOpen`] if too many consecutive
     /// failures have occurred.
+    ///
+    /// `snip_tokens_freed`: tokens already freed by a prior snip pass. The
+    /// effective token count is reduced by this amount before checking the
+    /// compression threshold.
     pub async fn compact_if_needed(
         &mut self,
         messages: &mut Vec<ChatMessage>,
@@ -415,6 +435,7 @@ impl AutoCompactor {
         provider: &Arc<dyn LlmProvider>,
         model: &str,
         api_prompt_tokens: usize,
+        snip_tokens_freed: usize,
     ) -> AutoCompactOutcome {
         if self.is_circuit_open() {
             tracing::warn!(
@@ -422,6 +443,17 @@ impl AutoCompactor {
                 "auto-compact circuit breaker open, skipping"
             );
             return AutoCompactOutcome::CircuitBreakerOpen;
+        }
+
+        // Check threshold with snip awareness.
+        let estimated = if api_prompt_tokens > 0 {
+            api_prompt_tokens
+        } else {
+            fastclaw_context::estimate_messages_tokens(messages)
+        };
+
+        if !self.should_compact(estimated, context_window, snip_tokens_freed) {
+            return AutoCompactOutcome::NotNeeded;
         }
 
         let result = try_compress_chat(messages, context_window, provider, model, api_prompt_tokens).await;
@@ -543,5 +575,53 @@ mod tests {
         let ac = AutoCompactor::default();
         assert!(!ac.is_circuit_open());
         assert_eq!(ac.consecutive_failures(), 0);
+    }
+
+    #[test]
+    fn should_compact_without_snip() {
+        let ac = AutoCompactor::new();
+        // 60k tokens, 100k context window, threshold = 50% = 50k.
+        // 60k > 50k, so should compact.
+        assert!(ac.should_compact(60_000, 100_000, 0));
+    }
+
+    #[test]
+    fn should_compact_under_threshold() {
+        let ac = AutoCompactor::new();
+        // 40k tokens, 100k context window, threshold = 50k.
+        // 40k < 50k, should not compact.
+        assert!(!ac.should_compact(40_000, 100_000, 0));
+    }
+
+    #[test]
+    fn snip_freed_avoids_compact() {
+        let ac = AutoCompactor::new();
+        // 60k tokens, 100k context window, threshold = 50k.
+        // snip freed 15k, so effective = 60k - 15k = 45k < 50k.
+        assert!(!ac.should_compact(60_000, 100_000, 15_000));
+    }
+
+    #[test]
+    fn snip_freed_partial_still_compacts() {
+        let ac = AutoCompactor::new();
+        // 60k tokens, 100k context window, threshold = 50k.
+        // snip freed 5k, effective = 55k > 50k, still needs compact.
+        assert!(ac.should_compact(60_000, 100_000, 5_000));
+    }
+
+    #[test]
+    fn snip_freed_zero_same_as_no_snip() {
+        let ac = AutoCompactor::new();
+        assert_eq!(
+            ac.should_compact(60_000, 100_000, 0),
+            ac.should_compact(60_000, 100_000, 0)
+        );
+    }
+
+    #[test]
+    fn snip_freed_exceeds_estimated_saturates_to_zero() {
+        let ac = AutoCompactor::new();
+        // snip freed more than estimated — effective = 0, which is under threshold.
+        assert!(!ac.should_compact(30_000, 100_000, 50_000));
     }
 }
