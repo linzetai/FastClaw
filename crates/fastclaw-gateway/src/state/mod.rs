@@ -23,7 +23,6 @@ use fastclaw_evolution::{
 };
 use fastclaw_memory::{EmbeddingProvider, EpisodicMemory, SemanticMemory};
 use fastclaw_model_router::BudgetTracker;
-use fastclaw_plugin::PluginRegistry;
 use fastclaw_session::SessionStore;
 #[cfg(any(test, feature = "test-helpers"))]
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -187,7 +186,6 @@ pub struct MemoryState {
 /// Extensions (plugins, channels, MCP, message bus).
 #[derive(Clone)]
 pub struct ExtensionState {
-    pub plugin_registry: Arc<tokio::sync::RwLock<PluginRegistry>>,
     pub channel_registry: Arc<tokio::sync::RwLock<ChannelRegistry>>,
     pub message_bus: Arc<MessageBus>,
     pub mcp_status:
@@ -1283,8 +1281,6 @@ impl AppState {
         test_ep_map.insert("main".to_string(), Arc::new(test_ep));
         test_sem_map.insert("main".to_string(), Arc::new(test_sem));
 
-        let wasm_host = fastclaw_plugin::WasmHost::new(Default::default())?;
-        let plugin_registry = PluginRegistry::new(wasm_host);
         let channel_registry = ChannelRegistry::new();
 
         let mut context_engine =
@@ -1354,7 +1350,6 @@ impl AppState {
                 embedding_provider: None,
             },
             ext: ExtensionState {
-                plugin_registry: Arc::new(tokio::sync::RwLock::new(plugin_registry)),
                 channel_registry: Arc::new(tokio::sync::RwLock::new(channel_registry)),
                 message_bus,
                 mcp_status: Arc::new(ArcSwap::new(Arc::new(std::collections::HashMap::new()))),

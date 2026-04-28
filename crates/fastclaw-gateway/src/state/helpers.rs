@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use fastclaw_core::agent_config::{self, AgentConfig, AgentModelConfig};
 use fastclaw_core::config::FastClawConfig;
-use fastclaw_plugin::PluginRegistry;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
 pub(crate) fn merge_model_base_urls_into_credentials(
@@ -151,14 +150,6 @@ fn builtin_default_model(config: &FastClawConfig) -> AgentModelConfig {
     model
 }
 
-pub(crate) fn resolve_plugins_dir(paths_cfg: &fastclaw_core::config::PathsConfig) -> PathBuf {
-    fastclaw_core::paths::resolve_plugins_dir_from(Some(paths_cfg))
-}
-
-pub(crate) fn resolve_extensions_dir(paths_cfg: &fastclaw_core::config::PathsConfig) -> PathBuf {
-    fastclaw_core::paths::resolve_extensions_dir_from(Some(paths_cfg))
-}
-
 pub(crate) fn resolve_skills_dir(paths_cfg: &fastclaw_core::config::PathsConfig) -> PathBuf {
     fastclaw_core::paths::resolve_skills_dir_from(Some(paths_cfg))
 }
@@ -167,33 +158,6 @@ pub(crate) fn resolve_state_dir(paths_cfg: &fastclaw_core::config::PathsConfig) 
     fastclaw_core::paths::resolve_state_dir_from(Some(paths_cfg))
 }
 
-pub(crate) fn load_plugins_from_dir(plugin_registry: &mut PluginRegistry, dir: &std::path::Path) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(e) => {
-            tracing::warn!(dir = %dir.display(), error = %e, "failed to read plugins directory");
-            return;
-        }
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        if !path.join("fastclaw.plugin.json").exists() || !path.join("plugin.wasm").exists() {
-            continue;
-        }
-        match plugin_registry.load_from_dir(&path) {
-            Ok(manifest) => {
-                tracing::info!(plugin_id = %manifest.id, caps = manifest.capabilities.len(), "loaded WASM plugin");
-            }
-            Err(e) => {
-                tracing::warn!(path = %path.display(), error = %e, "failed to load plugin");
-            }
-        }
-    }
-}
 
 pub(crate) fn persist_skills_deny_cleanup(cleaned_deny: &[String]) -> anyhow::Result<()> {
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot resolve home directory"))?;

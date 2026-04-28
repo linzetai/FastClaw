@@ -203,7 +203,7 @@
             "AppState/ExtStore 中无 PluginRegistry 字段",
             "cargo check -p fastclaw-gateway 编译通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P0-16",

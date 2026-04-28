@@ -2294,7 +2294,6 @@ dependencies = [
  "fastclaw-memory",
  "fastclaw-model-router",
  "fastclaw-observe",
- "fastclaw-plugin",
  "fastclaw-security",
  "fastclaw-self-iter",
  "fastclaw-session",

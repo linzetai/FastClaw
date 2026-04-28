@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
@@ -18,7 +18,6 @@ use fastclaw_evolution::{
 };
 use fastclaw_memory::{DreamingPipeline, EmbeddingProvider, EpisodicMemory, SemanticMemory};
 use fastclaw_model_router::BudgetTracker;
-use fastclaw_plugin::PluginRegistry;
 use fastclaw_session::SessionStore;
 
 use crate::memory_scope::memory_tool_agent_suffix;
@@ -41,7 +40,6 @@ struct BuildPhase3 {
     runtime: Arc<AgentRuntime>,
     router: AgentRouter,
     tool_registry: ToolRegistry,
-    plugin_registry: PluginRegistry,
     base_skill_registry: SkillRegistry,
     agent_skill_registries: std::collections::HashMap<String, Arc<SkillRegistry>>,
     workspaces: std::collections::HashMap<String, AgentWorkspace>,
@@ -117,48 +115,13 @@ impl StateBuilder {
         let tool_registry = super::AppState::build_tools_core(config).await?;
 
         let paths_cfg = &config.paths;
-        let wasm_host = fastclaw_plugin::WasmHost::new(Default::default())?;
-        let mut plugin_registry = PluginRegistry::new(wasm_host);
-        let plugins_dir = helpers::resolve_plugins_dir(paths_cfg);
-        if plugins_dir.exists() {
-            helpers::load_plugins_from_dir(&mut plugin_registry, &plugins_dir);
-        }
-
-        let extensions_dir = helpers::resolve_extensions_dir(paths_cfg);
-        let discovered_plugins = fastclaw_plugin::discover_plugins(&extensions_dir);
-        tracing::info!(
-            extensions_dir = %extensions_dir.display(),
-            count = discovered_plugins.len(),
-            "discovered extension plugins"
-        );
-
-        let plugin_arc = Arc::new(plugin_registry);
-        fastclaw_plugin::bridge::bridge_plugins(&plugin_arc, &tool_registry);
-        let bridged_count = plugin_arc.plugin_count();
-        if bridged_count > 0 {
-            tracing::info!(
-                plugins = bridged_count,
-                "bridged WASM plugin capabilities into LLM tool registry"
-            );
-        }
-        let plugin_registry = match Arc::try_unwrap(plugin_arc) {
-            Ok(r) => r,
-            Err(_) => unreachable!("plugin_registry Arc should have no other owners at build time"),
-        };
 
         use fastclaw_core::skill::{load_skills_from_dirs_with_layer, SkillLayer};
 
         let skills_dir = helpers::resolve_skills_dir(paths_cfg);
         let global_skills_dir = fastclaw_core::skill::resolve_global_skills_dir();
 
-        let mut ext_skill_dirs: Vec<PathBuf> = Vec::new();
-        for plugin in &discovered_plugins {
-            for sd in plugin.skill_dirs() {
-                ext_skill_dirs.push(sd);
-            }
-        }
-        let ext_refs: Vec<&Path> = ext_skill_dirs.iter().map(|p| p.as_path()).collect();
-        let ext_registry = load_skills_from_dirs_with_layer(&ext_refs, SkillLayer::Extension);
+        let ext_registry = SkillRegistry::new();
         let project_registry =
             load_skills_from_dirs_with_layer(&[skills_dir.as_path()], SkillLayer::Project);
         let global_registry =
@@ -282,7 +245,6 @@ impl StateBuilder {
             runtime,
             router,
             tool_registry,
-            plugin_registry,
             base_skill_registry,
             agent_skill_registries,
             workspaces,
@@ -664,9 +626,6 @@ impl StateBuilder {
                 embedding_provider: p5.phase2.embedding_provider,
             },
             ext: super::ExtensionState {
-                plugin_registry: Arc::new(tokio::sync::RwLock::new(
-                    p5.phase2.phase4.phase3.plugin_registry,
-                )),
                 channel_registry: Arc::new(tokio::sync::RwLock::new(
                     p5.phase2.phase4.channel_registry,
                 )),
@@ -842,28 +801,6 @@ impl StateBuilder {
             );
         }
 
-        if let Some(ref plugins_path) = state.cfg.config.paths.plugins_dir {
-            let dir = PathBuf::from(plugins_path);
-            if let Err(e) = std::fs::create_dir_all(&dir) {
-                tracing::warn!(
-                    path = %dir.display(),
-                    error = %e,
-                    "failed to create plugins directory for hot-reload watcher"
-                );
-            } else {
-                match fastclaw_plugin::start_watching(state.ext.plugin_registry.clone(), dir.clone()) {
-                    Ok(()) => tracing::info!(
-                        dir = %dir.display(),
-                        "plugin hot-reload watcher started"
-                    ),
-                    Err(e) => tracing::warn!(
-                        dir = %dir.display(),
-                        error = %e,
-                        "plugin hot-reload watcher failed to start"
-                    ),
-                }
-            }
-        }
 
         if let Some(ttl_hours) = state.cfg.config.session.ttl_hours {
             let store = state.store.session_store.clone();

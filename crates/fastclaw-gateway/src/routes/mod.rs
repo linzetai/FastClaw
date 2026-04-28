@@ -9,7 +9,6 @@ mod error;
 mod evolution;
 mod health;
 mod memory;
-mod plugin;
 mod session;
 mod subagent;
 mod traces;
@@ -109,11 +108,6 @@ pub fn api_routes() -> Router<AppState> {
         .route("/api/v1/cron/jobs", post(cron::upsert_cron_job))
         .route("/api/v1/cron/jobs/:job_id", get(cron::get_cron_job))
         .route("/api/v1/cron/jobs/:job_id", delete(cron::delete_cron_job))
-        .route("/api/v1/plugins", get(plugin::list_plugins))
-        .route(
-            "/api/v1/plugins/:plugin_id/invoke/:capability",
-            post(plugin::invoke_plugin),
-        )
         .route("/api/v1/channels", get(channel::list_channels))
         .route("/api/v1/routes", get(dynamic_routes::list_routes))
         .route("/api/v1/routes", post(dynamic_routes::add_route))
