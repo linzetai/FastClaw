@@ -339,7 +339,7 @@
             "至少 5 个测试用例覆盖上述场景",
             "cargo test -p fastclaw-context 全通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P1-04",

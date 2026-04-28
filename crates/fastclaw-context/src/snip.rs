@@ -350,4 +350,156 @@ mod tests {
         assert_eq!(rounds.len(), 1);
         assert_eq!(rounds[0].messages.len(), 1);
     }
+
+    // ──────────────────────────────────────────────
+    // SnipCompactor tests
+    // ──────────────────────────────────────────────
+
+    fn make_compactor(max_tokens: usize, min_rounds: usize) -> SnipCompactor {
+        SnipCompactor::new(SnipCompactorConfig {
+            max_tokens,
+            min_rounds_to_keep: min_rounds,
+        })
+    }
+
+    fn long_text(n: usize) -> String {
+        "x".repeat(n)
+    }
+
+    fn error_tool(text: &str) -> ChatMessage {
+        ChatMessage {
+            role: Role::Tool,
+            content: Some(json!({"error": text})),
+            name: None,
+            tool_calls: None,
+            tool_call_id: Some("call_err".into()),
+        }
+    }
+
+    #[test]
+    fn snip_no_op_when_under_budget() {
+        let msgs = vec![user("hi"), assistant("hello")];
+        let compactor = make_compactor(100_000, 1);
+        let result = compactor.compact(&msgs);
+        assert!(!result.compacted);
+        assert_eq!(result.tokens_freed, 0);
+        assert_eq!(result.rounds_removed, 0);
+        assert_eq!(result.messages.len(), msgs.len());
+    }
+
+    #[test]
+    fn snip_empty_messages_no_op() {
+        let compactor = make_compactor(100, 1);
+        let result = compactor.compact(&[]);
+        assert!(!result.compacted);
+        assert_eq!(result.messages.len(), 0);
+    }
+
+    #[test]
+    fn snip_removes_oldest_rounds_first() {
+        // Build 5 rounds with substantial content to exceed a small budget.
+        let mut msgs = Vec::new();
+        for i in 0..5 {
+            msgs.push(user(&long_text(200)));
+            msgs.push(assistant(&format!("answer {i} {}", long_text(200))));
+        }
+        let total = crate::estimate_messages_tokens(&msgs);
+        // Set budget to ~60% of total so some rounds get removed.
+        let budget = total * 60 / 100;
+        let compactor = make_compactor(budget, 2);
+        let result = compactor.compact(&msgs);
+
+        assert!(result.compacted, "should compact when over budget");
+        assert!(result.rounds_removed > 0, "should remove at least 1 round");
+        assert!(result.tokens_freed > 0);
+
+        let remaining = crate::estimate_messages_tokens(&result.messages);
+        assert!(remaining <= budget, "remaining {remaining} should be <= budget {budget}");
+
+        // The most recent rounds should be preserved. Check the last message
+        // is the last assistant message from the original list.
+        let last_original = msgs.last().unwrap().text_content().unwrap();
+        let last_result = result.messages.last().unwrap().text_content().unwrap();
+        assert_eq!(last_original, last_result, "most recent round should survive");
+    }
+
+    #[test]
+    fn snip_preserves_min_rounds() {
+        // Even if way over budget, we keep at least min_rounds_to_keep.
+        let mut msgs = Vec::new();
+        for _ in 0..5 {
+            msgs.push(user(&long_text(500)));
+            msgs.push(assistant(&long_text(500)));
+        }
+        let compactor = make_compactor(1, 3); // absurdly low budget, keep 3
+        let result = compactor.compact(&msgs);
+
+        let remaining_rounds = group_by_api_round(&result.messages);
+        assert!(
+            remaining_rounds.len() >= 3,
+            "should keep at least 3 rounds, got {}",
+            remaining_rounds.len()
+        );
+    }
+
+    #[test]
+    fn snip_error_round_protected() {
+        // Round 0: normal (user + assistant)
+        // Round 1: error (user + assistant_with_tool_call + error_tool + assistant)
+        // Round 2: normal (user + assistant)
+        let mut msgs = vec![
+            user(&long_text(300)),
+            assistant(&long_text(300)),
+            user("search something"),
+            assistant("calling tool"),
+            error_tool("connection timeout"),
+            assistant("sorry, tool failed"),
+            user("ok try again"),
+            assistant(&long_text(300)),
+        ];
+        // Push more content so we're over budget.
+        for _ in 0..3 {
+            msgs.push(user(&long_text(300)));
+            msgs.push(assistant(&long_text(300)));
+        }
+        let total = crate::estimate_messages_tokens(&msgs);
+        let budget = total * 40 / 100;
+        let compactor = make_compactor(budget, 2);
+        let result = compactor.compact(&msgs);
+
+        assert!(result.compacted);
+        // The error round (round 1) should NOT have been removed.
+        let has_error_content = result.messages.iter().any(|m| {
+            m.role == Role::Tool
+                && m.content
+                    .as_ref()
+                    .map_or(false, |c| c.to_string().contains("connection timeout"))
+        });
+        assert!(has_error_content, "error round should be preserved");
+    }
+
+    #[test]
+    fn snip_returns_correct_tokens_freed() {
+        let mut msgs = Vec::new();
+        for i in 0..4 {
+            msgs.push(user(&format!("question {i} {}", long_text(200))));
+            msgs.push(assistant(&format!("answer {i} {}", long_text(200))));
+        }
+        let total = crate::estimate_messages_tokens(&msgs);
+        let budget = total * 50 / 100;
+        let compactor = make_compactor(budget, 1);
+        let result = compactor.compact(&msgs);
+
+        assert!(result.compacted);
+        let remaining = crate::estimate_messages_tokens(&result.messages);
+        // tokens_freed should approximately equal (total - remaining).
+        // Allow for rounding: within 10 tokens.
+        let expected_freed = total - remaining;
+        assert!(
+            (result.tokens_freed as isize - expected_freed as isize).unsigned_abs() <= 10,
+            "tokens_freed {} should ≈ {} (total {total} - remaining {remaining})",
+            result.tokens_freed,
+            expected_freed,
+        );
+    }
 }
