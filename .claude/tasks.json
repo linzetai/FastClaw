@@ -489,7 +489,7 @@
             "reactive compact 能从 200k tokens 恢复到 128k 以内",
             "系统消息和当前 user turn 在所有场景中都保留"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P1-14",

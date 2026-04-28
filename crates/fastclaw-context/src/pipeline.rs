@@ -1,4 +1,4 @@
-use fastclaw_core::types::ChatMessage;
+use fastclaw_core::types::{ChatMessage, Role};
 
 use crate::compressor::{
     estimate_messages_tokens, CompactionStrategy, ContextCompactor, DEFAULT_IMPORTANCE_MAX_MESSAGES,
@@ -100,6 +100,12 @@ impl ContextPipeline {
         let mut meta = CompactionMetadata::default();
         let mut current = messages.to_vec();
 
+        let original_system: Vec<ChatMessage> = messages
+            .iter()
+            .filter(|m| m.role == Role::System)
+            .cloned()
+            .collect();
+
         // Layer 1: Snip
         if self.config.enable_snip {
             let result = self.run_snip(&current);
@@ -107,7 +113,7 @@ impl ContextPipeline {
                 meta.snip_applied = true;
                 meta.snip_tokens_freed = result.tokens_freed;
                 meta.snip_rounds_removed = result.rounds_removed;
-                current = result.messages;
+                current = Self::ensure_system_messages(&result.messages, &original_system);
             }
         }
 
@@ -154,6 +160,28 @@ impl ContextPipeline {
     /// Access the current config.
     pub fn config(&self) -> &PipelineConfig {
         &self.config
+    }
+
+    /// Re-insert any system messages removed by a compaction layer.
+    fn ensure_system_messages(
+        compacted: &[ChatMessage],
+        original_system: &[ChatMessage],
+    ) -> Vec<ChatMessage> {
+        if original_system.is_empty() {
+            return compacted.to_vec();
+        }
+        let existing_sys = compacted.iter().filter(|m| m.role == Role::System).count();
+        if existing_sys >= original_system.len() {
+            return compacted.to_vec();
+        }
+        let non_sys: Vec<ChatMessage> = compacted
+            .iter()
+            .filter(|m| m.role != Role::System)
+            .cloned()
+            .collect();
+        let mut result = original_system.to_vec();
+        result.extend(non_sys);
+        result
     }
 
     fn run_snip(&self, messages: &[ChatMessage]) -> SnipResult {
@@ -304,7 +332,11 @@ mod tests {
         });
         let (_, meta) = pipeline.pre_query_compact(&msgs);
         assert!(meta.snip_applied);
-        assert_eq!(meta.total_tokens_freed, meta.snip_tokens_freed);
+        assert!(meta.snip_tokens_freed > 0);
+        // total_tokens_freed may be slightly less than snip_tokens_freed when
+        // system messages are restored after snip removes round 0.
+        assert!(meta.total_tokens_freed <= meta.snip_tokens_freed);
+        assert!(meta.total_tokens_freed > 0);
     }
 
     #[test]
@@ -331,5 +363,161 @@ mod tests {
         let (result, meta) = pipeline.pre_query_compact(&msgs);
         let actual = estimate_messages_tokens(&result);
         assert_eq!(meta.tokens_after, actual);
+    }
+
+    // ====================================================================
+    // Integration tests — P1-13
+    // ====================================================================
+
+    /// Build a large conversation: 200 rounds, ~4000 chars per message.
+    /// Total ≈ 402k tokens (well above 128k context window).
+    fn build_large_conversation() -> Vec<ChatMessage> {
+        build_conversation(200, 4000)
+    }
+
+    #[test]
+    fn integration_200_rounds_pre_query_fits_128k() {
+        let context_window = 128_000;
+        let msgs = build_large_conversation();
+        let total = estimate_messages_tokens(&msgs);
+        assert!(
+            total > context_window,
+            "precondition: raw 200-round conversation ({total} tokens) must exceed 128k"
+        );
+
+        let pipeline = ContextPipeline::new(PipelineConfig {
+            snip_max_tokens: context_window,
+            reactive_target_tokens: context_window,
+            ..Default::default()
+        });
+        let (result, meta) = pipeline.pre_query_compact(&msgs);
+        let result_tokens = estimate_messages_tokens(&result);
+
+        assert!(
+            result_tokens <= context_window,
+            "post-compact tokens ({result_tokens}) must be <= {context_window}"
+        );
+        assert!(meta.snip_applied, "snip layer must activate for 200 rounds");
+        assert_eq!(meta.tokens_after, result_tokens);
+    }
+
+    #[test]
+    fn integration_200_rounds_compression_ratio_at_least_3x() {
+        let context_window = 128_000;
+        let msgs = build_large_conversation();
+        let total = estimate_messages_tokens(&msgs);
+
+        let pipeline = ContextPipeline::new(PipelineConfig {
+            snip_max_tokens: context_window,
+            reactive_target_tokens: context_window,
+            ..Default::default()
+        });
+        let (result, meta) = pipeline.pre_query_compact(&msgs);
+        let result_tokens = meta.tokens_after;
+
+        let ratio = total as f64 / result_tokens.max(1) as f64;
+        assert!(
+            ratio >= 3.0,
+            "compression ratio {ratio:.2}x (original {total}, after {result_tokens}) must be >= 3x"
+        );
+        assert!(result.len() < msgs.len());
+    }
+
+    #[test]
+    fn integration_reactive_recovers_200k_to_128k() {
+        let context_window = 128_000;
+        let msgs = build_conversation(200, 2000);
+        let total = estimate_messages_tokens(&msgs);
+        assert!(
+            total > context_window,
+            "precondition: ~200k tokens ({total}) must exceed 128k"
+        );
+
+        let pipeline = ContextPipeline::new(PipelineConfig {
+            reactive_target_tokens: context_window,
+            ..Default::default()
+        });
+        let result = pipeline.reactive_compact(&msgs);
+
+        assert!(result.recovered, "reactive compact must recover");
+        assert!(
+            result.tokens_after <= context_window,
+            "post-reactive tokens ({}) must be <= {context_window}",
+            result.tokens_after
+        );
+        assert!(result.level_used.is_some());
+    }
+
+    #[test]
+    fn integration_system_messages_survive_all_compaction() {
+        let context_window = 128_000;
+        let mut msgs = vec![
+            sys("You are FastClaw, a helpful AI assistant."),
+            sys("Always respond in the user's language."),
+        ];
+        for i in 0..200 {
+            msgs.push(user(&format!("question {i}: {}", long_text(4000))));
+            msgs.push(assistant(&format!("answer {i}: {}", long_text(4000))));
+        }
+
+        let pipeline = ContextPipeline::new(PipelineConfig {
+            snip_max_tokens: context_window,
+            reactive_target_tokens: context_window,
+            ..Default::default()
+        });
+
+        // pre_query_compact
+        let (pre_result, _) = pipeline.pre_query_compact(&msgs);
+        let sys_count = pre_result.iter().filter(|m| m.role == Role::System).count();
+        assert!(
+            sys_count >= 2,
+            "pre_query must preserve both system messages, got {sys_count}"
+        );
+
+        // reactive_compact
+        let reactive_result = pipeline.reactive_compact(&msgs);
+        assert!(reactive_result.recovered);
+        let sys_count_r = reactive_result
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::System)
+            .count();
+        assert!(
+            sys_count_r >= 2,
+            "reactive must preserve both system messages, got {sys_count_r}"
+        );
+    }
+
+    #[test]
+    fn integration_last_user_turn_survives_all_compaction() {
+        let context_window = 128_000;
+        let mut msgs = build_large_conversation();
+        let sentinel = "UNIQUE_SENTINEL_LAST_USER_TURN_12345";
+        msgs.push(user(sentinel));
+
+        let pipeline = ContextPipeline::new(PipelineConfig {
+            snip_max_tokens: context_window,
+            reactive_target_tokens: context_window,
+            ..Default::default()
+        });
+
+        // pre_query_compact
+        let (pre_result, _) = pipeline.pre_query_compact(&msgs);
+        let has_sentinel = pre_result.iter().any(|m| {
+            m.text_content()
+                .as_deref()
+                .map_or(false, |t| t.contains(sentinel))
+        });
+        assert!(has_sentinel, "pre_query must preserve the last user turn");
+
+        // reactive_compact
+        let reactive_result = pipeline.reactive_compact(&msgs);
+        assert!(reactive_result.recovered);
+        let has_sentinel_r = reactive_result.messages.iter().any(|m| {
+            m.text_content()
+                .as_deref()
+                .map_or(false, |t| t.contains(sentinel))
+        });
+        assert!(has_sentinel_r, "reactive must preserve the last user turn");
     }
 }
