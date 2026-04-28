@@ -368,7 +368,7 @@
             "至少 4 个测试用例覆盖三级降级和边界条件",
             "cargo test -p fastclaw-context 全通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P1-06",

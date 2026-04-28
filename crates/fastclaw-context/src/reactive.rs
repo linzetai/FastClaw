@@ -152,15 +152,16 @@ impl ReactiveCompactor {
 
     /// Level 2: Token-budget compaction — keeps system messages and fills the
     /// remaining budget with the most recent conversation messages.
-    /// Uses a 90% inner budget to leave room for the summary message overhead
-    /// that `ContextCompactor::TokenBudget` injects.
+    /// Uses an 80% inner budget to leave room for the summary message overhead
+    /// that `ContextCompactor::TokenBudget` injects (the summary can be
+    /// significant when many messages are evicted).
     fn try_importance(
         &self,
         messages: &[ChatMessage],
         original_system: &[ChatMessage],
     ) -> Option<ReactiveCompactResult> {
         let target = self.config.target_tokens;
-        let inner_budget = target * 90 / 100;
+        let inner_budget = target * 80 / 100;
 
         let strategy = CompactionStrategy::TokenBudget {
             max_tokens: inner_budget,
@@ -384,5 +385,102 @@ mod tests {
         let result = compactor.compact(&msgs);
         assert!(!result.recovered, "system msg alone exceeds budget");
         assert_eq!(result.level_used, Some(3));
+    }
+
+    #[test]
+    fn empty_messages_is_no_op() {
+        let compactor = ReactiveCompactor::new(ReactiveCompactorConfig::default());
+        let result = compactor.compact(&[]);
+        assert!(result.recovered);
+        assert!(result.level_used.is_none());
+        assert!(result.messages.is_empty());
+        assert_eq!(result.tokens_after, 0);
+    }
+
+    #[test]
+    fn level2_escalation_when_snip_insufficient() {
+        // Force snip to fail by setting min_rounds_to_keep very high so it
+        // can't remove enough rounds. Level 2 (token budget) should then succeed.
+        let msgs = build_conversation(10, 800);
+        let total = estimate_messages_tokens(&msgs);
+        let budget = total * 50 / 100;
+
+        let compactor = ReactiveCompactor::new(ReactiveCompactorConfig {
+            target_tokens: budget,
+            snip_min_rounds: 9, // protect almost all rounds so snip can't help
+            hard_truncate_keep: 6,
+        });
+        let result = compactor.compact(&msgs);
+        assert!(result.recovered);
+        assert_eq!(
+            result.level_used,
+            Some(2),
+            "snip should fail (too many protected rounds), level 2 should handle it"
+        );
+        assert!(result.tokens_after <= budget);
+    }
+
+    #[test]
+    fn tokens_after_matches_actual_estimate() {
+        let msgs = build_conversation(15, 500);
+        let total = estimate_messages_tokens(&msgs);
+        let budget = total * 60 / 100;
+
+        let compactor = ReactiveCompactor::new(ReactiveCompactorConfig {
+            target_tokens: budget,
+            ..Default::default()
+        });
+        let result = compactor.compact(&msgs);
+        assert!(result.recovered);
+        let actual = estimate_messages_tokens(&result.messages);
+        assert_eq!(
+            result.tokens_after, actual,
+            "tokens_after should match actual estimate"
+        );
+    }
+
+    #[test]
+    fn message_order_preserved_after_compaction() {
+        let mut msgs = vec![sys("system")];
+        for i in 0..8 {
+            msgs.push(user(&format!("q{i}")));
+            msgs.push(assistant(&format!("a{i}")));
+        }
+        let total = estimate_messages_tokens(&msgs);
+        let budget = total * 70 / 100;
+
+        let compactor = ReactiveCompactor::new(ReactiveCompactorConfig {
+            target_tokens: budget,
+            ..Default::default()
+        });
+        let result = compactor.compact(&msgs);
+        assert!(result.recovered);
+
+        // Verify system messages come first.
+        let first_non_sys = result
+            .messages
+            .iter()
+            .position(|m| m.role != Role::System);
+        if let Some(pos) = first_non_sys {
+            for m in &result.messages[..pos] {
+                assert_eq!(m.role, Role::System);
+            }
+        }
+
+        // Verify user-assistant ordering is maintained in the conversation portion.
+        let conv: Vec<&ChatMessage> = result
+            .messages
+            .iter()
+            .filter(|m| m.role != Role::System)
+            .collect();
+        for window in conv.windows(2) {
+            if window[0].role == Role::User {
+                assert_eq!(
+                    window[1].role,
+                    Role::Assistant,
+                    "assistant should follow user"
+                );
+            }
+        }
     }
 }
