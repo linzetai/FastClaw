@@ -9,6 +9,7 @@ use crate::chat_pipeline::{
     after_chat, maybe_spawn_smart_title_background, setup_chat, SetupChatOptions,
 };
 use crate::state::AppState;
+use fastclaw_agent::QueryEngine;
 use fastclaw_core::types::{AgentId, ChatMessage, ChatRequest, StreamEvent};
 
 use super::send_resp;
@@ -512,6 +513,111 @@ pub async fn spawn_chat(
             guard.remove(rid);
         }
     });
+}
+
+/// Stateful chat submission via `QueryEngine`. Each session gets its own
+/// `QueryEngine` instance that accumulates messages across turns. The engine
+/// is automatically dropped when the WebSocket connection closes.
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_chat_submit(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    state: &AppState,
+    query_engines: &mut HashMap<String, QueryEngine>,
+    owned_sessions: &mut HashSet<String>,
+    bg_tx: tokio::sync::mpsc::Sender<WsResponse>,
+    req_id: Option<String>,
+    params: serde_json::Value,
+) {
+    let Some(message_text) = params.get("message").and_then(|v| v.as_str()) else {
+        send_resp(
+            sender,
+            &WsResponse {
+                id: req_id,
+                msg_type: "error".into(),
+                data: None,
+                error: Some(json!({"code": -32602, "message": "message (string) required"})),
+            },
+        )
+        .await;
+        return;
+    };
+
+    let session_key = params
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default")
+        .to_string();
+
+    let agent_id_str = params
+        .get("agentId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("main");
+
+    if !query_engines.contains_key(&session_key) {
+        let lookup_req = ChatRequest {
+            model: None,
+            messages: vec![],
+            agent_id: Some(AgentId::from(agent_id_str.to_string())),
+            session_id: None,
+            stream: false,
+            temperature: None,
+            max_tokens: None,
+            tools: None,
+            slash_intent: None,
+            work_dir: None,
+        };
+        let agent_config = {
+            let router = state.rt.router.read().await;
+            match router.resolve(&lookup_req).cloned() {
+                Ok(cfg) => cfg,
+                Err(_) => {
+                    send_resp(
+                        sender,
+                        &WsResponse {
+                            id: req_id,
+                            msg_type: "error".into(),
+                            data: None,
+                            error: Some(
+                                json!({"code": 404, "message": format!("agent not found: {}", agent_id_str)}),
+                            ),
+                        },
+                    )
+                    .await;
+                    return;
+                }
+            }
+        };
+
+        let engine = QueryEngine::new(
+            state.rt.runtime.clone(),
+            agent_config,
+            state.rt.tool_registry.clone(),
+        );
+        query_engines.insert(session_key.clone(), engine);
+    }
+
+    let engine = query_engines.get_mut(&session_key).unwrap();
+    let message_text = message_text.to_string();
+    let rid = req_id.clone();
+
+    let mut rx = engine.submit_message(&message_text).await;
+
+    let rid_clone = rid.clone();
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            let is_done = matches!(&event, StreamEvent::Done { .. });
+            let resp = event_to_response(&event, &rid_clone, &state_clone, None);
+            if bg_tx.send(resp).await.is_err() {
+                break;
+            }
+            if is_done {
+                break;
+            }
+        }
+    });
+
+    owned_sessions.insert(session_key);
 }
 
 pub fn event_to_response(

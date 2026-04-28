@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
 use crate::state::AppState;
+use fastclaw_agent::QueryEngine;
 use fastclaw_security::ApiKeyAuth;
 
 static CONN_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -71,6 +72,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, auth: ApiKeyAuth, pre
     let mut broadcast_rx = state.strm.ws_broadcast.subscribe();
     let mut subscriptions: HashSet<String> = HashSet::new();
     let mut owned_sessions: HashSet<String> = HashSet::new();
+    let mut query_engines: HashMap<String, QueryEngine> = HashMap::new();
     let cancel = CancellationToken::new();
     let active_chat_cancels: Arc<tokio::sync::Mutex<HashMap<String, CancellationToken>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
@@ -226,6 +228,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, auth: ApiKeyAuth, pre
                     &state,
                     &mut subscriptions,
                     &mut owned_sessions,
+                    &mut query_engines,
                     &bg_tx,
                     &cancel,
                     active_chat_cancels.clone(),
@@ -247,6 +250,7 @@ async fn dispatch(
     state: &AppState,
     subscriptions: &mut HashSet<String>,
     owned_sessions: &mut HashSet<String>,
+    query_engines: &mut HashMap<String, QueryEngine>,
     bg_tx: &tokio::sync::mpsc::Sender<WsResponse>,
     cancel: &CancellationToken,
     active_chat_cancels: Arc<tokio::sync::Mutex<HashMap<String, CancellationToken>>>,
@@ -276,6 +280,12 @@ async fn dispatch(
                 active_chat_cancels.clone(),
                 id,
                 req.params,
+            )
+            .await
+        }
+        "chat.submit" => {
+            chat::handle_chat_submit(
+                sender, state, query_engines, owned_sessions, bg_tx.clone(), id, req.params,
             )
             .await
         }

@@ -568,7 +568,7 @@
             "断开连接后 QueryEngine 被清理",
             "cargo test -p fastclaw-gateway 全通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P2-05",
