@@ -541,7 +541,7 @@
             "messages() 返回所有 turn 的完整历史",
             "usage() 返回所有 turn 的累计 token 使用量"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P2-03",

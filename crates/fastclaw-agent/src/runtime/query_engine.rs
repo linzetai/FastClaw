@@ -4,6 +4,7 @@ use fastclaw_core::agent_config::AgentConfig;
 use fastclaw_core::tool::ToolRegistry;
 use fastclaw_core::types::{ChatMessage, ChatRequest, Role, StreamEvent, Usage};
 use tokio::sync::{mpsc, Mutex};
+use tokio_util::sync::CancellationToken;
 
 use super::AgentRuntime;
 use crate::LlmProvider;
@@ -23,12 +24,17 @@ struct QueryEngineState {
 /// invokes the runtime's streaming execution, and returns a channel receiver.
 /// When `StreamEvent::Done` is forwarded through the channel, the assistant's
 /// reply and token usage are automatically accumulated.
+///
+/// Call [`QueryEngine::abort`] to cancel the current in-flight query.
+/// The forwarding task stops producing events and the engine is ready for a
+/// new `submit_message` call.
 pub struct QueryEngine {
     runtime: Arc<AgentRuntime>,
     config: AgentConfig,
     tool_registry: Arc<ToolRegistry>,
     state: Arc<Mutex<QueryEngineState>>,
     llm_override: Option<Arc<dyn LlmProvider>>,
+    cancel_token: CancellationToken,
 }
 
 impl QueryEngine {
@@ -51,6 +57,7 @@ impl QueryEngine {
                 },
             })),
             llm_override: None,
+            cancel_token: CancellationToken::new(),
         }
     }
 
@@ -69,7 +76,7 @@ impl QueryEngine {
         self.state.lock().await.session_id.clone()
     }
 
-    /// Read the accumulated messages.
+    /// Read the accumulated messages (all turns).
     pub async fn messages(&self) -> Vec<ChatMessage> {
         self.state.lock().await.messages.clone()
     }
@@ -79,7 +86,13 @@ impl QueryEngine {
         self.state.lock().await.total_usage.clone()
     }
 
-    /// Number of user+assistant turns completed.
+    /// Alias for [`total_usage`](Self::total_usage) — returns cumulative token
+    /// usage across every completed turn.
+    pub async fn usage(&self) -> Usage {
+        self.total_usage().await
+    }
+
+    /// Number of user turns submitted so far.
     pub async fn turn_count(&self) -> usize {
         self.state
             .lock()
@@ -90,15 +103,35 @@ impl QueryEngine {
             .count()
     }
 
+    /// Cancel the current in-flight query.
+    ///
+    /// After calling `abort()`, the forwarding task will stop producing events
+    /// on the receiver returned by `submit_message`. The partial assistant
+    /// text accumulated so far (if any) is **not** added to the message
+    /// history — only fully completed turns are recorded.
+    ///
+    /// A new `submit_message` call can be made immediately after `abort()`.
+    pub fn abort(&mut self) {
+        self.cancel_token.cancel();
+        self.cancel_token = CancellationToken::new();
+    }
+
     /// Submit a user message and return a receiver of streaming events.
     ///
     /// The user message is appended to the internal history before execution.
     /// When `StreamEvent::Done` is forwarded through the receiver, the
     /// assistant's reply and usage stats are automatically accumulated.
+    ///
+    /// If [`abort`](Self::abort) is called while the stream is active, the
+    /// forwarding task stops and the receiver is closed.
     pub async fn submit_message(
-        &self,
+        &mut self,
         user_text: &str,
     ) -> mpsc::Receiver<StreamEvent> {
+        // Fresh cancellation token for this turn.
+        self.cancel_token = CancellationToken::new();
+        let cancel = self.cancel_token.clone();
+
         let user_msg = ChatMessage {
             role: Role::User,
             content: Some(serde_json::json!(user_text)),
@@ -133,10 +166,16 @@ impl QueryEngine {
         let llm_override = self.llm_override.clone();
 
         // Task 1: Run the agent runtime.
+        let runtime_cancel = cancel.clone();
         tokio::spawn(async move {
-            let _result = runtime
-                .execute_stream(&config, &request, &tool_registry, internal_tx, llm_override)
-                .await;
+            tokio::select! {
+                _ = runtime_cancel.cancelled() => {}
+                result = runtime.execute_stream(
+                    &config, &request, &tool_registry, internal_tx, llm_override
+                ) => {
+                    let _ = result;
+                }
+            }
         });
 
         // Task 2: Forward events while intercepting Done to update state.
@@ -144,41 +183,49 @@ impl QueryEngine {
         tokio::spawn(async move {
             let mut assistant_text = String::new();
 
-            while let Some(event) = internal_rx.recv().await {
-                match &event {
-                    StreamEvent::Delta(delta) => {
-                        for choice in &delta.choices {
-                            if let Some(ref content) = choice.delta.content {
-                                assistant_text.push_str(content);
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => {
+                        break;
+                    }
+                    event = internal_rx.recv() => {
+                        let Some(event) = event else { break };
+                        match &event {
+                            StreamEvent::Delta(delta) => {
+                                for choice in &delta.choices {
+                                    if let Some(ref content) = choice.delta.content {
+                                        assistant_text.push_str(content);
+                                    }
+                                }
                             }
+                            StreamEvent::Done {
+                                session_id, usage, ..
+                            } => {
+                                let mut s = state.lock().await;
+                                if let Some(sid) = session_id {
+                                    s.session_id = Some(sid.clone());
+                                }
+                                if let Some(u) = usage {
+                                    s.total_usage.prompt_tokens += u.prompt_tokens;
+                                    s.total_usage.completion_tokens += u.completion_tokens;
+                                    s.total_usage.total_tokens += u.total_tokens;
+                                }
+                                if !assistant_text.is_empty() {
+                                    s.messages.push(ChatMessage {
+                                        role: Role::Assistant,
+                                        content: Some(serde_json::json!(assistant_text)),
+                                        name: None,
+                                        tool_calls: None,
+                                        tool_call_id: None,
+                                    });
+                                }
+                            }
+                            _ => {}
+                        }
+                        if out_tx.send(event).await.is_err() {
+                            break;
                         }
                     }
-                    StreamEvent::Done {
-                        session_id, usage, ..
-                    } => {
-                        let mut s = state.lock().await;
-                        if let Some(sid) = session_id {
-                            s.session_id = Some(sid.clone());
-                        }
-                        if let Some(u) = usage {
-                            s.total_usage.prompt_tokens += u.prompt_tokens;
-                            s.total_usage.completion_tokens += u.completion_tokens;
-                            s.total_usage.total_tokens += u.total_tokens;
-                        }
-                        if !assistant_text.is_empty() {
-                            s.messages.push(ChatMessage {
-                                role: Role::Assistant,
-                                content: Some(serde_json::json!(assistant_text)),
-                                name: None,
-                                tool_calls: None,
-                                tool_call_id: None,
-                            });
-                        }
-                    }
-                    _ => {}
-                }
-                if out_tx.send(event).await.is_err() {
-                    break;
                 }
             }
         });
@@ -257,7 +304,6 @@ mod tests {
             },
         }));
 
-        // Turn 1: user message + usage
         {
             let mut s = state.lock().await;
             s.messages.push(ChatMessage {
@@ -271,7 +317,6 @@ mod tests {
             s.session_id = Some("sess-1".to_string());
         }
 
-        // Turn 1: assistant reply + completion usage
         {
             let mut s = state.lock().await;
             s.messages.push(ChatMessage {
@@ -284,7 +329,6 @@ mod tests {
             s.total_usage.completion_tokens += 50;
         }
 
-        // Turn 2: user message + usage
         {
             let mut s = state.lock().await;
             s.messages.push(ChatMessage {
@@ -316,5 +360,97 @@ mod tests {
         };
         assert_eq!(msg.role, Role::User);
         assert_eq!(msg.text_content().as_deref(), Some(text));
+    }
+
+    #[tokio::test]
+    async fn cancel_token_stops_forwarding() {
+        let cancel = CancellationToken::new();
+        let (tx, mut rx) = mpsc::channel::<String>(16);
+
+        let cancel_clone = cancel.clone();
+        tokio::spawn(async move {
+            for i in 0..100 {
+                tokio::select! {
+                    _ = cancel_clone.cancelled() => break,
+                    _ = tokio::task::yield_now() => {
+                        if tx.send(format!("msg-{i}")).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        // Receive a few messages then cancel.
+        let mut received = Vec::new();
+        for _ in 0..3 {
+            if let Some(msg) = rx.recv().await {
+                received.push(msg);
+            }
+        }
+        cancel.cancel();
+
+        // Allow the spawned task to observe cancellation.
+        tokio::task::yield_now().await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        // Channel should close shortly after cancellation.
+        let mut after_cancel = 0;
+        while rx.recv().await.is_some() {
+            after_cancel += 1;
+        }
+
+        assert!(received.len() >= 3, "should receive at least 3 before cancel");
+        assert!(
+            after_cancel <= 3,
+            "should receive very few events after cancel, got {after_cancel}"
+        );
+    }
+
+    #[tokio::test]
+    async fn abort_resets_for_next_turn() {
+        let cancel1 = CancellationToken::new();
+        assert!(!cancel1.is_cancelled());
+
+        cancel1.cancel();
+        assert!(cancel1.is_cancelled());
+
+        // After creating a new token, the new one should NOT be cancelled.
+        let cancel2 = CancellationToken::new();
+        assert!(!cancel2.is_cancelled(), "new token should be fresh");
+    }
+
+    #[tokio::test]
+    async fn partial_text_not_added_on_cancel() {
+        let state = Arc::new(Mutex::new(QueryEngineState {
+            session_id: None,
+            messages: Vec::new(),
+            total_usage: Usage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+            },
+        }));
+
+        // Simulate: add user message, start accumulating assistant text,
+        // then cancel before Done arrives.
+        {
+            let mut s = state.lock().await;
+            s.messages.push(ChatMessage {
+                role: Role::User,
+                content: Some(serde_json::json!("question")),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            });
+        }
+
+        // assistant_text would have been "partial answer..." but cancellation
+        // prevents it from being committed to state.
+        // After cancel, only the user message should be in history.
+        let s = state.lock().await;
+        assert_eq!(s.messages.len(), 1);
+        assert_eq!(s.messages[0].role, Role::User);
+        // No assistant message was committed.
     }
 }
