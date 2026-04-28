@@ -3,6 +3,7 @@ pub mod compressor;
 pub mod engine;
 pub mod keyword_interceptor;
 mod model_context;
+pub mod pipeline;
 pub mod reactive;
 pub mod snip;
 
@@ -23,6 +24,7 @@ pub use engine::{
 };
 pub use keyword_interceptor::MemoryKeywordInterceptor;
 pub use budget::{BudgetDecision, StopReason, TokenBudgetTracker};
+pub use pipeline::{CompactionMetadata, ContextPipeline, PipelineConfig};
 pub use reactive::{ReactiveCompactResult, ReactiveCompactor, ReactiveCompactorConfig};
 pub use snip::{group_by_api_round, ApiRound, SnipCompactor, SnipCompactorConfig, SnipResult};
 pub use model_context::{

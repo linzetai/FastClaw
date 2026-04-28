@@ -445,7 +445,7 @@
             "Collapse 为 None 时跳过第三层",
             "所有层可通过配置独立开关"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P1-11",
