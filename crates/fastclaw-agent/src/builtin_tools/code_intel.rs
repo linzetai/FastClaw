@@ -83,13 +83,37 @@ fn detect_symbol_kind_from_line(line: &str, query: &str) -> String {
 }
 
 fn parse_search_matches(raw: &str) -> Result<Vec<serde_json::Value>, String> {
-    let parsed: serde_json::Value =
-        serde_json::from_str(raw).map_err(|e| format!("invalid search result JSON: {e}"))?;
-    Ok(parsed
-        .get("matches")
-        .and_then(|m| m.as_array())
-        .cloned()
-        .unwrap_or_default())
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw) {
+        return Ok(parsed
+            .get("matches")
+            .and_then(|m| m.as_array())
+            .cloned()
+            .unwrap_or_default());
+    }
+
+    let mut matches = Vec::new();
+    for line in raw.lines() {
+        if line.starts_with("Found ") || line.starts_with('[') || line == "---" || line.is_empty() {
+            continue;
+        }
+        let mut parts = line.splitn(3, ':');
+        let path = match parts.next() {
+            Some(p) if !p.is_empty() => p,
+            _ => continue,
+        };
+        let line_no: u64 = match parts.next().and_then(|s| s.parse().ok()) {
+            Some(n) => n,
+            None => continue,
+        };
+        let text = parts.next().unwrap_or("");
+        matches.push(serde_json::json!({
+            "path": path,
+            "line": line_no,
+            "column": 0,
+            "text": text,
+        }));
+    }
+    Ok(matches)
 }
 
 fn parse_read_line(raw: &str) -> String {

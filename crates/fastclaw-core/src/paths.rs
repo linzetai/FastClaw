@@ -192,7 +192,12 @@ mod tests {
     #[test]
     fn state_dir_defaults_to_home_fastclaw() {
         let dir = resolve_state_dir();
-        assert!(dir.to_string_lossy().ends_with(".fastclaw"));
+        let dir_str = dir.to_string_lossy();
+        if cfg!(debug_assertions) {
+            assert!(dir_str.ends_with(".fastclaw-dev"), "got {dir_str}");
+        } else {
+            assert!(dir_str.ends_with(".fastclaw"), "got {dir_str}");
+        }
     }
 
     #[test]
@@ -208,7 +213,13 @@ mod tests {
     #[test]
     fn db_path_under_data() {
         let db = resolve_db_path();
-        assert!(db.to_string_lossy().contains(".fastclaw/data/sessions.db"));
+        let db_str = db.to_string_lossy();
+        let suffix = if cfg!(debug_assertions) {
+            ".fastclaw-dev/data/sessions.db"
+        } else {
+            ".fastclaw/data/sessions.db"
+        };
+        assert!(db_str.contains(suffix), "got {db_str}");
     }
 
     #[test]

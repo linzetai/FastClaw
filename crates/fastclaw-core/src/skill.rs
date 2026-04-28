@@ -850,6 +850,10 @@ mod tests {
     #[test]
     fn global_dir_ends_with_fastclaw_skills() {
         let dir = resolve_global_skills_dir();
-        assert!(dir.ends_with(".fastclaw/skills"));
+        if cfg!(debug_assertions) {
+            assert!(dir.ends_with(".fastclaw-dev/skills"), "got {}", dir.display());
+        } else {
+            assert!(dir.ends_with(".fastclaw/skills"), "got {}", dir.display());
+        }
     }
 }

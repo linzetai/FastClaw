@@ -704,7 +704,7 @@
             "cargo clippy --workspace -- -D warnings 零警告",
             "新增代码覆盖率 > 80%"
           ],
-          "status": "pending"
+          "status": "done"
         }
       ]
     },
