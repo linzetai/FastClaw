@@ -327,7 +327,7 @@
             "含 error 的 round 不被删除",
             "返回正确的 tokens_freed 计数"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P1-03",

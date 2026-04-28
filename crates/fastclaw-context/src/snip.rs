@@ -81,6 +81,138 @@ pub fn group_by_api_round(messages: &[ChatMessage]) -> Vec<ApiRound> {
         .collect()
 }
 
+/// Configuration for the snip compactor.
+pub struct SnipCompactorConfig {
+    /// Maximum token budget. If total tokens exceed this, oldest rounds are removed.
+    pub max_tokens: usize,
+    /// Minimum number of recent rounds to keep, even if over budget.
+    pub min_rounds_to_keep: usize,
+}
+
+/// Result of a snip compaction pass.
+#[derive(Debug)]
+pub struct SnipResult {
+    /// The surviving messages after compaction (flattened from kept rounds).
+    pub messages: Vec<ChatMessage>,
+    /// Number of tokens freed by removing rounds.
+    pub tokens_freed: usize,
+    /// Number of rounds removed.
+    pub rounds_removed: usize,
+    /// Whether any compaction actually happened.
+    pub compacted: bool,
+}
+
+/// Snip compactor: removes entire API rounds from oldest-first when the
+/// conversation exceeds the token budget.
+pub struct SnipCompactor {
+    config: SnipCompactorConfig,
+}
+
+impl SnipCompactor {
+    pub fn new(config: SnipCompactorConfig) -> Self {
+        Self { config }
+    }
+
+    /// Run snip compaction. Returns a no-op result if tokens are within budget.
+    pub fn compact(&self, messages: &[ChatMessage]) -> SnipResult {
+        let total_tokens = super::estimate_messages_tokens(messages);
+
+        if total_tokens <= self.config.max_tokens {
+            return SnipResult {
+                messages: messages.to_vec(),
+                tokens_freed: 0,
+                rounds_removed: 0,
+                compacted: false,
+            };
+        }
+
+        let rounds = group_by_api_round(messages);
+        if rounds.is_empty() {
+            return SnipResult {
+                messages: Vec::new(),
+                tokens_freed: 0,
+                rounds_removed: 0,
+                compacted: false,
+            };
+        }
+
+        let n = rounds.len();
+        let protected_start = n.saturating_sub(self.config.min_rounds_to_keep);
+
+        let mut tokens_freed = 0usize;
+        let mut current_tokens = total_tokens;
+        let mut remove_set = vec![false; n];
+
+        // Walk from oldest round forward, skipping protected recent rounds.
+        for (i, round) in rounds.iter().enumerate() {
+            if current_tokens <= self.config.max_tokens {
+                break;
+            }
+            if i >= protected_start {
+                break;
+            }
+            if round_contains_error(round) {
+                continue;
+            }
+            remove_set[i] = true;
+            tokens_freed += round.estimated_tokens;
+            current_tokens = current_tokens.saturating_sub(round.estimated_tokens);
+        }
+
+        let rounds_removed = remove_set.iter().filter(|&&r| r).count();
+        if rounds_removed == 0 {
+            return SnipResult {
+                messages: messages.to_vec(),
+                tokens_freed: 0,
+                rounds_removed: 0,
+                compacted: false,
+            };
+        }
+
+        let kept_messages: Vec<ChatMessage> = rounds
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| !remove_set[*i])
+            .flat_map(|(_, r)| r.messages)
+            .collect();
+
+        SnipResult {
+            messages: kept_messages,
+            tokens_freed,
+            rounds_removed,
+            compacted: true,
+        }
+    }
+}
+
+/// Heuristic: a round "contains an error" if any tool result message includes
+/// a JSON object with an `"error"` or `"is_error"` key set to a truthy value,
+/// or if any message text contains a `[ERROR]` / `Error:` marker.
+fn round_contains_error(round: &ApiRound) -> bool {
+    for msg in &round.messages {
+        if msg.role != Role::Tool {
+            continue;
+        }
+        if let Some(content) = &msg.content {
+            // Check for structured error indicators.
+            if let Some(obj) = content.as_object() {
+                if obj.get("error").is_some() || obj.get("is_error").is_some() {
+                    return true;
+                }
+            }
+            // Check for text markers.
+            let text = match content.as_str() {
+                Some(s) => s.to_string(),
+                None => content.to_string(),
+            };
+            if text.contains("[ERROR]") || text.contains("\"is_error\":true") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
