@@ -124,7 +124,7 @@
             "routes/mod.rs 中无 dag 相关声明",
             "cargo check -p fastclaw-gateway 编译通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P0-10",

@@ -400,31 +400,10 @@ fn spawn_cron_scheduler(state: AppState) {
 
         async fn trigger_dag_execute(
             &self,
-            dag: &serde_json::Value,
-            input: Option<&serde_json::Value>,
+            _dag: &serde_json::Value,
+            _input: Option<&serde_json::Value>,
         ) -> anyhow::Result<serde_json::Value> {
-            let dag_json = serde_json::to_string(dag)?;
-            let def = fastclaw_dag::DagDefinition::from_json(&dag_json)?;
-            let graph = fastclaw_dag::DagGraph::build(&def)?;
-            let handler = Arc::new(routes::CronDagHandler {
-                tool_registry: self.state.rt.tool_registry.clone(),
-                runtime: self.state.rt.runtime.clone(),
-                router: self.state.rt.router.clone(),
-            });
-            let dag_run_id = uuid::Uuid::new_v4().to_string();
-            let executor = fastclaw_dag::DagExecutor::with_checkpoint_store(
-                graph,
-                handler,
-                self.state.store.dag_checkpoint_store.clone(),
-                dag_run_id,
-            );
-            let ctx = if let Some(inp) = input {
-                fastclaw_dag::ExecutionContext::with_input(inp.clone())
-            } else {
-                fastclaw_dag::ExecutionContext::new()
-            };
-            let result = executor.run(ctx).await?;
-            Ok(serde_json::to_value(result.snapshot().await)?)
+            anyhow::bail!("DAG execution has been removed")
         }
 
         async fn trigger_webhook(

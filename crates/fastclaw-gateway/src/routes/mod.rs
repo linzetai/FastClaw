@@ -4,7 +4,6 @@ mod channel;
 mod chat;
 pub mod common;
 mod cron;
-mod dag;
 mod dynamic_routes;
 mod error;
 mod evolution;
@@ -25,7 +24,6 @@ pub use common::{
     apply_model_router_for_chat, filtered_tool_definitions, map_router_resolve_err,
     record_chat_budget_actual, record_chat_budget_stream_estimate, try_reserve_budget,
 };
-pub(crate) use dag::CronDagHandler;
 pub use memory::auto_record_episode;
 pub use session::{resolve_session_context, ResolvedSession};
 
@@ -107,10 +105,6 @@ pub fn api_routes() -> Router<AppState> {
             "/api/v1/evolution/candidates/:candidate_id/reject",
             post(evolution::reject_candidate),
         )
-        .route("/api/v1/dag/workflows", get(dag::dag_list_workflows))
-        .route("/api/v1/dag/validate", post(dag::dag_validate))
-        .route("/api/v1/dag/execute", post(dag::dag_execute))
-        .route("/api/v1/dag/run", post(dag::dag_execute))
         .route("/api/v1/cron/jobs", get(cron::list_cron_jobs))
         .route("/api/v1/cron/jobs", post(cron::upsert_cron_job))
         .route("/api/v1/cron/jobs/:job_id", get(cron::get_cron_job))
