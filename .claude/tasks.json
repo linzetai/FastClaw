@@ -216,7 +216,7 @@
             "workspace Cargo.toml 中无 fastclaw-plugin",
             "cargo check --workspace 编译通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P0-17",
