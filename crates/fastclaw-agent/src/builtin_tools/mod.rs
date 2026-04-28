@@ -117,11 +117,20 @@ pub fn register_identity_tools(registry: &ToolRegistry, workspace: Arc<AgentWork
     registry.register(Arc::new(UnifiedIdentityTool::new(workspace)));
 }
 
-/// Register todo tracking tool (todo_write) with a shared in-session store.
 /// Register the ToolSearchTool. Must be called after the registry is wrapped
 /// in `Arc`, since the tool needs a reference to search deferred tools.
 pub fn register_tool_search(registry: &Arc<ToolRegistry>) {
     registry.register(Arc::new(ToolSearchTool::new(registry.clone())));
+}
+
+/// Register SnipTool with shared messages state. The runtime updates
+/// this state before each tool iteration so SnipTool can mutate the
+/// conversation in-place.
+pub fn register_snip_tool(
+    registry: &ToolRegistry,
+    messages: std::sync::Arc<std::sync::Mutex<Vec<fastclaw_core::types::ChatMessage>>>,
+) {
+    registry.register(Arc::new(SnipTool::new(messages)));
 }
 
 pub fn register_todo_tools(registry: &ToolRegistry, store: TodoStore) {

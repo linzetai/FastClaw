@@ -678,7 +678,7 @@
             "ToolSearchTool 为 eager",
             "cargo check -p fastclaw-agent 编译通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P2-12",
