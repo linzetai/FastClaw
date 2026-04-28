@@ -17,7 +17,6 @@ use fastclaw_core::tool::ToolRegistry;
 use fastclaw_core::workspace::AgentWorkspace;
 use fastclaw_core::Router as AgentRouter;
 use fastclaw_cron::CronJobStore;
-use fastclaw_dag::CheckpointStore;
 use fastclaw_evolution::{
     FeedbackStore, LlmExtractionCallback, LlmExtractedPattern, PromptDistiller, SkillExtractor,
     SkillParam, SkillStore, TrajectoryStore,
@@ -88,7 +87,6 @@ pub struct RuntimeState {
 #[derive(Clone)]
 pub struct StorageState {
     pub session_store: Arc<SessionStore>,
-    pub dag_checkpoint_store: Arc<dyn CheckpointStore>,
     pub cron_store: Arc<CronJobStore>,
     pub cron_wake: Arc<tokio::sync::Notify>,
     pub notification_store: Arc<crate::notification_store::NotificationStore>,
@@ -1255,8 +1253,6 @@ impl AppState {
 
         let db_path = tmp.join("sessions.db");
         let session_store = Arc::new(SessionStore::open(&db_path).await?);
-        let dag_checkpoint_store: Arc<dyn CheckpointStore> =
-            Arc::new(fastclaw_dag::SqliteCheckpointStore::open(session_store.pool()).await?);
         let message_bus = Arc::new(MessageBus::new(128));
         for aid in ["main"] {
             let mut rx = message_bus.register(aid).await;
@@ -1343,7 +1339,6 @@ impl AppState {
             },
             store: StorageState {
                 session_store,
-                dag_checkpoint_store,
                 cron_store: Arc::new(cron_store),
                 cron_wake: Arc::new(tokio::sync::Notify::new()),
                 notification_store: Arc::new(notification_store),

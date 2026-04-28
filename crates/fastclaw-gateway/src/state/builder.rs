@@ -13,7 +13,6 @@ use fastclaw_core::tool::{Tool, ToolRegistry};
 use fastclaw_core::workspace::AgentWorkspace;
 use fastclaw_core::Router as AgentRouter;
 use fastclaw_cron::CronJobStore;
-use fastclaw_dag::CheckpointStore;
 use fastclaw_evolution::{
     FeedbackStore, PromptDistiller, SkillStore, TrajectoryStore,
 };
@@ -78,7 +77,6 @@ struct BuildPhase2Memory {
 
 struct BuildPhase5 {
     phase2: BuildPhase2Memory,
-    dag_checkpoint_store: Arc<dyn CheckpointStore>,
     cron_store: CronJobStore,
     notification_store: crate::notification_store::NotificationStore,
     budget_tracker: BudgetTracker,
@@ -523,11 +521,6 @@ impl StateBuilder {
         config: &FastClawConfig,
         p2: BuildPhase2Memory,
     ) -> anyhow::Result<BuildPhase5> {
-        let dag_checkpoint_store: Arc<dyn CheckpointStore> = Arc::new(
-            fastclaw_dag::SqliteCheckpointStore::open(p2.phase4.phase3.phase1.session_store.pool())
-                .await?,
-        );
-
         let cron_pool = helpers::open_memory_pool_named(&p2.phase4.phase3.phase1.db_path, "cron.db").await?;
         let cron_store = CronJobStore::open(cron_pool.clone()).await?;
         let notification_store =
@@ -564,7 +557,6 @@ impl StateBuilder {
 
         Ok(BuildPhase5 {
             phase2: p2,
-            dag_checkpoint_store,
             cron_store,
             notification_store,
             budget_tracker,
@@ -657,7 +649,6 @@ impl StateBuilder {
             },
             store: super::StorageState {
                 session_store: p5.phase2.phase4.phase3.phase1.session_store,
-                dag_checkpoint_store: p5.dag_checkpoint_store,
                 cron_store: Arc::new(p5.cron_store),
                 cron_wake: Arc::new(tokio::sync::Notify::new()),
                 notification_store: Arc::new(p5.notification_store),

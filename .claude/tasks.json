@@ -137,12 +137,12 @@
             "AppState 结构体中无 CheckpointStore 相关字段",
             "cargo check -p fastclaw-gateway 编译通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P0-11",
           "title": "删除 fastclaw-dag — 清理 Cargo.toml 并删目录",
-          "description": "从 gateway Cargo.toml 移除 fastclaw-dag 依赖。从 workspace members 移除。删除 crates/fastclaw-dag/ 目录。",
+          "description": "从 gateway Cargo.toml 移除 fastclaw-dag 依赖。从 workspace members 移除。删除 crates/fastclaw-dag/ 目录。注意：gateway 代码中的 fastclaw_dag 引用已在 P0-09/P0-10 中移除，lib.rs 中 trigger_dag_execute 已替换为 error stub。还需移除 fastclaw-cron 中 JobAction::DagExecute 变体和 JobTrigger trait 中的 trigger_dag_execute 方法。",
           "target_file": "crates/fastclaw-dag/ + Cargo.toml + crates/fastclaw-gateway/Cargo.toml",
           "cc_references": [],
           "acceptance_criteria": [
