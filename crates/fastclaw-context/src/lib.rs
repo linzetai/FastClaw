@@ -2,6 +2,7 @@ pub mod compressor;
 pub mod engine;
 pub mod keyword_interceptor;
 mod model_context;
+pub mod reactive;
 pub mod snip;
 
 pub use compressor::{
@@ -20,6 +21,7 @@ pub use engine::{
     DEFAULT_SYSTEM_REMINDER_TEXT,
 };
 pub use keyword_interceptor::MemoryKeywordInterceptor;
+pub use reactive::{ReactiveCompactResult, ReactiveCompactor, ReactiveCompactorConfig};
 pub use snip::{group_by_api_round, ApiRound, SnipCompactor, SnipCompactorConfig, SnipResult};
 pub use model_context::{
     has_explicit_output_limit, infer_context_window_from_model, infer_output_limit_from_model,

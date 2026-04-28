@@ -356,7 +356,7 @@
             "系统消息和当前 user turn 永不被删除",
             "返回 bool 表示恢复成功/失败"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P1-05",
