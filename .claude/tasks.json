@@ -163,7 +163,7 @@
             "crates/fastclaw-mcp/Cargo.toml 依赖正确",
             "cargo check -p fastclaw-mcp 编译通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P0-13",

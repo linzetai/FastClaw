@@ -2339,6 +2339,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastclaw-mcp"
+version = "0.0.4"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "fastclaw-core",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "fastclaw-memory"
 version = "0.0.4"
 dependencies = [
