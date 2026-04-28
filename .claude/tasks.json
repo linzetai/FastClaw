@@ -457,7 +457,7 @@
             "外部 crate 可 use fastclaw_context::{SnipCompactor, ReactiveCompactor, TokenBudgetTracker, ContextPipeline}",
             "cargo doc -p fastclaw-context 无警告"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P1-12",
