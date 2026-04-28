@@ -653,7 +653,7 @@
         {
           "id": "P2-10",
           "title": "实现 SnipTool (Agent 主动裁剪)",
-          "description": "snip 工具：输入 message_ids + reason，移除指定消息并替换为摘要。",
+          "description": "snip 工具：输入 message_indices + reason，移除指定消息并替换为摘要。通过 Arc<Mutex<Vec<ChatMessage>>> 共享消息状态。",
           "target_file": "crates/fastclaw-agent/src/builtin_tools/snip.rs",
           "cc_references": [
             "claude-code/packages/builtin-tools/src/tools/SnipTool/SnipTool.ts"
@@ -665,7 +665,7 @@
             "不存在的 message_id 跳过而非报错",
             "系统消息和当前 turn 不允许 snip"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P2-11",

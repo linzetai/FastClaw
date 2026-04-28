@@ -11,6 +11,7 @@ mod session;
 mod shell;
 mod skill;
 mod todo;
+mod snip;
 mod tool_search;
 mod utility;
 
@@ -45,6 +46,7 @@ pub use ask_question::{AskQuestionTool, with_stream_context};
 pub use confirm::ConfirmTool;
 pub use todo::{TodoStore, TodoWriteTool, TodoStatus, TodoItem};
 pub use code_intel::{FindReferencesTool, GoToDefinitionTool, UnifiedLspTool, WorkspaceSymbolsTool, FileOutlineTool, CodeChunkTool};
+pub use snip::SnipTool;
 pub use tool_search::ToolSearchTool;
 pub use utility::{CalculatorTool, CurrentTimeTool, SleepTool};
 
