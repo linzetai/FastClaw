@@ -1703,7 +1703,7 @@
             "cargo clippy --workspace -- -D warnings 零警告",
             "无退化（对比 Phase 0 前的测试数量）"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P5-06",
