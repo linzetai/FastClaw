@@ -340,28 +340,110 @@ impl Tool for TaskCreateTool {
 
     fn prompt(&self) -> String {
         "Launch a new agent to handle complex, multi-step tasks autonomously.\n\n\
-The task_create tool launches specialized agents that autonomously handle complex tasks.\n\n\
-## Writing the prompt\n\n\
-Brief the agent like a smart colleague who just walked into the room — it hasn't seen \
-this conversation, doesn't know what you've tried, doesn't understand why this task matters.\n\
-- Explain what you're trying to accomplish and why\n\
-- Describe what you've already learned or ruled out\n\
-- Give enough context that the agent can make judgment calls\n\
-- If you need a short response, say so (\"report in under 200 words\")\n\
-- Lookups: hand over the exact command. Investigations: hand over the question\n\n\
-**Never delegate understanding.** Don't write \"based on your findings, fix the bug\". \
-Write prompts that prove you understood: include file paths, line numbers, what specifically to change.\n\n\
-## When NOT to use\n\n\
-- If you want to read a specific file, use `read_file` or `glob` instead\n\
-- If you are searching for a specific class definition, use `search_in_files` instead\n\
-- If the task is simple and can be completed in 1-2 tool calls\n\n\
-## Usage notes\n\n\
-- Always include a short description (3-5 words) summarizing what the agent will do\n\
-- Launch multiple agents concurrently whenever possible for maximum performance\n\
-- When the agent is done, it returns a single message. The result is not visible to the user — \
-send a text message with a concise summary\n\
-- The agent's outputs should generally be trusted\n\
-- Clearly tell the agent whether you expect it to write code or just do research".to_string()
+The task_create tool launches specialized background agents that work independently \
+in their own context. Each agent gets a fresh context window, its own tool access, \
+and runs without seeing your conversation history.\n\n\
+## Decision Tree: When to Delegate\n\n\
+**USE task_create when:**\n\
+- The task requires 5+ tool calls and is mostly independent\n\
+- You need to explore multiple areas of the codebase in parallel\n\
+- The task involves a large refactor across many files\n\
+- You want to try multiple approaches simultaneously (best-of-N)\n\
+- The task is research-heavy (reading docs, exploring unfamiliar code)\n\
+- You're working on something else and want this done concurrently\n\n\
+**Do NOT use task_create when:**\n\
+- The task needs 1-3 tool calls — just do it directly\n\
+- You need the result immediately to make a decision\n\
+- The task requires back-and-forth with the user\n\
+- You need to modify files that you're currently editing (conflict risk)\n\
+- Reading a specific known file — use `read_file` instead\n\
+- Searching for a symbol — use `search_in_files` instead\n\
+- Simple git operations — do them directly\n\n\
+## Isolation Model\n\n\
+Each spawned agent operates in isolation:\n\
+- **Separate context**: The agent does NOT see your conversation, only the prompt you provide\n\
+- **Shared filesystem**: The agent can read/write the same files (coordinate carefully!)\n\
+- **Independent tools**: The agent has its own tool budget and execution context\n\
+- **No communication mid-task**: You cannot send follow-up instructions after launch\n\
+- **Single result**: Agent returns one final message when complete\n\n\
+### File Conflict Prevention\n\
+- If you and the agent both modify the same file, conflicts will occur\n\
+- Assign agents to DIFFERENT files or regions of the codebase\n\
+- For large refactors: assign non-overlapping file sets to each agent\n\
+- Use task_get to check completion BEFORE modifying shared files\n\n\
+## Writing Effective Prompts\n\n\
+Brief the agent like a smart colleague who just joined — they have no prior context.\n\n\
+### Essential Elements\n\
+1. **Goal**: What to accomplish and WHY it matters\n\
+2. **Context**: What you've already learned or tried (avoid re-exploration)\n\
+3. **Specifics**: File paths, line numbers, function names, exact changes needed\n\
+4. **Constraints**: What NOT to do, style requirements, compatibility needs\n\
+5. **Output format**: What you want back (code, summary, file list, etc.)\n\n\
+### Prompt Quality Rules\n\
+- **Never delegate understanding**: Don't say \"fix the bug\". Say \"the bug is in \
+src/parser.rs:142 where it fails to handle empty input — add a guard clause\"\n\
+- **Be specific about scope**: \"Only modify files in crates/fastclaw-agent/src/\" \
+is better than \"fix the agent code\"\n\
+- **Include success criteria**: \"The task is done when `cargo test -p X` passes\"\n\
+- **Provide examples if the task is ambiguous**: Show input → expected output\n\n\
+### Good vs Bad Prompts\n\
+```\n\
+BAD:  \"Fix the authentication bug\"\n\
+GOOD: \"In src/auth/jwt.rs:89, the token validation skips expiry check when \
+the 'iss' claim is missing. Add a guard that returns Err(TokenExpired) when \
+exp < now. Run cargo test -p auth to verify.\"\n\n\
+BAD:  \"Refactor the database code\"\n\
+GOOD: \"Move all SQL queries from src/handlers/*.rs into src/queries/*.rs. \
+Each handler file should import from the corresponding query module. \
+Don't change any query logic, only file organization. Affected files: \
+handlers/users.rs, handlers/posts.rs, handlers/comments.rs\"\n\
+```\n\n\
+## Parallel Launch Strategy\n\n\
+Launch multiple agents concurrently for maximum throughput:\n\n\
+### Independent Exploration\n\
+```\n\
+// Agent 1: Research the auth system\n\
+// Agent 2: Research the database layer\n\
+// Agent 3: Research the API routes\n\
+// → All run in parallel, results collected together\n\
+```\n\n\
+### Best-of-N Pattern\n\
+For tasks with multiple valid approaches:\n\
+1. Launch N agents with DIFFERENT strategies in the same message\n\
+2. Each agent works independently on the same problem\n\
+3. When all complete, compare results and pick the best\n\
+4. Use for: performance optimization, API design, error handling approaches\n\n\
+### Fan-out / Fan-in\n\
+For large codebase changes:\n\
+1. Fan-out: Launch agents for each non-overlapping file set\n\
+2. Wait: Monitor with task_list/task_get until all complete\n\
+3. Fan-in: Review all results, resolve any conflicts, commit together\n\n\
+## Result Handling\n\n\
+### What You Get Back\n\
+- The agent's final text message (summary of what was done)\n\
+- This is NOT visible to the user — YOU must relay relevant parts\n\
+- File changes made by the agent are already on disk\n\n\
+### After Task Completion\n\
+1. Read the result with `task_get`\n\
+2. Verify the agent's work (run tests, review files)\n\
+3. Summarize for the user what was accomplished\n\
+4. If the agent failed or needs correction, handle it yourself or launch a new task\n\n\
+### Trust but Verify\n\
+- Agent outputs should generally be trusted for factual lookups\n\
+- For code changes: run the test suite before reporting success\n\
+- For research: spot-check a few findings if the result seems surprising\n\n\
+## Task Lifecycle\n\n\
+- `task_create` → launches the agent, returns task_id immediately\n\
+- `task_list` → shows all active/completed tasks\n\
+- `task_get` → retrieves result (blocks if still running, or returns current status)\n\
+- `task_stop` → cancels a running task (agent's partial work remains on disk)\n\n\
+## Anti-Patterns\n\n\
+- Don't delegate trivial tasks (reading one file, running one command)\n\
+- Don't delegate tasks that need user interaction\n\
+- Don't launch an agent for something you'll need in the next 2 seconds\n\
+- Don't delegate the full user query to an agent — understand it yourself first\n\
+- Don't launch agents that will edit the same files simultaneously\n\
+- Don't forget to summarize agent results back to the user".to_string()
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
