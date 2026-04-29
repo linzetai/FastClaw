@@ -8,6 +8,7 @@ mod lsp_manager;
 mod media;
 mod memory;
 mod network;
+mod notebook;
 mod session;
 mod shell;
 mod skill;
@@ -48,6 +49,7 @@ pub use brief::BriefTool;
 pub use confirm::ConfirmTool;
 pub use todo::{TodoStore, TodoWriteTool, TodoStatus, TodoItem};
 pub use code_intel::{FindReferencesTool, GoToDefinitionTool, UnifiedLspTool, WorkspaceSymbolsTool, FileOutlineTool, CodeChunkTool};
+pub use notebook::NotebookEditTool;
 pub use snip::SnipTool;
 pub use tool_search::ToolSearchTool;
 pub use utility::{CalculatorTool, CurrentTimeTool, SleepTool};
@@ -86,6 +88,7 @@ pub fn register_builtin_tools_with_sandbox(registry: &ToolRegistry, sandboxed: b
     registry.register(Arc::new(CodeChunkTool));
     registry.register(Arc::new(MultiEditTool));
     registry.register(Arc::new(ListDirectoryTool));
+    registry.register(Arc::new(NotebookEditTool));
 }
 
 /// Register web tools with a specific search backend configuration.

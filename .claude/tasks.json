@@ -934,14 +934,14 @@
         {
           "id": "P4-05",
           "title": "Context Collapse 单元测试",
-          "description": "覆盖摘要生成、投影替换、阈值触发、互斥。",
+          "description": "覆盖摘要生成、投影替换、阈值触发、互斥。已在 P4-01~P4-04 中累计实现 33+4=37 个测试用例。",
           "target_file": "crates/fastclaw-context/src/collapse.rs",
           "cc_references": [],
           "acceptance_criteria": [
             "至少 5 个测试用例",
             "cargo test -p fastclaw-context 全通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4-06",
@@ -958,7 +958,7 @@
             "修改后写回的 .ipynb 可被 Jupyter 正常打开",
             "非 .ipynb 文件返回错误"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4-07",
