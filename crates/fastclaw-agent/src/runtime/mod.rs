@@ -45,6 +45,8 @@ pub mod prompt_sections;
 mod prompt_builder;
 mod stream_engine;
 mod tool_executor;
+#[allow(dead_code)]
+pub mod tool_result_storage;
 mod trajectory;
 
 pub use prompt_builder::{build_subagent_prompt_block, SubAgentPromptContext};

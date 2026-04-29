@@ -1361,7 +1361,7 @@
             "I/O 失败时返回原始内容（fallback，不 panic）",
             "cargo check -p fastclaw-agent 编译通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4H-13b",
