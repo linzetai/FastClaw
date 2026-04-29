@@ -39,6 +39,7 @@ mod accumulator;
 pub mod query_engine;
 pub(crate) mod context_compressor;
 pub mod prompt_engine;
+pub mod prompt_sections;
 mod prompt_builder;
 mod stream_engine;
 mod tool_executor;
