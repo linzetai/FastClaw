@@ -974,7 +974,7 @@
             "任务完成后自动更新状态",
             "任务停止后 tokio task 被 abort"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4-08",
