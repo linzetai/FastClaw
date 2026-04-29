@@ -1261,7 +1261,7 @@
             "无 system_prompt 配置时使用 PromptEngine 的 default（非 workspace.rs 的旧函数）",
             "cargo test -p fastclaw-agent 全通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4H-09",
