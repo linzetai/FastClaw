@@ -12,6 +12,7 @@ mod notebook;
 mod plan_mode;
 mod session;
 mod task;
+mod terminal;
 mod shell;
 mod skill;
 mod todo;
@@ -58,6 +59,7 @@ pub use task::{
 };
 pub use plan_mode::{EnterPlanModeTool, ExitPlanModeTool, ExecutionModeState, VerifyPlanExecutionTool};
 pub use snip::SnipTool;
+pub use terminal::TerminalCaptureTool;
 pub use tool_search::ToolSearchTool;
 pub use utility::{CalculatorTool, CurrentTimeTool, SleepTool};
 
