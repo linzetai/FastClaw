@@ -1021,7 +1021,7 @@
             "停止后状态变为 cancelled",
             "对已完成/已取消的任务调用 stop 返回无操作提示"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4-11",

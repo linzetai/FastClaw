@@ -53,7 +53,7 @@ pub use code_intel::{FindReferencesTool, GoToDefinitionTool, UnifiedLspTool, Wor
 pub use notebook::NotebookEditTool;
 pub use task::{
     NoopTaskWorkFactory, TaskCreateTool, TaskGetTool, TaskInfo, TaskListTool, TaskManager,
-    TaskManagerError, TaskStatus, TaskStopTool, TaskWorkFactory,
+    TaskManagerError, TaskStatus, TaskStopTool, TaskUpdateTool, TaskWorkFactory,
 };
 pub use snip::SnipTool;
 pub use tool_search::ToolSearchTool;
@@ -168,6 +168,7 @@ pub fn register_task_tools(
     )));
     registry.register_deferred(Arc::new(TaskListTool::new(Arc::clone(&manager))));
     registry.register_deferred(Arc::new(TaskGetTool::new(Arc::clone(&manager))));
+    registry.register_deferred(Arc::new(TaskUpdateTool::new(Arc::clone(&manager))));
     registry.register_deferred(Arc::new(TaskStopTool::new(manager)));
 }
 

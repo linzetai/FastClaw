@@ -180,25 +180,59 @@ impl TaskManager {
         }
     }
 
-    /// Update a task's subject/description while it's still running.
+    /// Update a task's metadata and/or status.
+    ///
+    /// Returns a list of field names that were actually changed.
     pub fn update(
         &self,
         task_id: &str,
         subject: Option<String>,
         description: Option<String>,
-    ) -> Result<(), TaskManagerError> {
+        status: Option<TaskStatus>,
+    ) -> Result<Vec<&'static str>, TaskManagerError> {
         let mut entry = self
             .tasks
             .get_mut(task_id)
             .ok_or(TaskManagerError::NotFound(task_id.to_string()))?;
 
+        let mut changed = Vec::new();
+
         if let Some(s) = subject {
-            entry.info.subject = s;
+            if s != entry.info.subject {
+                entry.info.subject = s;
+                changed.push("subject");
+            }
         }
         if let Some(d) = description {
-            entry.info.description = d;
+            if d != entry.info.description {
+                entry.info.description = d;
+                changed.push("description");
+            }
         }
-        Ok(())
+        if let Some(new_status) = status {
+            if new_status != entry.info.status {
+                let old_status = entry.info.status;
+                entry.info.status = new_status;
+                changed.push("status");
+
+                let is_terminal = matches!(
+                    new_status,
+                    TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
+                );
+                if is_terminal && entry.info.finished_at.is_none() {
+                    entry.info.finished_at = Some(Self::now_ms());
+                }
+
+                if old_status == TaskStatus::Running
+                    && is_terminal
+                    && entry.join_handle.take().is_some()
+                {
+                    self.running_count.fetch_sub(1, Ordering::AcqRel);
+                }
+            }
+        }
+
+        Ok(changed)
     }
 
     /// Number of currently running tasks.
@@ -623,6 +657,136 @@ impl Tool for TaskStopTool {
     }
 }
 
+// ─── TaskUpdateTool ──────────────────────────────────────────────────
+
+/// Tool that updates a task's subject, description, or status.
+pub struct TaskUpdateTool {
+    manager: Arc<TaskManager>,
+}
+
+impl TaskUpdateTool {
+    pub fn new(manager: Arc<TaskManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[derive(Deserialize)]
+struct TaskUpdateArgs {
+    task_id: String,
+    #[serde(default)]
+    subject: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    status: Option<TaskStatus>,
+}
+
+#[async_trait]
+impl Tool for TaskUpdateTool {
+    fn kind(&self) -> ToolKind {
+        ToolKind::Execute
+    }
+
+    fn name(&self) -> &str {
+        "task_update"
+    }
+
+    fn description(&self) -> &str {
+        "Update a background task's subject, description, or status. \
+         At least one field must be provided."
+    }
+
+    fn search_hint(&self) -> &str {
+        "update modify task status"
+    }
+
+    fn is_deferred(&self) -> bool {
+        true
+    }
+
+    fn parameters_schema(&self) -> ToolParameterSchema {
+        let mut props = HashMap::new();
+        props.insert(
+            "task_id".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "The ID of the task to update."
+            }),
+        );
+        props.insert(
+            "subject".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "New subject/title for the task."
+            }),
+        );
+        props.insert(
+            "description".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "New description for the task."
+            }),
+        );
+        props.insert(
+            "status".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "enum": ["pending", "running", "completed", "failed", "cancelled"],
+                "description": "New status for the task."
+            }),
+        );
+        ToolParameterSchema {
+            schema_type: "object".to_string(),
+            properties: props,
+            required: vec!["task_id".to_string()],
+        }
+    }
+
+    async fn execute(&self, arguments: &str) -> ToolResult {
+        let args: TaskUpdateArgs = match serde_json::from_str(arguments) {
+            Ok(v) => v,
+            Err(e) => {
+                return ToolResult::err(format!(
+                    "Invalid arguments: {e}. Expected {{\"task_id\": \"...\", ...}}"
+                ))
+            }
+        };
+
+        if args.subject.is_none() && args.description.is_none() && args.status.is_none() {
+            return ToolResult::err(
+                "No fields to update. Provide at least one of: subject, description, status.",
+            );
+        }
+
+        match self.manager.update(
+            &args.task_id,
+            args.subject,
+            args.description,
+            args.status,
+        ) {
+            Ok(changed) => {
+                if changed.is_empty() {
+                    ToolResult::ok(format!(
+                        "Task #{}: no changes (values already match).",
+                        args.task_id
+                    ))
+                } else {
+                    ToolResult::ok(format!(
+                        "Updated task #{}: {}",
+                        args.task_id,
+                        changed.join(", ")
+                    ))
+                }
+            }
+            Err(TaskManagerError::NotFound(_)) => ToolResult::err(format!(
+                "Task not found: {}. Use task_list to see available tasks.",
+                args.task_id
+            )),
+            Err(e) => ToolResult::err(format!("Failed to update task: {e}")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -759,7 +923,7 @@ mod tests {
             })
             .unwrap();
 
-        mgr.update(&id, Some("updated".into()), None).unwrap();
+        mgr.update(&id, Some("updated".into()), None, None).unwrap();
 
         let info = mgr.get(&id).unwrap();
         assert_eq!(info.subject, "updated");
@@ -1094,5 +1258,133 @@ mod tests {
         let tool = TaskStopTool::new(mgr);
         assert!(tool.is_deferred());
         assert_eq!(tool.kind(), ToolKind::Execute);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TaskUpdateTool tests
+    // ═══════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn task_update_tool_subject_and_description() {
+        let mgr = Arc::new(TaskManager::new(5));
+        let id = mgr
+            .spawn("original".into(), "old desc".into(), async {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                Ok("ok".into())
+            })
+            .unwrap();
+
+        let tool = TaskUpdateTool::new(Arc::clone(&mgr));
+        let result = tool
+            .execute(&format!(
+                r#"{{"task_id": "{id}", "subject": "renamed", "description": "new desc"}}"#
+            ))
+            .await;
+        assert!(result.success);
+        assert!(result.output.contains("subject"));
+        assert!(result.output.contains("description"));
+
+        let info = mgr.get(&id).unwrap();
+        assert_eq!(info.subject, "renamed");
+        assert_eq!(info.description, "new desc");
+    }
+
+    #[tokio::test]
+    async fn task_update_tool_status_to_completed() {
+        let mgr = Arc::new(TaskManager::new(5));
+        let id = mgr
+            .spawn("task1".into(), "".into(), async {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                Ok("ok".into())
+            })
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let tool = TaskUpdateTool::new(Arc::clone(&mgr));
+        let result = tool
+            .execute(&format!(
+                r#"{{"task_id": "{id}", "status": "completed"}}"#
+            ))
+            .await;
+        assert!(result.success);
+        assert!(result.output.contains("status"));
+
+        let info = mgr.get(&id).unwrap();
+        assert_eq!(info.status, TaskStatus::Completed);
+        assert!(info.finished_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn task_update_tool_no_change_same_values() {
+        let mgr = Arc::new(TaskManager::new(5));
+        let id = mgr
+            .spawn("same".into(), "same desc".into(), async {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                Ok("ok".into())
+            })
+            .unwrap();
+
+        let tool = TaskUpdateTool::new(Arc::clone(&mgr));
+        let result = tool
+            .execute(&format!(
+                r#"{{"task_id": "{id}", "subject": "same", "description": "same desc"}}"#
+            ))
+            .await;
+        assert!(result.success);
+        assert!(result.output.contains("no changes"));
+    }
+
+    #[tokio::test]
+    async fn task_update_tool_no_fields_provided() {
+        let mgr = Arc::new(TaskManager::new(5));
+        let id = mgr
+            .spawn("t".into(), "".into(), async { Ok("ok".into()) })
+            .unwrap();
+
+        let tool = TaskUpdateTool::new(Arc::clone(&mgr));
+        let result = tool
+            .execute(&format!(r#"{{"task_id": "{id}"}}"#))
+            .await;
+        assert!(!result.success);
+        assert!(result.output.contains("No fields to update"));
+    }
+
+    #[tokio::test]
+    async fn task_update_tool_not_found() {
+        let mgr = Arc::new(TaskManager::new(5));
+        let tool = TaskUpdateTool::new(Arc::clone(&mgr));
+
+        let result = tool
+            .execute(r#"{"task_id": "nope", "subject": "x"}"#)
+            .await;
+        assert!(!result.success);
+        assert!(result.output.contains("Task not found"));
+    }
+
+    #[tokio::test]
+    async fn task_update_tool_is_deferred() {
+        let mgr = Arc::new(TaskManager::new(5));
+        let tool = TaskUpdateTool::new(mgr);
+        assert!(tool.is_deferred());
+        assert_eq!(tool.kind(), ToolKind::Execute);
+    }
+
+    #[tokio::test]
+    async fn task_update_status_decrements_running_count() {
+        let mgr = Arc::new(TaskManager::new(5));
+        let id = mgr
+            .spawn("running".into(), "".into(), async {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                Ok("ok".into())
+            })
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(mgr.running_count(), 1);
+
+        mgr.update(&id, None, None, Some(TaskStatus::Completed))
+            .unwrap();
+        assert_eq!(mgr.running_count(), 0);
     }
 }
