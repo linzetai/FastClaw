@@ -47,3 +47,7 @@ pdf-extract = "0.10"
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"
+
+[[bench]]
+name = "prompt_token_budget"
+harness = false

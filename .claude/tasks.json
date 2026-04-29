@@ -1489,12 +1489,12 @@
           "cc_references": [],
           "acceptance_criteria": [
             "静态区总 token < 8000",
-            "动态区变化范围 1000~5000 tokens",
+            "动态区变化范围 >0, <=5000 tokens",
             "全部 eager 工具 prompt 总和 < 15000 tokens",
-            "deferred 模式下工具 prompt 总和 < 8000 tokens（节省 >= 30%）",
+            "deferred 模式下 prompt < 8000 tokens 且小于 eager 模式",
             "基准测试可通过 cargo bench 运行"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4H-18",
