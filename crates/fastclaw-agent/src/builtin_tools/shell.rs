@@ -149,6 +149,40 @@ fn preferred_shell() -> &'static str {
     })
 }
 
+/// Check if Linux namespace isolation (unshare) is available on this system.
+/// Returns true if `unshare` binary exists and user namespaces are permitted.
+#[cfg(not(windows))]
+pub fn namespace_available() -> bool {
+    use std::sync::OnceLock;
+    static AVAILABLE: OnceLock<bool> = OnceLock::new();
+    *AVAILABLE.get_or_init(|| {
+        // Check if unshare binary exists
+        let unshare_exists = std::process::Command::new("unshare")
+            .arg("--help")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !unshare_exists {
+            return false;
+        }
+        // Check if user namespaces are enabled (try a no-op unshare)
+        std::process::Command::new("unshare")
+            .args(["--user", "--map-root-user", "--", "true"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    })
+}
+
+/// Single-quote a string for safe inclusion in shell commands.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// Detect whether PowerShell Core (`pwsh`) is available; fall back to `powershell`.
 #[cfg(windows)]
 fn powershell_exe() -> &'static str {
@@ -1346,8 +1380,16 @@ pub struct ShellSandboxConfig {
     pub strip_env_vars: Vec<String>,
     /// Whether to enable Linux namespace isolation (requires unshare permissions).
     pub use_namespace: bool,
-    /// Read-only filesystem paths (for namespace mode).
+    /// Read-only filesystem paths (for namespace mode bind mounts).
     pub readonly_paths: Vec<String>,
+    /// Writable filesystem paths (for namespace mode bind mounts).
+    /// These get mounted read-write inside the namespace.
+    pub writable_paths: Vec<String>,
+    /// Whether to isolate network (create a new network namespace).
+    pub isolate_network: bool,
+    /// Allowed network hosts (only effective when isolate_network is true).
+    /// If empty and isolate_network is true, all network is blocked.
+    pub allowed_hosts: Vec<String>,
 }
 
 impl ShellSandboxConfig {
@@ -1431,6 +1473,9 @@ impl Default for ShellSandboxConfig {
             ],
             use_namespace: false,
             readonly_paths: Vec::new(),
+            writable_paths: Vec::new(),
+            isolate_network: false,
+            allowed_hosts: Vec::new(),
         }
     }
 }
@@ -1447,6 +1492,83 @@ impl SandboxedShellTool {
                 ShellSandboxConfig::compile_denied_regexes(&config.denied_patterns);
         }
         Self { config }
+    }
+
+    /// Build the namespace-isolated command using unshare + bind mounts.
+    /// Returns None if namespace isolation is not available (graceful degradation).
+    #[cfg(not(windows))]
+    fn build_namespace_command(&self, command: &str, shell: &str) -> Option<tokio::process::Command> {
+        if !self.config.use_namespace {
+            return None;
+        }
+
+        // Check if unshare is available
+        if !namespace_available() {
+            tracing::warn!("namespace isolation requested but unshare not available; falling back to non-isolated execution");
+            return None;
+        }
+
+        let mut args: Vec<String> = Vec::new();
+
+        // Always create mount and PID namespaces
+        args.push("--mount".into());
+        args.push("--pid".into());
+        args.push("--fork".into());
+
+        // Optional network namespace isolation
+        if self.config.isolate_network {
+            args.push("--net".into());
+        }
+
+        // Map current user to root inside namespace (allows bind mounts without root)
+        args.push("--map-root-user".into());
+
+        args.push("--".into());
+
+        // Build a setup script that creates bind mounts then executes the command
+        let setup_script = self.build_namespace_setup_script(command, shell);
+        args.push(shell.into());
+        args.push("-c".into());
+        args.push(setup_script);
+
+        let mut cmd = tokio::process::Command::new("unshare");
+        cmd.args(&args);
+        Some(cmd)
+    }
+
+    /// Build the shell script that sets up bind mounts inside the namespace.
+    #[cfg(not(windows))]
+    fn build_namespace_setup_script(&self, user_command: &str, shell: &str) -> String {
+        let mut script = String::new();
+        script.push_str("set -e\n");
+
+        // Remount root as private so our mounts don't propagate
+        script.push_str("mount --make-rprivate /\n");
+
+        // Mount readonly_paths as read-only
+        for path in &self.config.readonly_paths {
+            script.push_str(&format!(
+                "mount --bind '{p}' '{p}' 2>/dev/null && mount -o remount,bind,ro '{p}' 2>/dev/null || true\n",
+                p = path.replace('\'', "'\\''")
+            ));
+        }
+
+        // Mount writable_paths as read-write (explicit bind to ensure they survive ro remounts)
+        for path in &self.config.writable_paths {
+            script.push_str(&format!(
+                "mount --bind '{p}' '{p}' 2>/dev/null || true\n",
+                p = path.replace('\'', "'\\''")
+            ));
+        }
+
+        // Execute the user's command
+        script.push_str(&format!(
+            "exec {shell} -c {cmd}\n",
+            shell = shell,
+            cmd = shell_quote(user_command)
+        ));
+
+        script
     }
 
     fn validate_command(&self, command: &str) -> Result<(), String> {
@@ -1710,7 +1832,7 @@ Sandbox restrictions:\n");
         }
 
         let shell_hint = args.get("shell").and_then(|v| v.as_str());
-        let mut cmd = if self.config.use_namespace {
+        let mut cmd = {
             #[cfg(not(windows))]
             {
                 let shell = match shell_hint {
@@ -1718,16 +1840,16 @@ Sandbox restrictions:\n");
                     Some("bash") => "bash",
                     _ => preferred_shell(),
                 };
-                let mut c = tokio::process::Command::new("unshare");
-                c.args(["--mount", "--pid", "--fork", "--", shell, "-c", command]);
-                c
+                if let Some(ns_cmd) = self.build_namespace_command(command, shell) {
+                    ns_cmd
+                } else {
+                    build_shell_command(command, shell_hint)
+                }
             }
             #[cfg(windows)]
             {
                 build_shell_command(command, shell_hint)
             }
-        } else {
-            build_shell_command(command, shell_hint)
         };
 
         if let Some(dir) = args.get("working_dir").and_then(|v| v.as_str()) {
@@ -2329,5 +2451,53 @@ mod sandbox_tests {
         let tool = default_sandbox();
         assert!(tool.validate_command("PATH=/evil ls").is_err());
         assert!(tool.validate_command("LD_PRELOAD=./evil.so cat /etc/passwd").is_err());
+    }
+
+    // --- Namespace isolation tests ---
+
+    #[test]
+    fn namespace_available_returns_bool() {
+        // Just verify it doesn't panic; actual availability depends on system
+        #[cfg(not(windows))]
+        let _ = super::namespace_available();
+    }
+
+    #[test]
+    fn shell_quote_handles_special_chars() {
+        assert_eq!(super::shell_quote("hello"), "'hello'");
+        assert_eq!(super::shell_quote("it's"), "'it'\\''s'");
+        assert_eq!(super::shell_quote("a b"), "'a b'");
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn namespace_command_not_built_when_disabled() {
+        let config = super::ShellSandboxConfig::default();
+        let tool = super::SandboxedShellTool::new(config);
+        assert!(tool.build_namespace_command("ls", "bash").is_none());
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn namespace_setup_script_includes_mounts() {
+        let mut config = super::ShellSandboxConfig::default();
+        config.use_namespace = true;
+        config.readonly_paths = vec!["/usr".into(), "/lib".into()];
+        config.writable_paths = vec!["/tmp".into()];
+        let tool = super::SandboxedShellTool::new(config);
+        let script = tool.build_namespace_setup_script("echo ok", "bash");
+        assert!(script.contains("mount --make-rprivate /"));
+        assert!(script.contains("/usr"));
+        assert!(script.contains("remount,bind,ro"));
+        assert!(script.contains("/tmp"));
+        assert!(script.contains("echo ok"));
+    }
+
+    #[test]
+    fn config_new_fields_default_correctly() {
+        let config = super::ShellSandboxConfig::default();
+        assert!(!config.isolate_network);
+        assert!(config.writable_paths.is_empty());
+        assert!(config.allowed_hosts.is_empty());
     }
 }
