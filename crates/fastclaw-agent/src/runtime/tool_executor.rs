@@ -5,7 +5,7 @@ use fastclaw_core::agent_config::BehaviorConfig;
 use fastclaw_core::tool::{PostToolInfo, ToolDefinition, ToolHook, ToolHookContext, ToolRegistry};
 use fastclaw_core::types::ToolCall;
 
-use crate::builtin_tools::{with_file_access_mode, with_work_dir};
+use crate::builtin_tools::{with_file_access_mode, with_work_dir, ExecutionModeState};
 
 use super::prompt_builder::memory_tool_suffix;
 
@@ -604,10 +604,12 @@ pub(crate) async fn execute_tool_batch(
     behavior: &BehaviorConfig,
     work_dir: &Option<String>,
     log_suffix: &str,
+    mode_state: Option<&ExecutionModeState>,
 ) -> Vec<ToolExecResult> {
-    execute_tool_batch_with_hooks(tool_calls, tool_registry, behavior, work_dir, log_suffix, &[], "").await
+    execute_tool_batch_with_hooks(tool_calls, tool_registry, behavior, work_dir, log_suffix, &[], "", mode_state).await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_batch_with_hooks(
     tool_calls: &[ToolCall],
     tool_registry: &Arc<ToolRegistry>,
@@ -616,9 +618,10 @@ pub(crate) async fn execute_tool_batch_with_hooks(
     log_suffix: &str,
     hooks: &[Arc<dyn ToolHook>],
     agent_id: &str,
+    mode_state: Option<&ExecutionModeState>,
 ) -> Vec<ToolExecResult> {
     execute_tool_batch_with_hooks_and_stream(
-        tool_calls, tool_registry, behavior, work_dir, log_suffix, hooks, agent_id, None,
+        tool_calls, tool_registry, behavior, work_dir, log_suffix, hooks, agent_id, None, mode_state,
     ).await
 }
 
@@ -632,6 +635,7 @@ pub(crate) async fn execute_tool_batch_with_hooks_and_stream(
     hooks: &[Arc<dyn ToolHook>],
     agent_id: &str,
     stream_tx: Option<&tokio::sync::mpsc::Sender<fastclaw_core::types::StreamEvent>>,
+    mode_state: Option<&ExecutionModeState>,
 ) -> Vec<ToolExecResult> {
     // Batch-level dedup: when the same read_file path appears multiple times
     // in one batch, only execute the first and share the result.
@@ -676,7 +680,7 @@ pub(crate) async fn execute_tool_batch_with_hooks_and_stream(
     if !concurrent_indices.is_empty() {
         let concurrent_futures: Vec<_> = concurrent_indices.iter().map(|&i| {
             execute_single_tool(
-                &tool_calls[i], tool_registry, behavior, work_dir, log_suffix, hooks, agent_id, stream_tx,
+                &tool_calls[i], tool_registry, behavior, work_dir, log_suffix, hooks, agent_id, stream_tx, mode_state,
             )
         }).collect();
         let concurrent_results = futures::future::join_all(concurrent_futures).await;
@@ -687,7 +691,7 @@ pub(crate) async fn execute_tool_batch_with_hooks_and_stream(
 
     for &i in &sequential_indices {
         let result = execute_single_tool(
-            &tool_calls[i], tool_registry, behavior, work_dir, log_suffix, hooks, agent_id, stream_tx,
+            &tool_calls[i], tool_registry, behavior, work_dir, log_suffix, hooks, agent_id, stream_tx, mode_state,
         ).await;
         results[i] = Some(result);
     }
@@ -724,6 +728,7 @@ async fn execute_single_tool(
     hooks: &[Arc<dyn ToolHook>],
     agent_id: &str,
     stream_tx: Option<&tokio::sync::mpsc::Sender<fastclaw_core::types::StreamEvent>>,
+    mode_state: Option<&ExecutionModeState>,
 ) -> ToolExecResult {
     let tool_name = tc.function.name.clone();
     let call_id = tc.id.clone();
@@ -747,6 +752,17 @@ async fn execute_single_tool(
     let tool_kind = tool_registry.get(&tool_name)
         .map(|t| t.kind())
         .unwrap_or(fastclaw_core::tool::ToolKind::Other);
+
+    if let Some(ms) = mode_state {
+        if ms.is_blocked(tool_kind) {
+            tracing::info!(tool = %tool_name, kind = ?tool_kind, "tool blocked by plan mode{log_suffix}");
+            let result = fastclaw_core::tool::ToolResult::typed_err(
+                fastclaw_core::tool::ToolErrorType::ExecutionDenied,
+                ExecutionModeState::blocked_message(&tool_name),
+            );
+            return (tool_name, call_id, arguments, result);
+        }
+    }
 
     let hook_ctx = ToolHookContext {
         tool_name: tool_name.clone(),

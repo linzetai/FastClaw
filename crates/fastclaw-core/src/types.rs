@@ -364,6 +364,26 @@ pub struct AskQuestionOption {
     pub label: String,
 }
 
+/// Execution mode controlling which tools are available and how the agent behaves.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    /// Full execution mode: all tools available.
+    #[default]
+    Agent,
+    /// Read-only planning mode: write/edit/execute tools are blocked.
+    Plan,
+}
+
+impl std::fmt::Display for ExecutionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Agent => write!(f, "agent"),
+            Self::Plan => write!(f, "plan"),
+        }
+    }
+}
+
 /// Event emitted by the streaming agentic loop.
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
@@ -431,6 +451,12 @@ pub enum StreamEvent {
     },
 
     Error(String),
+
+    /// Emitted when execution mode changes (e.g. Agent ↔ Plan).
+    ModeChange {
+        from: ExecutionMode,
+        to: ExecutionMode,
+    },
 
     /// Emitted when context token usage exceeds a safety threshold.
     ContextLimitWarning {

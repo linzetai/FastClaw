@@ -81,6 +81,7 @@ pub struct RuntimeState {
         Arc<ArcSwap<std::collections::HashMap<String, Arc<SkillRegistry>>>>,
     pub workspaces: Arc<std::collections::HashMap<String, AgentWorkspace>>,
     pub prompt_guard: Arc<fastclaw_security::PromptGuard>,
+    pub mode_state: fastclaw_agent::builtin_tools::ExecutionModeState,
 }
 
 /// Persistent stores.
@@ -1351,6 +1352,7 @@ impl AppState {
                 ))),
                 workspaces: Arc::new(std::collections::HashMap::new()),
                 prompt_guard: Arc::new(fastclaw_security::PromptGuard::new()),
+                mode_state: fastclaw_agent::builtin_tools::ExecutionModeState::new(),
             },
             store: StorageState {
                 session_store,

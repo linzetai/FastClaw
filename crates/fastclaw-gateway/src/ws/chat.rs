@@ -319,11 +319,12 @@ pub async fn spawn_chat(
             fastclaw_agent::build_subagent_prompt_block(&ctx)
         };
 
+        let mode_state_for_task = state.rt.mode_state.clone();
         let task = tokio::spawn(async move {
             tokio::select! {
                 result = fastclaw_agent::builtin_tools::with_stream_context(
                     stream_context_key_for_task.clone(),
-                    runtime.execute_stream_with_confirm(&cfg, &enriched, &tool_reg, tx, llm_for_task, confirm_pending_for_task, subagent_prompt),
+                    runtime.execute_stream_with_confirm(&cfg, &enriched, &tool_reg, tx, llm_for_task, confirm_pending_for_task, subagent_prompt, Some(mode_state_for_task)),
                 ) => result,
                 _ = cancel2.cancelled() => Err(anyhow::anyhow!("cancelled")),
             }
@@ -864,6 +865,15 @@ pub fn event_to_response(
                 "content": content,
                 "attachments": attachments,
                 "mode": mode,
+            })),
+            error: None,
+        },
+        StreamEvent::ModeChange { from, to } => WsResponse {
+            id: req_id.clone(),
+            msg_type: "chat.mode_change".into(),
+            data: Some(json!({
+                "from": format!("{from}"),
+                "to": format!("{to}"),
             })),
             error: None,
         },

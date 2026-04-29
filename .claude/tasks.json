@@ -1,7 +1,7 @@
 {
   "project": "FastClaw v5 Refactoring — Rust 高性能 Claude Code 内核",
   "version": "5.0",
-  "total_tasks": 74,
+  "total_tasks": 77,
   "phases": [
     {
       "id": "phase-0",
@@ -1026,7 +1026,7 @@
         {
           "id": "P4-11",
           "title": "实现 WorkflowTool",
-          "description": "加载 .json5/.yaml 工作流定义，支持 start/status/advance/cancel/list。",
+          "description": "加载 .json5/.yaml 工作流定义，支持 start/status/advance/cancel/list。 [DEFERRED: 降为 P2，非核心内核功能，后续迭代实现]",
           "target_file": "crates/fastclaw-agent/src/builtin_tools/workflow.rs",
           "cc_references": [
             "claude-code/packages/builtin-tools/src/tools/WorkflowTool/WorkflowTool.ts"
@@ -1039,7 +1039,7 @@
             "list 列出可用工作流和运行中的实例",
             "运行状态持久化到 .fastclaw/workflow-runs/"
           ],
-          "status": "pending"
+          "status": "deferred"
         },
         {
           "id": "P4-12",
@@ -1055,7 +1055,7 @@
             "Plan 模式下 read/search 工具正常可用",
             "模式状态在 StreamEvent 中通知前端"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4-13",
@@ -1120,7 +1120,7 @@
       "id": "phase-4.5",
       "name": "PromptEngine + 工具截断重构",
       "priority": "P0",
-      "estimated_weeks": 3,
+      "estimated_weeks": 3.5,
       "tasks": [
         {
           "id": "P4H-01",
@@ -1341,38 +1341,107 @@
         },
         {
           "id": "P4H-13",
-          "title": "实现 ToolResultStorage — persist-to-disk 策略",
-          "description": "创建 tool_result_storage.rs。大工具结果持久化到 session 目录（~/.fastclaw/sessions/<sid>/tool-results/<id>.txt），替换为 2KB preview + 文件路径。实现 per-message aggregate budget（200K）。空结果返回 marker 文本。",
+          "title": "实现 ToolResultStorage 核心 — persist-to-disk + 常量 + preview",
+          "description": "创建 tool_result_storage.rs。实现核心功能：(1) 常量定义：DEFAULT_MAX_RESULT_SIZE_CHARS=50K, MAX_TOOL_RESULTS_PER_MESSAGE_CHARS=200K, PREVIEW_SIZE_BYTES=2000, PERSISTED_OUTPUT_TAG XML 标签 (2) get_persistence_threshold()：Infinity(usize::MAX) opt-out + min(declared, 50K) (3) ToolResultStorage::process_result()：空结果 marker、已持久化检测、阈值比较、持久化到 session_dir/tool-results/<id>.txt(使用 O_EXCL 避免重复写)、generate_preview 在换行边界截断 (4) buildLargeToolResultMessage 生成 <persisted-output> XML 包裹的 preview + 路径。注意：ReadFile 等声明 max_result_size_chars=usize::MAX 的工具通过 get_persistence_threshold 跳过持久化（防死循环）。参考 CC toolResultStorage.ts L1-200。",
           "target_file": "crates/fastclaw-agent/src/runtime/tool_result_storage.rs",
           "cc_references": [
-            "claude-code/src/utils/toolResultStorage.ts — 全文",
-            "claude-code/src/constants/toolLimits.ts"
+            "claude-code/src/utils/toolResultStorage.ts L1-200 — persistToolResult, buildLargeToolResultMessage, generatePreview, isToolResultContentEmpty, maybePersistLargeToolResult",
+            "claude-code/src/constants/toolLimits.ts — DEFAULT_MAX_RESULT_SIZE_CHARS, MAX_TOOL_RESULT_BYTES, BYTES_PER_TOKEN"
           ],
           "acceptance_criteria": [
-            "超过 per-tool threshold 的结果持久化到 session 目录",
-            "持久化后的 preview 包含：文件大小、路径、前 2KB 内容",
-            "per-message aggregate budget (200K) 正确执行",
             "空结果返回 '(tool_name completed with no output)' marker",
-            "决策一旦做出不可变（seenIds frozen，支持 prompt cache 稳定性）",
-            "文件路径格式：~/.fastclaw/sessions/<sid>/tool-results/<tool_use_id>.txt"
+            "content 以 PERSISTED_OUTPUT_TAG 开头时不再处理（幂等）",
+            "get_persistence_threshold(usize::MAX) 返回 usize::MAX（Infinity opt-out）",
+            "get_persistence_threshold(30_000) 返回 30_000（< 50K 时取 declared）",
+            "get_persistence_threshold(100_000) 返回 50_000（> 50K 时 cap 到 50K）",
+            "超过阈值的结果持久化到 session_dir/tool-results/<tool_use_id>.txt",
+            "使用 O_EXCL/create_new(true) 写入避免重复写（replay 安全）",
+            "preview 在 PREVIEW_SIZE_BYTES 附近的换行边界截断",
+            "持久化后返回 <persisted-output> XML 包裹的 preview + 路径",
+            "I/O 失败时返回原始内容（fallback，不 panic）",
+            "cargo check -p fastclaw-agent 编译通过"
+          ],
+          "status": "pending"
+        },
+        {
+          "id": "P4H-13b",
+          "title": "实现 ContentReplacementState + enforce_per_message_budget",
+          "description": "在 tool_result_storage.rs 中实现 (1) ContentReplacementState 结构：seen_ids(HashSet) + replacements(HashMap)。核心不变式：tool_use_id 一旦进入 seen_ids 命运不可变（替换或保留）(2) ContentReplacementRecord 用于 transcript 序列化 (3) enforce_per_message_budget()：按连续 Tool message 分组为 wire-level group，每组分区为 mustReapply/frozen/fresh，mustReapply 从 replacements 缓存重新应用（零 I/O），frozen 不变，fresh 按 size 降序持久化直到 group 总量 <= 200K (4) skip_tool_names：Infinity-threshold 工具排除在 budget 之外 (5) reconstruct_state()：从 messages + records 重建 state（session resume 用）。参考 CC toolResultStorage.ts L367-910。",
+          "target_file": "crates/fastclaw-agent/src/runtime/tool_result_storage.rs",
+          "cc_references": [
+            "claude-code/src/utils/toolResultStorage.ts L367-910 — ContentReplacementState, enforceToolResultBudget, partitionByPriorDecision, selectFreshToReplace, reconstructContentReplacementState",
+            "claude-code/src/query.ts L421-436 — applyToolResultBudget 调用点"
+          ],
+          "acceptance_criteria": [
+            "ContentReplacementState 的 seen_ids 和 replacements 正确维护",
+            "mustReapply: state.replacements 中已有的 ID → 重新应用缓存字符串",
+            "frozen: state.seen_ids 中已有但 replacements 无 → 保留原文不变",
+            "fresh: 新 ID → 按 size 降序选择持久化，直到 group 总量 <= budget",
+            "持久化后 state.seen_ids.insert + state.replacements.insert 原子更新",
+            "skip_tool_names 中的工具排除在 fresh 之外（标记为 seen 但不参与 budget 计算）",
+            "连续 Tool role messages 作为同一 group 评估",
+            "reconstruct_state 从 records 正确恢复 replacements + 冻结所有 messages 中的 ID",
+            "cargo check -p fastclaw-agent 编译通过"
+          ],
+          "status": "pending"
+        },
+        {
+          "id": "P4H-13c",
+          "title": "迁移 per-tool 阈值 — Tool trait max_result_size_chars 声明",
+          "description": "废弃 tool_executor.rs 中的 tool_output_char_limit() 硬编码 match 表。改为各工具通过 Tool::max_result_size_chars() 声明自己的阈值。迁移表：read_file → usize::MAX (Infinity opt-out), shell → 30_000, grep/glob → 20_000, write_file/edit_file → 100_000, web_fetch/web_search → 100_000, memory/todo → 5_000, snip → 5_000, sleep → 1_000, 其余 → 100_000（trait default）。同时废弃 tool_output_line_limit() 硬编码表。保留 truncate_tool_result_output_with_limit 函数体作为 fallback 但不再作为主路径。注意：Tool trait 已有 max_result_size_chars 方法（P4-08 添加），本任务只需各工具覆写正确值。",
+          "target_file": "crates/fastclaw-agent/src/builtin_tools/ 各工具文件",
+          "cc_references": [
+            "claude-code/packages/builtin-tools/src/tools/*/Tool.ts — maxResultSizeChars 声明"
+          ],
+          "acceptance_criteria": [
+            "read_file max_result_size_chars 返回 usize::MAX",
+            "shell/run_command max_result_size_chars 返回 30_000",
+            "grep/glob max_result_size_chars 返回 20_000",
+            "snip/memory_store 返回 5_000，sleep 返回 1_000",
+            "其余工具使用 trait default 100_000",
+            "tool_output_char_limit() 和 tool_output_line_limit() 函数标记 #[deprecated] 或删除",
+            "cargo check -p fastclaw-agent 编译通过"
           ],
           "status": "pending"
         },
         {
           "id": "P4H-14",
           "title": "重构 tool_executor 接入 ToolResultStorage",
-          "description": "在 tool_executor.rs 中，工具执行完成后通过 ToolResultStorage.process_result() 处理结果（替代当前的 truncate_tool_result_output_with_limit）。batch 执行完成后调用 enforce_per_message_budget()。保留现有 microcompact 和 semantic_header 逻辑不变。",
-          "target_file": "crates/fastclaw-agent/src/runtime/tool_executor.rs",
+          "description": "在 tool_executor.rs 中：(1) 工具执行完成后通过 ToolResultStorage.process_result() 处理单个结果（替代 truncate_tool_result_output_with_limit）。process_result 会根据 get_persistence_threshold(tool.max_result_size_chars()) 判断是否持久化 (2) 在 execute_stream query loop 中 API 调用前，调用 enforce_per_message_budget() 处理聚合 budget。传入 ContentReplacementState（挂在 session/runtime 上下文）和 skip_tool_names（遍历 tool_registry 中 max_result_size_chars=usize::MAX 的工具）(3) enforce 返回的 ContentReplacementRecord 写入 session SQLite (4) 保留现有 microcompact 和 semantic_header 逻辑不变 (5) 持久化 I/O 失败时降级为旧版 truncate（fallback）。",
+          "target_file": "crates/fastclaw-agent/src/runtime/tool_executor.rs + runtime/mod.rs",
           "cc_references": [
-            "claude-code/src/services/tools/toolExecution.ts — processToolResultBlock()"
+            "claude-code/src/services/tools/toolExecution.ts — processToolResultBlock(), processPreMappedToolResultBlock()",
+            "claude-code/src/query.ts L416-436 — applyToolResultBudget 调用点 + skipToolNames 构造"
           ],
           "acceptance_criteria": [
             "单工具结果通过 ToolResultStorage.process_result() 处理",
-            "batch 执行后调用 enforce_per_message_budget()",
+            "execute_stream 中 API 调用前执行 enforce_per_message_budget()",
+            "ContentReplacementState 从 session 上下文获取（首次创建 or resume 重建）",
+            "skip_tool_names 从 tool_registry 中 max_result_size_chars==usize::MAX 的工具自动构造",
+            "新增的 ContentReplacementRecord 写入 session SQLite",
             "现有 microcompact_tool_results 和 semantic_header 保持不变",
             "现有 dedup_repeated_tool_calls 保持不变",
-            "truncate_tool_result_output_with_limit 作为 fallback（ToolResultStorage 失败时）",
+            "持久化 I/O 失败时 fallback 到 truncate_tool_result_output_with_limit",
             "cargo test -p fastclaw-agent 全通过"
+          ],
+          "status": "pending"
+        },
+        {
+          "id": "P4H-14b",
+          "title": "实现 ContentReplacementRecord 的 session 持久化与 resume 重建",
+          "description": "在 fastclaw-session 中：(1) 新增 content_replacement_records 表（session_id, tool_use_id, replacement TEXT）(2) 写入接口：save_replacement_records(session_id, records) (3) 读取接口：load_replacement_records(session_id) (4) 在 tool_executor 中 enforce_per_message_budget 返回新记录后调用保存 (5) 在 session resume 时加载 records → ToolResultStorage::reconstruct_state() 重建 ContentReplacementState。保证 resume 后 prompt cache 前缀与原始 session 字节级一致。",
+          "target_file": "crates/fastclaw-session/src/lib.rs + crates/fastclaw-agent/src/runtime/tool_result_storage.rs",
+          "cc_references": [
+            "claude-code/src/utils/toolResultStorage.ts L460-490 — provisionContentReplacementState, reconstructContentReplacementState",
+            "claude-code/src/utils/sessionStorage.ts — recordContentReplacement"
+          ],
+          "acceptance_criteria": [
+            "content_replacement_records 表包含 session_id, tool_use_id, replacement 列",
+            "save_replacement_records 正确写入 SQLite",
+            "load_replacement_records 正确读取并反序列化",
+            "session resume 后 reconstruct_state 正确重建 seen_ids + replacements",
+            "重建后 enforce_per_message_budget 对旧消息重新应用相同的 replacement（字节一致）",
+            "cargo test -p fastclaw-session 和 -p fastclaw-agent 全通过"
           ],
           "status": "pending"
         },
@@ -1396,17 +1465,19 @@
         },
         {
           "id": "P4H-16",
-          "title": "ToolResultStorage 单元测试",
-          "description": "测试持久化、preview 生成、per-message budget、空结果处理、决策不可变性。",
+          "title": "ToolResultStorage 全面单元测试",
+          "description": "覆盖 tool_result_storage.rs 所有核心功能：(1) process_result 测试：小结果不持久化、大结果持久化+preview、空结果marker、已持久化检测（幂等）、Infinity opt-out、I/O 失败 fallback (2) get_persistence_threshold 测试：declared < 50K、declared > 50K、declared == usize::MAX (3) ContentReplacementState 测试：seen_ids 不可变性、mustReapply 字节一致、frozen 不被替换、fresh 按 size 排序 (4) enforce_per_message_budget 测试：总量 <= budget 不替换、总量 > budget 最大先替换、skip_tool_names 排除、连续 group 分组正确 (5) reconstruct_state 测试：从 records 恢复、冻结所有 message IDs (6) generate_preview 测试：换行边界截断、短内容不截断。",
           "target_file": "crates/fastclaw-agent/src/runtime/tool_result_storage.rs",
           "cc_references": [],
           "acceptance_criteria": [
-            "小结果（< threshold）不触发持久化",
-            "大结果持久化后返回 preview + 文件路径",
-            "per-message budget 正确替换最大的结果",
-            "空结果返回 marker 文本",
-            "同一 tool_use_id 重复调用返回相同决策（不可变）",
-            "至少 6 个测试用例"
+            "process_result: 小/大/空/已持久化/Infinity 各有测试",
+            "get_persistence_threshold: 3 个边界值测试",
+            "ContentReplacementState: mustReapply/frozen/fresh 分区逻辑测试",
+            "enforce_per_message_budget: 4+ 场景（under budget / over budget / skip / multi-group）",
+            "reconstruct_state: resume 后决策一致性测试",
+            "generate_preview: 换行边界 + 短内容测试",
+            "至少 15 个测试用例",
+            "cargo test -p fastclaw-agent -- tool_result_storage 全通过"
           ],
           "status": "pending"
         },

@@ -101,6 +101,9 @@ pub struct ExecutionParams<'a> {
     /// Pre-built sub-agent prompt block to append to the system message.
     /// Built by the caller (gateway) using `build_subagent_prompt_block`.
     pub subagent_prompt: Option<String>,
+    /// Shared execution mode state for plan-mode blocking.
+    /// When `Some`, tools of kind Edit/Execute are blocked in Plan mode.
+    pub mode_state: Option<crate::builtin_tools::ExecutionModeState>,
 }
 
 /// Additional parameters specific to the streaming execution path.
@@ -208,7 +211,7 @@ impl AgentRuntime {
         tool_registry: &Arc<ToolRegistry>,
         llm_override: Option<Arc<dyn LlmProvider>>,
     ) -> anyhow::Result<ExecutionResult> {
-        let params = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt: None };
+        let params = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt: None, mode_state: None };
         self.execute_inner(&params).await
     }
 
@@ -220,7 +223,7 @@ impl AgentRuntime {
         llm_override: Option<Arc<dyn LlmProvider>>,
         subagent_prompt: Option<String>,
     ) -> anyhow::Result<ExecutionResult> {
-        let params = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt };
+        let params = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt, mode_state: None };
         self.execute_inner(&params).await
     }
 
@@ -228,7 +231,7 @@ impl AgentRuntime {
         &self,
         params: &ExecutionParams<'_>,
     ) -> anyhow::Result<ExecutionResult> {
-        let ExecutionParams { config, request, tool_registry, ref llm_override, ref subagent_prompt } = *params;
+        let ExecutionParams { config, request, tool_registry, ref llm_override, ref subagent_prompt, ref mode_state } = *params;
         let max_iterations = config.behavior.max_tool_calls_per_turn;
         let max_errors = config.behavior.max_consecutive_errors;
 
@@ -383,7 +386,7 @@ impl AgentRuntime {
                 .ok_or_else(|| anyhow::anyhow!("LLM reported tool_calls but none were present"))?;
 
             let results = execute_tool_batch(
-                tool_calls, tool_registry, &config.behavior, &request.work_dir, "",
+                tool_calls, tool_registry, &config.behavior, &request.work_dir, "", mode_state.as_ref(),
             ).await;
 
             for (tool_name, call_id, arguments, result) in results {
@@ -527,7 +530,7 @@ impl AgentRuntime {
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
         llm_override: Option<Arc<dyn LlmProvider>>,
     ) -> anyhow::Result<(u32, u32)> {
-        let exec = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt: None };
+        let exec = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt: None, mode_state: None };
         let stream = StreamParams { tx, confirm_pending: None };
         self.execute_stream_inner(&exec, stream).await
     }
@@ -541,7 +544,7 @@ impl AgentRuntime {
         llm_override: Option<Arc<dyn LlmProvider>>,
         subagent_prompt: Option<String>,
     ) -> anyhow::Result<(u32, u32)> {
-        let exec = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt };
+        let exec = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt, mode_state: None };
         let stream = StreamParams { tx, confirm_pending: None };
         self.execute_stream_inner(&exec, stream).await
     }
@@ -556,8 +559,9 @@ impl AgentRuntime {
         llm_override: Option<Arc<dyn LlmProvider>>,
         confirm_pending: Arc<DashMap<String, tokio::sync::oneshot::Sender<String>>>,
         subagent_prompt: Option<String>,
+        mode_state: Option<crate::builtin_tools::ExecutionModeState>,
     ) -> anyhow::Result<(u32, u32)> {
-        let exec = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt };
+        let exec = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt, mode_state };
         let stream = StreamParams { tx, confirm_pending: Some(confirm_pending) };
         self.execute_stream_inner(&exec, stream).await
     }
@@ -567,7 +571,7 @@ impl AgentRuntime {
         params: &ExecutionParams<'_>,
         stream_params: StreamParams,
     ) -> anyhow::Result<(u32, u32)> {
-        let ExecutionParams { config, request, tool_registry, ref llm_override, ref subagent_prompt } = *params;
+        let ExecutionParams { config, request, tool_registry, ref llm_override, ref subagent_prompt, ref mode_state } = *params;
         let StreamParams { ref tx, ref confirm_pending } = stream_params;
         let max_iterations = config.behavior.max_tool_calls_per_turn;
         let max_errors = config.behavior.max_consecutive_errors;
@@ -1068,8 +1072,9 @@ impl AgentRuntime {
                 .await;
             }
 
+            let mode_before = mode_state.as_ref().map(|ms| ms.current_mode());
             let stream_results = execute_tool_batch(
-                &assembled_calls, tool_registry, &config.behavior, &request.work_dir, " (stream)",
+                &assembled_calls, tool_registry, &config.behavior, &request.work_dir, " (stream)", mode_state.as_ref(),
             ).await;
 
             for (tool_name, call_id, arguments, mut result) in stream_results {
@@ -1235,6 +1240,17 @@ impl AgentRuntime {
                         lstate.error_limit_reached = true;
                         break;
                     }
+                }
+            }
+
+            if let (Some(before), Some(ms)) = (mode_before, mode_state.as_ref()) {
+                let after = ms.current_mode();
+                if before != after {
+                    let _ = send_stream_event(
+                        tx,
+                        StreamEvent::ModeChange { from: before, to: after },
+                        false,
+                    ).await;
                 }
             }
 

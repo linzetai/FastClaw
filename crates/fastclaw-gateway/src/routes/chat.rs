@@ -568,6 +568,13 @@ async fn handle_stream(
                     });
                     yield Ok(format!("event: brief\ndata: {ev}\n\n"));
                 }
+                StreamEvent::ModeChange { from, to } => {
+                    let ev = json!({
+                        "from": format!("{from}"),
+                        "to": format!("{to}"),
+                    });
+                    yield Ok(format!("event: mode_change\ndata: {ev}\n\n"));
+                }
             }
         }
     };
