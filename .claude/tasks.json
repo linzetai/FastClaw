@@ -1226,7 +1226,7 @@
             "environment 正确输出 cwd/platform/shell/model/git 信息",
             "environment 包含模型知识截止日期"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4H-07",
