@@ -1192,7 +1192,7 @@
             "包含 progressive fallback chain（3 层降级）",
             "根据 ctx.enabled_tools 动态引用正确的工具名"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4H-05",
