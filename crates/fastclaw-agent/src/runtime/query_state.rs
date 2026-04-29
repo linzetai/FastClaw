@@ -6,6 +6,14 @@
 
 use super::stream_engine::ToolCallTrace;
 
+/// Max attempts to recover from `max_output_tokens` (finish_reason=length)
+/// by escalating the token limit before giving up.
+pub(crate) const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT: u32 = 3;
+
+/// Token limit used when escalating after a max_output_tokens truncation.
+/// 16 384 is a safe upper bound that most models support.
+pub(crate) const ESCALATED_MAX_TOKENS: u32 = 16_384;
+
 /// Unified mutable state tracked across iterations of the agent query loop.
 ///
 /// Subsumes the old `LoopState` and the scattered token-accumulation variables
@@ -198,6 +206,20 @@ impl QueryLoopState {
         }
     }
 
+    /// Attempt recovery from a `max_output_tokens` (finish_reason=length) truncation.
+    ///
+    /// Returns `Some(Continue(MaxOutputTokensRecovery))` if under the retry
+    /// limit, or `None` if the limit is exhausted (caller should proceed
+    /// normally, which typically means end-turn).
+    pub fn try_max_output_tokens_recovery(&mut self) -> Option<LoopTransition> {
+        if self.max_output_tokens_recovery_count < MAX_OUTPUT_TOKENS_RECOVERY_LIMIT {
+            self.max_output_tokens_recovery_count += 1;
+            Some(LoopTransition::Continue(ContinueReason::MaxOutputTokensRecovery))
+        } else {
+            None
+        }
+    }
+
     /// After the LLM response: should the loop continue or terminate?
     pub fn determine_post_llm_transition(&self, has_tool_calls: bool) -> LoopTransition {
         if !has_tool_calls {
@@ -360,6 +382,41 @@ mod tests {
         assert_eq!(
             s.determine_post_llm_transition(true),
             LoopTransition::Continue(ContinueReason::ToolUse)
+        );
+    }
+
+    #[test]
+    fn max_output_tokens_recovery_succeeds_under_limit() {
+        let mut s = QueryLoopState::new(10);
+        for i in 0..MAX_OUTPUT_TOKENS_RECOVERY_LIMIT {
+            let result = s.try_max_output_tokens_recovery();
+            assert_eq!(
+                result,
+                Some(LoopTransition::Continue(ContinueReason::MaxOutputTokensRecovery)),
+                "attempt {} should succeed",
+                i + 1
+            );
+            assert_eq!(s.max_output_tokens_recovery_count, i + 1);
+        }
+    }
+
+    #[test]
+    fn max_output_tokens_recovery_fails_at_limit() {
+        let mut s = QueryLoopState::new(10);
+        s.max_output_tokens_recovery_count = MAX_OUTPUT_TOKENS_RECOVERY_LIMIT;
+        let result = s.try_max_output_tokens_recovery();
+        assert!(result.is_none(), "should return None when limit exhausted");
+    }
+
+    #[test]
+    fn max_output_tokens_recovery_exhaustion_sequence() {
+        let mut s = QueryLoopState::new(10);
+        for _ in 0..MAX_OUTPUT_TOKENS_RECOVERY_LIMIT {
+            assert!(s.try_max_output_tokens_recovery().is_some());
+        }
+        assert!(
+            s.try_max_output_tokens_recovery().is_none(),
+            "4th attempt should fail after 3 successes"
         );
     }
 

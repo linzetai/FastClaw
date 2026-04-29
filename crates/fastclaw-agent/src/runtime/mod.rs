@@ -776,7 +776,7 @@ impl AgentRuntime {
             .as_deref()
             .unwrap_or(&config.model.model)
             .to_string();
-        let max_tokens = request.max_tokens.or(config.model.max_tokens).or_else(|| {
+        let mut max_tokens = request.max_tokens.or(config.model.max_tokens).or_else(|| {
             let inferred = fastclaw_context::infer_output_limit_from_model(&model);
             if inferred > 0 { Some(inferred) } else { None }
         });
@@ -1066,7 +1066,35 @@ impl AgentRuntime {
                 ));
             }
 
+            // max_output_tokens recovery: when finish_reason=length and no
+            // tool calls, the model's output was truncated by the token limit.
+            // Escalate max_tokens and retry up to MAX_OUTPUT_TOKENS_RECOVERY_LIMIT times.
             let has_valid_tool_calls = tool_call_accum.iter().any(|a| !a.name.is_empty());
+            if last_finish_reason.as_deref() == Some("length") && !has_valid_tool_calls {
+                if let Some(query_state::LoopTransition::Continue(query_state::ContinueReason::MaxOutputTokensRecovery)) =
+                    state.try_max_output_tokens_recovery()
+                {
+                    let escalated = query_state::ESCALATED_MAX_TOKENS;
+                    tracing::warn!(
+                        agent_id = %config.agent_id,
+                        attempt = state.max_output_tokens_recovery_count,
+                        escalated_max_tokens = escalated,
+                        "max_output_tokens recovery — retrying with escalated limit"
+                    );
+                    max_tokens = Some(escalated);
+                    messages.push(ChatMessage {
+                        role: Role::Assistant,
+                        content: Some(serde_json::Value::String(
+                            std::mem::take(&mut accumulated_content),
+                        )),
+                        name: None,
+                        tool_calls: None,
+                        tool_call_id: None,
+                    });
+                    continue;
+                }
+            }
+
             let transition = state.determine_post_llm_transition(has_valid_tool_calls);
 
             match transition {
