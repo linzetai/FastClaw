@@ -843,6 +843,189 @@ pub fn validate_readonly_command(command: &str) -> Result<(), String> {
     Ok(())
 }
 
+// ─── Path Safety Validation ─────────────────────────────────────────────────
+
+/// Sensitive paths under $HOME that should never be written to by shell commands.
+const SENSITIVE_HOME_PATHS: &[&str] = &[
+    ".ssh",
+    ".gnupg",
+    ".gpg",
+    ".bashrc",
+    ".bash_profile",
+    ".bash_login",
+    ".profile",
+    ".zshrc",
+    ".zshenv",
+    ".zprofile",
+    ".zlogin",
+    ".config/git/credentials",
+    ".gitconfig",
+    ".npmrc",
+    ".cargo/credentials",
+    ".cargo/credentials.toml",
+    ".aws/credentials",
+    ".kube/config",
+    ".docker/config.json",
+    ".netrc",
+    ".env",
+    ".fastclaw",
+];
+
+/// Commands known to write/modify files (for which path validation applies).
+const PATH_WRITE_COMMANDS: &[&str] = &[
+    "rm", "rmdir", "mv", "cp", "touch", "mkdir",
+    "chmod", "chown", "chgrp",
+    "ln", "unlink",
+    "tee",
+];
+
+/// Extract file path arguments from a command string for validation.
+/// Returns (base_command, list of path arguments).
+fn extract_paths_from_command(segment: &str) -> (String, Vec<String>) {
+    let tokens: Vec<&str> = segment.split_whitespace().collect();
+    if tokens.is_empty() {
+        return (String::new(), Vec::new());
+    }
+
+    let base_cmd = tokens[0].rsplit('/').next().unwrap_or(tokens[0]).to_string();
+    let args = &tokens[1..];
+
+    let mut paths = Vec::new();
+    let mut after_double_dash = false;
+
+    for (i, &arg) in args.iter().enumerate() {
+        if arg == "--" {
+            after_double_dash = true;
+            continue;
+        }
+        if after_double_dash {
+            paths.push(arg.to_string());
+            continue;
+        }
+        if arg.starts_with('-') {
+            // Skip flags and their arguments for known flag-with-value patterns
+            if matches!(arg, "-o" | "-t" | "--target-directory" | "--output") {
+                // next token is the value — include it as a path since it's an output target
+                if let Some(&next) = args.get(i + 1) {
+                    paths.push(next.to_string());
+                }
+            }
+            continue;
+        }
+        paths.push(arg.to_string());
+    }
+
+    (base_cmd, paths)
+}
+
+/// Check if a path resolves to a sensitive location that should be protected.
+/// `home_dir` is the user's home directory.
+fn is_sensitive_path(path: &std::path::Path, home_dir: &std::path::Path) -> Option<String> {
+    for sensitive in SENSITIVE_HOME_PATHS {
+        let sensitive_full = home_dir.join(sensitive);
+        if path == sensitive_full || path.starts_with(&sensitive_full) {
+            return Some(format!(
+                "path '{}' targets sensitive location ~/{sensitive}",
+                path.display()
+            ));
+        }
+    }
+    None
+}
+
+/// Check if a path contains traversal patterns that might escape allowed directories.
+fn has_traversal_attempt(raw_path: &str) -> bool {
+    let normalized = raw_path.replace('\\', "/");
+    normalized.contains("/../")
+        || normalized.starts_with("../")
+        || normalized.ends_with("/..")
+        || normalized == ".."
+}
+
+/// Validate paths extracted from a command against security rules.
+/// Only applies to write commands (rm, mv, cp, touch, etc.) since read commands
+/// are bounded by the OS file permissions and the sandbox directory restriction.
+pub fn validate_command_paths(command: &str, allowed_dirs: &[String]) -> Result<(), String> {
+    let stripped = strip_single_quoted_regions(command);
+
+    for segment in stripped
+        .split("&&")
+        .flat_map(|s| s.split("||"))
+        .flat_map(|s| s.split(';'))
+        .flat_map(|s| s.split('|'))
+    {
+        let seg = segment.trim();
+        if seg.is_empty() {
+            continue;
+        }
+
+        let (base_cmd, paths) = extract_paths_from_command(seg);
+
+        // Only validate paths for write commands
+        if !PATH_WRITE_COMMANDS.contains(&base_cmd.as_str()) {
+            // Also check sed -i (write via in-place edit)
+            if base_cmd == "sed" {
+                let tokens: Vec<&str> = seg.split_whitespace().collect();
+                if !tokens.iter().any(|t| *t == "-i" || t.starts_with("-i")) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+        }
+
+        let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root"));
+
+        for raw_path in &paths {
+            // Strip surrounding quotes
+            let cleaned = raw_path.trim_matches(|c| c == '\'' || c == '"');
+
+            // 1. Check traversal attempt
+            if has_traversal_attempt(cleaned) {
+                return Err(format!(
+                    "path traversal detected in '{cleaned}' — canonicalize paths or use absolute paths within the workspace"
+                ));
+            }
+
+            // 2. Resolve path for sensitive-path check
+            let expanded = if cleaned.starts_with('~') {
+                home_dir.join(cleaned.trim_start_matches("~/").trim_start_matches('~'))
+            } else if cleaned.starts_with('/') {
+                std::path::PathBuf::from(cleaned)
+            } else {
+                // Relative path — try to resolve it; if allowed_dirs is set use first as base
+                let base = allowed_dirs.first()
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+                base.join(cleaned)
+            };
+
+            // 3. Check sensitive path
+            if let Some(reason) = is_sensitive_path(&expanded, &home_dir) {
+                return Err(reason);
+            }
+
+            // 4. If allowed_dirs is configured, verify the path is within bounds
+            if !allowed_dirs.is_empty() {
+                let canonical = expanded.canonicalize().unwrap_or(expanded.clone());
+                let in_allowed = allowed_dirs.iter().any(|d| {
+                    let allowed = std::path::Path::new(d);
+                    let allowed_c = allowed.canonicalize().unwrap_or_else(|_| allowed.to_path_buf());
+                    canonical.starts_with(&allowed_c)
+                });
+                if !in_allowed {
+                    return Err(format!(
+                        "path '{}' resolves outside allowed directories: {}",
+                        cleaned,
+                        allowed_dirs.join(", ")
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Zsh-specific dangerous commands that can bypass shell security.
 const ZSH_DANGEROUS_COMMANDS: &[&str] = &[
     "zmodload", "emulate",
@@ -1223,6 +1406,13 @@ Sandbox restrictions:\n");
             return ToolResult::err(format!(
                 "SANDBOX BLOCKED: {reason} \
                  Adjust the command to comply, or use non-shell tools (read_file, write_file, web_fetch) where appropriate."
+            ));
+        }
+
+        if let Err(reason) = validate_command_paths(command, &self.config.allowed_dirs) {
+            return ToolResult::err(format!(
+                "SANDBOX BLOCKED: {reason} \
+                 Use absolute paths within the allowed workspace, or use dedicated file tools."
             ));
         }
 
@@ -1697,5 +1887,84 @@ mod sandbox_tests {
     fn readonly_blocks_npm_write() {
         assert!(super::validate_readonly_command("npm install express").is_err());
         assert!(super::validate_readonly_command("npm publish").is_err());
+    }
+
+    // --- Path safety validation tests ---
+
+    #[test]
+    fn path_blocks_traversal_attempt() {
+        let allowed = vec!["/home/user/project".to_string()];
+        assert!(super::validate_command_paths("rm ../../etc/passwd", &allowed).is_err());
+        assert!(super::validate_command_paths("mv ../../../secret.txt here", &allowed).is_err());
+        assert!(super::validate_command_paths("touch ..", &allowed).is_err());
+    }
+
+    #[test]
+    fn path_blocks_sensitive_home_ssh() {
+        let home = dirs::home_dir().unwrap();
+        let ssh_path = format!("rm {}/.ssh/id_rsa", home.display());
+        assert!(super::validate_command_paths(&ssh_path, &[]).is_err());
+    }
+
+    #[test]
+    fn path_blocks_sensitive_home_bashrc() {
+        let home = dirs::home_dir().unwrap();
+        let bashrc = format!("mv {0}/.bashrc {0}/.bashrc.bak", home.display());
+        assert!(super::validate_command_paths(&bashrc, &[]).is_err());
+    }
+
+    #[test]
+    fn path_blocks_sensitive_tilde_paths() {
+        assert!(super::validate_command_paths("rm ~/.ssh/known_hosts", &[]).is_err());
+        assert!(super::validate_command_paths("cp evil ~/.gnupg/gpg.conf", &[]).is_err());
+        assert!(super::validate_command_paths("touch ~/.bashrc", &[]).is_err());
+    }
+
+    #[test]
+    fn path_allows_normal_workspace_files() {
+        let allowed = vec!["/home/user/project".to_string()];
+        // cat/grep are read-only commands, not in PATH_WRITE_COMMANDS, so they pass
+        assert!(super::validate_command_paths("cat /home/user/project/file.txt", &allowed).is_ok());
+        assert!(super::validate_command_paths("grep -r TODO src/", &allowed).is_ok());
+    }
+
+    #[test]
+    fn path_blocks_write_outside_allowed_dirs() {
+        let allowed = vec!["/home/user/project".to_string()];
+        assert!(super::validate_command_paths("rm /tmp/secret", &allowed).is_err());
+        assert!(super::validate_command_paths("touch /etc/crontab", &allowed).is_err());
+    }
+
+    #[test]
+    fn path_skips_validation_for_read_commands() {
+        let allowed = vec!["/home/user/project".to_string()];
+        // Read commands (cat, ls, grep) don't have path restrictions beyond OS perms
+        assert!(super::validate_command_paths("cat /etc/passwd", &allowed).is_ok());
+        assert!(super::validate_command_paths("ls /var/log", &allowed).is_ok());
+    }
+
+    #[test]
+    fn path_validates_all_segments_in_chain() {
+        let allowed = vec!["/home/user/project".to_string()];
+        assert!(super::validate_command_paths(
+            "ls /home/user/project && rm /tmp/evil",
+            &allowed
+        ).is_err());
+    }
+
+    #[test]
+    fn path_no_false_positive_on_quoted_content() {
+        assert!(super::validate_command_paths(
+            "echo 'rm ~/.ssh/id_rsa'",
+            &[]
+        ).is_ok());
+    }
+
+    #[test]
+    fn path_allows_write_in_workspace_when_allowed() {
+        let tmp = std::env::temp_dir();
+        let allowed = vec![tmp.to_string_lossy().to_string()];
+        let cmd = format!("touch {}/test.txt", tmp.display());
+        assert!(super::validate_command_paths(&cmd, &allowed).is_ok());
     }
 }

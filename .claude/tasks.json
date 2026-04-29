@@ -1573,7 +1573,7 @@
             "保护 .bashrc, .ssh/, .gnupg/ 等敏感路径",
             "cargo test -p fastclaw-agent 全通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4S-04",
