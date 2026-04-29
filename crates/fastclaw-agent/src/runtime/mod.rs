@@ -43,6 +43,7 @@ pub(crate) mod context_compressor;
 pub mod prompt_engine;
 pub mod prompt_sections;
 mod prompt_builder;
+pub(crate) mod query_deps;
 mod query_state;
 mod stream_engine;
 mod tool_executor;
@@ -56,8 +57,8 @@ use accumulator::{accumulate_tool_call, ToolCallAccumulator};
 #[cfg(feature = "evolution")]
 use prompt_builder::SKILL_MANAGEMENT_GUIDANCE;
 use query_state::QueryLoopState;
+use query_deps::QueryDeps;
 use stream_engine::send_stream_event;
-use unified_compact::unified_pre_query_compact;
 use tool_executor::execute_tool_batch;
 use tool_executor::filter_tool_definitions;
 use tool_executor::semantic_header;
@@ -790,20 +791,19 @@ impl AgentRuntime {
             fastclaw_context::infer_context_window_from_model(&config.model.model),
         );
 
-        // Provider for LLM compression — resolved once
-        let provider_for_compress: Arc<dyn LlmProvider> = match &llm_override {
+        // QueryDeps: unified dependency injection for LLM calls + compression
+        let provider_for_deps: Arc<dyn LlmProvider> = match &llm_override {
             Some(p) => p.clone(),
             None => self.resolve_provider(&config.agent_id)?,
         };
-
-        // Pipeline created once outside the loop to retain cross-iteration state
-        let mut compact_pipeline = fastclaw_context::ContextPipeline::new(
+        let compact_pipeline = fastclaw_context::ContextPipeline::new(
             fastclaw_context::PipelineConfig {
                 snip_max_tokens: context_window as usize,
                 reactive_target_tokens: context_window as usize,
                 ..Default::default()
             },
         );
+        let deps = query_deps::ProductionDeps::new(provider_for_deps, compact_pipeline);
 
         // Reconstruct ContentReplacementState from persisted records on session resume
         let mut replacement_state = Self::load_or_create_replacement_state(
@@ -847,13 +847,11 @@ impl AgentRuntime {
 
             state.begin_iteration();
 
-            // ── Unified context compaction ────────────────────────────────
-            let compact_result = unified_pre_query_compact(
+            // ── Unified context compaction (via QueryDeps) ─────────────────
+            let compact_result = deps.pre_query_compact(
                 &mut messages,
-                &mut compact_pipeline,
                 context_window,
                 max_tokens,
-                &provider_for_compress,
                 &model,
                 state.last_estimated_tokens,
             ).await;
@@ -906,11 +904,6 @@ impl AgentRuntime {
             const MAX_STREAM_RESUME_ATTEMPTS: u32 = 5;
             let mut stream_resume_attempts: u32 = 0;
 
-            let provider = match &llm_override {
-                Some(p) => p.clone(),
-                None => self.resolve_provider(&config.agent_id)?,
-            };
-
             let newly_replaced = apply_message_budget(&tool_storage, &mut messages, &mut replacement_state, &skip_tool_names);
             Self::persist_replacement_records(session_store, request.session_id.as_deref(), &newly_replaced).await;
 
@@ -929,7 +922,7 @@ impl AgentRuntime {
                 };
 
                 let llm_call_t0 = std::time::Instant::now();
-                let stream_result = provider.chat_completion_stream(&params).await;
+                let stream_result = deps.call_model_stream(&params).await;
                 let mut stream = match stream_result {
                     Ok(s) => s,
                     Err(e) => {
@@ -943,7 +936,7 @@ impl AgentRuntime {
                                 error = %e,
                                 "prompt_too_long detected — attempting reactive compaction"
                             );
-                            let reactive_result = compact_pipeline.reactive_compact(&messages);
+                            let reactive_result = deps.reactive_compact(&messages);
                             if reactive_result.recovered {
                                 tracing::info!(
                                     level = ?reactive_result.level_used,
