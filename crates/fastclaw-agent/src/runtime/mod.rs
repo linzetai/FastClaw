@@ -48,6 +48,7 @@ mod stream_engine;
 mod tool_executor;
 pub mod tool_result_storage;
 mod trajectory;
+mod unified_compact;
 
 pub use prompt_builder::{build_subagent_prompt_block, SubAgentPromptContext};
 
@@ -56,10 +57,9 @@ use accumulator::{accumulate_tool_call, ToolCallAccumulator};
 use prompt_builder::SKILL_MANAGEMENT_GUIDANCE;
 use query_state::QueryLoopState;
 use stream_engine::send_stream_event;
-use tool_executor::dedup_repeated_tool_calls;
+use unified_compact::unified_pre_query_compact;
 use tool_executor::execute_tool_batch;
 use tool_executor::filter_tool_definitions;
-use tool_executor::microcompact_tool_results;
 use tool_executor::semantic_header;
 #[allow(deprecated)]
 use tool_executor::truncate_tool_result_output_with_limit;
@@ -774,6 +774,26 @@ impl AgentRuntime {
         let skip_tool_names = build_skip_tool_names(tool_registry);
         let stream_start = std::time::Instant::now();
 
+        // Context window — constant across iterations
+        let context_window = config.model.context_window.unwrap_or(
+            fastclaw_context::infer_context_window_from_model(&config.model.model),
+        );
+
+        // Provider for LLM compression — resolved once
+        let provider_for_compress: Arc<dyn LlmProvider> = match &llm_override {
+            Some(p) => p.clone(),
+            None => self.resolve_provider(&config.agent_id)?,
+        };
+
+        // Pipeline created once outside the loop to retain cross-iteration state
+        let mut compact_pipeline = fastclaw_context::ContextPipeline::new(
+            fastclaw_context::PipelineConfig {
+                snip_max_tokens: context_window as usize,
+                reactive_target_tokens: context_window as usize,
+                ..Default::default()
+            },
+        );
+
         // Reconstruct ContentReplacementState from persisted records on session resume
         let mut replacement_state = Self::load_or_create_replacement_state(
             session_store,
@@ -816,108 +836,32 @@ impl AgentRuntime {
 
             state.begin_iteration();
 
-            // ── Context window management ───────────────────────────────
-            let context_window = config.model.context_window.unwrap_or(
-                fastclaw_context::infer_context_window_from_model(&config.model.model),
-            );
-
-            // Phase 0a: Microcompact old tool results (keep last 3 fully, next 3 faded)
-            microcompact_tool_results(&mut messages, 3);
-
-            // Phase 0a-2: Deduplicate repeated tool calls on the same target
-            dedup_repeated_tool_calls(&mut messages);
-
-            // Phase 0b: Content filter — truncate oversized tool results, remove
-            // empty messages, deduplicate consecutive identical system messages.
-            {
-                let filter = fastclaw_context::ContentFilterHook::new(2000);
-                let _ = fastclaw_context::ContextHook::on_assemble(&filter, &mut messages).await;
-            }
-
-            // Phase 0c: System reminder — nudge every 20 user turns to keep the
-            // agent grounded on tool usage and memory in long conversations.
-            {
-                let reminder = fastclaw_context::SystemReminderHook::default();
-                let _ = fastclaw_context::ContextHook::on_assemble(&reminder, &mut messages).await;
-            }
-
-            // Phase 0.5: ContextPipeline pre-query compaction (snip + importance)
-            let pipeline = fastclaw_context::ContextPipeline::new(
-                fastclaw_context::PipelineConfig {
-                    snip_max_tokens: context_window as usize,
-                    reactive_target_tokens: context_window as usize,
-                    ..Default::default()
-                },
-            );
-            let (compacted, pipeline_meta) = pipeline.pre_query_compact(&messages);
-            if pipeline_meta.snip_applied || pipeline_meta.micro_applied {
-                tracing::info!(
-                    snip_freed = pipeline_meta.snip_tokens_freed,
-                    snip_rounds = pipeline_meta.snip_rounds_removed,
-                    micro_evicted = pipeline_meta.micro_evicted,
-                    total_freed = pipeline_meta.total_tokens_freed,
-                    "pre-query pipeline compacted context"
-                );
-                messages = compacted;
-            }
-
-            // Phase 1: LLM-based compression at 60% threshold
-            // Use API-reported prompt_tokens from the previous iteration when available;
-            // falls back to chars/4 heuristic on the first iteration.
-            let local_estimate = fastclaw_context::estimate_messages_tokens(&messages);
-            tracing::debug!(
-                local_estimate,
-                api_prompt_tokens = state.last_estimated_tokens,
-                "pre-compact: entering LLM compression"
-            );
-
-            let provider_for_compress = match &llm_override {
-                Some(p) => p.clone(),
-                None => self.resolve_provider(&config.agent_id)?,
-            };
-            let compress_result = context_compressor::try_compress_chat(
+            // ── Unified context compaction ────────────────────────────────
+            let compact_result = unified_pre_query_compact(
                 &mut messages,
+                &mut compact_pipeline,
                 context_window,
+                max_tokens,
                 &provider_for_compress,
                 &model,
                 state.last_estimated_tokens,
             ).await;
-
-            if compress_result.compressed {
-                tracing::info!(
-                    original = compress_result.original_tokens,
-                    new = compress_result.new_tokens,
-                    saved = compress_result.original_tokens.saturating_sub(compress_result.new_tokens),
-                    "post-compact: LLM compression reduced context"
-                );
-            }
-
-            // Phase 2: Hard fit messages within context window budget
-            state.last_estimated_tokens = fastclaw_context::ContextEngine::fit_to_context_window(
-                &mut messages,
-                context_window,
-                max_tokens,
-            );
-            let estimated_tokens = state.last_estimated_tokens;
+            state.last_estimated_tokens = compact_result.estimated_tokens;
+            let estimated_tokens = compact_result.estimated_tokens;
 
             // Emit live context usage update to frontend
-            let tokens_saved = if compress_result.compressed {
-                compress_result.original_tokens.saturating_sub(compress_result.new_tokens) as u32
-            } else {
-                0
-            };
             let _ = send_stream_event(
                 tx,
                 StreamEvent::ContextUsageUpdate {
                     used_tokens: estimated_tokens as u32,
                     limit_tokens: context_window,
-                    compressed: compress_result.compressed,
-                    tokens_saved,
+                    compressed: compact_result.compressed_by_llm,
+                    tokens_saved: compact_result.tokens_saved_by_llm as u32,
                 },
                 false,
             ).await;
 
-            // Phase 3: Warn if context usage is critically high (>90%)
+            // Warn if context usage is critically high (>90%)
             let usage_ratio = estimated_tokens as f32 / context_window.max(1) as f32;
             if usage_ratio > 0.90 {
                 let _ = send_stream_event(
@@ -988,7 +932,7 @@ impl AgentRuntime {
                                 error = %e,
                                 "prompt_too_long detected — attempting reactive compaction"
                             );
-                            let reactive_result = pipeline.reactive_compact(&messages);
+                            let reactive_result = compact_pipeline.reactive_compact(&messages);
                             if reactive_result.recovered {
                                 tracing::info!(
                                     level = ?reactive_result.level_used,

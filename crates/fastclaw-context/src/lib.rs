@@ -25,7 +25,7 @@ pub use engine::{
 };
 pub use keyword_interceptor::MemoryKeywordInterceptor;
 pub use budget::{BudgetDecision, StopReason, TokenBudgetTracker};
-pub use pipeline::{CompactionMetadata, ContextPipeline, PipelineConfig};
+pub use pipeline::{AutoCompactCircuitBreaker, CompactTracking, CompactionMetadata, ContextPipeline, PipelineConfig};
 pub use reactive::{ReactiveCompactResult, ReactiveCompactor, ReactiveCompactorConfig};
 pub use snip::{group_by_api_round, ApiRound, SnipCompactor, SnipCompactorConfig, SnipResult};
 pub use collapse::{

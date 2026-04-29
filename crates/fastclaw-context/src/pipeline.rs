@@ -80,6 +80,52 @@ impl Default for PipelineConfig {
     }
 }
 
+/// Cross-iteration compaction tracking statistics.
+#[derive(Debug, Clone, Default)]
+pub struct CompactTracking {
+    pub total_invocations: u32,
+    pub total_snip_rounds_removed: usize,
+    pub total_tokens_freed: usize,
+}
+
+/// Circuit breaker for LLM-based autocompact — trips after consecutive failures
+/// to avoid wasting tokens on a model that cannot compress effectively.
+#[derive(Debug, Clone)]
+pub struct AutoCompactCircuitBreaker {
+    pub consecutive_failures: u32,
+    pub threshold: u32,
+    pub tripped: bool,
+}
+
+impl Default for AutoCompactCircuitBreaker {
+    fn default() -> Self {
+        Self {
+            consecutive_failures: 0,
+            threshold: 3,
+            tripped: false,
+        }
+    }
+}
+
+impl AutoCompactCircuitBreaker {
+    pub fn record_success(&mut self) {
+        self.consecutive_failures = 0;
+        self.tripped = false;
+    }
+
+    pub fn record_failure(&mut self) {
+        self.consecutive_failures += 1;
+        if self.consecutive_failures >= self.threshold {
+            self.tripped = true;
+        }
+    }
+
+    pub fn should_attempt(&self) -> bool {
+        !self.tripped
+    }
+}
+
+
 /// Orchestrates the multi-layer context compaction pipeline.
 ///
 /// ```text
@@ -92,22 +138,52 @@ impl Default for PipelineConfig {
 /// reactive_compact():
 ///   Emergency recovery when prompt_too_long is returned
 /// ```
+///
+/// Create once outside the agent loop to retain cross-iteration state
+/// (tracking, circuit breaker, collapse store).
 pub struct ContextPipeline {
     config: PipelineConfig,
+    pub tracking: CompactTracking,
+    pub circuit_breaker: AutoCompactCircuitBreaker,
+    pub collapse_store: crate::collapse::CollapseStore,
 }
 
 impl ContextPipeline {
     pub fn new(config: PipelineConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            tracking: CompactTracking::default(),
+            circuit_breaker: AutoCompactCircuitBreaker::default(),
+            collapse_store: crate::collapse::CollapseStore::default(),
+        }
+    }
+
+    /// Whether the LLM-based autocompact should be attempted this iteration.
+    pub fn should_attempt_autocompact(&self) -> bool {
+        self.config.enable_auto_compact
+            && !self.config.enable_collapse
+            && self.circuit_breaker.should_attempt()
+    }
+
+    /// Record that LLM autocompact succeeded (resets circuit breaker).
+    pub fn record_autocompact_success(&mut self) {
+        self.circuit_breaker.record_success();
+    }
+
+    /// Record that LLM autocompact failed or was ineffective.
+    pub fn record_autocompact_failure(&mut self) {
+        self.circuit_breaker.record_failure();
     }
 
     /// Run the pre-query compaction pipeline (layers 1-3, synchronous).
     ///
     /// Layer 4 (AutoCompact) is not executed here because it requires an
-    /// async LLM call. Callers should check `metadata.should_auto_compact(config)`
+    /// async LLM call. Callers should check `should_attempt_autocompact()`
     /// before invoking auto-compact — when collapse is enabled, auto-compact
     /// is suppressed (mutual exclusion at the pipeline layer).
-    pub fn pre_query_compact(&self, messages: &[ChatMessage]) -> (Vec<ChatMessage>, CompactionMetadata) {
+    ///
+    /// Takes `&mut self` to update cross-iteration tracking statistics.
+    pub fn pre_query_compact(&mut self, messages: &[ChatMessage]) -> (Vec<ChatMessage>, CompactionMetadata) {
         let tokens_before = estimate_messages_tokens(messages);
         let mut meta = CompactionMetadata::default();
         let mut current = messages.to_vec();
@@ -156,6 +232,11 @@ impl ContextPipeline {
         };
         meta.total_tokens_freed = tokens_before.saturating_sub(tokens_after);
         meta.tokens_after = tokens_after;
+
+        // Update cross-iteration tracking
+        self.tracking.total_invocations += 1;
+        self.tracking.total_snip_rounds_removed += meta.snip_rounds_removed;
+        self.tracking.total_tokens_freed += meta.total_tokens_freed;
 
         (current, meta)
     }
@@ -268,7 +349,7 @@ mod tests {
     #[test]
     fn no_op_when_under_all_thresholds() {
         let msgs = vec![sys("system"), user("hi"), assistant("hello")];
-        let pipeline = ContextPipeline::new(PipelineConfig::default());
+        let mut pipeline = ContextPipeline::new(PipelineConfig::default());
         let (result, meta) = pipeline.pre_query_compact(&msgs);
         assert_eq!(result.len(), msgs.len());
         assert!(!meta.snip_applied);
@@ -281,7 +362,7 @@ mod tests {
     fn snip_layer_triggers_when_over_budget() {
         let msgs = build_conversation(20, 400);
         let total = estimate_messages_tokens(&msgs);
-        let pipeline = ContextPipeline::new(PipelineConfig {
+        let mut pipeline = ContextPipeline::new(PipelineConfig {
             snip_max_tokens: total * 80 / 100,
             enable_micro_compact: false,
             ..Default::default()
@@ -296,7 +377,7 @@ mod tests {
     #[test]
     fn micro_compact_triggers_when_too_many_messages() {
         let msgs = build_conversation(40, 50);
-        let pipeline = ContextPipeline::new(PipelineConfig {
+        let mut pipeline = ContextPipeline::new(PipelineConfig {
             enable_snip: false,
             micro_max_messages: 20,
             micro_recent_window: 10,
@@ -311,7 +392,7 @@ mod tests {
     #[test]
     fn collapse_layer_skipped_when_disabled() {
         let msgs = build_conversation(5, 100);
-        let pipeline = ContextPipeline::new(PipelineConfig {
+        let mut pipeline = ContextPipeline::new(PipelineConfig {
             enable_collapse: false,
             ..Default::default()
         });
@@ -322,7 +403,7 @@ mod tests {
     #[test]
     fn all_layers_disabled_is_no_op() {
         let msgs = build_conversation(20, 400);
-        let pipeline = ContextPipeline::new(PipelineConfig {
+        let mut pipeline = ContextPipeline::new(PipelineConfig {
             enable_snip: false,
             enable_micro_compact: false,
             enable_collapse: false,
@@ -338,7 +419,7 @@ mod tests {
     fn snip_tokens_freed_in_metadata() {
         let msgs = build_conversation(15, 600);
         let total = estimate_messages_tokens(&msgs);
-        let pipeline = ContextPipeline::new(PipelineConfig {
+        let mut pipeline = ContextPipeline::new(PipelineConfig {
             snip_max_tokens: total * 70 / 100,
             enable_micro_compact: false,
             ..Default::default()
@@ -369,7 +450,7 @@ mod tests {
     fn metadata_tokens_after_is_accurate() {
         let msgs = build_conversation(20, 400);
         let total = estimate_messages_tokens(&msgs);
-        let pipeline = ContextPipeline::new(PipelineConfig {
+        let mut pipeline = ContextPipeline::new(PipelineConfig {
             snip_max_tokens: total * 75 / 100,
             ..Default::default()
         });
@@ -398,7 +479,7 @@ mod tests {
             "precondition: raw 200-round conversation ({total} tokens) must exceed 128k"
         );
 
-        let pipeline = ContextPipeline::new(PipelineConfig {
+        let mut pipeline = ContextPipeline::new(PipelineConfig {
             snip_max_tokens: context_window,
             reactive_target_tokens: context_window,
             ..Default::default()
@@ -420,7 +501,7 @@ mod tests {
         let msgs = build_large_conversation();
         let total = estimate_messages_tokens(&msgs);
 
-        let pipeline = ContextPipeline::new(PipelineConfig {
+        let mut pipeline = ContextPipeline::new(PipelineConfig {
             snip_max_tokens: context_window,
             reactive_target_tokens: context_window,
             ..Default::default()
@@ -446,7 +527,7 @@ mod tests {
             "precondition: ~200k tokens ({total}) must exceed 128k"
         );
 
-        let pipeline = ContextPipeline::new(PipelineConfig {
+        let mut pipeline = ContextPipeline::new(PipelineConfig {
             reactive_target_tokens: context_window,
             ..Default::default()
         });
@@ -473,7 +554,7 @@ mod tests {
             msgs.push(assistant(&format!("answer {i}: {}", long_text(4000))));
         }
 
-        let pipeline = ContextPipeline::new(PipelineConfig {
+        let mut pipeline = ContextPipeline::new(PipelineConfig {
             snip_max_tokens: context_window,
             reactive_target_tokens: context_window,
             ..Default::default()
@@ -513,7 +594,7 @@ mod tests {
             ..Default::default()
         };
         let msgs = build_conversation(5, 100);
-        let pipeline = ContextPipeline::new(config.clone());
+        let mut pipeline = ContextPipeline::new(config.clone());
         let (_, meta) = pipeline.pre_query_compact(&msgs);
 
         assert!(meta.collapse_applied);
@@ -531,7 +612,7 @@ mod tests {
             ..Default::default()
         };
         let msgs = build_conversation(5, 100);
-        let pipeline = ContextPipeline::new(config.clone());
+        let mut pipeline = ContextPipeline::new(config.clone());
         let (_, meta) = pipeline.pre_query_compact(&msgs);
 
         assert!(!meta.collapse_applied);
@@ -549,7 +630,7 @@ mod tests {
             ..Default::default()
         };
         let msgs = build_conversation(5, 100);
-        let pipeline = ContextPipeline::new(config.clone());
+        let mut pipeline = ContextPipeline::new(config.clone());
         let (_, meta) = pipeline.pre_query_compact(&msgs);
 
         assert!(!meta.should_auto_compact(&config));
@@ -562,7 +643,7 @@ mod tests {
         let sentinel = "UNIQUE_SENTINEL_LAST_USER_TURN_12345";
         msgs.push(user(sentinel));
 
-        let pipeline = ContextPipeline::new(PipelineConfig {
+        let mut pipeline = ContextPipeline::new(PipelineConfig {
             snip_max_tokens: context_window,
             reactive_target_tokens: context_window,
             ..Default::default()
