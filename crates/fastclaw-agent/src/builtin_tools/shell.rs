@@ -1540,6 +1540,7 @@ fn strip_single_quoted_regions(s: &str) -> String {
 
 /// Check for unescaped backtick command substitution.
 /// Returns true if the string contains backticks that are not preceded by `\`.
+#[allow(dead_code)]
 fn contains_unescaped_backticks(s: &str) -> bool {
     let bytes = s.as_bytes();
     for i in 0..bytes.len() {
@@ -1775,7 +1776,33 @@ impl SandboxedShellTool {
             );
         }
 
-        self.validate_injection_patterns(trimmed)?;
+        // 1. Injection detection via ShellSecurityChecker (replaces old validate_injection_patterns)
+        use super::shell_security::{ShellSecurityChecker, SecurityVerdict};
+        match ShellSecurityChecker::check(trimmed) {
+            SecurityVerdict::Blocked { reason, .. } => {
+                return Err(format!(
+                    "Sandbox blocks shell injection: {reason}. \
+                     Rewrite without shell injection patterns, or use dedicated tools."
+                ));
+            }
+            SecurityVerdict::NeedsConfirmation { .. } => {
+                // NeedsConfirmation patterns are allowed through sandbox but may be
+                // gated by the agent's confirmation flow at a higher level.
+            }
+            SecurityVerdict::Safe => {}
+        }
+
+        // 2. Path validation via PathValidator
+        use super::shell_path_validation::{PathValidator, PathVerdict};
+        let path_validator = PathValidator::new(
+            self.config.allowed_dirs.iter().map(std::path::PathBuf::from).collect()
+        );
+        if let PathVerdict::Blocked { reason, .. } = path_validator.validate(trimmed) {
+            return Err(format!(
+                "Sandbox blocks path access: {reason}. \
+                 Use paths within the allowed workspace directory."
+            ));
+        }
 
         // Block binary hijack env var prefixes (PATH=, LD_PRELOAD=, etc.)
         if let Some(reason) = has_binary_hijack_prefix(trimmed) {
@@ -1846,11 +1873,10 @@ impl SandboxedShellTool {
         Ok(())
     }
 
-    /// Detect shell injection patterns: command substitution, process
-    /// substitution, and dangerous parameter expansion.
-    ///
-    /// These patterns are blocked unconditionally in sandboxed mode because
-    /// they allow arbitrary command execution inside otherwise-safe commands.
+    /// Legacy injection pattern validation — now delegated to ShellSecurityChecker
+    /// in validate_command(). Kept for backward compatibility with tests that
+    /// reference INJECTION_PATTERNS directly.
+    #[allow(dead_code)]
     fn validate_injection_patterns(&self, command: &str) -> Result<(), String> {
         let unquoted = strip_single_quoted_regions(command);
 
