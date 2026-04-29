@@ -1443,7 +1443,7 @@
             "重建后 enforce_per_message_budget 对旧消息重新应用相同的 replacement（字节一致）",
             "cargo test -p fastclaw-session 和 -p fastclaw-agent 全通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4H-15",
