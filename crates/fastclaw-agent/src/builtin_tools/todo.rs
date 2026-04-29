@@ -172,18 +172,80 @@ impl Tool for TodoWriteTool {
 
     fn prompt(&self) -> String {
         format!("{TODO_WRITE_DESCRIPTION}\n\n\
-## Examples of When to Use\n\n\
-- User: \"Add dark mode toggle\" → Create todo list: add state management, implement styles, \
-create toggle component, update components, run tests\n\
-- User: \"Rename getCwd to getCurrentWorkingDirectory\" → Search codebase, find all instances, \
-create todo per file\n\
-- User: \"Implement registration, catalog, cart, checkout\" → Break each feature into specific tasks\n\n\
-## Examples of When NOT to Use\n\n\
-- User: \"What does git status do?\" → Informational, no coding task\n\
-- User: \"Add a comment to this function\" → Single straightforward edit\n\
-- User: \"Run npm install\" → Single command execution\n\n\
-When in doubt, use this tool. Being proactive with task management demonstrates attentiveness \
-and ensures you complete all requirements successfully.")
+## Decision Guide: Create or Skip?\n\n\
+**CREATE a todo list when:**\n\
+- Task requires 3+ distinct steps with dependencies\n\
+- User provides multiple tasks (numbered or comma-separated)\n\
+- Task touches multiple files or systems (refactoring, migrations)\n\
+- Requirements are complex enough that you might forget a step\n\
+- The task involves research → implementation → verification phases\n\
+- After receiving new instructions — capture requirements immediately\n\n\
+**SKIP the todo list when:**\n\
+- Single, straightforward task (add a comment, run a command)\n\
+- Trivial 1-2 step work with obvious execution path\n\
+- Purely conversational/informational requests\n\
+- Quick lookups or simple questions\n\n\
+## Task Decomposition Principles\n\n\
+### Granularity\n\
+- Each todo should be completable in 1-5 tool calls\n\
+- If a todo needs 10+ tool calls, break it into sub-tasks\n\
+- If a todo is just one tool call, merge it with related items\n\n\
+### Ordering\n\
+- Put dependency-sensitive tasks in the right order\n\
+- Group related tasks (all file reads, then all edits, then tests)\n\
+- Put verification/testing as the last item\n\n\
+### Naming\n\
+- Use action verbs: \"Implement X\", \"Add Y to Z\", \"Fix W\"\n\
+- Be specific: \"Add validation to login form\" not \"Handle forms\"\n\
+- Include the target: file name, function name, or component\n\n\
+## State Management Rules\n\n\
+### The One-Active Rule\n\
+Only ONE todo should be `in_progress` at any time. This signals focus:\n\
+- Mark `in_progress` BEFORE starting work on it\n\
+- Mark `completed` IMMEDIATELY when done — don't batch completions\n\
+- Then mark the next todo `in_progress`\n\n\
+### Status Transitions\n\
+- `pending` → `in_progress`: About to start working on it\n\
+- `in_progress` → `completed`: Work is done and verified\n\
+- `pending` → `cancelled`: No longer needed (scope change, duplicate)\n\
+- NEVER go backward (`completed` → `in_progress`)\n\n\
+### Handling Failures\n\
+- If a task hits an error: keep it `in_progress` while debugging\n\
+- If you need to pivot: add a NEW todo for the fix, cancel the broken one\n\
+- If scope expands: add new todos, don't modify existing completed ones\n\n\
+## The merge Parameter\n\n\
+- `merge: false` (default for first call): REPLACES the entire todo list\n\
+- `merge: true`: Updates specific items by `id`, leaves others unchanged\n\n\
+### When to use `merge: true`:\n\
+- Marking a single item as completed\n\
+- Adding new tasks to an existing list\n\
+- Updating a task's content without resetting others\n\n\
+### When to use `merge: false`:\n\
+- Creating the initial todo list\n\
+- Completely restructuring the plan\n\n\
+## Parallel Execution Pattern\n\n\
+Prefer creating the first todo as `in_progress` AND starting work on it \
+in the same tool call batch:\n\n\
+In one response:\n\
+1. Call todo_write with todos marked in_progress\n\
+2. Call the first tool needed for that task\n\
+Both execute in the same turn, saving a round-trip.\n\n\
+## Examples\n\n\
+### When to Create\n\
+- \"Add dark mode toggle\" → [state management, styles, component, integration, test]\n\
+- \"Rename getCwd everywhere\" → [search codebase, update file1, file2, ..., verify]\n\
+- \"Implement auth + cart + checkout\" → [separate todo per feature, each broken down]\n\n\
+### When to Skip\n\
+- \"What does git status do?\" → Just answer (informational)\n\
+- \"Add a comment to calculateTotal\" → Just edit (single step)\n\
+- \"Run npm install\" → Just run it (trivial)\n\n\
+## Anti-Patterns\n\n\
+- Don't create todos just to show you're organized — only when genuinely helpful\n\
+- Don't add a \"test the change\" todo unless user asks (prevents over-focus on testing)\n\
+- Don't create single-item todo lists (pointless overhead)\n\
+- Don't forget to mark items completed as you go (stale list = confusing)\n\
+- Don't modify completed items — add new ones instead\n\
+- Don't end your turn with incomplete todos without explanation")
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
