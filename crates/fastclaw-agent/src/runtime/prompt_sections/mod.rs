@@ -340,6 +340,357 @@ fn actions_zh() -> String {
         .to_string()
 }
 
+/// Using-tools section: decision tree, cost asymmetry, anti-patterns, few-shot examples,
+/// search query guidance, and progressive fallback chain.
+///
+/// This is the most critical section for tool usage behavior.
+/// Dynamically references available tool names from `ctx.enabled_tools`.
+///
+/// Corresponds to Claude Code's `getUsingYourToolsSection()`.
+pub fn using_tools_section() -> PromptSection {
+    PromptSection {
+        name: "using_tools",
+        compute: Box::new(|ctx| {
+            let lang = ctx.language_preference.as_deref();
+            Some(match lang {
+                Some("zh" | "zh-CN" | "zh-TW") => using_tools_zh(ctx),
+                _ => using_tools_en(ctx),
+            })
+        }),
+        cache_break: false,
+    }
+}
+
+fn tool_name_or(ctx: &PromptContext, name: &str, fallback: &str) -> String {
+    if ctx.enabled_tools.contains(name) {
+        format!("`{name}`")
+    } else {
+        fallback.to_string()
+    }
+}
+
+fn has_tool(ctx: &PromptContext, name: &str) -> bool {
+    ctx.enabled_tools.contains(name)
+}
+
+fn using_tools_en(ctx: &PromptContext) -> String {
+    let grep = tool_name_or(ctx, "search_in_files", "the search tool");
+    let glob = tool_name_or(ctx, "glob", "the glob tool");
+    let read = tool_name_or(ctx, "read_file", "the file read tool");
+    let edit = tool_name_or(ctx, "edit_file", "the file edit tool");
+    let write = tool_name_or(ctx, "write_file", "the file write tool");
+    let shell = tool_name_or(ctx, "shell_exec", "the shell tool");
+    let list_dir = tool_name_or(ctx, "list_directory", "the directory listing tool");
+    let tool_search = tool_name_or(ctx, "tool_search", "the tool search");
+
+    let tool_search_note = if has_tool(ctx, "tool_search") && ctx.deferred_tool_count > 0 {
+        format!(
+            "\n\nIf you need a specialized tool not in your current set, use {tool_search} \
+             to discover it. There are {count} additional tools available on demand.",
+            count = ctx.deferred_tool_count
+        )
+    } else {
+        String::new()
+    };
+
+    format!(
+        "\
+<using_tools>
+## Tool Use Decision Tree
+
+Before calling any tool, walk through this decision tree:
+
+**Step 0 — Do I need a tool at all?**
+If you can answer from your training knowledge with high confidence, do so directly.
+Tools are for: reading/writing files, running commands, searching code, fetching URLs.
+Do NOT call tools just to \"double check\" things you already know.
+
+**Step 1 — Is there a specialized tool for this?**
+Prefer specialized tools over {shell}:
+- File search → {grep}
+- File pattern matching → {glob}
+- Reading files → {read}
+- Editing files → {edit}
+- Writing new files → {write}
+- Listing directories → {list_dir}
+Specialized tools are faster, safer, and produce better-structured output.
+
+**Step 2 — Can I express this as a single shell command?**
+If no specialized tool fits, use {shell}. Prefer one-liners over multi-step scripts.
+Never use shell for tasks a specialized tool handles better (e.g. don't use `cat` to read, \
+don't use `sed` to edit, don't use `find` when {glob} works).
+
+**Step 3 — Can I parallelize?**
+If you need multiple independent pieces of information, batch tool calls in a single response.
+For example, reading 3 unrelated files → 3 parallel {read} calls, not sequential.
+Independent searches → parallel {grep} calls.{tool_search_note}
+
+## Cost Asymmetry Principle
+
+**Searching is cheap. Guessing is expensive.**
+
+A wrong guess that leads to a broken edit can cost 5-10 turns to recover from.
+A search call that confirms your assumption costs 1 turn.
+
+Rules:
+- When unsure which file to edit → search first
+- When unsure about function signatures → read first
+- When unsure about import paths → search first
+- NEVER guess file paths. Use {glob} to find them.
+- NEVER guess function names. Use {grep} to find them.
+- NEVER assume file content is unchanged since you last read it. Re-read before editing.
+
+## Anti-Patterns — When NOT to Call Tools
+
+Do NOT use tools for:
+1. **Confirming known facts** — if you know Python uses `def`, don't search for proof
+2. **Reading files you just wrote** — you already know the content
+3. **Searching for syntax** — use your training knowledge for language syntax
+4. **Explaining code** — if the user already shared the code, analyze it directly
+5. **Counting lines** — estimate from what you've seen rather than running `wc`
+6. **Trivial shell commands** — don't run `echo` or `pwd` when you already know the answer
+
+## Search Query Construction
+
+### {grep} — Content Search
+
+Search for **identifiers and content words**, not descriptions:
+- Good: `fn handle_request` (the actual code)
+- Bad: `function that handles HTTP requests` (a description)
+
+Use regex anchoring for precision:
+- `^pub fn foo` — function definition at start of line
+- `use.*MyStruct` — imports of a specific type
+- `TODO|FIXME|HACK` — find annotations
+
+### {glob} — File Pattern Search
+
+Use specific patterns:
+- `**/test_*.py` — Python test files
+- `src/**/*.rs` — Rust source files under src
+- `**/Cargo.toml` — all Cargo manifests
+
+## Progressive Fallback Chain
+
+When searching, use a 3-layer fallback strategy:
+
+**Layer 1: Precise search**
+Use {grep} with an exact identifier (e.g. `fn calculate_total`).
+If found → done.
+
+**Layer 2: Broaden the query**
+Relax the pattern (e.g. `calculate_total` without `fn`, or `calculate` if the name varies).
+Try alternative naming conventions (snake_case vs camelCase).
+If found → done.
+
+**Layer 3: Structural search**
+Use {glob} to find candidate files by name pattern, then {read} them.
+Use {list_dir} to explore directory structure.
+As a last resort, use {shell} with more complex search commands.
+
+## Few-Shot Examples
+
+Request: \"What does the handle_request function do?\"
+→ Action: {grep} for `fn handle_request` to find it, then {read} the file.
+
+Request: \"Fix the typo in the README\"
+→ Action: {read} the README, then {edit} the typo.
+
+Request: \"Add a new API endpoint for /users\"
+→ Action: {grep} for existing endpoint patterns (e.g. `Router::new` or `#[get`), \
+{read} a similar endpoint file as reference, then {edit} or {write} the new endpoint.
+
+Request: \"Why is the build failing?\"
+→ Action: {shell} to run the build command and capture the error output.
+
+Request: \"Find all files that import DatabasePool\"
+→ Action: {grep} for `use.*DatabasePool` or `import.*DatabasePool`.
+
+Request: \"Rename the Config struct to AppConfig\"
+→ Action: {grep} for `Config` to find all occurrences, then {edit} each file. \
+Check for re-exports and type aliases too.
+
+Request: \"What test files exist for the auth module?\"
+→ Action: {glob} for `**/auth*test*` or `**/test*auth*`.
+
+Request: \"Run the tests and fix any failures\"
+→ Action: {shell} to run tests, analyze output, then {read} + {edit} failing code.
+
+Request: \"How is user authentication implemented?\"
+→ Action: {grep} for `fn authenticate` or `fn login`, then {read} the relevant files.
+
+## Multi-Step Search Strategy
+
+For complex investigations, combine tools progressively:
+1. {glob} to understand project structure and find candidate files
+2. {grep} to search for specific symbols or patterns across the codebase
+3. {read} to understand the full context of matches
+4. Only then proceed to {edit} or {write}
+
+Never skip step 3 — always read before editing.
+</using_tools>"
+    )
+}
+
+fn using_tools_zh(ctx: &PromptContext) -> String {
+    let grep = tool_name_or(ctx, "search_in_files", "搜索工具");
+    let glob = tool_name_or(ctx, "glob", "glob 工具");
+    let read = tool_name_or(ctx, "read_file", "文件读取工具");
+    let edit = tool_name_or(ctx, "edit_file", "文件编辑工具");
+    let write = tool_name_or(ctx, "write_file", "文件写入工具");
+    let shell = tool_name_or(ctx, "shell_exec", "shell 工具");
+    let list_dir = tool_name_or(ctx, "list_directory", "目录列表工具");
+    let tool_search = tool_name_or(ctx, "tool_search", "工具搜索");
+
+    let tool_search_note = if has_tool(ctx, "tool_search") && ctx.deferred_tool_count > 0 {
+        format!(
+            "\n\n如果你需要当前工具集中没有的专业工具，使用 {tool_search} 来发现它。\
+             有 {count} 个额外工具按需可用。",
+            count = ctx.deferred_tool_count
+        )
+    } else {
+        String::new()
+    };
+
+    format!(
+        "\
+<using_tools>
+## 工具使用决策树
+
+调用任何工具前，按此决策树逐步判断：
+
+**Step 0 — 是否需要工具？**
+如果你能凭训练知识高置信度地回答，直接回答即可。
+工具用于：读写文件、运行命令、搜索代码、获取 URL。
+不要仅为了「再确认一下」已知事实而调用工具。
+
+**Step 1 — 是否有专用工具？**
+优先使用专用工具而非 {shell}：
+- 文件内容搜索 → {grep}
+- 文件名匹配 → {glob}
+- 读取文件 → {read}
+- 编辑文件 → {edit}
+- 写入新文件 → {write}
+- 列出目录 → {list_dir}
+专用工具更快、更安全、输出结构更好。
+
+**Step 2 — 能否用一条 shell 命令完成？**
+如果没有合适的专用工具，使用 {shell}。优先单行命令而非多步脚本。
+绝不用 shell 做专用工具能更好完成的任务（如不要用 `cat` 读文件、不要用 `sed` 编辑、\
+{glob} 能用时不要用 `find`）。
+
+**Step 3 — 能否并行？**
+如果需要多个独立的信息，在一次回复中批量调用工具。
+例如读取 3 个不相关的文件 → 3 个并行 {read} 调用，而非顺序执行。
+独立的搜索 → 并行 {grep} 调用。{tool_search_note}
+
+## 成本不对称原则
+
+**搜索很便宜，猜测很昂贵。**
+
+错误的猜测导致的坏编辑可能需要 5-10 轮才能恢复。
+确认假设的搜索调用只花 1 轮。
+
+规则：
+- 不确定要编辑哪个文件 → 先搜索
+- 不确定函数签名 → 先读取
+- 不确定导入路径 → 先搜索
+- 绝不猜测文件路径。用 {glob} 查找。
+- 绝不猜测函数名。用 {grep} 查找。
+- 绝不假设文件内容自上次读取后未变。编辑前重新读取。
+
+## 反模式 — 何时不该调用工具
+
+以下情况不要使用工具：
+1. **确认已知事实** — 如果你知道 Python 用 `def`，不需要搜索证明
+2. **读取刚写入的文件** — 你已知道其内容
+3. **搜索语法** — 用训练知识回答语言语法问题
+4. **解释代码** — 如果用户已分享代码，直接分析
+5. **计算行数** — 根据已见内容估算，而非运行 `wc`
+6. **简单 shell 命令** — 已知答案时不要运行 `echo` 或 `pwd`
+
+## 搜索查询构造指导
+
+### {grep} — 内容搜索
+
+搜索**标识符和内容词**，而非描述：
+- 好：`fn handle_request`（实际代码）
+- 坏：`处理 HTTP 请求的函数`（描述性语言）
+
+使用正则锚点提高精度：
+- `^pub fn foo` — 行首的函数定义
+- `use.*MyStruct` — 特定类型的导入
+- `TODO|FIXME|HACK` — 查找注解
+
+### {glob} — 文件名匹配搜索
+
+使用具体的模式：
+- `**/test_*.py` — Python 测试文件
+- `src/**/*.rs` — src 下的 Rust 源文件
+- `**/Cargo.toml` — 所有 Cargo 配置
+
+## 渐进式降级搜索链
+
+搜索时使用三层降级策略：
+
+**第一层：精确搜索**
+用 {grep} 搜索精确标识符（如 `fn calculate_total`）。
+找到 → 完成。
+
+**第二层：放宽查询**
+放宽模式（如去掉 `fn` 只搜 `calculate_total`，或名称有变体时搜 `calculate`）。
+尝试不同命名约定（snake_case vs camelCase）。
+找到 → 完成。
+
+**第三层：结构化搜索**
+用 {glob} 按文件名模式查找候选文件，然后 {read} 它们。
+用 {list_dir} 探索目录结构。
+最后手段：用 {shell} 执行更复杂的搜索命令。
+
+## 示例
+
+请求：「handle_request 函数做了什么？」
+→ 操作：用 {grep} 搜索 `fn handle_request` 找到它，然后 {read} 该文件。
+
+请求：「修复 README 中的错别字」
+→ 操作：{read} README，然后 {edit} 修正错别字。
+
+请求：「添加一个 /users 的新 API 端点」
+→ 操作：用 {grep} 搜索现有端点模式（如 `Router::new` 或 `#[get`），\
+{read} 一个类似的端点文件作为参考，然后 {edit} 或 {write} 新端点。
+
+请求：「为什么构建失败了？」
+→ 操作：用 {shell} 运行构建命令并捕获错误输出。
+
+请求：「找出所有导入 DatabasePool 的文件」
+→ 操作：用 {grep} 搜索 `use.*DatabasePool` 或 `import.*DatabasePool`。
+
+请求：「将 Config 结构体重命名为 AppConfig」
+→ 操作：用 {grep} 搜索 `Config` 找到所有出现位置，然后 {edit} 每个文件。\
+同时检查 re-export 和类型别名。
+
+请求：「auth 模块有哪些测试文件？」
+→ 操作：用 {glob} 搜索 `**/auth*test*` 或 `**/test*auth*`。
+
+请求：「运行测试并修复失败」
+→ 操作：用 {shell} 运行测试，分析输出，然后 {read} + {edit} 失败的代码。
+
+请求：「用户认证是怎么实现的？」
+→ 操作：用 {grep} 搜索 `fn authenticate` 或 `fn login`，然后 {read} 相关文件。
+
+## 多步搜索策略
+
+复杂调查时，逐步组合工具：
+1. {glob} 了解项目结构，找到候选文件
+2. {grep} 搜索特定符号或模式
+3. {read} 理解匹配结果的完整上下文
+4. 然后才进行 {edit} 或 {write}
+
+绝不跳过第 3 步 — 编辑前始终先读取。
+</using_tools>"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,5 +844,179 @@ mod tests {
     fn doing_tasks_and_actions_not_cache_break() {
         assert!(!doing_tasks_section().cache_break);
         assert!(!actions_section().cache_break);
+    }
+
+    fn make_ctx_with_tools(lang: Option<&str>, deferred: usize, tools: &[&str]) -> PromptContext {
+        let mut ctx = make_ctx(lang, deferred);
+        ctx.enabled_tools = tools.iter().map(|s| s.to_string()).collect();
+        ctx
+    }
+
+    const CORE_TOOLS: &[&str] = &[
+        "search_in_files",
+        "glob",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "shell_exec",
+        "list_directory",
+        "tool_search",
+    ];
+
+    #[test]
+    fn using_tools_en_has_decision_tree() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(None, 0, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        assert!(text.contains("Step 0"));
+        assert!(text.contains("Step 1"));
+        assert!(text.contains("Step 2"));
+        assert!(text.contains("Step 3"));
+    }
+
+    #[test]
+    fn using_tools_en_has_cost_asymmetry() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(None, 0, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        assert!(text.contains("Searching is cheap"));
+        assert!(text.contains("Guessing is expensive"));
+    }
+
+    #[test]
+    fn using_tools_en_has_anti_patterns() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(None, 0, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        assert!(text.contains("Anti-Patterns"));
+        assert!(text.contains("Confirming known facts"));
+        assert!(text.contains("Reading files you just wrote"));
+    }
+
+    #[test]
+    fn using_tools_en_has_few_shot_examples() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(None, 0, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        let example_count = text.matches("→ Action:").count();
+        assert!(
+            example_count >= 8,
+            "Expected >=8 few-shot examples, got {example_count}"
+        );
+    }
+
+    #[test]
+    fn using_tools_en_has_grep_glob_guidance() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(None, 0, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        assert!(text.contains("Content Search"));
+        assert!(text.contains("File Pattern Search"));
+        assert!(text.contains("`search_in_files`"));
+        assert!(text.contains("`glob`"));
+    }
+
+    #[test]
+    fn using_tools_en_has_fallback_chain() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(None, 0, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        assert!(text.contains("Layer 1"));
+        assert!(text.contains("Layer 2"));
+        assert!(text.contains("Layer 3"));
+    }
+
+    #[test]
+    fn using_tools_en_references_actual_tool_names() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(None, 0, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        assert!(text.contains("`search_in_files`"));
+        assert!(text.contains("`glob`"));
+        assert!(text.contains("`read_file`"));
+        assert!(text.contains("`edit_file`"));
+        assert!(text.contains("`shell_exec`"));
+    }
+
+    #[test]
+    fn using_tools_en_falls_back_when_tools_missing() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(None, 0, &[]);
+        let text = (section.compute)(&ctx).unwrap();
+        assert!(text.contains("the search tool"));
+        assert!(text.contains("the glob tool"));
+        assert!(!text.contains("`search_in_files`"));
+    }
+
+    #[test]
+    fn using_tools_en_shows_tool_search_note_with_deferred() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(None, 7, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        assert!(text.contains("`tool_search`"));
+        assert!(text.contains("7 additional tools"));
+    }
+
+    #[test]
+    fn using_tools_en_no_tool_search_note_without_deferred() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(None, 0, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        assert!(!text.contains("additional tools available on demand"));
+    }
+
+    #[test]
+    fn using_tools_zh_has_decision_tree() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(Some("zh"), 0, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        assert!(text.contains("是否需要工具"));
+        assert!(text.contains("是否有专用工具"));
+        assert!(text.contains("能否并行"));
+    }
+
+    #[test]
+    fn using_tools_zh_has_cost_asymmetry() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(Some("zh-CN"), 0, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        assert!(text.contains("搜索很便宜"));
+        assert!(text.contains("猜测很昂贵"));
+    }
+
+    #[test]
+    fn using_tools_zh_has_anti_patterns() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(Some("zh"), 0, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        assert!(text.contains("反模式"));
+        assert!(text.contains("确认已知事实"));
+    }
+
+    #[test]
+    fn using_tools_zh_has_few_shot_examples() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(Some("zh"), 0, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        let example_count = text.matches("→ 操作：").count();
+        assert!(
+            example_count >= 8,
+            "Expected >=8 few-shot examples, got {example_count}"
+        );
+    }
+
+    #[test]
+    fn using_tools_zh_has_fallback_chain() {
+        let section = using_tools_section();
+        let ctx = make_ctx_with_tools(Some("zh"), 0, CORE_TOOLS);
+        let text = (section.compute)(&ctx).unwrap();
+        assert!(text.contains("第一层"));
+        assert!(text.contains("第二层"));
+        assert!(text.contains("第三层"));
+    }
+
+    #[test]
+    fn using_tools_not_cache_break() {
+        assert!(!using_tools_section().cache_break);
     }
 }
