@@ -858,7 +858,7 @@
             "连续快速发送 10 条消息不崩溃",
             "cargo tauri dev 启动后无控制台报错"
           ],
-          "status": "pending"
+          "status": "done"
         }
       ]
     },
