@@ -1383,7 +1383,7 @@
             "reconstruct_state 从 records 正确恢复 replacements + 冻结所有 messages 中的 ID",
             "cargo check -p fastclaw-agent 编译通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4H-13c",
