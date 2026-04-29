@@ -1509,7 +1509,7 @@
             "ToolResultStorage 正确注入到 tool_executor 流程",
             "现有 microcompact/snip/reactive/autocompact 行为不受影响"
           ],
-          "status": "pending"
+          "status": "done"
         }
       ]
     },
