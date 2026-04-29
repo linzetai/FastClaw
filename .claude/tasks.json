@@ -898,7 +898,7 @@
             "生成的摘要存入 CollapseStore",
             "LLM 调用失败时 graceful 处理，不影响主流程"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4-03",

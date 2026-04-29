@@ -29,7 +29,8 @@ pub use pipeline::{CompactionMetadata, ContextPipeline, PipelineConfig};
 pub use reactive::{ReactiveCompactResult, ReactiveCompactor, ReactiveCompactorConfig};
 pub use snip::{group_by_api_round, ApiRound, SnipCompactor, SnipCompactorConfig, SnipResult};
 pub use collapse::{
-    project as project_collapses, CollapseOverlapError, CollapseSpan, CollapseStore,
+    project as project_collapses, CollapseEngine, CollapseEngineConfig, CollapseMode,
+    CollapseOverlapError, CollapseResult, CollapseSpan, CollapseStore, CollapseSummarizer,
 };
 pub use model_context::{
     has_explicit_output_limit, infer_context_window_from_model, infer_output_limit_from_model,

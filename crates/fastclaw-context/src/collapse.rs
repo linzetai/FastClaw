@@ -7,10 +7,18 @@
 //! At query time, [`project`] merges these summaries into the message
 //! list, replacing collapsed rounds with their summary while leaving
 //! uncollapsed messages intact. The original messages are never modified.
+//!
+//! The [`CollapseEngine`] monitors context usage and triggers LLM-based
+//! summarization at configurable thresholds (90% async, 95% blocking).
 
 use std::collections::BTreeMap;
 
+use fastclaw_core::types::{ChatMessage, Role};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+
+use crate::compressor::estimate_messages_tokens;
+use crate::snip::{group_by_api_round, ApiRound};
 
 /// A collapsed range of API rounds together with its summary.
 ///
@@ -148,12 +156,214 @@ impl std::fmt::Display for CollapseOverlapError {
 
 impl std::error::Error for CollapseOverlapError {}
 
+// ─── Collapse Engine — threshold-based summary generation ────────────
+
+/// Async trait for generating summaries via LLM.
+#[async_trait::async_trait]
+pub trait CollapseSummarizer: Send + Sync {
+    /// Summarize a set of messages into a concise text.
+    /// Returns `(summary_text, summary_token_estimate)`.
+    async fn summarize(&self, messages: &[ChatMessage]) -> anyhow::Result<String>;
+}
+
+/// How the collapse engine should act based on context usage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollapseMode {
+    /// Context usage is below thresholds — do nothing.
+    NoOp,
+    /// Usage >= async_threshold — spawn background summarization.
+    Async,
+    /// Usage >= blocking_threshold — block until summarization completes.
+    Blocking,
+}
+
+/// Configuration for the collapse engine.
+#[derive(Debug, Clone)]
+pub struct CollapseEngineConfig {
+    /// Context usage ratio (0.0–1.0) at which async summarization triggers.
+    pub async_threshold: f64,
+    /// Context usage ratio (0.0–1.0) at which blocking summarization triggers.
+    pub blocking_threshold: f64,
+    /// Minimum number of recent rounds to preserve (never collapse).
+    pub preserve_recent_rounds: usize,
+    /// Minimum rounds in a batch to justify collapsing.
+    pub min_collapse_batch: usize,
+}
+
+impl Default for CollapseEngineConfig {
+    fn default() -> Self {
+        Self {
+            async_threshold: 0.90,
+            blocking_threshold: 0.95,
+            preserve_recent_rounds: 5,
+            min_collapse_batch: 3,
+        }
+    }
+}
+
+/// Result of a collapse attempt.
+#[derive(Debug)]
+pub struct CollapseResult {
+    /// The collapse span that was created, if any.
+    pub span: Option<CollapseSpan>,
+    /// Which mode was used.
+    pub mode: CollapseMode,
+}
+
+/// Engine that monitors context usage and triggers LLM-based summarization.
+pub struct CollapseEngine {
+    config: CollapseEngineConfig,
+}
+
+impl CollapseEngine {
+    pub fn new(config: CollapseEngineConfig) -> Self {
+        Self { config }
+    }
+
+    /// Determine the collapse mode based on current context usage.
+    pub fn evaluate_mode(&self, current_tokens: usize, context_window: usize) -> CollapseMode {
+        if context_window == 0 {
+            return CollapseMode::NoOp;
+        }
+        let ratio = current_tokens as f64 / context_window as f64;
+        if ratio >= self.config.blocking_threshold {
+            CollapseMode::Blocking
+        } else if ratio >= self.config.async_threshold {
+            CollapseMode::Async
+        } else {
+            CollapseMode::NoOp
+        }
+    }
+
+    /// Select rounds eligible for collapsing.
+    ///
+    /// Returns the range `(start_round, end_round)` of rounds to collapse,
+    /// or `None` if no eligible rounds exist. Skips rounds already collapsed
+    /// and preserves the most recent `preserve_recent_rounds`.
+    pub fn select_rounds_to_collapse(
+        &self,
+        rounds: &[ApiRound],
+        store: &CollapseStore,
+    ) -> Option<(usize, usize)> {
+        if rounds.len() <= self.config.preserve_recent_rounds {
+            return None;
+        }
+
+        let eligible_end = rounds.len().saturating_sub(self.config.preserve_recent_rounds);
+
+        // Find the first contiguous batch of uncollapsed rounds.
+        let mut batch_start: Option<usize> = None;
+        let mut batch_end: usize = 0;
+
+        for round in rounds.iter().take(eligible_end) {
+            if store.is_round_collapsed(round.index) {
+                // If we have accumulated a batch, check if it's large enough.
+                if let Some(start) = batch_start {
+                    if batch_end - start + 1 >= self.config.min_collapse_batch {
+                        return Some((start, batch_end));
+                    }
+                }
+                batch_start = None;
+            } else {
+                if batch_start.is_none() {
+                    batch_start = Some(round.index);
+                }
+                batch_end = round.index;
+            }
+        }
+
+        // Check trailing batch.
+        if let Some(start) = batch_start {
+            if batch_end - start + 1 >= self.config.min_collapse_batch {
+                return Some((start, batch_end));
+            }
+        }
+
+        None
+    }
+
+    /// Perform the collapse: select rounds, call LLM summarizer, store result.
+    ///
+    /// Returns `Ok(CollapseResult)` with `span = None` if no rounds qualify
+    /// or if the LLM call fails (graceful degradation).
+    pub async fn collapse(
+        &self,
+        messages: &[ChatMessage],
+        context_window: usize,
+        store: &mut CollapseStore,
+        summarizer: &dyn CollapseSummarizer,
+    ) -> anyhow::Result<CollapseResult> {
+        let current_tokens = estimate_messages_tokens(messages);
+        let mode = self.evaluate_mode(current_tokens, context_window);
+
+        if mode == CollapseMode::NoOp {
+            return Ok(CollapseResult { span: None, mode });
+        }
+
+        let rounds = group_by_api_round(messages);
+        let range = self.select_rounds_to_collapse(&rounds, store);
+
+        let Some((start, end)) = range else {
+            return Ok(CollapseResult { span: None, mode });
+        };
+
+        // Collect messages for the selected rounds.
+        let collapse_messages: Vec<ChatMessage> = rounds
+            .iter()
+            .filter(|r| r.index >= start && r.index <= end)
+            .flat_map(|r| r.messages.iter().cloned())
+            .collect();
+
+        let original_tokens = estimate_messages_tokens(&collapse_messages);
+
+        // Call LLM summarizer — graceful failure.
+        let summary = match summarizer.summarize(&collapse_messages).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    start_round = start,
+                    end_round = end,
+                    "Collapse summarization failed, skipping gracefully"
+                );
+                return Ok(CollapseResult { span: None, mode });
+            }
+        };
+
+        let summary_tokens = summary.len() / 4; // chars/4 heuristic
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let span = CollapseSpan {
+            start_round: start,
+            end_round: end,
+            summary,
+            summary_tokens,
+            original_tokens,
+            created_at: now,
+        };
+
+        // Attempt to insert — if overlap somehow occurs, treat as no-op.
+        match store.add(span.clone()) {
+            Ok(()) => Ok(CollapseResult {
+                span: Some(span),
+                mode,
+            }),
+            Err(e) => {
+                tracing::warn!(error = %e, "Collapse span overlaps existing, skipping");
+                Ok(CollapseResult { span: None, mode })
+            }
+        }
+    }
+
+    pub fn config(&self) -> &CollapseEngineConfig {
+        &self.config
+    }
+}
+
 // ─── Project collapsed summaries into a message list ─────────────────
-
-use fastclaw_core::types::{ChatMessage, Role};
-use serde_json::json;
-
-use crate::snip::group_by_api_round;
 
 /// Non-destructively project collapsed summaries into the message list.
 ///
@@ -514,5 +724,261 @@ mod tests {
         assert_eq!(all[0].start_round, 0);
         assert_eq!(all[1].start_round, 5);
         assert_eq!(all[2].start_round, 10);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // CollapseEngine tests
+    // ═══════════════════════════════════════════════════════════════
+
+    struct MockSummarizer {
+        response: Result<String, String>,
+    }
+
+    impl MockSummarizer {
+        fn ok(text: &str) -> Self {
+            Self {
+                response: Ok(text.to_string()),
+            }
+        }
+        fn failing(err: &str) -> Self {
+            Self {
+                response: Err(err.to_string()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CollapseSummarizer for MockSummarizer {
+        async fn summarize(&self, _messages: &[ChatMessage]) -> anyhow::Result<String> {
+            match &self.response {
+                Ok(text) => Ok(text.clone()),
+                Err(e) => Err(anyhow::anyhow!("{}", e)),
+            }
+        }
+    }
+
+    fn make_conversation(num_rounds: usize, chars_per_msg: usize) -> Vec<ChatMessage> {
+        let mut messages = vec![msg(Role::System, "system prompt")];
+        for i in 0..num_rounds {
+            let content = format!("q{i} {}", "x".repeat(chars_per_msg));
+            messages.push(msg(Role::User, &content));
+            let answer = format!("a{i} {}", "y".repeat(chars_per_msg));
+            messages.push(msg(Role::Assistant, &answer));
+        }
+        messages
+    }
+
+    #[test]
+    fn evaluate_mode_noop_below_90() {
+        let engine = CollapseEngine::new(CollapseEngineConfig::default());
+        let mode = engine.evaluate_mode(80_000, 100_000);
+        assert_eq!(mode, CollapseMode::NoOp);
+    }
+
+    #[test]
+    fn evaluate_mode_async_at_90() {
+        let engine = CollapseEngine::new(CollapseEngineConfig::default());
+        let mode = engine.evaluate_mode(90_000, 100_000);
+        assert_eq!(mode, CollapseMode::Async);
+    }
+
+    #[test]
+    fn evaluate_mode_blocking_at_95() {
+        let engine = CollapseEngine::new(CollapseEngineConfig::default());
+        let mode = engine.evaluate_mode(95_000, 100_000);
+        assert_eq!(mode, CollapseMode::Blocking);
+    }
+
+    #[test]
+    fn evaluate_mode_blocking_at_100() {
+        let engine = CollapseEngine::new(CollapseEngineConfig::default());
+        let mode = engine.evaluate_mode(100_000, 100_000);
+        assert_eq!(mode, CollapseMode::Blocking);
+    }
+
+    #[test]
+    fn evaluate_mode_zero_context_window() {
+        let engine = CollapseEngine::new(CollapseEngineConfig::default());
+        let mode = engine.evaluate_mode(50_000, 0);
+        assert_eq!(mode, CollapseMode::NoOp);
+    }
+
+    #[test]
+    fn select_rounds_preserves_recent() {
+        let engine = CollapseEngine::new(CollapseEngineConfig {
+            preserve_recent_rounds: 3,
+            min_collapse_batch: 2,
+            ..Default::default()
+        });
+        let messages = make_conversation(5, 100);
+        let rounds = group_by_api_round(&messages);
+        let store = CollapseStore::new();
+
+        let range = engine.select_rounds_to_collapse(&rounds, &store);
+        // 5 rounds, preserve last 3, eligible = rounds 0..2
+        assert!(range.is_some());
+        let (start, end) = range.unwrap();
+        assert!(end < 5 - 3);
+        assert!(start <= end);
+    }
+
+    #[test]
+    fn select_rounds_too_few_rounds() {
+        let engine = CollapseEngine::new(CollapseEngineConfig {
+            preserve_recent_rounds: 5,
+            min_collapse_batch: 3,
+            ..Default::default()
+        });
+        let messages = make_conversation(4, 100);
+        let rounds = group_by_api_round(&messages);
+        let store = CollapseStore::new();
+
+        let range = engine.select_rounds_to_collapse(&rounds, &store);
+        assert!(range.is_none());
+    }
+
+    #[test]
+    fn select_rounds_skips_already_collapsed() {
+        let engine = CollapseEngine::new(CollapseEngineConfig {
+            preserve_recent_rounds: 2,
+            min_collapse_batch: 2,
+            ..Default::default()
+        });
+        let messages = make_conversation(8, 100);
+        let rounds = group_by_api_round(&messages);
+        let mut store = CollapseStore::new();
+        // Collapse rounds 0-2 already.
+        store.add(make_span(0, 2, "already collapsed")).unwrap();
+
+        let range = engine.select_rounds_to_collapse(&rounds, &store);
+        // Should skip 0-2 and find 3+ as eligible.
+        assert!(range.is_some());
+        let (start, _end) = range.unwrap();
+        assert!(start >= 3);
+    }
+
+    #[tokio::test]
+    async fn collapse_noop_below_threshold() {
+        let engine = CollapseEngine::new(CollapseEngineConfig::default());
+        // Small messages, large context window → NoOp.
+        let messages = make_conversation(3, 10);
+        let mut store = CollapseStore::new();
+        let summarizer = MockSummarizer::ok("summary");
+
+        let result = engine
+            .collapse(&messages, 1_000_000, &mut store, &summarizer)
+            .await
+            .unwrap();
+        assert_eq!(result.mode, CollapseMode::NoOp);
+        assert!(result.span.is_none());
+        assert!(store.is_empty());
+    }
+
+    #[tokio::test]
+    async fn collapse_triggers_and_stores_span() {
+        let engine = CollapseEngine::new(CollapseEngineConfig {
+            async_threshold: 0.90,
+            blocking_threshold: 0.95,
+            preserve_recent_rounds: 2,
+            min_collapse_batch: 2,
+        });
+        // Create enough messages to exceed 90% of a small context window.
+        let messages = make_conversation(10, 200);
+        let tokens = estimate_messages_tokens(&messages);
+        // Set context_window slightly above tokens so we're at ~92%.
+        let context_window = (tokens as f64 / 0.92) as usize;
+
+        let mut store = CollapseStore::new();
+        let summarizer = MockSummarizer::ok("This is the LLM summary.");
+
+        let result = engine
+            .collapse(&messages, context_window, &mut store, &summarizer)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            result.mode,
+            CollapseMode::Async | CollapseMode::Blocking
+        ));
+        assert!(result.span.is_some());
+        let span = result.span.unwrap();
+        assert_eq!(span.summary, "This is the LLM summary.");
+        assert!(!store.is_empty());
+        assert!(store.is_round_collapsed(span.start_round));
+    }
+
+    #[tokio::test]
+    async fn collapse_graceful_on_llm_failure() {
+        let engine = CollapseEngine::new(CollapseEngineConfig {
+            async_threshold: 0.90,
+            blocking_threshold: 0.95,
+            preserve_recent_rounds: 2,
+            min_collapse_batch: 2,
+        });
+        let messages = make_conversation(10, 200);
+        let tokens = estimate_messages_tokens(&messages);
+        let context_window = (tokens as f64 / 0.92) as usize;
+
+        let mut store = CollapseStore::new();
+        let summarizer = MockSummarizer::failing("LLM rate limited");
+
+        let result = engine
+            .collapse(&messages, context_window, &mut store, &summarizer)
+            .await
+            .unwrap();
+
+        // Should succeed but with no span created.
+        assert!(result.span.is_none());
+        assert!(store.is_empty());
+    }
+
+    #[tokio::test]
+    async fn collapse_blocking_mode_at_95() {
+        let engine = CollapseEngine::new(CollapseEngineConfig {
+            async_threshold: 0.90,
+            blocking_threshold: 0.95,
+            preserve_recent_rounds: 2,
+            min_collapse_batch: 2,
+        });
+        let messages = make_conversation(10, 200);
+        let tokens = estimate_messages_tokens(&messages);
+        // Set context window so usage is ~96%.
+        let context_window = (tokens as f64 / 0.96) as usize;
+
+        let mut store = CollapseStore::new();
+        let summarizer = MockSummarizer::ok("Blocking summary.");
+
+        let result = engine
+            .collapse(&messages, context_window, &mut store, &summarizer)
+            .await
+            .unwrap();
+
+        assert_eq!(result.mode, CollapseMode::Blocking);
+        assert!(result.span.is_some());
+    }
+
+    #[tokio::test]
+    async fn collapse_no_eligible_rounds_returns_none() {
+        let engine = CollapseEngine::new(CollapseEngineConfig {
+            async_threshold: 0.50, // Very low threshold to ensure trigger.
+            blocking_threshold: 0.95,
+            preserve_recent_rounds: 10, // Preserve more than available.
+            min_collapse_batch: 2,
+        });
+        let messages = make_conversation(5, 200);
+        let tokens = estimate_messages_tokens(&messages);
+        let context_window = tokens; // 100% usage.
+
+        let mut store = CollapseStore::new();
+        let summarizer = MockSummarizer::ok("summary");
+
+        let result = engine
+            .collapse(&messages, context_window, &mut store, &summarizer)
+            .await
+            .unwrap();
+
+        // Triggered but no rounds eligible (all preserved).
+        assert!(result.span.is_none());
+        assert!(store.is_empty());
     }
 }
