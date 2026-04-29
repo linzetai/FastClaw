@@ -97,7 +97,9 @@ pub fn register_builtin_tools_with_sandbox(registry: &ToolRegistry, sandboxed: b
     registry.register(Arc::new(CodeChunkTool));
     registry.register(Arc::new(MultiEditTool));
     registry.register(Arc::new(ListDirectoryTool));
-    registry.register(Arc::new(NotebookEditTool));
+
+    registry.register_deferred(Arc::new(NotebookEditTool));
+    registry.register_deferred(Arc::new(TerminalCaptureTool::new()));
 }
 
 /// Register web tools with a specific search backend configuration.
