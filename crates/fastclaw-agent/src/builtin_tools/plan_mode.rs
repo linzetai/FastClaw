@@ -5,6 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fastclaw_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolResult};
 use fastclaw_core::types::ExecutionMode;
+use serde::Deserialize;
 
 const MODE_AGENT: u8 = 0;
 const MODE_PLAN: u8 = 1;
@@ -199,6 +200,139 @@ impl Tool for ExitPlanModeTool {
     }
 }
 
+// ─── VerifyPlanExecutionTool ─────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct VerifyPlanArgs {
+    plan_summary: String,
+    all_steps_completed: bool,
+    #[serde(default)]
+    verification_notes: Option<String>,
+}
+
+/// Validates that a plan has been fully executed before exiting plan mode.
+///
+/// The agent should call this tool before `exit_plan_mode` to confirm
+/// all planned steps have been carried out. When `all_steps_completed`
+/// is false, the tool warns the agent about incomplete work.
+pub struct VerifyPlanExecutionTool {
+    mode_state: ExecutionModeState,
+}
+
+impl VerifyPlanExecutionTool {
+    pub fn new(mode_state: ExecutionModeState) -> Self {
+        Self { mode_state }
+    }
+}
+
+#[async_trait]
+impl Tool for VerifyPlanExecutionTool {
+    fn kind(&self) -> ToolKind {
+        ToolKind::Think
+    }
+
+    fn name(&self) -> &str {
+        "verify_plan_execution"
+    }
+
+    fn description(&self) -> &str {
+        "Verify that a plan has been fully executed before exiting plan mode. \
+         Provide a summary, whether all steps are completed, and optional notes."
+    }
+
+    fn search_hint(&self) -> &str {
+        "verify plan execution check steps completed before exit"
+    }
+
+    fn is_deferred(&self) -> bool {
+        true
+    }
+
+    fn parameters_schema(&self) -> ToolParameterSchema {
+        let mut props = HashMap::new();
+        props.insert(
+            "plan_summary".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "A brief summary of the plan that was being executed."
+            }),
+        );
+        props.insert(
+            "all_steps_completed".to_string(),
+            serde_json::json!({
+                "type": "boolean",
+                "description": "Whether all planned steps have been completed."
+            }),
+        );
+        props.insert(
+            "verification_notes".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Optional notes about the verification (e.g. what was skipped or changed)."
+            }),
+        );
+        ToolParameterSchema {
+            schema_type: "object".to_string(),
+            properties: props,
+            required: vec!["plan_summary".to_string(), "all_steps_completed".to_string()],
+        }
+    }
+
+    async fn execute(&self, arguments: &str) -> ToolResult {
+        let args: VerifyPlanArgs = match serde_json::from_str(arguments) {
+            Ok(v) => v,
+            Err(e) => {
+                return ToolResult::err(format!(
+                    "Invalid arguments: {e}. Expected \
+                     {{\"plan_summary\": \"...\", \"all_steps_completed\": true/false, \
+                     \"verification_notes\": \"...\"}}"
+                ))
+            }
+        };
+
+        let current = self.mode_state.current_mode();
+        let mode_note = if current != ExecutionMode::Plan {
+            "\n\nNote: You are not currently in plan mode."
+        } else {
+            ""
+        };
+
+        if !args.all_steps_completed {
+            let notes_section = args
+                .verification_notes
+                .as_deref()
+                .filter(|n| !n.is_empty())
+                .map(|n| format!("\n\nVerification notes: {n}"))
+                .unwrap_or_default();
+
+            return ToolResult::ok(format!(
+                "⚠ Plan verification: INCOMPLETE\n\n\
+                 Plan: {summary}\n\n\
+                 Not all steps have been completed. Please review your plan \
+                 and complete the remaining steps before exiting plan mode.\
+                 {notes_section}{mode_note}"
+                , summary = args.plan_summary
+            ));
+        }
+
+        let notes_section = args
+            .verification_notes
+            .as_deref()
+            .filter(|n| !n.is_empty())
+            .map(|n| format!("\n\nVerification notes: {n}"))
+            .unwrap_or_default();
+
+        ToolResult::ok(format!(
+            "✓ Plan verification: COMPLETE\n\n\
+             Plan: {summary}\n\n\
+             All steps have been completed. You may now safely call \
+             exit_plan_mode to return to agent mode and begin implementation.\
+             {notes_section}{mode_note}"
+            , summary = args.plan_summary
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,5 +458,111 @@ mod tests {
         assert!(msg.contains("write_file"));
         assert!(msg.contains("Plan mode"));
         assert!(msg.contains("exit_plan_mode"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // VerifyPlanExecutionTool tests
+    // ═══════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn verify_plan_all_completed() {
+        let state = ExecutionModeState::new();
+        state.transition(ExecutionMode::Plan);
+        let tool = VerifyPlanExecutionTool::new(state);
+
+        let result = tool
+            .execute(r#"{"plan_summary":"Refactor auth module","all_steps_completed":true}"#)
+            .await;
+        assert!(result.success);
+        assert!(result.output.contains("COMPLETE"));
+        assert!(result.output.contains("Refactor auth module"));
+        assert!(result.output.contains("exit_plan_mode"));
+        assert!(!result.output.contains("not currently in plan mode"));
+    }
+
+    #[tokio::test]
+    async fn verify_plan_incomplete() {
+        let state = ExecutionModeState::new();
+        state.transition(ExecutionMode::Plan);
+        let tool = VerifyPlanExecutionTool::new(state);
+
+        let result = tool
+            .execute(r#"{"plan_summary":"Add caching","all_steps_completed":false}"#)
+            .await;
+        assert!(result.success);
+        assert!(result.output.contains("INCOMPLETE"));
+        assert!(result.output.contains("Add caching"));
+        assert!(result.output.contains("remaining steps"));
+    }
+
+    #[tokio::test]
+    async fn verify_plan_with_notes() {
+        let state = ExecutionModeState::new();
+        state.transition(ExecutionMode::Plan);
+        let tool = VerifyPlanExecutionTool::new(state);
+
+        let result = tool
+            .execute(
+                r#"{"plan_summary":"DB migration","all_steps_completed":true,"verification_notes":"Skipped index step"}"#,
+            )
+            .await;
+        assert!(result.success);
+        assert!(result.output.contains("COMPLETE"));
+        assert!(result.output.contains("Skipped index step"));
+    }
+
+    #[tokio::test]
+    async fn verify_plan_incomplete_with_notes() {
+        let state = ExecutionModeState::new();
+        state.transition(ExecutionMode::Plan);
+        let tool = VerifyPlanExecutionTool::new(state);
+
+        let result = tool
+            .execute(
+                r#"{"plan_summary":"API redesign","all_steps_completed":false,"verification_notes":"Step 3 blocked by external dep"}"#,
+            )
+            .await;
+        assert!(result.success);
+        assert!(result.output.contains("INCOMPLETE"));
+        assert!(result.output.contains("Step 3 blocked by external dep"));
+    }
+
+    #[tokio::test]
+    async fn verify_plan_not_in_plan_mode() {
+        let state = ExecutionModeState::new();
+        let tool = VerifyPlanExecutionTool::new(state);
+
+        let result = tool
+            .execute(r#"{"plan_summary":"Test plan","all_steps_completed":true}"#)
+            .await;
+        assert!(result.success);
+        assert!(result.output.contains("COMPLETE"));
+        assert!(result.output.contains("not currently in plan mode"));
+    }
+
+    #[tokio::test]
+    async fn verify_plan_invalid_args() {
+        let state = ExecutionModeState::new();
+        let tool = VerifyPlanExecutionTool::new(state);
+
+        let result = tool.execute(r#"{"plan_summary":"missing bool"}"#).await;
+        assert!(!result.success);
+        assert!(result.output.contains("Invalid arguments"));
+    }
+
+    #[tokio::test]
+    async fn verify_plan_empty_notes_ignored() {
+        let state = ExecutionModeState::new();
+        state.transition(ExecutionMode::Plan);
+        let tool = VerifyPlanExecutionTool::new(state);
+
+        let result = tool
+            .execute(
+                r#"{"plan_summary":"Cleanup","all_steps_completed":true,"verification_notes":""}"#,
+            )
+            .await;
+        assert!(result.success);
+        assert!(result.output.contains("COMPLETE"));
+        assert!(!result.output.contains("Verification notes"));
     }
 }
