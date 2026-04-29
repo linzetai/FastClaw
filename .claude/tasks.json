@@ -1277,7 +1277,7 @@
             "tool definition 构建时使用 prompt() 作为 LLM 看到的描述",
             "现有所有 Tool 实现无需修改即可编译"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4H-10",
