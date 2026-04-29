@@ -1,4 +1,5 @@
 pub mod budget;
+pub mod collapse;
 pub mod compressor;
 pub mod engine;
 pub mod keyword_interceptor;
@@ -27,6 +28,9 @@ pub use budget::{BudgetDecision, StopReason, TokenBudgetTracker};
 pub use pipeline::{CompactionMetadata, ContextPipeline, PipelineConfig};
 pub use reactive::{ReactiveCompactResult, ReactiveCompactor, ReactiveCompactorConfig};
 pub use snip::{group_by_api_round, ApiRound, SnipCompactor, SnipCompactorConfig, SnipResult};
+pub use collapse::{
+    project as project_collapses, CollapseOverlapError, CollapseSpan, CollapseStore,
+};
 pub use model_context::{
     has_explicit_output_limit, infer_context_window_from_model, infer_output_limit_from_model,
     normalize_model_name, TokenLimitType,
