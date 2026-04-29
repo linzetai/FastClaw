@@ -60,7 +60,7 @@
             "session resume 后已有的 tool result 文件可读取",
             "cargo test -p fastclaw-agent 全通过"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "6G-04",

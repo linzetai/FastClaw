@@ -74,11 +74,22 @@ use trajectory::last_user_turn_text;
 use trajectory::truncate_for_trajectory;
 
 /// Create a ToolResultStorage for the current invocation session.
-/// Uses a temp directory under the system temp path to persist large tool outputs.
-fn create_tool_result_storage() -> ToolResultStorage {
-    let session_dir = std::env::temp_dir()
-        .join("fastclaw_sessions")
-        .join(format!("s_{}", std::process::id()));
+///
+/// - With `session_id`: uses `~/.fastclaw/sessions/<session_id>/` so tool results
+///   persist across process restarts and can be recovered on session resume.
+/// - Without `session_id`: uses an ephemeral temp directory that lives only as
+///   long as the current process.
+fn create_tool_result_storage(session_id: Option<&str>) -> ToolResultStorage {
+    let session_dir = match session_id {
+        Some(sid) => dirs::home_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join(".fastclaw")
+            .join("sessions")
+            .join(sid),
+        None => std::env::temp_dir()
+            .join("fastclaw_sessions")
+            .join(format!("ephemeral_{}", std::process::id())),
+    };
     ToolResultStorage::new(session_dir)
 }
 
@@ -426,7 +437,7 @@ impl AgentRuntime {
         });
 
         let mut state = QueryLoopState::new(max_iterations);
-        let tool_storage = create_tool_result_storage();
+        let tool_storage = create_tool_result_storage(request.session_id.as_deref());
         let skip_tool_names = build_skip_tool_names(tool_registry);
 
         // Reconstruct ContentReplacementState from persisted records on session resume
@@ -770,7 +781,7 @@ impl AgentRuntime {
         });
 
         let mut state = QueryLoopState::new(max_iterations);
-        let tool_storage = create_tool_result_storage();
+        let tool_storage = create_tool_result_storage(request.session_id.as_deref());
         let skip_tool_names = build_skip_tool_names(tool_registry);
         let stream_start = std::time::Instant::now();
 

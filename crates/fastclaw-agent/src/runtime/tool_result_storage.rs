@@ -858,4 +858,41 @@ mod tests {
         assert!(result.newly_replaced.is_empty(), "frozen (seen but not replaced) must not be replaced");
         assert!(!result.replacements.contains_key("frozen_id"));
     }
+
+    #[test]
+    fn session_based_storage_survives_recreation() {
+        let tmp = TempDir::new().unwrap();
+        let session_dir = tmp.path().join("my_session");
+
+        let content = "x".repeat(60_000);
+
+        // First storage instance — persists a large result
+        {
+            let storage = ToolResultStorage::new(session_dir.clone());
+            let result = storage
+                .process_result("shell_exec", "tool_abc", &content, 50_000)
+                .unwrap();
+            assert!(result.is_some());
+        }
+
+        // Second storage instance (simulates session resume) — file still exists
+        {
+            let storage = ToolResultStorage::new(session_dir.clone());
+            let filepath = storage.tool_result_path("tool_abc");
+            assert!(filepath.exists(), "tool result must survive storage recreation");
+            let read_back = fs::read_to_string(&filepath).unwrap();
+            assert_eq!(read_back.len(), 60_000);
+            assert_eq!(read_back, content);
+        }
+    }
+
+    #[test]
+    fn tool_result_path_uses_session_dir() {
+        let storage = ToolResultStorage::new(PathBuf::from("/home/user/.fastclaw/sessions/sid123"));
+        let path = storage.tool_result_path("call_456");
+        assert_eq!(
+            path,
+            PathBuf::from("/home/user/.fastclaw/sessions/sid123/tool-results/call_456.txt")
+        );
+    }
 }
