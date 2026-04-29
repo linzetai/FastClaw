@@ -228,6 +228,25 @@ impl SessionStore {
         .execute(&self.pool)
         .await?;
 
+        // content_replacement_records: persist per-message budget decisions for session resume
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS content_replacement_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                tool_use_id TEXT NOT NULL,
+                replacement TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_crr_session ON content_replacement_records(session_id)"
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -809,6 +828,69 @@ impl SessionStore {
         .await?;
         Ok(result.rows_affected())
     }
+
+    // ── Content Replacement Records ─────────────────────────────────────
+
+    /// Persist content replacement records for a session.
+    /// These records allow byte-identical reconstruction of `ContentReplacementState`
+    /// on session resume, preserving prompt cache prefix stability.
+    pub async fn save_replacement_records(
+        &self,
+        session_id: &str,
+        records: &[crate::models::ContentReplacementRow],
+    ) -> anyhow::Result<()> {
+        if records.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = self.pool.begin().await?;
+        for record in records {
+            sqlx::query(
+                "INSERT INTO content_replacement_records (session_id, tool_use_id, replacement)
+                 VALUES (?, ?, ?)",
+            )
+            .bind(session_id)
+            .bind(&record.tool_use_id)
+            .bind(&record.replacement)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+
+        tracing::debug!(
+            session_id,
+            count = records.len(),
+            "saved content replacement records"
+        );
+        Ok(())
+    }
+
+    /// Load all content replacement records for a session, ordered by insertion.
+    pub async fn load_replacement_records(
+        &self,
+        session_id: &str,
+    ) -> anyhow::Result<Vec<crate::models::ContentReplacementRow>> {
+        let rows = sqlx::query_as::<_, crate::models::ContentReplacementRow>(
+            "SELECT tool_use_id, replacement FROM content_replacement_records
+             WHERE session_id = ? ORDER BY id ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    /// Delete all content replacement records for a session (e.g. on session reset).
+    pub async fn delete_replacement_records(&self, session_id: &str) -> anyhow::Result<u64> {
+        let result = sqlx::query(
+            "DELETE FROM content_replacement_records WHERE session_id = ?",
+        )
+        .bind(session_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
 }
 
 fn row_to_trace(
@@ -1113,5 +1195,134 @@ mod tests {
     async fn get_subagent_run_returns_none_for_unknown() {
         let store = SessionStore::open_memory().await.unwrap();
         assert!(store.get_subagent_run("nonexistent").await.unwrap().is_none());
+    }
+
+    // ── Content Replacement Record tests ────────────────────────────────
+
+    use crate::models::ContentReplacementRow;
+
+    #[tokio::test]
+    async fn save_and_load_replacement_records() {
+        let store = SessionStore::open_memory().await.unwrap();
+        store.create_session("s1", "agent", None).await.unwrap();
+
+        let records = vec![
+            ContentReplacementRow {
+                tool_use_id: "tu_1".into(),
+                replacement: "<persisted-output>\npreview 1\n</persisted-output>".into(),
+            },
+            ContentReplacementRow {
+                tool_use_id: "tu_2".into(),
+                replacement: "<persisted-output>\npreview 2\n</persisted-output>".into(),
+            },
+        ];
+        store.save_replacement_records("s1", &records).await.unwrap();
+
+        let loaded = store.load_replacement_records("s1").await.unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].tool_use_id, "tu_1");
+        assert_eq!(loaded[0].replacement, "<persisted-output>\npreview 1\n</persisted-output>");
+        assert_eq!(loaded[1].tool_use_id, "tu_2");
+        assert_eq!(loaded[1].replacement, "<persisted-output>\npreview 2\n</persisted-output>");
+    }
+
+    #[tokio::test]
+    async fn load_replacement_records_empty_when_none_saved() {
+        let store = SessionStore::open_memory().await.unwrap();
+        store.create_session("s1", "agent", None).await.unwrap();
+
+        let loaded = store.load_replacement_records("s1").await.unwrap();
+        assert!(loaded.is_empty());
+    }
+
+    #[tokio::test]
+    async fn save_replacement_records_empty_vec_is_noop() {
+        let store = SessionStore::open_memory().await.unwrap();
+        store.create_session("s1", "agent", None).await.unwrap();
+
+        store.save_replacement_records("s1", &[]).await.unwrap();
+        let loaded = store.load_replacement_records("s1").await.unwrap();
+        assert!(loaded.is_empty());
+    }
+
+    #[tokio::test]
+    async fn save_replacement_records_appends_to_existing() {
+        let store = SessionStore::open_memory().await.unwrap();
+        store.create_session("s1", "agent", None).await.unwrap();
+
+        let batch1 = vec![ContentReplacementRow {
+            tool_use_id: "tu_1".into(),
+            replacement: "[r1]".into(),
+        }];
+        store.save_replacement_records("s1", &batch1).await.unwrap();
+
+        let batch2 = vec![ContentReplacementRow {
+            tool_use_id: "tu_2".into(),
+            replacement: "[r2]".into(),
+        }];
+        store.save_replacement_records("s1", &batch2).await.unwrap();
+
+        let loaded = store.load_replacement_records("s1").await.unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].tool_use_id, "tu_1");
+        assert_eq!(loaded[1].tool_use_id, "tu_2");
+    }
+
+    #[tokio::test]
+    async fn delete_replacement_records_removes_all() {
+        let store = SessionStore::open_memory().await.unwrap();
+        store.create_session("s1", "agent", None).await.unwrap();
+
+        let records = vec![
+            ContentReplacementRow { tool_use_id: "tu_1".into(), replacement: "[r1]".into() },
+            ContentReplacementRow { tool_use_id: "tu_2".into(), replacement: "[r2]".into() },
+        ];
+        store.save_replacement_records("s1", &records).await.unwrap();
+
+        let deleted = store.delete_replacement_records("s1").await.unwrap();
+        assert_eq!(deleted, 2);
+
+        let loaded = store.load_replacement_records("s1").await.unwrap();
+        assert!(loaded.is_empty());
+    }
+
+    #[tokio::test]
+    async fn replacement_records_cascade_on_session_delete() {
+        let store = SessionStore::open_memory().await.unwrap();
+        store.create_session("s1", "agent", None).await.unwrap();
+
+        let records = vec![ContentReplacementRow {
+            tool_use_id: "tu_1".into(),
+            replacement: "[r]".into(),
+        }];
+        store.save_replacement_records("s1", &records).await.unwrap();
+
+        store.delete_session("s1").await.unwrap();
+        let loaded = store.load_replacement_records("s1").await.unwrap();
+        assert!(loaded.is_empty());
+    }
+
+    #[tokio::test]
+    async fn replacement_records_isolated_between_sessions() {
+        let store = SessionStore::open_memory().await.unwrap();
+        store.create_session("s1", "agent", None).await.unwrap();
+        store.create_session("s2", "agent", None).await.unwrap();
+
+        store.save_replacement_records("s1", &[ContentReplacementRow {
+            tool_use_id: "tu_a".into(),
+            replacement: "[ra]".into(),
+        }]).await.unwrap();
+        store.save_replacement_records("s2", &[ContentReplacementRow {
+            tool_use_id: "tu_b".into(),
+            replacement: "[rb]".into(),
+        }]).await.unwrap();
+
+        let s1 = store.load_replacement_records("s1").await.unwrap();
+        assert_eq!(s1.len(), 1);
+        assert_eq!(s1[0].tool_use_id, "tu_a");
+
+        let s2 = store.load_replacement_records("s2").await.unwrap();
+        assert_eq!(s2.len(), 1);
+        assert_eq!(s2[0].tool_use_id, "tu_b");
     }
 }

@@ -64,7 +64,7 @@ use tool_executor::semantic_header;
 use tool_executor::truncate_tool_result_output_with_limit;
 use tool_result_storage::{
     ContentReplacementState, ToolResultEntry, ToolResultStorage,
-    MAX_TOOL_RESULTS_PER_MESSAGE_CHARS,
+    MAX_TOOL_RESULTS_PER_MESSAGE_CHARS, reconstruct_state,
 };
 #[cfg(any(feature = "evolution", feature = "self-iter"))]
 use trajectory::append_text_to_chat_content;
@@ -119,12 +119,13 @@ fn process_tool_output(
 
 /// Apply enforce_per_message_budget on messages before sending to LLM.
 /// Modifies messages in-place by replacing oversized tool results with previews.
+/// Returns any newly created replacement records for session persistence.
 fn apply_message_budget(
     storage: &ToolResultStorage,
     messages: &mut [fastclaw_core::types::ChatMessage],
     state: &mut ContentReplacementState,
     skip_tool_names: &std::collections::HashSet<String>,
-) {
+) -> Vec<tool_result_storage::ContentReplacementRecord> {
     let mut tool_entries: Vec<ToolResultEntry> = Vec::new();
     let mut entry_indices: Vec<usize> = Vec::new();
 
@@ -144,7 +145,7 @@ fn apply_message_budget(
     }
 
     if tool_entries.is_empty() {
-        return;
+        return Vec::new();
     }
 
     let result = storage.enforce_per_message_budget(
@@ -155,7 +156,7 @@ fn apply_message_budget(
     );
 
     if result.replacements.is_empty() {
-        return;
+        return Vec::new();
     }
 
     for &idx in &entry_indices {
@@ -173,6 +174,8 @@ fn apply_message_budget(
             "Per-message budget: persisted tool results"
         );
     }
+
+    result.newly_replaced
 }
 
 /// Build ChatMessage content for a tool result. When the result carries images,
@@ -216,6 +219,9 @@ pub struct ExecutionParams<'a> {
     /// Shared execution mode state for plan-mode blocking.
     /// When `Some`, tools of kind Edit/Execute are blocked in Plan mode.
     pub mode_state: Option<crate::builtin_tools::ExecutionModeState>,
+    /// Optional session store for persisting content replacement records.
+    /// When provided with a session_id, enables byte-stable resume.
+    pub session_store: Option<Arc<fastclaw_session::SessionStore>>,
 }
 
 /// Additional parameters specific to the streaming execution path.
@@ -358,7 +364,7 @@ impl AgentRuntime {
         tool_registry: &Arc<ToolRegistry>,
         llm_override: Option<Arc<dyn LlmProvider>>,
     ) -> anyhow::Result<ExecutionResult> {
-        let params = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt: None, mode_state: None };
+        let params = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt: None, mode_state: None, session_store: None };
         self.execute_inner(&params).await
     }
 
@@ -370,7 +376,7 @@ impl AgentRuntime {
         llm_override: Option<Arc<dyn LlmProvider>>,
         subagent_prompt: Option<String>,
     ) -> anyhow::Result<ExecutionResult> {
-        let params = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt, mode_state: None };
+        let params = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt, mode_state: None, session_store: None };
         self.execute_inner(&params).await
     }
 
@@ -378,7 +384,7 @@ impl AgentRuntime {
         &self,
         params: &ExecutionParams<'_>,
     ) -> anyhow::Result<ExecutionResult> {
-        let ExecutionParams { config, request, tool_registry, ref llm_override, subagent_prompt: _, ref mode_state } = *params;
+        let ExecutionParams { config, request, tool_registry, ref llm_override, subagent_prompt: _, ref mode_state, ref session_store } = *params;
         let max_iterations = config.behavior.max_tool_calls_per_turn;
         let max_errors = config.behavior.max_consecutive_errors;
 
@@ -420,8 +426,14 @@ impl AgentRuntime {
 
         let mut lstate = LoopState::new();
         let tool_storage = create_tool_result_storage();
-        let mut replacement_state = ContentReplacementState::new();
         let skip_tool_names = build_skip_tool_names(tool_registry);
+
+        // Reconstruct ContentReplacementState from persisted records on session resume
+        let mut replacement_state = Self::load_or_create_replacement_state(
+            session_store,
+            request.session_id.as_deref(),
+            &request.messages,
+        ).await;
 
         loop {
             if lstate.error_limit_reached {
@@ -454,7 +466,8 @@ impl AgentRuntime {
                 "LLM call"
             );
 
-            apply_message_budget(&tool_storage, &mut messages, &mut replacement_state, &skip_tool_names);
+            let newly_replaced = apply_message_budget(&tool_storage, &mut messages, &mut replacement_state, &skip_tool_names);
+            Self::persist_replacement_records(session_store, request.session_id.as_deref(), &newly_replaced).await;
 
             let params = CompletionParams {
                 model,
@@ -680,7 +693,7 @@ impl AgentRuntime {
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
         llm_override: Option<Arc<dyn LlmProvider>>,
     ) -> anyhow::Result<(u32, u32)> {
-        let exec = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt: None, mode_state: None };
+        let exec = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt: None, mode_state: None, session_store: None };
         let stream = StreamParams { tx, confirm_pending: None };
         self.execute_stream_inner(&exec, stream).await
     }
@@ -694,7 +707,7 @@ impl AgentRuntime {
         llm_override: Option<Arc<dyn LlmProvider>>,
         subagent_prompt: Option<String>,
     ) -> anyhow::Result<(u32, u32)> {
-        let exec = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt, mode_state: None };
+        let exec = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt, mode_state: None, session_store: None };
         let stream = StreamParams { tx, confirm_pending: None };
         self.execute_stream_inner(&exec, stream).await
     }
@@ -710,8 +723,9 @@ impl AgentRuntime {
         confirm_pending: Arc<DashMap<String, tokio::sync::oneshot::Sender<String>>>,
         subagent_prompt: Option<String>,
         mode_state: Option<crate::builtin_tools::ExecutionModeState>,
+        session_store: Option<Arc<fastclaw_session::SessionStore>>,
     ) -> anyhow::Result<(u32, u32)> {
-        let exec = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt, mode_state };
+        let exec = ExecutionParams { config, request, tool_registry, llm_override, subagent_prompt, mode_state, session_store };
         let stream = StreamParams { tx, confirm_pending: Some(confirm_pending) };
         self.execute_stream_inner(&exec, stream).await
     }
@@ -721,7 +735,7 @@ impl AgentRuntime {
         params: &ExecutionParams<'_>,
         stream_params: StreamParams,
     ) -> anyhow::Result<(u32, u32)> {
-        let ExecutionParams { config, request, tool_registry, ref llm_override, subagent_prompt: _, ref mode_state } = *params;
+        let ExecutionParams { config, request, tool_registry, ref llm_override, subagent_prompt: _, ref mode_state, ref session_store } = *params;
         let StreamParams { ref tx, ref confirm_pending } = stream_params;
         let max_iterations = config.behavior.max_tool_calls_per_turn;
         let max_errors = config.behavior.max_consecutive_errors;
@@ -774,9 +788,15 @@ impl AgentRuntime {
 
         let mut lstate = LoopState::new();
         let tool_storage = create_tool_result_storage();
-        let mut replacement_state = ContentReplacementState::new();
         let skip_tool_names = build_skip_tool_names(tool_registry);
         let stream_start = std::time::Instant::now();
+
+        // Reconstruct ContentReplacementState from persisted records on session resume
+        let mut replacement_state = Self::load_or_create_replacement_state(
+            session_store,
+            request.session_id.as_deref(),
+            &request.messages,
+        ).await;
         let mut acc_prompt_tokens: u32 = 0;
         let mut acc_completion_tokens: u32 = 0;
         let mut last_estimated_tokens: usize = 0;
@@ -961,7 +981,8 @@ impl AgentRuntime {
                 None => self.resolve_provider(&config.agent_id)?,
             };
 
-            apply_message_budget(&tool_storage, &mut messages, &mut replacement_state, &skip_tool_names);
+            let newly_replaced = apply_message_budget(&tool_storage, &mut messages, &mut replacement_state, &skip_tool_names);
+            Self::persist_replacement_records(session_store, request.session_id.as_deref(), &newly_replaced).await;
 
             let mut accumulated_content = String::new();
             let mut tool_call_accum: Vec<ToolCallAccumulator> = Vec::new();
@@ -1766,6 +1787,88 @@ impl AgentRuntime {
             token_budget: None,
             memory_prompt: None,
             session_start_date: date,
+        }
+    }
+
+    /// Load persisted ContentReplacementState from session store, or create fresh.
+    /// On resume, collects all tool_use_ids from existing messages and loads persisted
+    /// replacement records to reconstruct byte-identical state.
+    async fn load_or_create_replacement_state(
+        session_store: &Option<Arc<fastclaw_session::SessionStore>>,
+        session_id: Option<&str>,
+        messages: &[ChatMessage],
+    ) -> ContentReplacementState {
+        let Some(store) = session_store else {
+            return ContentReplacementState::new();
+        };
+        let Some(sid) = session_id else {
+            return ContentReplacementState::new();
+        };
+
+        let records = match store.load_replacement_records(sid).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!(error = %e, session_id = sid, "failed to load replacement records, starting fresh");
+                return ContentReplacementState::new();
+            }
+        };
+
+        if records.is_empty() {
+            return ContentReplacementState::new();
+        }
+
+        let message_tool_use_ids: Vec<String> = messages
+            .iter()
+            .filter(|m| m.role == Role::Tool)
+            .filter_map(|m| m.tool_call_id.clone())
+            .collect();
+
+        let cr_records: Vec<tool_result_storage::ContentReplacementRecord> = records
+            .into_iter()
+            .map(|r| tool_result_storage::ContentReplacementRecord {
+                tool_use_id: r.tool_use_id,
+                replacement: r.replacement,
+            })
+            .collect();
+
+        let state = reconstruct_state(&message_tool_use_ids, &cr_records);
+        tracing::info!(
+            session_id = sid,
+            seen_ids = state.seen_ids.len(),
+            replacements = state.replacements.len(),
+            "reconstructed ContentReplacementState from persisted records"
+        );
+        state
+    }
+
+    /// Persist newly created replacement records to session store.
+    /// Fails silently (logs warning) — the fallback is truncation on next turn.
+    async fn persist_replacement_records(
+        session_store: &Option<Arc<fastclaw_session::SessionStore>>,
+        session_id: Option<&str>,
+        records: &[tool_result_storage::ContentReplacementRecord],
+    ) {
+        if records.is_empty() {
+            return;
+        }
+        let Some(store) = session_store else { return; };
+        let Some(sid) = session_id else { return; };
+
+        let rows: Vec<fastclaw_session::ContentReplacementRow> = records
+            .iter()
+            .map(|r| fastclaw_session::ContentReplacementRow {
+                tool_use_id: r.tool_use_id.clone(),
+                replacement: r.replacement.clone(),
+            })
+            .collect();
+
+        if let Err(e) = store.save_replacement_records(sid, &rows).await {
+            tracing::warn!(
+                error = %e,
+                session_id = sid,
+                count = rows.len(),
+                "failed to persist replacement records"
+            );
         }
     }
 

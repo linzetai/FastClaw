@@ -214,7 +214,6 @@ impl Default for ContentReplacementState {
 /// Serializable record of one content-replacement decision.
 /// Written to the transcript so decisions survive session resume.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct ContentReplacementRecord {
     pub tool_use_id: String,
     pub replacement: String,
@@ -420,7 +419,6 @@ impl ToolResultStorage {
 ///
 /// All tool_use_ids in `message_tool_use_ids` are frozen (added to seen_ids).
 /// Records populate the replacements map.
-#[allow(dead_code)]
 pub fn reconstruct_state(
     message_tool_use_ids: &[String],
     records: &[ContentReplacementRecord],

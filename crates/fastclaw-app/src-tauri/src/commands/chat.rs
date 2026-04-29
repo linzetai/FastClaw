@@ -150,12 +150,13 @@ pub async fn chat_stream(
     let stream_cancel_map_for_task = state.stream_cancels.clone();
     let confirm_pending_for_task = app.strm.ask_question_pending.clone();
     let mode_state_for_task = app.rt.mode_state.clone();
+    let session_store_for_task = Some(app.store.session_store.clone());
 
     let task = tokio::spawn(async move {
         let result = tokio::select! {
             result = fastclaw_agent::builtin_tools::with_stream_context(
                 stream_context_key_for_task.clone(),
-                runtime.execute_stream_with_confirm(&agent_config, &enriched, &tool_reg, tx, llm_override, confirm_pending_for_task, subagent_prompt, Some(mode_state_for_task)),
+                runtime.execute_stream_with_confirm(&agent_config, &enriched, &tool_reg, tx, llm_override, confirm_pending_for_task, subagent_prompt, Some(mode_state_for_task), session_store_for_task),
             ) => result,
             _ = &mut cancel_rx => Err(anyhow::anyhow!("cancelled")),
         };

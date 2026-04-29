@@ -81,3 +81,12 @@ pub struct SessionSummary {
     #[serde(default)]
     pub total_elapsed_ms: i64,
 }
+
+/// A persisted content replacement record for tool result budget enforcement.
+/// Stores decisions made by `enforce_per_message_budget` so that session resume
+/// can reconstruct the identical `ContentReplacementState`.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ContentReplacementRow {
+    pub tool_use_id: String,
+    pub replacement: String,
+}
