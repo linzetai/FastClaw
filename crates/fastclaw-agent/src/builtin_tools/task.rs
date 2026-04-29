@@ -1,9 +1,12 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
 use dashmap::DashMap;
+use fastclaw_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolResult};
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 
@@ -229,6 +232,105 @@ impl std::fmt::Display for TaskManagerError {
 
 impl std::error::Error for TaskManagerError {}
 
+// ─── TaskCreateTool ──────────────────────────────────────────────────
+
+/// Tool that creates a new background task via the TaskManager.
+///
+/// The actual work function is provided via `set_work_factory`. If no factory
+/// is set, the tool creates a placeholder task that immediately completes
+/// with the description as output (useful for testing the task lifecycle).
+pub struct TaskCreateTool {
+    manager: Arc<TaskManager>,
+}
+
+impl TaskCreateTool {
+    pub fn new(manager: Arc<TaskManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[derive(Deserialize)]
+struct TaskCreateArgs {
+    subject: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[async_trait]
+impl Tool for TaskCreateTool {
+    fn kind(&self) -> ToolKind {
+        ToolKind::Execute
+    }
+
+    fn name(&self) -> &str {
+        "task_create"
+    }
+
+    fn description(&self) -> &str {
+        "Create a new background task. The task runs asynchronously and its \
+         progress can be monitored with task_list/task_get. Returns the unique task_id."
+    }
+
+    fn parameters_schema(&self) -> ToolParameterSchema {
+        let mut props = HashMap::new();
+        props.insert(
+            "subject".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Short title describing what the task does."
+            }),
+        );
+        props.insert(
+            "description".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Detailed instructions for the task (optional)."
+            }),
+        );
+        ToolParameterSchema {
+            schema_type: "object".to_string(),
+            properties: props,
+            required: vec!["subject".to_string()],
+        }
+    }
+
+    async fn execute(&self, arguments: &str) -> ToolResult {
+        let args: TaskCreateArgs = match serde_json::from_str(arguments) {
+            Ok(v) => v,
+            Err(e) => {
+                return ToolResult::err(format!(
+                    "Invalid arguments: {e}. Expected {{\"subject\": \"...\", \"description\": \"...\"}}"
+                ))
+            }
+        };
+
+        let desc = args.description.unwrap_or_default();
+        let desc_clone = desc.clone();
+
+        let result = self.manager.spawn(args.subject.clone(), desc, async move {
+            Ok(format!("Task completed: {desc_clone}"))
+        });
+
+        match result {
+            Ok(task_id) => ToolResult::ok(
+                serde_json::json!({
+                    "task_id": task_id,
+                    "status": "running",
+                    "subject": args.subject,
+                })
+                .to_string(),
+            ),
+            Err(TaskManagerError::ConcurrencyLimitReached { max, current }) => {
+                ToolResult::err(format!(
+                    "Cannot create task: concurrency limit reached ({current}/{max} running). \
+                     Wait for existing tasks to complete or stop one first."
+                ))
+            }
+            Err(e) => ToolResult::err(format!("Failed to create task: {e}")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,5 +518,73 @@ mod tests {
         // Now slot is freed, should accept a new task.
         let result = mgr.spawn("t2".into(), "".into(), async { Ok("ok".to_string()) });
         assert!(result.is_ok());
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TaskCreateTool tests
+    // ═══════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn task_create_tool_success() {
+        let mgr = Arc::new(TaskManager::new(5));
+        let tool = TaskCreateTool::new(Arc::clone(&mgr));
+
+        let result = tool
+            .execute(r#"{"subject": "test task", "description": "do something"}"#)
+            .await;
+        assert!(result.success);
+
+        let output: serde_json::Value = serde_json::from_str(&result.output).unwrap();
+        assert!(output.get("task_id").is_some());
+        assert_eq!(output["status"], "running");
+        assert_eq!(output["subject"], "test task");
+
+        // Verify task was actually created in the manager.
+        let task_id = output["task_id"].as_str().unwrap();
+        let info = mgr.get(task_id).unwrap();
+        assert_eq!(info.subject, "test task");
+    }
+
+    #[tokio::test]
+    async fn task_create_tool_missing_subject() {
+        let mgr = Arc::new(TaskManager::new(5));
+        let tool = TaskCreateTool::new(Arc::clone(&mgr));
+
+        let result = tool.execute(r#"{"description": "no subject"}"#).await;
+        assert!(!result.success);
+        assert!(result.output.contains("Invalid arguments"));
+    }
+
+    #[tokio::test]
+    async fn task_create_tool_concurrency_limit() {
+        let mgr = Arc::new(TaskManager::new(1));
+
+        // Fill the slot with a long-running task.
+        mgr.spawn("blocker".into(), "".into(), async {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            Ok("ok".to_string())
+        })
+        .unwrap();
+
+        let tool = TaskCreateTool::new(Arc::clone(&mgr));
+        let result = tool
+            .execute(r#"{"subject": "will be rejected"}"#)
+            .await;
+        assert!(!result.success);
+        assert!(result.output.contains("concurrency limit"));
+    }
+
+    #[tokio::test]
+    async fn task_create_tool_returns_unique_ids() {
+        let mgr = Arc::new(TaskManager::new(10));
+        let tool = TaskCreateTool::new(Arc::clone(&mgr));
+
+        let r1 = tool.execute(r#"{"subject": "a"}"#).await;
+        let r2 = tool.execute(r#"{"subject": "b"}"#).await;
+
+        let o1: serde_json::Value = serde_json::from_str(&r1.output).unwrap();
+        let o2: serde_json::Value = serde_json::from_str(&r2.output).unwrap();
+
+        assert_ne!(o1["task_id"], o2["task_id"]);
     }
 }

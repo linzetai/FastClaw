@@ -51,7 +51,7 @@ pub use confirm::ConfirmTool;
 pub use todo::{TodoStore, TodoWriteTool, TodoStatus, TodoItem};
 pub use code_intel::{FindReferencesTool, GoToDefinitionTool, UnifiedLspTool, WorkspaceSymbolsTool, FileOutlineTool, CodeChunkTool};
 pub use notebook::NotebookEditTool;
-pub use task::{TaskInfo, TaskManager, TaskManagerError, TaskStatus};
+pub use task::{TaskCreateTool, TaskInfo, TaskManager, TaskManagerError, TaskStatus};
 pub use snip::SnipTool;
 pub use tool_search::ToolSearchTool;
 pub use utility::{CalculatorTool, CurrentTimeTool, SleepTool};

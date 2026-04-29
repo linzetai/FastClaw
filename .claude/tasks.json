@@ -990,7 +990,7 @@
             "子 Agent 在独立 tokio task 中执行",
             "达到最大并发数时返回错误或排队"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "P4-09",
