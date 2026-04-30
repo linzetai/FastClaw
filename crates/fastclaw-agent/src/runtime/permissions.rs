@@ -344,6 +344,149 @@ impl ShellRule {
     }
 }
 
+// ── Auto Mode Classifier ─────────────────────────────────────────────
+
+/// Safety classification result from LLM side-query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SafetyDecision {
+    Safe,
+    Unsafe,
+    NeedsConfirmation,
+}
+
+/// Result of auto-mode classification.
+#[derive(Debug, Clone)]
+pub struct AutoClassification {
+    pub decision: SafetyDecision,
+    pub reason: String,
+}
+
+impl AutoClassification {
+    /// Parse an LLM response into a classification.
+    /// Expected format: "SAFE: <reason>" or "UNSAFE: <reason>".
+    pub fn parse_response(response: &str) -> Self {
+        let trimmed = response.trim();
+        if trimmed.is_empty() {
+            return Self {
+                decision: SafetyDecision::NeedsConfirmation,
+                reason: "empty response from classifier".into(),
+            };
+        }
+
+        let upper = trimmed.to_uppercase();
+        if upper.starts_with("SAFE") {
+            let reason = trimmed
+                .get(4..)
+                .map(|s| s.trim_start_matches(':').trim())
+                .unwrap_or("")
+                .to_string();
+            Self {
+                decision: SafetyDecision::Safe,
+                reason: if reason.is_empty() { "classified as safe".into() } else { reason },
+            }
+        } else if upper.starts_with("UNSAFE") {
+            let reason = trimmed
+                .get(6..)
+                .map(|s| s.trim_start_matches(':').trim())
+                .unwrap_or("")
+                .to_string();
+            Self {
+                decision: SafetyDecision::Unsafe,
+                reason: if reason.is_empty() { "classified as unsafe".into() } else { reason },
+            }
+        } else {
+            Self {
+                decision: SafetyDecision::NeedsConfirmation,
+                reason: format!("unrecognized classification: {}", &trimmed[..trimmed.len().min(100)]),
+            }
+        }
+    }
+}
+
+/// Auto-mode classifier that uses LLM side-query to determine if a
+/// command is safe to execute without user confirmation.
+pub struct AutoModeClassifier {
+    _placeholder: (),
+}
+
+impl AutoModeClassifier {
+    pub fn new() -> Self {
+        Self { _placeholder: () }
+    }
+
+    /// Build the LLM prompt for classifying a command's safety.
+    pub fn build_classification_prompt(command: &str, context: &str) -> String {
+        format!(
+            "You are a security classifier. Determine if the following command is safe to \
+             execute automatically without user confirmation.\n\n\
+             Command: {command}\n\
+             Context: {context}\n\n\
+             Rules:\n\
+             - Commands that only READ data are SAFE\n\
+             - Commands that WRITE/DELETE/MODIFY important data are UNSAFE\n\
+             - Commands that affect system configuration are UNSAFE\n\
+             - Network requests to trusted APIs are generally SAFE\n\
+             - Commands with irreversible effects (rm -rf, git push --force) are UNSAFE\n\n\
+             Respond with exactly one line in the format:\n\
+             SAFE: <brief reason>\n\
+             or\n\
+             UNSAFE: <brief reason>"
+        )
+    }
+
+    /// Classify a command using the provided LLM provider.
+    /// Returns NeedsConfirmation on any failure (safe fallback).
+    pub async fn classify(
+        &self,
+        command: &str,
+        context: &str,
+        provider: &std::sync::Arc<dyn crate::llm::LlmProvider>,
+        model: &str,
+    ) -> AutoClassification {
+        use crate::llm::CompletionParams;
+        use fastclaw_core::types::{ChatMessage, Role};
+
+        let prompt = Self::build_classification_prompt(command, context);
+        let messages = vec![ChatMessage {
+            role: Role::User,
+            content: Some(serde_json::Value::String(prompt)),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }];
+
+        let params = CompletionParams {
+            model,
+            messages: &messages,
+            max_tokens: Some(100),
+            temperature: 0.0,
+            tools: None,
+        };
+
+        match provider.chat_completion(&params).await {
+            Ok(response) => {
+                let text = response
+                    .choices
+                    .first()
+                    .and_then(|c| c.message.content.as_ref())
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                AutoClassification::parse_response(text)
+            }
+            Err(_) => AutoClassification {
+                decision: SafetyDecision::NeedsConfirmation,
+                reason: "classifier LLM call failed; falling back to confirmation".into(),
+            },
+        }
+    }
+}
+
+impl Default for AutoModeClassifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Basic shell tokenization (splits on whitespace, respects quotes).
 fn shell_tokenize(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
@@ -568,6 +711,41 @@ mod tests {
         assert_eq!(deserialized.scope, RuleScope::Session);
         assert!(deserialized.matcher.matches("git:force-push"));
         assert!(!deserialized.matcher.matches("git:pull"));
+    }
+
+    // ── Auto Mode Classifier Tests ────────────────────────────────────
+
+    #[test]
+    fn safety_classification_parse_safe() {
+        let result = AutoClassification::parse_response("SAFE: this is a read-only command");
+        assert_eq!(result.decision, SafetyDecision::Safe);
+        assert!(result.reason.contains("read-only"));
+    }
+
+    #[test]
+    fn safety_classification_parse_unsafe() {
+        let result = AutoClassification::parse_response("UNSAFE: deletes important files");
+        assert_eq!(result.decision, SafetyDecision::Unsafe);
+        assert!(result.reason.contains("deletes"));
+    }
+
+    #[test]
+    fn safety_classification_parse_unknown_defaults_confirm() {
+        let result = AutoClassification::parse_response("not sure about this");
+        assert_eq!(result.decision, SafetyDecision::NeedsConfirmation);
+    }
+
+    #[test]
+    fn safety_classification_parse_empty() {
+        let result = AutoClassification::parse_response("");
+        assert_eq!(result.decision, SafetyDecision::NeedsConfirmation);
+    }
+
+    #[test]
+    fn auto_classifier_prompt_contains_command() {
+        let prompt = AutoModeClassifier::build_classification_prompt("rm -rf /", "user wants cleanup");
+        assert!(prompt.contains("rm -rf /"));
+        assert!(prompt.contains("user wants cleanup"));
     }
 
     // ── Shell Rule Matching Tests ────────────────────────────────────

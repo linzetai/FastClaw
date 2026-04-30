@@ -755,7 +755,8 @@
             "5 个测试",
             "预计 ~300 行"
           ],
-          "status": "pending"
+          "status": "done",
+          "completion_notes": "实现 AutoModeClassifier + AutoClassification + SafetyDecision。parse_response 解析 SAFE/UNSAFE 格式。classify 通过 LlmProvider 做 side-query，失败时 fallback 到 NeedsConfirmation。build_classification_prompt 构建安全分类 prompt。5个测试全通过。"
         },
         {
           "id": "7B-04",
