@@ -19,6 +19,8 @@ pub mod shell_readonly;
 pub mod shell_security;
 #[allow(dead_code)]
 pub mod shell_snapshot;
+#[allow(dead_code)]
+pub mod coordinator;
 mod skill;
 mod todo;
 mod snip;
