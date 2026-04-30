@@ -194,6 +194,7 @@ pub(crate) mod mock {
                     compressed_by_llm: false,
                     tokens_saved_by_llm: 0,
                     pipeline_applied: false,
+                    session_memory_extracted: false,
                 }
             } else {
                 results.remove(0)

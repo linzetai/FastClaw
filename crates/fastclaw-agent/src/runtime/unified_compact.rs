@@ -4,6 +4,7 @@ use fastclaw_core::types::ChatMessage;
 
 use crate::llm::LlmProvider;
 use super::context_compressor;
+use super::session_memory;
 use super::tool_executor::{
     dedup_repeated_tool_calls, microcompact_tool_results, time_based_microcompact,
     DEFAULT_CACHE_WINDOW_DURATION,
@@ -17,6 +18,7 @@ pub(crate) struct UnifiedCompactResult {
     pub compressed_by_llm: bool,
     pub tokens_saved_by_llm: usize,
     pub pipeline_applied: bool,
+    pub session_memory_extracted: bool,
 }
 
 /// Run all pre-query compression steps in a single call.
@@ -85,6 +87,27 @@ pub(crate) async fn unified_pre_query_compact(
         *messages = compacted;
     }
 
+    // Step 5.5: Session memory extraction — before LLM compression, try to
+    // extract key facts/decisions/task state so that even aggressive compression
+    // preserves essential context.
+    let pre_compress_estimate = fastclaw_context::estimate_messages_tokens(messages);
+    let extraction = session_memory::extract_session_memory(
+        messages,
+        provider,
+        model,
+        context_window,
+        if last_estimated_tokens > 0 {
+            last_estimated_tokens
+        } else {
+            pre_compress_estimate
+        },
+    )
+    .await;
+    let session_memory_extracted = extraction.memory.is_some();
+    if let Some(ref mem) = extraction.memory {
+        session_memory::inject_session_memory(messages, mem);
+    }
+
     // Step 6: LLM-based compression (check circuit breaker first)
     let compress_result = if pipeline.should_attempt_autocompact() {
         let local_estimate = fastclaw_context::estimate_messages_tokens(messages);
@@ -145,5 +168,6 @@ pub(crate) async fn unified_pre_query_compact(
         compressed_by_llm: compress_result.compressed,
         tokens_saved_by_llm,
         pipeline_applied,
+        session_memory_extracted,
     }
 }

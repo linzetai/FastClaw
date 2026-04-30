@@ -503,7 +503,8 @@
             "5 个测试",
             "预计 ~300 行"
           ],
-          "status": "pending"
+          "status": "done",
+          "completion_notes": "新建 session_memory.rs (370行含测试)。LLM side-query 提取 key_facts/decisions/task_state/files，注入 system prompt 作为 <session_memory> block。在 unified_pre_query_compact Step 5.5 执行（LLM 压缩前），阈值40%触发。失败时静默 fallback。5 测试通过，clippy 0 warnings，788 tests pass。"
         },
         {
           "id": "6E-03",
