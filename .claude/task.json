@@ -570,7 +570,8 @@
             "8 个测试",
             "预计 ~350 行"
           ],
-          "status": "pending"
+          "status": "done",
+          "completion_notes": "实现 WorkflowTool 562行，含 WorkflowStore + WorkflowTool (Tool trait)。支持 JSON 工作流定义加载、start/status/advance/cancel/list 操作。8 个测试全部通过。"
         },
         {
           "id": "6F-02",

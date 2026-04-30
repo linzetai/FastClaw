@@ -22,6 +22,7 @@ mod todo;
 mod snip;
 mod tool_search;
 mod utility;
+pub mod workflow;
 
 #[cfg(feature = "browser")]
 pub mod browser;
@@ -70,6 +71,7 @@ pub use snip::SnipTool;
 pub use terminal::TerminalCaptureTool;
 pub use tool_search::ToolSearchTool;
 pub use utility::{CalculatorTool, CurrentTimeTool, SleepTool};
+pub use workflow::{WorkflowStore, WorkflowTool, WorkflowDefinition, WorkflowRun, WorkflowStatus};
 
 #[cfg(feature = "browser")]
 pub use browser::{register_browser_tool, BrowserTool};
