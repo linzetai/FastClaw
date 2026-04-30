@@ -148,7 +148,7 @@ impl Coordinator {
                             error: info.error,
                         }
                     }
-                    _ => WorkerResult {
+                    TaskStatus::Pending | TaskStatus::Running | TaskStatus::Cancelled => WorkerResult {
                         task_id: worker_id.clone(),
                         status: WorkerStatus::Skipped,
                         output: None,
@@ -172,9 +172,13 @@ impl Coordinator {
     /// Generate a summary of coordinator execution results.
     pub fn summarize_results(plan: &CoordinatorPlan, results: &[WorkerResult]) -> String {
         let total = results.len();
-        let succeeded = results.iter().filter(|r| r.status == WorkerStatus::Success).count();
-        let failed = results.iter().filter(|r| r.status == WorkerStatus::Failed).count();
-        let skipped = results.iter().filter(|r| r.status == WorkerStatus::Skipped).count();
+        let (succeeded, failed, skipped) = results.iter().fold((0, 0, 0), |(s, f, sk), r| {
+            match r.status {
+                WorkerStatus::Success => (s + 1, f, sk),
+                WorkerStatus::Failed => (s, f + 1, sk),
+                WorkerStatus::Skipped => (s, f, sk + 1),
+            }
+        });
 
         let mut summary = format!(
             "## Coordinator Summary: {}\n\nResults: {}/{} succeeded, {} failed, {} skipped\n\n",
