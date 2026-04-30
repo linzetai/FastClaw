@@ -247,6 +247,17 @@ impl SessionStore {
         .execute(&self.pool)
         .await?;
 
+        // collapse_state: persists CollapseStore JSON for session resume
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS collapse_state (
+                session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+                state_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -891,6 +902,51 @@ impl SessionStore {
         .await?;
         Ok(result.rows_affected())
     }
+
+    // ── Collapse state persistence ──────────────────────────────────
+
+    /// Save the collapse state JSON for a session (upsert).
+    ///
+    /// The caller is responsible for serializing the `CollapseStore` to JSON.
+    /// This decouples `fastclaw-session` from `fastclaw-context`.
+    pub async fn save_collapse_state(
+        &self,
+        session_id: &str,
+        state_json: &str,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO collapse_state (session_id, state_json, updated_at)
+             VALUES (?, ?, datetime('now'))
+             ON CONFLICT(session_id) DO UPDATE SET
+                state_json = excluded.state_json,
+                updated_at = excluded.updated_at",
+        )
+        .bind(session_id)
+        .bind(state_json)
+        .execute(&self.pool)
+        .await?;
+
+        tracing::debug!(session_id, "saved collapse state");
+        Ok(())
+    }
+
+    /// Load the collapse state JSON for a session.
+    ///
+    /// Returns `None` if no collapse state has been saved for this session.
+    /// The caller deserializes the JSON back into a `CollapseStore`.
+    pub async fn load_collapse_state(
+        &self,
+        session_id: &str,
+    ) -> anyhow::Result<Option<String>> {
+        let row = sqlx::query_scalar::<_, String>(
+            "SELECT state_json FROM collapse_state WHERE session_id = ?",
+        )
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
 }
 
 fn row_to_trace(
@@ -1324,5 +1380,55 @@ mod tests {
         let s2 = store.load_replacement_records("s2").await.unwrap();
         assert_eq!(s2.len(), 1);
         assert_eq!(s2[0].tool_use_id, "tu_b");
+    }
+
+    #[tokio::test]
+    async fn save_and_load_collapse_state() {
+        let store = SessionStore::open_memory().await.unwrap();
+        store.create_session("s1", "agent", None).await.unwrap();
+
+        let state = r#"{"spans":{"0":{"start_round":0,"end_round":2,"summary":"round 0-2 summary","summary_tokens":10,"original_tokens":500,"created_at":1700000000000}}}"#;
+        store.save_collapse_state("s1", state).await.unwrap();
+
+        let loaded = store.load_collapse_state("s1").await.unwrap();
+        assert_eq!(loaded.as_deref(), Some(state));
+    }
+
+    #[tokio::test]
+    async fn load_collapse_state_returns_none_when_empty() {
+        let store = SessionStore::open_memory().await.unwrap();
+        store.create_session("s1", "agent", None).await.unwrap();
+
+        let loaded = store.load_collapse_state("s1").await.unwrap();
+        assert!(loaded.is_none(), "should return None for unsaved state");
+    }
+
+    #[tokio::test]
+    async fn save_collapse_state_upserts() {
+        let store = SessionStore::open_memory().await.unwrap();
+        store.create_session("s1", "agent", None).await.unwrap();
+
+        store.save_collapse_state("s1", r#"{"spans":{}}"#).await.unwrap();
+        store.save_collapse_state("s1", r#"{"spans":{"0":{"start_round":0,"end_round":1,"summary":"v2","summary_tokens":5,"original_tokens":100,"created_at":0}}}"#).await.unwrap();
+
+        let loaded = store.load_collapse_state("s1").await.unwrap().unwrap();
+        assert!(loaded.contains("v2"), "should have the updated state");
+        assert!(!loaded.contains(r#""spans":{}"#), "should not have old empty state");
+    }
+
+    #[tokio::test]
+    async fn collapse_state_isolated_per_session() {
+        let store = SessionStore::open_memory().await.unwrap();
+        store.create_session("s1", "agent", None).await.unwrap();
+        store.create_session("s2", "agent", None).await.unwrap();
+
+        store.save_collapse_state("s1", r#"{"spans":{"0":{"start_round":0,"end_round":0,"summary":"s1 data","summary_tokens":5,"original_tokens":50,"created_at":0}}}"#).await.unwrap();
+
+        let s1 = store.load_collapse_state("s1").await.unwrap();
+        assert!(s1.is_some());
+        assert!(s1.unwrap().contains("s1 data"));
+
+        let s2 = store.load_collapse_state("s2").await.unwrap();
+        assert!(s2.is_none(), "s2 should have no state");
     }
 }

@@ -542,7 +542,8 @@
             "4 个测试",
             "预计 ~150 行"
           ],
-          "status": "pending"
+          "status": "done",
+          "completion_notes": "在 SessionStore 中新增 collapse_state 表和 save/load_collapse_state 方法。CollapseStore 已有 Serialize/Deserialize，通过 JSON blob 存储避免跨 crate 依赖。4 测试通过(save/load、空状态返回 None、upsert、session 隔离)，clippy 0 warnings，24 session tests pass。"
         }
       ]
     },
