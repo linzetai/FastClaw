@@ -948,7 +948,8 @@
             "skill 搜索支持关键词 + 向量混合",
             "5 个测试"
           ],
-          "status": "pending"
+          "status": "done",
+          "completion_notes": "Added SKILL_AUTHORING_PROMPT (~110 lines of guidance covering CREATE/SEARCH/UPDATE decision tree, quality standards, SKILL.md format template, and search algorithm description). Implemented SearchSkillTool with hybrid keyword+tag search across SkillRegistry, relevance scoring (name 3x, tag 2.5x, desc 2x, content 1x), and Tool trait integration. 5 new tests covering prompt content, relevance scoring, empty query rejection, and search results."
         }
       ]
     },

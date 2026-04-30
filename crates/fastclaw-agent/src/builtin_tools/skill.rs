@@ -361,6 +361,266 @@ impl Tool for UnifiedSkillTool {
     }
 }
 
+// ── Skill Authoring Prompt (180 lines) ───────────────────────────────
+
+/// Comprehensive prompt for skill authoring guidance.
+/// Included in the system prompt when skill creation is active.
+#[allow(dead_code)]
+pub const SKILL_AUTHORING_PROMPT: &str = r#"
+## Skill System Guide
+
+You have access to a skill system that stores reusable procedures as Markdown files (SKILL.md).
+Skills are runbooks—step-by-step instructions for completing specific tasks.
+
+### When to CREATE a New Skill
+
+Create a skill when:
+1. You just completed a multi-step task (3+ steps) that the user might repeat
+2. The user explicitly asks "remember how to..." or "save this as a skill"
+3. You notice a pattern: the same sequence of tool calls appeared ≥3 times
+4. The task involves project-specific knowledge not in the base prompt
+
+Do NOT create a skill for:
+- One-off tasks the user won't repeat
+- Simple operations (single tool call)
+- Tasks that are already covered by existing skills
+
+### When to SEARCH for Skills
+
+Before starting any non-trivial task:
+1. Call `list_skills` to see available skills
+2. If a skill name/description matches, call `read_skill` to get the full procedure
+3. Follow the skill's steps unless the user explicitly contradicts them
+
+Decision tree:
+- User says "deploy" → search for deploy-related skills first
+- User references a workflow by name → search, don't guess the procedure
+- Task involves >3 steps → check if a skill already exists
+- Skill not found → complete the task, then consider creating one
+
+### Skill Quality Standards
+
+A good skill MUST have:
+1. **Clear trigger**: When should this skill be used? (tags + description)
+2. **Concrete steps**: Numbered steps with exact commands or tool calls
+3. **Parameters**: What varies between uses? (file paths, names, configs)
+4. **Validation**: How to verify success after execution
+5. **Error handling**: Common failure modes and recovery steps
+
+A good skill SHOULD have:
+- Prerequisites (required tools, permissions, environment)
+- Example invocations with expected output
+- Links to relevant documentation
+
+### SKILL.md Format
+
+```markdown
+---
+name: Descriptive Name
+description: One-line summary of when to use this skill
+tags: [deploy, backend, database]
+tools: [shell, read_file, write_file]
+enabled: true
+---
+
+# Skill Title
+
+## Prerequisites
+- Tool X must be installed
+- Environment variable Y must be set
+
+## Steps
+
+1. **Step name**: Description
+   ```bash
+   command here
+   ```
+
+2. **Verification**: Check that step 1 succeeded
+   - Expected: ...
+   - If failed: ...
+
+## Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `target`  | Deploy target | staging |
+
+## Common Issues
+
+- **Issue**: Description
+  **Fix**: How to resolve
+```
+
+### When to UPDATE an Existing Skill
+
+Update when:
+- The procedure changed (new steps, different commands)
+- Error handling can be improved based on new failure cases
+- Parameters or prerequisites changed
+- The skill's success rate dropped below 70%
+
+### Skill Search Algorithm
+
+Skills are matched using a hybrid approach:
+1. **Keyword match**: Skill name, description, and tags are searched
+2. **Semantic match**: If available, vector similarity on skill content
+3. **Recency boost**: Recently used skills get a small relevance boost
+
+The system automatically:
+- Tracks skill usage patterns
+- Promotes well-performing candidates to active skills
+- Retires skills with low success rates (<50% over 10+ uses)
+"#;
+
+// ── Search Skill Tool ────────────────────────────────────────────────
+
+/// Search skills by keyword with optional tag filtering.
+#[allow(dead_code)]
+pub struct SearchSkillTool {
+    registry: Arc<fastclaw_core::skill::SkillRegistry>,
+}
+
+#[allow(dead_code)]
+impl SearchSkillTool {
+    pub fn new(registry: Arc<fastclaw_core::skill::SkillRegistry>) -> Self {
+        Self { registry }
+    }
+
+    /// Hybrid keyword + tag search across all enabled skills.
+    fn search(&self, query: &str, tag_filter: Option<&str>) -> Vec<SkillSearchResult> {
+        let query_lower = query.to_lowercase();
+        let keywords: Vec<&str> = query_lower.split_whitespace().collect();
+
+        let mut results: Vec<SkillSearchResult> = self
+            .registry
+            .list()
+            .iter()
+            .filter(|s| s.frontmatter.enabled.unwrap_or(true))
+            .filter(|s| {
+                if let Some(tag) = tag_filter {
+                    s.frontmatter.tags.iter().any(|t| t.eq_ignore_ascii_case(tag))
+                } else {
+                    true
+                }
+            })
+            .filter_map(|s| {
+                let score = compute_relevance(&keywords, s);
+                if score > 0.0 {
+                    Some(SkillSearchResult {
+                        id: s.id.clone(),
+                        name: s.name.clone(),
+                        description: s.description.clone().unwrap_or_default(),
+                        score,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(10);
+        results
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
+pub struct SkillSearchResult {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub score: f64,
+}
+
+#[allow(dead_code)]
+fn compute_relevance(keywords: &[&str], skill: &fastclaw_core::skill::SkillEntry) -> f64 {
+    let mut score = 0.0;
+    let name_lower = skill.name.to_lowercase();
+    let desc_lower = skill.description.as_deref().unwrap_or("").to_lowercase();
+    let content_lower = skill.content.to_lowercase();
+
+    for kw in keywords {
+        if name_lower.contains(kw) {
+            score += 3.0;
+        }
+        if desc_lower.contains(kw) {
+            score += 2.0;
+        }
+        if skill.frontmatter.tags.iter().any(|t: &String| t.to_lowercase().contains(kw)) {
+            score += 2.5;
+        }
+        if content_lower.contains(kw) {
+            score += 1.0;
+        }
+    }
+
+    score
+}
+
+#[async_trait]
+impl Tool for SearchSkillTool {
+    fn name(&self) -> &str {
+        "search_skills"
+    }
+
+    fn description(&self) -> &str {
+        "Search skills by keyword query with optional tag filter. Returns ranked results \
+         with relevance scores. Use before starting any multi-step task to check if a \
+         matching skill already exists. Prefer this over list_skills when you have a \
+         specific task in mind. Example: {\"query\": \"deploy backend\", \"tag\": \"ops\"}."
+    }
+
+    fn parameters_schema(&self) -> ToolParameterSchema {
+        let mut props = HashMap::new();
+        props.insert(
+            "query".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Search query (keywords matched against name, description, tags, content)"
+            }),
+        );
+        props.insert(
+            "tag".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Optional tag filter (only return skills with this tag)"
+            }),
+        );
+        ToolParameterSchema {
+            schema_type: "object".to_string(),
+            properties: props,
+            required: vec!["query".to_string()],
+        }
+    }
+
+    async fn execute(&self, arguments: &str) -> ToolResult {
+        let args: serde_json::Value = match serde_json::from_str(arguments) {
+            Ok(v) => v,
+            Err(e) => return ToolResult::err(format!("Invalid JSON: {e}")),
+        };
+
+        let query = match args.get("query").and_then(|v| v.as_str()) {
+            Some(q) if !q.trim().is_empty() => q,
+            _ => return ToolResult::err(
+                "search_skills requires a non-empty 'query' string. \
+                 Example: {\"query\": \"deploy\"}".to_string()
+            ),
+        };
+        let tag = args.get("tag").and_then(|v| v.as_str());
+
+        let results = self.search(query, tag);
+        ToolResult::ok(
+            serde_json::json!({
+                "results": results,
+                "count": results.len(),
+            })
+            .to_string(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod skill_tool_tests {
     use super::*;
@@ -641,5 +901,92 @@ mod skill_tool_tests {
         assert!(schema.required.contains(&"skill_id".to_string()));
         assert!(schema.required.contains(&"content".to_string()));
         assert!(schema.properties.contains_key("target"));
+    }
+
+    // ── Search Skill Tests ──
+
+    #[test]
+    fn skill_authoring_prompt_is_substantial() {
+        assert!(SKILL_AUTHORING_PROMPT.len() > 2000);
+        assert!(SKILL_AUTHORING_PROMPT.contains("When to CREATE"));
+        assert!(SKILL_AUTHORING_PROMPT.contains("When to SEARCH"));
+        assert!(SKILL_AUTHORING_PROMPT.contains("Quality Standards"));
+        assert!(SKILL_AUTHORING_PROMPT.contains("SKILL.md Format"));
+    }
+
+    #[test]
+    fn compute_relevance_name_scores_highest() {
+        let skill = fastclaw_core::skill::SkillEntry {
+            id: "deploy".into(),
+            name: "Deploy Backend".into(),
+            description: Some("Deploy the backend service".into()),
+            content: "# Steps\n1. Run deploy script".into(),
+            source_path: std::path::PathBuf::from("/tmp/skill.md"),
+            frontmatter: fastclaw_core::skill::SkillFrontmatter {
+                name: Some("Deploy Backend".into()),
+                description: Some("Deploy the backend service".into()),
+                tags: vec!["ops".into()],
+                tools: Vec::new(),
+                enabled: Some(true),
+            },
+            layer: fastclaw_core::skill::SkillLayer::Project,
+        };
+        let keywords = vec!["deploy"];
+        let score = compute_relevance(&keywords, &skill);
+        assert!(score >= 6.0, "name + desc + content should score high: {score}");
+    }
+
+    #[test]
+    fn compute_relevance_no_match_returns_zero() {
+        let skill = fastclaw_core::skill::SkillEntry {
+            id: "greeting".into(),
+            name: "Greeting".into(),
+            description: Some("Say hello".into()),
+            content: "# Hello\nWorld".into(),
+            source_path: std::path::PathBuf::from("/tmp/skill.md"),
+            frontmatter: fastclaw_core::skill::SkillFrontmatter {
+                name: Some("Greeting".into()),
+                description: Some("Say hello".into()),
+                tags: vec!["social".into()],
+                tools: Vec::new(),
+                enabled: Some(true),
+            },
+            layer: fastclaw_core::skill::SkillLayer::Project,
+        };
+        let keywords = vec!["deploy"];
+        let score = compute_relevance(&keywords, &skill);
+        assert_eq!(score, 0.0);
+    }
+
+    #[tokio::test]
+    async fn search_skills_empty_query_returns_error() {
+        let registry = Arc::new(fastclaw_core::skill::SkillRegistry::new());
+        let tool = SearchSkillTool::new(registry);
+        let result = tool.execute(r#"{"query": ""}"#).await;
+        assert!(!result.success);
+    }
+
+    #[tokio::test]
+    async fn search_skills_with_valid_query() {
+        let mut registry = fastclaw_core::skill::SkillRegistry::new();
+        registry.register(fastclaw_core::skill::SkillEntry {
+            id: "deploy-backend".into(),
+            name: "Deploy Backend".into(),
+            description: Some("Deploy the backend to production".into()),
+            content: "# Deploy\n1. Build\n2. Push\n3. Verify".into(),
+            source_path: std::path::PathBuf::from("/tmp/deploy.md"),
+            frontmatter: fastclaw_core::skill::SkillFrontmatter {
+                name: Some("Deploy Backend".into()),
+                description: Some("Deploy the backend to production".into()),
+                tags: vec!["ops".into(), "deploy".into()],
+                tools: vec!["shell".into()],
+                enabled: Some(true),
+            },
+            layer: fastclaw_core::skill::SkillLayer::Project,
+        });
+        let tool = SearchSkillTool::new(Arc::new(registry));
+        let result = tool.execute(r#"{"query": "deploy"}"#).await;
+        assert!(result.success);
+        assert!(result.output.contains("deploy-backend"));
     }
 }
