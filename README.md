@@ -367,6 +367,78 @@ kubectl apply -f deploy/kubernetes/deployment.yaml
 
 ---
 
+## 桌面应用（FastClaw Desktop）
+
+FastClaw 提供基于 **Tauri v2 + React 19** 的原生桌面应用，内嵌 Gateway 引擎，开箱即用。
+
+### 特性
+
+- **内嵌 Gateway** — 启动即运行，无需单独启动服务端，零配置开始对话
+- **原生 IM 界面** — React 19 + TailwindCSS 4 构建的现代聊天界面，支持 Markdown 渲染和代码高亮
+- **流式对话** — 通过 Tauri IPC Channel 直接与内嵌 Gateway 通信，无 WebSocket 开销
+- **系统托盘** — 最小化到托盘，左键点击显示，关闭窗口仅隐藏
+- **全局快捷键** — `Ctrl+Shift+Space` 随时呼出/隐藏窗口
+- **系统通知** — 定时任务完成/失败时弹出原生通知，托盘显示未读数
+- **多 Agent 管理** — 创建、编辑、删除 Agent，配置模型和工具
+- **会话管理** — 多会话切换、历史消息、标题自动生成
+- **MCP 集成** — 通过 tauri-plugin-mcp-bridge 连接外部 MCP Server
+- **定时任务** — 在桌面端创建和管理 Cron 定时任务
+- **自动更新** — 内置 OTA 更新检查（tauri-plugin-updater）
+- **开机自启** — 支持 macOS / Windows / Linux 开机自启动
+- **数据导入/导出** — 支持会话数据的 ZIP 打包导入导出
+- **跨平台** — 支持 Linux（deb / AppImage）、Windows（NSIS）、macOS
+
+### 构建
+
+```bash
+cd crates/fastclaw-app
+
+# 安装前端依赖
+pnpm install
+
+# 开发模式（前端 HMR + Rust 热编译）
+pnpm tauri dev
+
+# 生产构建
+pnpm tauri build
+```
+
+构建产物：
+- Linux: `target/release/bundle/deb/*.deb` / `target/release/bundle/appimage/*.AppImage`
+- Windows: `target/release/bundle/nsis/*.exe`
+- macOS: `target/release/bundle/macos/*.app`
+
+### 架构
+
+```
+┌────────────────────────────────────────────┐
+│             Tauri v2 Desktop App           │
+│                                            │
+│  ┌──────────────────────────────────────┐  │
+│  │   React 19 + TailwindCSS Frontend   │  │
+│  │  ┌──────────┐ ┌────────┐ ┌───────┐  │  │
+│  │  │ Chat UI  │ │Agents  │ │Config │  │  │
+│  │  │(Stream)  │ │Manager │ │Panel  │  │  │
+│  │  └────┬─────┘ └────┬───┘ └───┬───┘  │  │
+│  │       └─────────────┼────────┘       │  │
+│  │             Tauri IPC                │  │
+│  └──────────────┬───────────────────────┘  │
+│                 ▼                           │
+│  ┌──────────────────────────────────────┐  │
+│  │      Embedded FastClaw Gateway       │  │
+│  │  (In-process, no external server)    │  │
+│  └──────────────────────────────────────┘  │
+│                                            │
+│  Plugins: Tray · GlobalShortcut ·          │
+│    Notification · Autostart · Updater ·    │
+│    MCP Bridge · Dialog · FS · Shell        │
+└────────────────────────────────────────────┘
+```
+
+详细桌面端使用说明参见 [docs/MANUAL.md](docs/MANUAL.md#桌面应用fastclaw-desktop)。
+
+---
+
 ## 开发
 
 ```bash

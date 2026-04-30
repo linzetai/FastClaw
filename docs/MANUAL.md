@@ -27,7 +27,8 @@
 - [19. 可观测性](#19-可观测性)
 - [20. 备份与恢复](#20-备份与恢复)
 - [21. 部署指南](#21-部署指南)
-- [22. 故障排查](#22-故障排查)
+- [22. 桌面应用（FastClaw Desktop）](#22-桌面应用fastclaw-desktop)
+- [23. 故障排查](#23-故障排查)
 
 ---
 
@@ -1503,9 +1504,261 @@ kubectl apply -f deploy/kubernetes/deployment.yaml
 
 ---
 
-## 22. 故障排查
+## 22. 桌面应用（FastClaw Desktop）
 
-### 22.1 环境诊断
+FastClaw 提供基于 Tauri v2 + React 19 的原生桌面应用。桌面端内嵌完整的 Gateway 引擎，启动即可使用，无需单独部署服务端。
+
+### 22.1 技术栈
+
+| 层 | 技术 |
+|----|------|
+| 原生外壳 | Tauri v2（Rust） |
+| 前端框架 | React 19 + TypeScript 6 |
+| 样式 | TailwindCSS 4 |
+| 构建工具 | Vite 8 |
+| 状态管理 | Zustand 5 |
+| Markdown | react-markdown + rehype-highlight + remark-gfm |
+| 虚拟列表 | react-virtuoso |
+| 图标 | lucide-react |
+| 测试 | Vitest + Testing Library |
+
+### 22.2 功能概览
+
+**核心对话**
+- 多 Agent 流式聊天，Tauri IPC Channel 直传（非 WebSocket），延迟更低
+- Markdown 渲染、代码高亮、GFM 表格
+- 工具调用实时展示（tool_call → tool_result → 流式输出）
+- 支持取消正在进行的聊天流
+- 对话中可提交用户确认/回答（`submit_tool_answer`）
+
+**会话管理**
+- 多会话列表，创建 / 切换 / 删除
+- 标题自动生成（smart title）
+- 为每个会话设置独立的工作目录（`set_session_work_dir`）
+- 历史消息浏览
+
+**Agent 管理**
+- 列出所有 Agent 及其工具
+- 创建 / 编辑 / 删除 Agent
+- 上传 Agent 头像
+- 编辑 Agent 工具列表
+- 读取身份文件（SOUL.md / USER.md / AGENTS.md）
+
+**配置与模型**
+- 在界面中查看和修改配置（credentials、logging、memory 等）
+- 配置项安全读取：API Key 自动脱敏显示（`sk-12...cdef`）
+- 写入保护：`gateway` 段为只读，不可通过 UI 修改
+- 测试模型连接（`test_model_connection`）
+- 列出所有可用模型
+
+**渠道管理**
+- 列出渠道状态
+- 绑定 / 解绑 Agent 与渠道
+- 重载渠道连接
+
+**MCP 管理**
+- 查看 MCP Server 连接状态
+- 添加 / 删除 MCP Server
+- 重载 MCP Server 列表
+- 通过 `tauri-plugin-mcp-bridge` 桥接外部 MCP
+
+**定时任务**
+- 创建 / 编辑 / 删除定时任务
+- 查看任务执行历史
+
+**通知中心**
+- 通知列表、详情
+- 标记已读 / 全部已读
+- 删除通知 / 清除已读
+- 未读计数（托盘 tooltip 显示）
+- 系统原生通知弹窗
+
+**数据管理**
+- 导入数据（ZIP 格式）
+- 导出数据（ZIP 格式，包含会话、配置等）
+
+**Skill 管理**
+- 列出可用 Skills
+- 刷新 Skill 列表
+- 上传自定义 Skill
+
+### 22.3 系统集成
+
+**系统托盘**
+
+桌面端始终保留系统托盘图标：
+- 左键单击 → 显示/聚焦主窗口
+- 右键菜单 → 「显示窗口」/「退出」
+- 未读通知时 tooltip 显示未读计数，如 `FastClaw (3 条未读)`
+
+**全局快捷键**
+
+- `Ctrl+Shift+Space` — 切换窗口显示/隐藏（全局可用，即使应用不在前台）
+
+**窗口行为**
+
+- 关闭按钮不退出应用，仅隐藏到托盘
+- 自定义标题栏（`decorations: false`），提供原生拖拽区域
+- 最小窗口尺寸 640×480
+
+**开机自启**
+
+使用 `tauri-plugin-autostart`，支持：
+- macOS: LaunchAgent
+- Windows / Linux: 对应平台的自启动机制
+
+**自动更新**
+
+使用 `tauri-plugin-updater`：
+- 启动时自动检查 GitHub Releases 的 `latest.json`
+- Windows 使用 passive 安装模式（静默后台更新）
+- 更新签名验证（Ed25519 公钥）
+
+### 22.4 内嵌 Gateway
+
+桌面端启动时自动在进程内启动一个完整的 FastClaw Gateway：
+
+1. 加载配置（debug 模式使用 `~/.fastclaw-dev/`，release 模式使用 `~/.fastclaw/`）
+2. 绑定配置的端口；如果端口已被占用，自动回退到随机端口
+3. 等待 Gateway 健康检查通过（最多 10 秒）
+4. 通知前端 Gateway 就绪（`gateway://started` 事件）
+5. 前端通过 Tauri IPC 直接调用 Rust Commands，无需经过 HTTP
+
+如果 Gateway 启动失败，弹出系统通知告知用户。
+
+### 22.5 Tauri IPC Commands
+
+桌面端通过 Tauri IPC 暴露以下 Rust Commands 给前端调用：
+
+| 模块 | 命令 | 说明 |
+|------|------|------|
+| **Chat** | `chat_stream` | 流式聊天（通过 Tauri Channel 传输 delta） |
+| | `cancel_chat_stream` | 取消正在进行的聊天 |
+| | `submit_tool_answer` | 提交用户回答（confirm / ask_question） |
+| **Config** | `get_config` | 获取配置（脱敏后） |
+| | `set_config` | 修改配置 |
+| | `list_models` | 列出模型 |
+| | `test_model_connection` | 测试模型连接 |
+| | `get_gateway_info` | 获取内嵌 Gateway 信息 |
+| | `health_check` | 健康检查 |
+| **Agent** | `list_agents` | 列出 Agent |
+| | `get_agent` | 获取 Agent 详情 |
+| | `create_agent` | 创建 Agent |
+| | `update_agent` | 更新 Agent |
+| | `delete_agent` | 删除 Agent |
+| | `list_tools` / `list_agent_tools` | 列出工具 |
+| | `update_agent_tools` | 更新 Agent 工具列表 |
+| | `upload_agent_avatar` | 上传头像 |
+| | `read_identity_files` | 读取身份文件 |
+| **Session** | `list_sessions` | 列出会话 |
+| | `create_session` | 创建会话 |
+| | `get_session` / `get_session_messages` | 获取会话和消息 |
+| | `update_session_title` | 更新标题 |
+| | `delete_session` | 删除会话 |
+| | `set_session_work_dir` | 设置工作目录 |
+| **Channel** | `list_channels` | 列出渠道 |
+| | `bind_agent_channel` / `unbind_agent_channel` | 绑定/解绑 |
+| | `reload_channel` | 重载渠道 |
+| **MCP** | `get_mcp_status` | MCP 状态 |
+| | `add_mcp_server` / `remove_mcp_server` | 添加/删除 |
+| | `reload_mcp_servers` | 重载 |
+| **Cron** | `cron_list_jobs` / `cron_get_job` | 列出/获取任务 |
+| | `cron_upsert_job` / `cron_delete_job` | 创建/删除任务 |
+| | `cron_list_runs` | 执行历史 |
+| **Notification** | `notification_list` / `notification_get` | 列出/获取通知 |
+| | `notification_mark_read` / `notification_mark_all_read` | 标记已读 |
+| | `notification_unread_count` | 未读计数 |
+| | `notification_delete` / `notification_clear_read` | 删除/清除 |
+| **Skill** | `list_skills` / `refresh_skills` / `upload_skill` | 技能管理 |
+| **Migration** | `import_data` / `export_data` | 数据导入导出 |
+
+### 22.6 前端项目结构
+
+```
+crates/fastclaw-app/
+├── src/                        # React 前端
+│   ├── App.tsx                 # 根组件
+│   ├── main.tsx                # 入口
+│   ├── index.css               # TailwindCSS 样式
+│   ├── components/
+│   │   ├── layout/             # 应用布局（侧边栏 + 主区域）
+│   │   ├── message-stream/     # 聊天消息流（流式渲染）
+│   │   ├── agent-list/         # Agent 列表
+│   │   ├── agent-detail/       # Agent 详情/编辑
+│   │   ├── settings/           # 设置面板
+│   │   ├── notification/       # 通知中心
+│   │   └── onboarding/         # 首次使用引导
+│   ├── lib/                    # 状态管理（Zustand stores）
+│   └── hooks/                  # React hooks
+├── src-tauri/                  # Tauri Rust 后端
+│   ├── src/
+│   │   ├── lib.rs              # 应用入口、托盘、快捷键
+│   │   ├── embedded.rs         # 内嵌 Gateway 启动/管理
+│   │   └── commands/           # 12 个 IPC Command 模块
+│   ├── tauri.conf.json         # Tauri 配置
+│   └── Cargo.toml
+├── package.json
+├── vite.config.ts
+└── tsconfig.json
+```
+
+### 22.7 安全配置（CSP）
+
+桌面端配置了严格的 Content Security Policy：
+
+```
+default-src 'self' data: blob:;
+connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:* https:;
+img-src 'self' data: blob: https: http://asset.localhost asset:;
+style-src 'self' 'unsafe-inline';
+font-src 'self' data:;
+media-src 'self' data: blob:;
+object-src 'none';
+frame-ancestors 'none';
+base-uri 'self'
+```
+
+仅允许连接本地 Gateway（`127.0.0.1` / `localhost`）和 HTTPS 外部资源。
+
+### 22.8 开发与构建
+
+**环境准备**
+
+```bash
+# 安装 Tauri CLI
+pnpm add -D @tauri-apps/cli
+
+# 安装前端依赖
+cd crates/fastclaw-app
+pnpm install
+```
+
+**开发模式**
+
+```bash
+pnpm tauri dev
+```
+
+前端使用 Vite HMR（`localhost:1420`），Rust 后端自动热编译。Vite 开发服务器自动代理 `/api` 请求到 Gateway 端口。
+
+**生产构建**
+
+```bash
+pnpm tauri build
+```
+
+构建产物包含：
+- **Linux**: `.deb`（依赖 libwebkit2gtk-4.1-0, libgtk-3-0, libayatana-appindicator3-1）和 `.AppImage`
+- **Windows**: NSIS 安装程序（支持简体中文和英文语言选择）
+- **macOS**: `.app` 应用包
+
+更新器会同时生成 `latest.json` 和签名文件，用于 OTA 更新。
+
+---
+
+## 23. 故障排查
+
+### 23.1 环境诊断
 
 ```bash
 fastclaw doctor
@@ -1513,7 +1766,7 @@ fastclaw doctor
 
 逐项检查版本、配置、凭证、Gateway 状态等。支持 `--json` 输出方便自动化。
 
-### 22.2 常见问题
+### 23.2 常见问题
 
 **Gateway 启动失败**
 
@@ -1557,7 +1810,7 @@ fastclaw config fix
 fastclaw setup
 ```
 
-### 22.3 日志调试
+### 23.3 日志调试
 
 ```bash
 # 开启详细日志
@@ -1570,7 +1823,7 @@ RUST_LOG=fastclaw_agent=trace fastclaw serve
 tail -f ~/.fastclaw/logs/gateway-daemon.log
 ```
 
-### 22.4 健康检查
+### 23.4 健康检查
 
 ```bash
 # CLI 健康检查
