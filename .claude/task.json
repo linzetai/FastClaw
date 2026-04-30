@@ -484,7 +484,8 @@
             "3 个测试",
             "预计 ~150 行"
           ],
-          "status": "pending"
+          "status": "done",
+          "completion_notes": "实现 time_based_microcompact 函数(~100行)，通过 iteration_msg_boundaries 跟踪迭代时间，在 unified_pre_query_compact 中作为 Step 0 执行。3 测试通过，clippy 0 warnings，779+4 tests pass。"
         },
         {
           "id": "6E-02",

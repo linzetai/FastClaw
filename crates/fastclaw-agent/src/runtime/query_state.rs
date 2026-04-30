@@ -57,6 +57,11 @@ pub(crate) struct QueryLoopState {
 
     // ── Warning deduplication ────────────────────────────────────────
     pub compact_warning_sent: bool,
+
+    // ── Time-based microcompact tracking (6E-01) ─────────────────────
+    /// Message count at the start of each iteration, paired with wall-clock time.
+    /// Used to determine which tool results are outside the cache window.
+    pub iteration_msg_boundaries: Vec<(usize, std::time::Instant)>,
 }
 
 /// The outcome of one loop iteration: continue or terminate.
@@ -126,6 +131,8 @@ impl QueryLoopState {
             last_estimated_tokens: 0,
 
             compact_warning_sent: false,
+
+            iteration_msg_boundaries: Vec::new(),
         }
     }
 

@@ -477,6 +477,7 @@ impl AgentRuntime {
             }
 
             state.begin_iteration();
+            state.iteration_msg_boundaries.push((messages.len(), std::time::Instant::now()));
 
             tracing::info!(
                 agent_id = %config.agent_id,
@@ -857,6 +858,7 @@ impl AgentRuntime {
             }
 
             state.begin_iteration();
+            state.iteration_msg_boundaries.push((messages.len(), std::time::Instant::now()));
 
             // ── Unified context compaction (via QueryDeps) ─────────────────
             let compact_result = deps.pre_query_compact(
@@ -865,6 +867,7 @@ impl AgentRuntime {
                 max_tokens,
                 &model,
                 state.last_estimated_tokens,
+                &state.iteration_msg_boundaries,
             ).await;
             state.last_estimated_tokens = compact_result.estimated_tokens;
             let estimated_tokens = compact_result.estimated_tokens;

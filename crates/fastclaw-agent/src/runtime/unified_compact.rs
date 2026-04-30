@@ -4,7 +4,10 @@ use fastclaw_core::types::ChatMessage;
 
 use crate::llm::LlmProvider;
 use super::context_compressor;
-use super::tool_executor::{dedup_repeated_tool_calls, microcompact_tool_results};
+use super::tool_executor::{
+    dedup_repeated_tool_calls, microcompact_tool_results, time_based_microcompact,
+    DEFAULT_CACHE_WINDOW_DURATION,
+};
 
 /// Result of the unified pre-query compression pipeline.
 #[derive(Debug, Clone)]
@@ -26,6 +29,7 @@ pub(crate) struct UnifiedCompactResult {
 ///   5. ContextPipeline::pre_query_compact (snip + importance)
 ///   6. LLM-based compression (with circuit breaker)
 ///   7. Hard fit to context window
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn unified_pre_query_compact(
     messages: &mut Vec<ChatMessage>,
     pipeline: &mut fastclaw_context::ContextPipeline,
@@ -34,7 +38,20 @@ pub(crate) async fn unified_pre_query_compact(
     provider: &Arc<dyn LlmProvider>,
     model: &str,
     last_estimated_tokens: usize,
+    iteration_boundaries: &[(usize, std::time::Instant)],
 ) -> UnifiedCompactResult {
+    // Step 0: Time-based microcompact — collapse tool results outside the prompt
+    // cache window (default 5 min). These won't get cache hits so keeping them
+    // verbatim wastes context budget.
+    let time_compacted = time_based_microcompact(
+        messages,
+        iteration_boundaries,
+        DEFAULT_CACHE_WINDOW_DURATION,
+    );
+    if time_compacted > 0 {
+        tracing::debug!(time_compacted, "time-based microcompact collapsed stale tool results");
+    }
+
     // Step 1: Microcompact old tool results (keep last 3 fully, next 3 faded)
     microcompact_tool_results(messages, 3);
 

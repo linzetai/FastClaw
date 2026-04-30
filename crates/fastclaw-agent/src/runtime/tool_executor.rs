@@ -366,6 +366,102 @@ pub(crate) fn microcompact_tool_results(
     }
 }
 
+/// Default cache window duration for time-based microcompact (5 minutes).
+pub(crate) const DEFAULT_CACHE_WINDOW_DURATION: std::time::Duration =
+    std::time::Duration::from_secs(5 * 60);
+
+const TIME_COMPACTED_MARKER: &str = "[time-compacted]";
+
+/// Time-driven microcompact: compresses tool results that are older than
+/// `cache_window_duration` from the most recent assistant turn boundary.
+///
+/// This complements the count-based `microcompact_tool_results` by using
+/// wall-clock time to determine staleness. Tool results outside the cache
+/// window won't benefit from LLM prompt caching, so keeping them verbatim
+/// wastes context. They are collapsed to a one-liner summary.
+///
+/// # Arguments
+/// - `messages`: mutable slice of chat messages
+/// - `iteration_boundaries`: `(msg_index, wall_time)` pairs marking when each
+///   iteration started
+/// - `cache_window`: how far back from `now` to consider results "fresh"
+///
+/// # Returns
+/// Number of tool results that were compacted.
+pub(crate) fn time_based_microcompact(
+    messages: &mut [fastclaw_core::types::ChatMessage],
+    iteration_boundaries: &[(usize, std::time::Instant)],
+    cache_window: std::time::Duration,
+) -> usize {
+    use fastclaw_core::types::Role;
+
+    if iteration_boundaries.is_empty() {
+        return 0;
+    }
+
+    let now = std::time::Instant::now();
+    let cutoff = now.checked_sub(cache_window).unwrap_or(now);
+
+    // Find the earliest message index that is within the cache window.
+    // All tool results before this index are candidates for compaction.
+    let fresh_boundary_idx = iteration_boundaries
+        .iter()
+        .rev()
+        .find(|(_, time)| *time >= cutoff)
+        .map(|(idx, _)| *idx)
+        .unwrap_or(messages.len());
+
+    if fresh_boundary_idx == 0 {
+        return 0;
+    }
+
+    let mut compacted = 0;
+
+    for i in 0..fresh_boundary_idx.min(messages.len()) {
+        let msg = &messages[i];
+        if !matches!(msg.role, Role::Tool) {
+            continue;
+        }
+
+        let is_compactable = msg
+            .name
+            .as_deref()
+            .map(|n| COMPACTABLE_TOOLS.iter().any(|t| n.starts_with(t)))
+            .unwrap_or(false);
+        if !is_compactable {
+            continue;
+        }
+
+        let text = match msg.text_content() {
+            Some(t) => t,
+            None => continue,
+        };
+
+        // Skip already-compacted results
+        if text.starts_with(ONELINER_MARKER)
+            || text.starts_with(FADED_MARKER)
+            || text.starts_with(TIME_COMPACTED_MARKER)
+        {
+            continue;
+        }
+
+        // Preserve error results
+        if is_error_tool_result(&text) {
+            continue;
+        }
+
+        let tool_name = messages[i].name.clone().unwrap_or_default();
+        let summary = format!(
+            "{TIME_COMPACTED_MARKER} {}",
+            one_liner_summary(&tool_name, &text)
+        );
+        messages[i].content = Some(serde_json::Value::String(summary));
+        compacted += 1;
+    }
+
+    compacted
+}
+
 /// Deduplicate repeated tool calls on the same target.
 ///
 /// When the same file is `read_file`-d multiple times, or the same command is
@@ -1011,5 +1107,111 @@ mod tool_result_truncation_tests {
             "oneliner should reuse semantic header, got: {summary}"
         );
         assert!(!summary.contains("actual file content"), "should not include body");
+    }
+
+    #[test]
+    fn time_microcompact_collapses_stale_tool_results() {
+        use super::{time_based_microcompact, TIME_COMPACTED_MARKER};
+        use fastclaw_core::types::{ChatMessage, Role};
+        use std::time::{Duration, Instant};
+
+        let old_time = Instant::now() - Duration::from_secs(600);
+        let boundaries = vec![(0usize, old_time)];
+
+        let mut msgs = vec![
+            ChatMessage {
+                role: Role::Tool,
+                content: Some(serde_json::json!("file content here...")),
+                name: Some("read_file".into()),
+                tool_calls: None,
+                tool_call_id: Some("tc-1".into()),
+            },
+            ChatMessage {
+                role: Role::User,
+                content: Some(serde_json::json!("user msg")),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            },
+        ];
+
+        let count = time_based_microcompact(&mut msgs, &boundaries, Duration::from_secs(300));
+        assert_eq!(count, 1, "should compact 1 stale tool result");
+        let text = msgs[0].text_content().unwrap();
+        assert!(
+            text.starts_with(TIME_COMPACTED_MARKER),
+            "expected time-compacted marker, got: {text}"
+        );
+        assert_eq!(
+            msgs[1].text_content().unwrap(),
+            "user msg",
+            "user message should be untouched"
+        );
+    }
+
+    #[test]
+    fn time_microcompact_preserves_fresh_and_errors() {
+        use super::{time_based_microcompact, TIME_COMPACTED_MARKER};
+        use fastclaw_core::types::{ChatMessage, Role};
+        use std::time::{Duration, Instant};
+
+        let old_time = Instant::now() - Duration::from_secs(600);
+        let fresh_time = Instant::now() - Duration::from_secs(60);
+        let boundaries = vec![(0usize, old_time), (2usize, fresh_time)];
+
+        let mut msgs = vec![
+            ChatMessage {
+                role: Role::Tool,
+                content: Some(serde_json::json!("stale output")),
+                name: Some("read_file".into()),
+                tool_calls: None,
+                tool_call_id: Some("tc-1".into()),
+            },
+            ChatMessage {
+                role: Role::Tool,
+                content: Some(serde_json::json!("Error: file not found")),
+                name: Some("read_file".into()),
+                tool_calls: None,
+                tool_call_id: Some("tc-2".into()),
+            },
+            ChatMessage {
+                role: Role::Tool,
+                content: Some(serde_json::json!("fresh output")),
+                name: Some("read_file".into()),
+                tool_calls: None,
+                tool_call_id: Some("tc-3".into()),
+            },
+        ];
+
+        let count = time_based_microcompact(&mut msgs, &boundaries, Duration::from_secs(300));
+        assert_eq!(count, 1, "only 1 stale non-error should be compacted");
+
+        let t0 = msgs[0].text_content().unwrap();
+        assert!(t0.starts_with(TIME_COMPACTED_MARKER), "stale result compacted: {t0}");
+
+        let t1 = msgs[1].text_content().unwrap();
+        assert!(t1.contains("Error"), "error result preserved: {t1}");
+
+        let t2 = msgs[2].text_content().unwrap();
+        assert_eq!(t2, "fresh output", "fresh result preserved");
+    }
+
+    #[test]
+    fn time_microcompact_noop_on_empty_boundaries() {
+        use super::time_based_microcompact;
+        use fastclaw_core::types::{ChatMessage, Role};
+        use std::time::Duration;
+
+        let mut msgs = vec![ChatMessage {
+            role: Role::Tool,
+            content: Some(serde_json::json!("some output")),
+            name: Some("read_file".into()),
+            tool_calls: None,
+            tool_call_id: Some("tc-1".into()),
+        }];
+
+        let count = time_based_microcompact(&mut msgs, &[], Duration::from_secs(300));
+        assert_eq!(count, 0, "no compaction with empty boundaries");
+        assert_eq!(msgs[0].text_content().unwrap(), "some output");
     }
 }
