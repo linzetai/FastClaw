@@ -40,6 +40,8 @@ use base64::Engine as _;
 #[allow(dead_code)]
 pub mod api_errors;
 #[allow(dead_code)]
+pub mod cache_break_detection;
+#[allow(dead_code)]
 pub mod retry;
 mod accumulator;
 pub mod query_engine;
