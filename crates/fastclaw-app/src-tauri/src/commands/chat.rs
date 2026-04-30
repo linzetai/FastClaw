@@ -430,6 +430,12 @@ pub async fn chat_stream(
                     "data": {"from": format!("{from}"), "to": format!("{to}")}
                 }));
             }
+            StreamEvent::Suggestions { items } => {
+                let _ = channel.send(json!({
+                    "type": "chat.suggestions",
+                    "data": {"items": items}
+                }));
+            }
         }
     }
 

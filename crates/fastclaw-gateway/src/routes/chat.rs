@@ -583,6 +583,10 @@ async fn handle_stream(
                     });
                     yield Ok(format!("event: mode_change\ndata: {ev}\n\n"));
                 }
+                StreamEvent::Suggestions { items } => {
+                    let ev = json!({ "items": items });
+                    yield Ok(format!("event: suggestions\ndata: {ev}\n\n"));
+                }
             }
         }
     };

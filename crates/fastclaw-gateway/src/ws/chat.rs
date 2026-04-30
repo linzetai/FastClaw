@@ -892,5 +892,11 @@ pub fn event_to_response(
             })),
             error: None,
         },
+        StreamEvent::Suggestions { items } => WsResponse {
+            id: req_id.clone(),
+            msg_type: "chat.suggestions".into(),
+            data: Some(json!({ "items": items })),
+            error: None,
+        },
     }
 }
