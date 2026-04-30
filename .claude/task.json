@@ -631,7 +631,8 @@
             "HookResult 支持阻塞、阻止继续、修改输出",
             "cargo check -p fastclaw-agent 编译通过"
           ],
-          "status": "pending"
+          "status": "done",
+          "completion_notes": "实现 hook_events.rs ~170行。HookEvent enum 7种事件(PreToolUse/PostToolUse/Stop/SubagentStop/TaskCompleted/PermissionRequest/Notification)。HookResult 含 blocking_error/prevent_continuation/modified_output。Duration serde序列化为毫秒。5个测试全通过。"
         },
         {
           "id": "7A-02",

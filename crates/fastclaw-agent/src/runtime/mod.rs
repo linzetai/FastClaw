@@ -55,6 +55,8 @@ mod prompt_builder;
 pub(crate) mod query_deps;
 #[allow(dead_code)]
 pub mod file_state_cache;
+#[allow(dead_code)]
+pub mod hook_events;
 mod query_state;
 mod session_memory;
 #[allow(dead_code)]
