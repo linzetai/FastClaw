@@ -838,7 +838,8 @@
             "5 个测试",
             "预计 ~300 行"
           ],
-          "status": "pending"
+          "status": "done",
+          "completion_notes": "实现 memory_selection.rs ~180行。两阶段 pipeline: vector recall (CANDIDATE_LIMIT=20) → LLM rerank (SELECT_LIMIT=5)。build_rerank_prompt 构造精排 prompt，parse_rerank_response 解析 LLM 返回的序号。LLM 失败 fallback 到 vector top-5。recalled_to_candidates 转换适配 MemoryManager::recall。5 个测试全通过。"
         }
       ]
     },
