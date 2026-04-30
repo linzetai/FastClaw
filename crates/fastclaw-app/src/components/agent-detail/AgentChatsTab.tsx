@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X, Search, FolderOpen } from "lucide-react";
 import { useAgentStore, type Chat } from "../../lib/agent-store";
+import { useActiveAgentChats } from "../../lib/stores/selectors";
 import { ListContainer } from "./common";
 
 function ChatRow({ chat, isActive, onClick, onClose, isLast }: {
@@ -56,11 +57,10 @@ function ChatRow({ chat, isActive, onClick, onClose, isLast }: {
 
 export function ChatsTab() {
   const activeAgentId = useAgentStore((s) => s.activeAgentId);
-  const agentChats = useAgentStore((s) => s.agentChats);
+  const ac = useActiveAgentChats();
   const setActiveChat = useAgentStore((s) => s.setActiveChat);
   const reopenChat = useAgentStore((s) => s.reopenChat);
   const closeChat = useAgentStore((s) => s.closeChat);
-  const ac = agentChats[activeAgentId];
 
   const [chatQuery, setChatQuery] = useState("");
 

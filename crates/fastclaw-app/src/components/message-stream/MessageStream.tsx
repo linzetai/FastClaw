@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useAgentStore } from "../../lib/agent-store";
+import { useActiveAgentChats } from "../../lib/stores/selectors";
 import type { MentionInputHandle, MentionOption } from "./MentionInput";
 import { MessageRendererRow } from "./MessageRenderer";
 
@@ -38,7 +39,7 @@ interface MessageStreamProps {
 export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps) {
   const activeAgentId = useAgentStore((s) => s.activeAgentId);
   const agents = useAgentStore((s) => s.agents);
-  const agentChats = useAgentStore((s) => s.agentChats);
+  const ac = useActiveAgentChats();
   const newChat = useAgentStore((s) => s.newChat);
   const setWorkDir = useAgentStore((s) => s.setWorkDir);
   const setActiveChat = useAgentStore((s) => s.setActiveChat);
@@ -49,7 +50,6 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
 
   const agent = agents.find((a) => a.id === activeAgentId) ?? agents[0];
   const agentAvatarUrl = useAvatarUrl(agent?.avatar);
-  const ac = agentChats[activeAgentId];
   const activeChat = ac?.chatList.find((c) => c.id === ac.activeChatId);
   const stream = activeChat?.stream ?? [];
   const workDir = activeChat?.workDir ?? null;
