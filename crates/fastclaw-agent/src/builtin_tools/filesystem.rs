@@ -1280,7 +1280,7 @@ impl Tool for ReadFileTool {
         "read_file"
     }
 
-    fn max_result_size_chars(&self) -> usize { usize::MAX }
+    fn max_result_size_chars(&self) -> usize { DEFAULT_READ_FILE_MAX_CHARS }
 
     fn description(&self) -> &str {
         "Reads and returns the content of a specified file. If the file is large, the content \

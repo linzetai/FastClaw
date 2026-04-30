@@ -303,8 +303,8 @@ pub trait Tool: Send + Sync {
     }
 
     /// Maximum characters of tool result output before persistence to disk.
-    /// Default: 100_000. Tools with naturally bounded output (e.g. ReadFile
-    /// uses its own maxTokens) should return `usize::MAX` to opt out.
+    /// Default: 100_000. Return `usize::MAX` to opt out of both per-result
+    /// persistence and per-message budget enforcement (use sparingly).
     fn max_result_size_chars(&self) -> usize {
         100_000
     }

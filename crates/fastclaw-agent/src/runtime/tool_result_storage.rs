@@ -21,8 +21,8 @@ const TOOL_RESULTS_SUBDIR: &str = "tool-results";
 
 /// Resolve the effective persistence threshold for a tool.
 ///
-/// - `usize::MAX` = hard opt-out (e.g. ReadFile — persisting its output then
-///   reading it back with ReadFile would be circular).
+/// - `usize::MAX` = hard opt-out (reserved for tools where persistence
+///   would cause issues; currently no built-in tool uses this).
 /// - Otherwise: `min(declared, DEFAULT_MAX_RESULT_SIZE_CHARS)`.
 pub fn get_persistence_threshold(declared_max_result_size_chars: usize) -> usize {
     if declared_max_result_size_chars == usize::MAX {
@@ -302,8 +302,8 @@ impl ToolResultStorage {
     ///
     /// State is mutated in place: `seen_ids` and `replacements` are updated.
     ///
-    /// `skip_tool_names`: tools with usize::MAX threshold (e.g. ReadFile)
-    /// are excluded from budget calculation.
+    /// `skip_tool_names`: tools explicitly excluded from budget calculation
+    /// (those whose `max_result_size_chars() == usize::MAX`).
     pub fn enforce_per_message_budget(
         &self,
         entries: Vec<ToolResultEntry>,
@@ -729,15 +729,35 @@ mod tests {
         let mut state = ContentReplacementState::new();
         let big = "z".repeat(200_000);
         let mut skip = HashSet::new();
-        skip.insert("read_file".into());
+        skip.insert("custom_exempt_tool".into());
         let entries = vec![
-            ToolResultEntry { tool_use_id: "t1".into(), tool_name: "read_file".into(), content: big },
+            ToolResultEntry { tool_use_id: "t1".into(), tool_name: "custom_exempt_tool".into(), content: big },
         ];
         let result = storage.enforce_per_message_budget(
             entries, &mut state, &skip, 100_000,
         );
         assert!(result.newly_replaced.is_empty());
         assert!(state.seen_ids.contains("t1"));
+    }
+
+    #[test]
+    fn enforce_budget_read_file_participates_in_budget() {
+        let (storage, _tmp) = make_storage();
+        let mut state = ContentReplacementState::new();
+        let big = "z".repeat(150_000);
+        let small = "a".repeat(30_000);
+        let entries = vec![
+            ToolResultEntry { tool_use_id: "rf1".into(), tool_name: "read_file".into(), content: big },
+            ToolResultEntry { tool_use_id: "rf2".into(), tool_name: "read_file".into(), content: small },
+        ];
+        let result = storage.enforce_per_message_budget(
+            entries, &mut state, &HashSet::new(), 100_000,
+        );
+        assert_eq!(result.newly_replaced.len(), 1);
+        assert_eq!(result.newly_replaced[0].tool_use_id, "rf1");
+        assert!(result.replacements.contains_key("rf1"));
+        assert!(state.seen_ids.contains("rf1"));
+        assert!(state.seen_ids.contains("rf2"));
     }
 
     // ---- reconstruct_state tests ----

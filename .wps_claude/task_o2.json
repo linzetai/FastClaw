@@ -4,8 +4,8 @@
     "title": "read_file budget 豁免修复（根因）",
     "phase": "上下文管理",
     "description": "修复上下文快速填满的根因。当前 ReadFileTool::max_result_size_chars() 返回 usize::MAX，导致 build_skip_tool_names() 将 read_file 加入豁免列表，enforce_per_message_budget() 完全不约束 read_file 结果。模型一轮内连续读 4 个大文件 → 4×32K=128K → 上下文直接满。修复：将 max_result_size_chars 改为 32_768（与 DEFAULT_READ_FILE_MAX_CHARS 一致），让 read_file 参与 budget enforcement。同时验证 process_result() 中的 PERSISTED_OUTPUT_TAG 检查能防止循环持久化问题。",
-    "status": "pending",
-    "completion_note": "",
+    "status": "done",
+    "completion_note": "将 ReadFileTool::max_result_size_chars() 从 usize::MAX 改为 DEFAULT_READ_FILE_MAX_CHARS (32_768)，使 read_file 参与 budget enforcement 和 persistence。更新了 get_persistence_threshold/build_skip_tool_names/Tool trait 的注释。新增测试 enforce_budget_read_file_participates_in_budget 验证修复效果。全部 933+86 测试通过。",
     "dependencies": [],
     "attentions": [
       "修改位置：crates/fastclaw-agent/src/builtin_tools/filesystem.rs line 1283",

@@ -127,7 +127,7 @@ fn create_tool_result_storage(session_id: Option<&str>) -> ToolResultStorage {
 }
 
 /// Build the set of tool names whose results should skip budget enforcement.
-/// These are tools with max_result_size_chars == usize::MAX (e.g. ReadFileTool).
+/// These are tools with `max_result_size_chars() == usize::MAX`.
 fn build_skip_tool_names(tool_registry: &fastclaw_core::tool::ToolRegistry) -> std::collections::HashSet<String> {
     tool_registry
         .tool_names()
