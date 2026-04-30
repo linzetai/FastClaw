@@ -262,17 +262,17 @@
       color var(--duration-slow) var(--ease-in-out);
   }
 
-  *,
-  *::before,
-  *::after {
-    transition-property: background-color, border-color, box-shadow, color, fill, stroke, opacity;
-    transition-duration: var(--duration-normal);
+  a, button, input, textarea, select, label,
+  [role="button"], [role="tab"], [role="option"],
+  [data-interactive] {
+    transition-property: background-color, border-color, box-shadow, color, opacity;
+    transition-duration: var(--duration-fast);
     transition-timing-function: var(--ease-in-out);
   }
 
-  input, textarea, select, button {
-    transition-property: background-color, border-color, box-shadow, color, opacity;
-    transition-duration: var(--duration-fast);
+  aside, nav, header, [data-theme-transition] {
+    transition-property: background-color, border-color, color;
+    transition-duration: var(--duration-slow);
     transition-timing-function: var(--ease-in-out);
   }
 
@@ -504,6 +504,12 @@
     border-radius: var(--radius-xs);
     margin: 0.5em 0;
   }
+}
+
+/* ━━━ Streaming Performance ━━━ */
+[data-streaming="true"] .markdown-body,
+[data-streaming="true"] .markdown-body * {
+  transition: none !important;
 }
 
 /* ━━━ Syntax Highlighting ━━━ */

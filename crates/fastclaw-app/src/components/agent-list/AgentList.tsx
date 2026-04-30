@@ -297,7 +297,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
               <button
                 key={agent.id}
                 onClick={() => setActiveAgent(agent.id)}
-                className="group relative mx-auto mb-1 flex h-[52px] w-[52px] items-center justify-center rounded-[var(--radius-sm)] transition-all duration-150 hover:bg-[var(--bg-hover)]"
+                className="group relative mx-auto mb-1 flex h-[52px] w-[52px] items-center justify-center rounded-[var(--radius-sm)] hover:bg-[var(--bg-hover)]"
                 style={{
                   background: active ? "var(--bg-active)" : "transparent",
                   animation: `slide-up var(--duration-slow) var(--ease-out) ${i * 0.04}s backwards`,
@@ -321,7 +321,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
             <button
               key={agent.id}
               onClick={() => setActiveAgent(agent.id)}
-              className="mb-0.5 flex w-full cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] px-3 py-3 text-left transition-all duration-150 hover:bg-[var(--bg-hover)]"
+              className="mb-0.5 flex w-full cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] px-3 py-3 text-left hover:bg-[var(--bg-hover)]"
               style={{
                 background: active ? "var(--bg-active)" : "transparent",
                 animation: `slide-up var(--duration-slow) var(--ease-out) ${i * 0.04}s backwards`,

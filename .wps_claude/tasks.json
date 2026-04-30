@@ -101,14 +101,19 @@
       "title": "移除全局 * Transition + Streaming CSS 优化",
       "phase": "CSS 性能",
       "description": "index.css:248-254 的 *, *::before, *::after 全局 transition-property 在 streaming 时每条消息触发 color/opacity/background-color transition。删除全局声明，仅保留 button/a/input/select/textarea 的 transition。添加 .streaming-active .markdown-body { transition: none !important } 规则。同时统一主题切换相关 transition 为 var(--duration-slow)。",
-      "status": "pending",
+      "status": "done",
       "dependencies": ["FE-007"],
       "attentions": [
         "实际 CSS 是明确的 transition-property 而非 shorthand 'transition: all'，影响范围是 background-color/border-color/box-shadow/color/fill/stroke/opacity",
         "删除全局 transition 后，AgentList 选中态背景色渐变需要手动在该组件添加",
         "主题切换 html 0.35s vs * 0.2s 时间差导致视觉割裂，需统一为 --duration-slow",
         "需要验证 prefers-reduced-motion 下的行为仍正确",
-        "[FE-007 前置] 动画 Token 系统已完成：全局 * transition 已改为 var(--duration-normal) var(--ease-in-out)，html/body 用 var(--duration-slow)。prefers-reduced-motion 已有覆盖规则。此任务重点是移除全局 * 的 transition-property 声明，改为组件级按需声明"
+        "[FE-007 前置] 动画 Token 系统已完成：全局 * transition 已改为 var(--duration-normal) var(--ease-in-out)，html/body 用 var(--duration-slow)。prefers-reduced-motion 已有覆盖规则。此任务重点是移除全局 * 的 transition-property 声明，改为组件级按需声明",
+        "[FE-002 结果] 全局 * transition 替换为两组 scoped selectors：1) 交互元素 (a/button/input/textarea/select/label/[role=button]/[role=tab]/[role=option]) → duration-fast；2) 容器元素 (aside/nav/header/[data-theme-transition]) → duration-slow 用于主题切换平滑",
+        "[FE-002 结果] MessageStream 容器添加 data-streaming='true' 属性，streaming 期间 .markdown-body 内所有元素 transition: none !important",
+        "[FE-002 结果] AgentList 按钮移除冗余 Tailwind transition-all duration-150（已由 CSS button 规则覆盖）",
+        "[FE-002 结果] 绝大多数非按钮交互元素已有 Tailwind transition-colors 类，不受全局 * 移除影响",
+        "[FE-002 结果] 回归测试 47/48 pass (1 skipped)。Build 无回归"
       ],
       "gate": "1) streaming 期间 Performance 面板无 transition recalculate style；2) perf baseline streaming P95 帧时间下降 > 15%；3) 主题切换视觉平滑无割裂；4) 所有按钮 hover 仍有 transition 效果；5) screenshot diff 通过（主题切换前后）；6) Core C1-C10 通过"
     },

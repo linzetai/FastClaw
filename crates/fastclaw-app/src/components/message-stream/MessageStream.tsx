@@ -304,6 +304,7 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
     <div
       className="relative flex min-h-0 flex-1 flex-col"
       style={{ background: "var(--bg-primary)" }}
+      data-streaming={streaming ? "true" : undefined}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
