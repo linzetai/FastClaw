@@ -1,8 +1,8 @@
 import {
   Image as ImageIcon, FileText, Paperclip, Settings2, FolderOpen, ArrowUp,
-  Square, X,
+  Square, X, Loader2,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { MentionInput, type MentionInputHandle, type InlineMention, type MentionOption } from "./MentionInput";
 import { useAgentStore } from "../../lib/agent-store";
 import { QuestionPanel } from "./MessageRenderer";
@@ -263,8 +263,96 @@ export function StreamFooter({
   setPendingQuestion,
   stopStream,
 }: StreamFooterProps) {
+  const [inputHasContent, setInputHasContent] = useState(false);
+  const [sendPending, setSendPending] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+
+  useEffect(() => {
+    if (streaming) setSendPending(false);
+  }, [streaming]);
+
+  const wrappedSend = useCallback((txt: string, mentions: InlineMention[]) => {
+    setSendPending(true);
+    setInputHasContent(false);
+    handleMentionSend(txt, mentions);
+  }, [handleMentionSend]);
+
+  const handleRecallLastMessage = useCallback((): string | null => {
+    const state = useAgentStore.getState();
+    const agentId = state.activeAgentId;
+    const ac = state.agentChats[agentId];
+    if (!ac) return null;
+    const chat = ac.chatList.find((c) => c.id === ac.activeChatId);
+    if (!chat) return null;
+    for (let i = chat.stream.length - 1; i >= 0; i--) {
+      const item = chat.stream[i];
+      if (item.type === "message" && item.data.role === "user") return item.data.content;
+    }
+    return null;
+  }, []);
+
+  useEffect(() => {
+    const handleDragEnter = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) {
+        setDragOver(true);
+      }
+    };
+    const handleDragLeave = (e: DragEvent) => {
+      if (e.relatedTarget === null || !(e.currentTarget as Node)?.contains(e.relatedTarget as Node)) {
+        setDragOver(false);
+      }
+    };
+    const handleDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }
+    };
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      if (e.dataTransfer?.files.length) {
+        processFiles(e.dataTransfer.files);
+      }
+    };
+
+    document.addEventListener("dragenter", handleDragEnter);
+    document.addEventListener("dragleave", handleDragLeave);
+    document.addEventListener("dragover", handleDragOver);
+    document.addEventListener("drop", handleDrop);
+    return () => {
+      document.removeEventListener("dragenter", handleDragEnter);
+      document.removeEventListener("dragleave", handleDragLeave);
+      document.removeEventListener("dragover", handleDragOver);
+      document.removeEventListener("drop", handleDrop);
+    };
+  }, [processFiles]);
+
   return (
     <div className="relative shrink-0 px-6 pb-5 pt-2">
+      {dragOver && (
+        <div
+          className="fixed inset-0 z-[9998] flex items-center justify-center"
+          style={{
+            background: "rgba(0,0,0,0.4)",
+            animation: "fade-in var(--duration-fast) var(--ease-out)",
+          }}
+        >
+          <div
+            className="flex h-48 w-72 flex-col items-center justify-center gap-3 rounded-2xl"
+            style={{
+              background: "var(--bg-elevated)",
+              border: "2px dashed var(--tint)",
+              animation: "drop-zone-pulse 2s ease-in-out infinite",
+            }}
+          >
+            <Paperclip size={32} strokeWidth={1.5} style={{ color: "var(--tint)" }} />
+            <span className="text-[14px] font-medium" style={{ color: "var(--fill-primary)" }}>
+              拖放文件到此处
+            </span>
+          </div>
+        </div>
+      )}
       {pendingQuestion && (
         <QuestionPanel
           question={pendingQuestion}
@@ -297,10 +385,12 @@ export function StreamFooter({
           disabled={streaming}
           placeholder="描述任务，或输入 @ 引用文件、目录、Skill..."
           options={mentionOptions}
-          onSend={handleMentionSend}
+          onSend={wrappedSend}
           onNewTopic={handleNewTopic}
           onAttach={() => fileInputRef.current?.click()}
           onPasteFiles={processFiles}
+          onRecallLastMessage={handleRecallLastMessage}
+          onContentChange={setInputHasContent}
         />
 
         <div className="flex items-center justify-between gap-2 px-3.5 pb-3">
@@ -381,6 +471,20 @@ export function StreamFooter({
               >
                 <Square size={12} strokeWidth={2.5} fill="currentColor" />
               </button>
+            ) : sendPending ? (
+              <button
+                key="loading"
+                disabled
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+                style={{
+                  background: "var(--tint)",
+                  color: "#fff",
+                  opacity: 0.7,
+                }}
+                title="发送中..."
+              >
+                <Loader2 size={16} strokeWidth={2} className="animate-spin" />
+              </button>
             ) : (
               <button
                 key="send"
@@ -388,13 +492,15 @@ export function StreamFooter({
                   const ref = mentionInputRef.current;
                   if (ref) {
                     const t = ref.getText().trim();
-                    if (t) handleMentionSend(t, ref.getMentions());
+                    if (t) wrappedSend(t, ref.getMentions());
                   }
                 }}
-                className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-all duration-150 hover:brightness-110 active:scale-95 disabled:opacity-25"
+                disabled={!inputHasContent && attachedFiles.length === 0}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-150 hover:scale-[1.02] active:scale-95 disabled:cursor-default"
                 style={{
                   background: "var(--tint)",
                   color: "#fff",
+                  opacity: inputHasContent || attachedFiles.length > 0 ? 1 : 0.3,
                 }}
                 title="发送 ↩"
               >

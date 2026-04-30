@@ -45,6 +45,8 @@ interface MentionInputProps {
   onNewTopic: () => void;
   onAttach: () => void;
   onPasteFiles?: (files: File[]) => void;
+  onRecallLastMessage?: () => string | null;
+  onContentChange?: (hasContent: boolean) => void;
   extraKeyHandler?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
 }
 
@@ -183,7 +185,7 @@ function HighlightOverlay({ text, mentions }: { text: string; mentions: InlineMe
 /* ─── MentionInput ─── */
 export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
   function MentionInput(
-    { disabled, placeholder, options, onSend, onNewTopic, onAttach, onPasteFiles, extraKeyHandler },
+    { disabled, placeholder, options, onSend, onNewTopic, onAttach, onPasteFiles, onRecallLastMessage, onContentChange, extraKeyHandler },
     ref,
   ) {
     const [text, setText] = useState("");
@@ -257,6 +259,7 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
         });
         setMentions(validMentions);
         setText(newVal);
+        onContentChange?.(!!newVal.trim());
 
         const beforeCursor = newVal.slice(0, cursorPos);
         const atMatch = beforeCursor.match(/@([^\s@]*)$/);
@@ -405,6 +408,21 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
           onAttach();
           return;
         }
+
+        if (e.key === "ArrowUp" && !text.trim() && !popupActive && onRecallLastMessage) {
+          const lastMsg = onRecallLastMessage();
+          if (lastMsg) {
+            e.preventDefault();
+            setText(lastMsg);
+            setMentions([]);
+            setTimeout(() => {
+              if (taRef.current) {
+                taRef.current.setSelectionRange(lastMsg.length, lastMsg.length);
+              }
+            }, 0);
+            return;
+          }
+        }
       },
       [
         text,
@@ -416,11 +434,12 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
         onSend,
         onNewTopic,
         onAttach,
+        onRecallLastMessage,
         extraKeyHandler,
       ],
     );
 
-    const MAX_HEIGHT = 160;
+    const MAX_HEIGHT = 240;
 
     const autoGrow = useCallback(() => {
       const el = taRef.current;
@@ -428,7 +447,6 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
       el.style.height = "auto";
       const clamped = Math.min(el.scrollHeight, MAX_HEIGHT);
       el.style.height = clamped + "px";
-      el.style.overflowY = el.scrollHeight > MAX_HEIGHT ? "auto" : "hidden";
     }, []);
 
     const syncOverlayScroll = useCallback(() => {
@@ -440,6 +458,14 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
     useEffect(() => {
       autoGrow();
     }, [text, autoGrow]);
+
+    useEffect(() => {
+      const el = taRef.current;
+      if (!el) return;
+      const ro = new ResizeObserver(() => autoGrow());
+      ro.observe(el);
+      return () => ro.disconnect();
+    }, [autoGrow]);
 
     const [popupRect, setPopupRect] = useState<{ top: number; left: number; width: number } | null>(null);
 
@@ -492,7 +518,7 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
               }
             }}
             placeholder={placeholder}
-            rows={2}
+            rows={1}
             disabled={disabled}
             className="mention-textarea"
             spellCheck={false}
