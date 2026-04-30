@@ -1011,7 +1011,8 @@
             "budget 阈值告警",
             "5 个测试"
           ],
-          "status": "pending"
+          "status": "done",
+          "completion_notes": "Extended existing cost_tracker.rs with ModelCostRate (per-model USD pricing), BudgetAlert enum (Warning/Exceeded), accumulated_cost_usd tracking, compute_call_cost(), budget threshold checking with warn/exceed alerts, and Prometheus cost metrics (fastclaw_llm_cost_usd_total, fastclaw_llm_accumulated_cost_usd, fastclaw_budget_exceeded). 5 new tests + 8 existing all pass."
         },
         {
           "id": "7D-04",

@@ -45,6 +45,26 @@ impl ModelStats {
     }
 }
 
+/// Per-model cost rates (USD per 1K tokens).
+#[derive(Debug, Clone)]
+pub struct ModelCostRate {
+    pub input_per_1k: f64,
+    pub output_per_1k: f64,
+    pub cache_read_per_1k: f64,
+    pub cache_write_per_1k: f64,
+}
+
+impl Default for ModelCostRate {
+    fn default() -> Self {
+        Self {
+            input_per_1k: 0.003,
+            output_per_1k: 0.015,
+            cache_read_per_1k: 0.0015,
+            cache_write_per_1k: 0.00375,
+        }
+    }
+}
+
 /// Configuration for the cost tracker.
 #[derive(Debug, Clone)]
 pub struct CostTrackerConfig {
@@ -52,6 +72,14 @@ pub struct CostTrackerConfig {
     pub cache_hit_rate_warn_threshold: f64,
     /// Minimum calls before evaluating cache hit rate (avoids noise).
     pub min_calls_for_cache_warning: u64,
+    /// Budget limit in USD. None means no limit.
+    pub budget_limit_usd: Option<f64>,
+    /// Warn at this percentage of budget (0.0–1.0). Default: 0.8 (80%).
+    pub budget_warn_threshold: f64,
+    /// Default cost rates for unknown models.
+    pub default_cost_rate: ModelCostRate,
+    /// Per-model cost rate overrides.
+    pub model_cost_rates: HashMap<String, ModelCostRate>,
 }
 
 impl Default for CostTrackerConfig {
@@ -59,8 +87,21 @@ impl Default for CostTrackerConfig {
         Self {
             cache_hit_rate_warn_threshold: 0.3,
             min_calls_for_cache_warning: 5,
+            budget_limit_usd: None,
+            budget_warn_threshold: 0.8,
+            default_cost_rate: ModelCostRate::default(),
+            model_cost_rates: HashMap::new(),
         }
     }
+}
+
+/// Alert level returned by budget checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BudgetAlert {
+    /// Cost exceeds warning threshold but within limit.
+    Warning,
+    /// Cost has exceeded the budget limit.
+    Exceeded,
 }
 
 /// Tracks API call costs across all models in a session.
@@ -69,6 +110,9 @@ pub struct CostTracker {
     config: CostTrackerConfig,
     per_model: HashMap<String, ModelStats>,
     global_calls: AtomicU64,
+    accumulated_cost_usd: f64,
+    budget_warning_emitted: bool,
+    budget_exceeded_emitted: bool,
 }
 
 impl CostTracker {
@@ -77,12 +121,19 @@ impl CostTracker {
             config,
             per_model: HashMap::new(),
             global_calls: AtomicU64::new(0),
+            accumulated_cost_usd: 0.0,
+            budget_warning_emitted: false,
+            budget_exceeded_emitted: false,
         }
     }
 
     /// Record a completed API call's token usage.
-    pub fn record(&mut self, usage: &CallUsage) {
+    /// Returns a `BudgetAlert` if a budget threshold was crossed.
+    pub fn record(&mut self, usage: &CallUsage) -> Option<BudgetAlert> {
         self.global_calls.fetch_add(1, Ordering::Relaxed);
+
+        let call_cost = self.compute_call_cost(usage);
+        self.accumulated_cost_usd += call_cost;
 
         let stats = self.per_model.entry(usage.model.clone()).or_default();
         stats.total_calls += 1;
@@ -95,7 +146,9 @@ impl CostTracker {
         let total_calls = stats.total_calls;
 
         self.emit_metrics(usage);
+        self.emit_cost_metrics(call_cost);
         self.check_cache_hit_rate(&usage.model, rate, total_calls);
+        self.check_budget()
     }
 
     /// Get stats for a specific model.
@@ -138,6 +191,59 @@ impl CostTracker {
             .increment(1);
     }
 
+    /// Current accumulated cost in USD.
+    pub fn accumulated_cost_usd(&self) -> f64 {
+        self.accumulated_cost_usd
+    }
+
+    /// Compute the cost of a single API call in USD.
+    pub fn compute_call_cost(&self, usage: &CallUsage) -> f64 {
+        let rate = self.config.model_cost_rates
+            .get(&usage.model)
+            .unwrap_or(&self.config.default_cost_rate);
+
+        let input_cost = (usage.prompt_tokens as f64 / 1000.0) * rate.input_per_1k;
+        let output_cost = (usage.completion_tokens as f64 / 1000.0) * rate.output_per_1k;
+        let cache_read_cost = (usage.cache_read_tokens as f64 / 1000.0) * rate.cache_read_per_1k;
+        let cache_write_cost = (usage.cache_creation_tokens as f64 / 1000.0) * rate.cache_write_per_1k;
+
+        input_cost + output_cost + cache_read_cost + cache_write_cost
+    }
+
+    fn check_budget(&mut self) -> Option<BudgetAlert> {
+        let limit = self.config.budget_limit_usd?;
+
+        if self.accumulated_cost_usd >= limit && !self.budget_exceeded_emitted {
+            self.budget_exceeded_emitted = true;
+            tracing::error!(
+                accumulated_usd = format!("{:.4}", self.accumulated_cost_usd),
+                limit_usd = format!("{:.4}", limit),
+                "budget limit exceeded"
+            );
+            gauge!("fastclaw_budget_exceeded").set(1.0);
+            return Some(BudgetAlert::Exceeded);
+        }
+
+        let warn_at = limit * self.config.budget_warn_threshold;
+        if self.accumulated_cost_usd >= warn_at && !self.budget_warning_emitted {
+            self.budget_warning_emitted = true;
+            tracing::warn!(
+                accumulated_usd = format!("{:.4}", self.accumulated_cost_usd),
+                warn_threshold_usd = format!("{:.4}", warn_at),
+                limit_usd = format!("{:.4}", limit),
+                "approaching budget limit"
+            );
+            return Some(BudgetAlert::Warning);
+        }
+
+        None
+    }
+
+    fn emit_cost_metrics(&self, call_cost: f64) {
+        counter!("fastclaw_llm_cost_usd_total").increment((call_cost * 10000.0) as u64);
+        gauge!("fastclaw_llm_accumulated_cost_usd").set(self.accumulated_cost_usd);
+    }
+
     fn check_cache_hit_rate(&self, model: &str, rate: f64, total_calls: u64) {
         if total_calls < self.config.min_calls_for_cache_warning {
             return;
@@ -163,6 +269,15 @@ impl CostTracker {
 impl Default for CostTracker {
     fn default() -> Self {
         Self::new(CostTrackerConfig::default())
+    }
+}
+
+impl CostTracker {
+    /// Reset the budget alert state (useful for testing or session resets).
+    #[allow(dead_code)]
+    pub fn reset_budget_alerts(&mut self) {
+        self.budget_warning_emitted = false;
+        self.budget_exceeded_emitted = false;
     }
 }
 
@@ -276,5 +391,115 @@ mod tests {
     fn empty_tracker_returns_none_for_unknown_model() {
         let tracker = CostTracker::default();
         assert!(tracker.model_stats("nonexistent").is_none());
+    }
+
+    #[test]
+    fn budget_warning_at_threshold() {
+        let config = CostTrackerConfig {
+            budget_limit_usd: Some(1.0),
+            budget_warn_threshold: 0.8,
+            ..Default::default()
+        };
+        let mut tracker = CostTracker::new(config);
+
+        // Each call ~0.003 * 100 + 0.015 * 50 = 0.3 + 0.75 = 1.05
+        // With default rates: input=0.003/1k, output=0.015/1k
+        // 100_000 prompt tokens = 0.3, 50_000 completion = 0.75 => 1.05 per call
+        // But our usage helper uses smaller numbers. Let's be explicit:
+        let big_usage = CallUsage {
+            model: "claude-3".into(),
+            prompt_tokens: 100_000,
+            completion_tokens: 50_000,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+        };
+        // cost = (100_000/1000)*0.003 + (50_000/1000)*0.015 = 300*0.003 + 50*0.015 = 0.9 + 0.75 = nope
+        // Actually: (100_000/1000)*0.003 = 100*0.003 = 0.3; (50_000/1000)*0.015 = 50*0.015 = 0.75 => 1.05
+        // Wait let me recalculate: 100_000 / 1000 = 100. 100 * 0.003 = 0.3
+        // 50_000 / 1000 = 50. 50 * 0.015 = 0.75
+        // total = 1.05 => exceeds limit of 1.0
+
+        let alert = tracker.record(&big_usage);
+        // 1.05 > 1.0 = exceeded
+        assert_eq!(alert, Some(BudgetAlert::Exceeded));
+    }
+
+    #[test]
+    fn budget_warning_fires_before_exceeded() {
+        let config = CostTrackerConfig {
+            budget_limit_usd: Some(10.0),
+            budget_warn_threshold: 0.5,
+            ..Default::default()
+        };
+        let mut tracker = CostTracker::new(config);
+
+        // Small call: 10_000 prompt + 5_000 completion
+        // cost = (10/1000)*0.003*1000 ... wait, (10_000/1000)*0.003 = 10*0.003 = 0.03;
+        //   (5_000/1000)*0.015 = 5*0.015 = 0.075 => total per call = 0.105
+        // 50 calls => 5.25 => exceeds 50% of 10.0 = 5.0
+        let small_usage = CallUsage {
+            model: "gpt-4".into(),
+            prompt_tokens: 10_000,
+            completion_tokens: 5_000,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+        };
+
+        let mut saw_warning = false;
+        for _ in 0..50 {
+            if let Some(alert) = tracker.record(&small_usage) {
+                if alert == BudgetAlert::Warning {
+                    saw_warning = true;
+                    break;
+                }
+            }
+        }
+        assert!(saw_warning, "expected budget warning");
+        assert!(tracker.accumulated_cost_usd() >= 5.0);
+    }
+
+    #[test]
+    fn no_budget_alert_without_limit() {
+        let mut tracker = CostTracker::default();
+        let alert = tracker.record(&usage("claude-3", 100_000, 50_000, 0));
+        assert_eq!(alert, None);
+    }
+
+    #[test]
+    fn cost_accumulates_correctly() {
+        let mut tracker = CostTracker::default();
+        // 1000 prompt / 1000 = 1.0 * 0.003 = 0.003
+        // 500 completion / 1000 = 0.5 * 0.015 = 0.0075
+        // total = 0.0105
+        tracker.record(&usage("claude-3", 1000, 500, 0));
+        let expected = 0.003 + 0.0075;
+        assert!((tracker.accumulated_cost_usd() - expected).abs() < 0.0001);
+    }
+
+    #[test]
+    fn custom_model_rates_applied() {
+        let mut rates = HashMap::new();
+        rates.insert("custom-model".into(), ModelCostRate {
+            input_per_1k: 0.01,
+            output_per_1k: 0.03,
+            cache_read_per_1k: 0.005,
+            cache_write_per_1k: 0.0075,
+        });
+        let config = CostTrackerConfig {
+            model_cost_rates: rates,
+            ..Default::default()
+        };
+        let mut tracker = CostTracker::new(config);
+
+        // 2000 prompt: 2 * 0.01 = 0.02; 1000 completion: 1 * 0.03 = 0.03
+        tracker.record(&CallUsage {
+            model: "custom-model".into(),
+            prompt_tokens: 2000,
+            completion_tokens: 1000,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+        });
+        let expected = 0.02 + 0.03;
+        assert!((tracker.accumulated_cost_usd() - expected).abs() < 0.0001);
     }
 }
