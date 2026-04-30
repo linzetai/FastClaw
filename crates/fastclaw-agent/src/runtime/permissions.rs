@@ -164,6 +164,17 @@ impl PermissionRuleEngine {
 
         let mut engine = Self::new();
         engine.add_rules(config.permissions);
+
+        let shadows = engine.detect_shadowed_rules();
+        for w in &shadows {
+            tracing::warn!(
+                shadowed = w.shadowed_index,
+                by = w.shadowing_index,
+                "{}",
+                w.message
+            );
+        }
+
         Ok(engine)
     }
 
@@ -177,18 +188,47 @@ impl PermissionRuleEngine {
         self.session_rules.len() + self.global_rules.len()
     }
 
-    /// Get the reason why a tool is denied, if applicable.
+    /// Get a detailed explanation of why a tool is allowed/denied,
+    /// including which rule matched and its matcher.
     pub fn permission_explain(&self, tool_name: &str) -> String {
-        match self.evaluate(tool_name) {
-            PermissionDecision::Allowed => format!("'{tool_name}' is allowed"),
-            PermissionDecision::Denied(reason) => {
-                let r = reason.unwrap_or_else(|| "no reason given".into());
-                format!("'{tool_name}' is denied: {r}")
-            }
-            PermissionDecision::NoMatch => {
-                format!("'{tool_name}' has no matching rule (default behavior applies)")
+        if let Some((idx, rule, scope)) =
+            self.find_matching_rule(&self.session_rules, tool_name, "session")
+                .or_else(|| self.find_matching_rule(&self.global_rules, tool_name, "global"))
+        {
+            let matcher_desc = match &rule.matcher {
+                RuleMatcher::Exact { tool } => format!("exact({})", tool),
+                RuleMatcher::Prefix { prefix } => format!("prefix({}*)", prefix),
+                RuleMatcher::Wildcard { pattern } => format!("wildcard({})", pattern),
+            };
+            let effect = match rule.effect {
+                RuleEffect::Allow => "allowed",
+                RuleEffect::Deny => "denied",
+            };
+            let reason_part = rule
+                .reason
+                .as_deref()
+                .map(|r| format!(", reason: {r}"))
+                .unwrap_or_default();
+            format!(
+                "'{tool_name}' is {effect} by {scope} rule #{idx} [{matcher_desc}]{reason_part}"
+            )
+        } else {
+            format!("'{tool_name}' has no matching rule (default behavior applies)")
+        }
+    }
+
+    fn find_matching_rule<'a>(
+        &self,
+        rules: &'a [PermissionRule],
+        tool_name: &str,
+        scope: &'static str,
+    ) -> Option<(usize, &'a PermissionRule, &'static str)> {
+        for (i, rule) in rules.iter().enumerate() {
+            if rule.matcher.matches(tool_name) {
+                return Some((i, rule, scope));
             }
         }
+        None
     }
 }
 
@@ -487,6 +527,71 @@ impl Default for AutoModeClassifier {
     }
 }
 
+// ── Shadowed Rule Detection ──────────────────────────────────────────
+
+/// A warning about a rule that is shadowed (will never fire) by an earlier rule.
+#[derive(Debug, Clone)]
+pub struct ShadowWarning {
+    pub shadowed_index: usize,
+    pub shadowing_index: usize,
+    pub message: String,
+}
+
+impl PermissionRuleEngine {
+    /// Detect rules that are shadowed by earlier rules in the same scope.
+    /// A deny rule is shadowed if an earlier deny rule with a broader matcher
+    /// already covers the same tools. Similarly for allow rules.
+    pub fn detect_shadowed_rules(&self) -> Vec<ShadowWarning> {
+        let mut warnings = Vec::new();
+        Self::detect_in_scope(&self.global_rules, 0, &mut warnings);
+        let offset = self.global_rules.len();
+        Self::detect_in_scope(&self.session_rules, offset, &mut warnings);
+        warnings
+    }
+
+    fn detect_in_scope(
+        rules: &[PermissionRule],
+        index_offset: usize,
+        warnings: &mut Vec<ShadowWarning>,
+    ) {
+        for i in 0..rules.len() {
+            for j in (i + 1)..rules.len() {
+                if rules[i].effect != rules[j].effect {
+                    continue;
+                }
+                if Self::matcher_covers(&rules[i].matcher, &rules[j].matcher) {
+                    warnings.push(ShadowWarning {
+                        shadowing_index: index_offset + i,
+                        shadowed_index: index_offset + j,
+                        message: format!(
+                            "Rule #{} shadows rule #{}: broader matcher with same effect",
+                            index_offset + i,
+                            index_offset + j
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Check if matcher `a` covers all cases that matcher `b` would match.
+    fn matcher_covers(a: &RuleMatcher, b: &RuleMatcher) -> bool {
+        match (a, b) {
+            (RuleMatcher::Wildcard { pattern }, _) if pattern == "*" => true,
+            (RuleMatcher::Prefix { prefix: a_pre }, RuleMatcher::Prefix { prefix: b_pre }) => {
+                b_pre.starts_with(a_pre.as_str())
+            }
+            (RuleMatcher::Prefix { prefix }, RuleMatcher::Exact { tool }) => {
+                tool.starts_with(prefix.as_str())
+            }
+            (RuleMatcher::Exact { tool: a_tool }, RuleMatcher::Exact { tool: b_tool }) => {
+                a_tool == b_tool
+            }
+            _ => false,
+        }
+    }
+}
+
 // ── Denial Tracking ──────────────────────────────────────────────────
 
 /// Records a user denial for a specific tool+pattern combination.
@@ -729,9 +834,14 @@ mod tests {
         engine.add_rule(PermissionRule::allow_exact("safe_tool"));
         engine.add_rule(PermissionRule::deny_exact("bad_tool").with_reason("unsafe"));
 
-        assert!(engine.permission_explain("safe_tool").contains("allowed"));
-        assert!(engine.permission_explain("bad_tool").contains("denied"));
-        assert!(engine.permission_explain("bad_tool").contains("unsafe"));
+        let safe_msg = engine.permission_explain("safe_tool");
+        assert!(safe_msg.contains("allowed"), "got: {safe_msg}");
+        assert!(safe_msg.contains("exact(safe_tool)"), "got: {safe_msg}");
+
+        let bad_msg = engine.permission_explain("bad_tool");
+        assert!(bad_msg.contains("denied"), "got: {bad_msg}");
+        assert!(bad_msg.contains("unsafe"), "got: {bad_msg}");
+
         assert!(engine.permission_explain("unknown").contains("no matching rule"));
     }
 
@@ -897,5 +1007,83 @@ mod tests {
     fn shell_tokenize_handles_quotes() {
         let tokens = shell_tokenize("echo 'hello world' \"foo bar\"");
         assert_eq!(tokens, vec!["echo", "hello world", "foo bar"]);
+    }
+
+    // ── Shadow Detection Tests ──
+
+    #[test]
+    fn shadow_detect_wildcard_covers_exact() {
+        let mut engine = PermissionRuleEngine::new();
+        engine.add_rule(PermissionRule {
+            matcher: RuleMatcher::Wildcard {
+                pattern: "*".into(),
+            },
+            effect: RuleEffect::Allow,
+            scope: RuleScope::Global,
+            reason: None,
+        });
+        engine.add_rule(PermissionRule::allow_exact("read_file"));
+        let warnings = engine.detect_shadowed_rules();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].shadowed_index, 1);
+        assert_eq!(warnings[0].shadowing_index, 0);
+    }
+
+    #[test]
+    fn shadow_detect_prefix_covers_exact() {
+        let mut engine = PermissionRuleEngine::new();
+        engine.add_rule(PermissionRule {
+            matcher: RuleMatcher::Prefix {
+                prefix: "file_".into(),
+            },
+            effect: RuleEffect::Deny,
+            scope: RuleScope::Global,
+            reason: None,
+        });
+        engine.add_rule(PermissionRule::deny_exact("file_write"));
+        let warnings = engine.detect_shadowed_rules();
+        assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn shadow_detect_no_false_positive_different_effects() {
+        let mut engine = PermissionRuleEngine::new();
+        engine.add_rule(PermissionRule {
+            matcher: RuleMatcher::Wildcard {
+                pattern: "*".into(),
+            },
+            effect: RuleEffect::Allow,
+            scope: RuleScope::Global,
+            reason: None,
+        });
+        engine.add_rule(PermissionRule::deny_exact("bad_tool"));
+        let warnings = engine.detect_shadowed_rules();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn shadow_detect_no_warning_for_unrelated_rules() {
+        let mut engine = PermissionRuleEngine::new();
+        engine.add_rule(PermissionRule::allow_exact("tool_a"));
+        engine.add_rule(PermissionRule::allow_exact("tool_b"));
+        let warnings = engine.detect_shadowed_rules();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn explain_includes_scope_and_matcher() {
+        let mut engine = PermissionRuleEngine::new();
+        engine.add_rule(PermissionRule {
+            matcher: RuleMatcher::Prefix {
+                prefix: "file_".into(),
+            },
+            effect: RuleEffect::Allow,
+            scope: RuleScope::Global,
+            reason: Some("file ops allowed".into()),
+        });
+        let msg = engine.permission_explain("file_read");
+        assert!(msg.contains("global"), "got: {msg}");
+        assert!(msg.contains("prefix(file_*)"), "got: {msg}");
+        assert!(msg.contains("file ops allowed"), "got: {msg}");
     }
 }

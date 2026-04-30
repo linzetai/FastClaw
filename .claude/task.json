@@ -790,7 +790,8 @@
             "规则加载时自动运行 shadow detection",
             "5 个测试"
           ],
-          "status": "pending"
+          "status": "done",
+          "completion_notes": "实现 ShadowWarning + detect_shadowed_rules (matcher_covers 判断覆盖关系)。增强 permission_explain 显示匹配规则的 scope/index/matcher/reason。load_from_dir 自动运行 shadow detection 并 tracing::warn。5 个新测试全通过。"
         }
       ]
     },
