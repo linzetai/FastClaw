@@ -61,6 +61,8 @@ pub mod hook_config;
 pub mod hook_events;
 #[allow(dead_code)]
 pub mod hook_executor;
+#[allow(dead_code)]
+pub mod permissions;
 mod query_state;
 mod session_memory;
 #[allow(dead_code)]

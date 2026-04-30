@@ -718,7 +718,8 @@
             "15 个测试",
             "预计 ~500 行"
           ],
-          "status": "pending"
+          "status": "done",
+          "completion_notes": "实现 permissions.rs ~320行。PermissionRuleEngine 评估 allow/deny 规则链，支持 prefix/exact/wildcard 匹配。Session 规则优先于 Global。load_from_dir 从 settings.json 加载。15个测试全通过。"
         },
         {
           "id": "7B-02",
