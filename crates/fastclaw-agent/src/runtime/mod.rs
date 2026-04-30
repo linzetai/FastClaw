@@ -37,6 +37,10 @@ use crate::builtin_tools::{with_file_access_mode, with_work_dir};
 use crate::llm::{CompletionParams, LlmProvider};
 use base64::Engine as _;
 
+#[allow(dead_code)]
+pub mod api_errors;
+#[allow(dead_code)]
+pub mod retry;
 mod accumulator;
 pub mod query_engine;
 pub(crate) mod context_compressor;

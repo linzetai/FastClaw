@@ -357,7 +357,7 @@
             "25+ 测试",
             "预计 ~300 行"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "6H-02",
@@ -376,7 +376,7 @@
             "15 个测试",
             "预计 ~400 行"
           ],
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "6H-03",
