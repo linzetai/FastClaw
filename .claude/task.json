@@ -606,7 +606,8 @@
             "5 个测试",
             "预计 ~150 行"
           ],
-          "status": "pending"
+          "status": "done",
+          "completion_notes": "实现 FileStateCache (~120行)，DashMap 存储 PathBuf→FileState(hash/mtime/preview)。is_unchanged/update/invalidate/invalidate_all/get_preview 方法完整。5个测试全部通过。"
         }
       ]
     },
