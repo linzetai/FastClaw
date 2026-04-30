@@ -2,8 +2,8 @@ import {
   Image as ImageIcon, FileText, Paperclip, Settings2, FolderOpen, ArrowUp,
   Square, X, Loader2,
 } from "lucide-react";
-import { useState, useCallback, useEffect } from "react";
-import { MentionInput, type MentionInputHandle, type InlineMention, type MentionOption } from "./MentionInput";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { MentionInput, type MentionInputHandle, type InlineMention, type MentionOption, type SlashCommand, type ChatReference } from "./MentionInput";
 import { useAgentStore } from "../../lib/agent-store";
 import { QuestionPanel } from "./MessageRenderer";
 import * as transport from "../../lib/transport";
@@ -271,6 +271,31 @@ export function StreamFooter({
     if (streaming) setSendPending(false);
   }, [streaming]);
 
+  const slashCommands: SlashCommand[] = useMemo(() => [
+    { id: "new", label: "new", desc: "开始新话题", action: handleNewTopic },
+    { id: "clear", label: "clear", desc: "新建对话（清空当前）", action: handleNewTopic },
+    { id: "model", label: "model", desc: "切换模型", action: () => {
+      if (onToggleDetail) onToggleDetail();
+    }},
+    { id: "tools", label: "tools", desc: "管理工具配置", action: () => {
+      if (onToggleDetail) onToggleDetail();
+    }},
+  ], [handleNewTopic, onToggleDetail]);
+
+  const chatReferences: ChatReference[] = useMemo(() => {
+    const state = useAgentStore.getState();
+    const agentId = state.activeAgentId;
+    const ac = state.agentChats[agentId];
+    if (!ac) return [];
+    return ac.chatList
+      .filter((c) => c.id !== ac.activeChatId && c.stream.length > 0)
+      .map((c) => ({
+        id: c.id,
+        label: c.title || `对话 ${c.id.slice(0, 6)}`,
+        desc: c.stream.length > 0 ? `${c.stream.length} 条消息` : undefined,
+      }));
+  }, [activeChat]);
+
   const wrappedSend = useCallback((txt: string, mentions: InlineMention[]) => {
     setSendPending(true);
     setInputHasContent(false);
@@ -383,8 +408,10 @@ export function StreamFooter({
         <MentionInput
           ref={mentionInputRef}
           disabled={streaming}
-          placeholder="描述任务，或输入 @ 引用文件、目录、Skill..."
+          placeholder="描述任务，或输入 @ 引用文件、/ 命令、# 会话..."
           options={mentionOptions}
+          slashCommands={slashCommands}
+          chatReferences={chatReferences}
           onSend={wrappedSend}
           onNewTopic={handleNewTopic}
           onAttach={() => fileInputRef.current?.click()}

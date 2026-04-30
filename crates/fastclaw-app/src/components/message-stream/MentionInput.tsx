@@ -9,15 +9,38 @@ import {
   type KeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { File, Folder, Sparkles } from "lucide-react";
+import {
+  useFloating,
+  offset,
+  flip,
+  shift,
+  autoUpdate,
+  size as floatingSize,
+} from "@floating-ui/react";
+import { File, Folder, Sparkles, Search, MessageSquare, Terminal } from "lucide-react";
+import { fuzzyFilter, type FuzzyResult } from "../../lib/fuzzy";
 
 /* ─── Types ─── */
 export type MentionType = "file" | "dir" | "skill";
+export type TriggerType = "@" | "/" | "#";
 
 export interface MentionOption {
   id: string;
   label: string;
   type: MentionType;
+  desc?: string;
+}
+
+export interface SlashCommand {
+  id: string;
+  label: string;
+  desc: string;
+  action: () => void;
+}
+
+export interface ChatReference {
+  id: string;
+  label: string;
   desc?: string;
 }
 
@@ -41,6 +64,8 @@ interface MentionInputProps {
   disabled?: boolean;
   placeholder?: string;
   options: MentionOption[];
+  slashCommands?: SlashCommand[];
+  chatReferences?: ChatReference[];
   onSend: (text: string, mentions: InlineMention[]) => void;
   onNewTopic: () => void;
   onAttach: () => void;
@@ -56,31 +81,113 @@ const MENTION_TYPE_META: Record<MentionType, { text: string; icon: React.ReactNo
   skill: { text: "Skill", icon: <Sparkles size={12} strokeWidth={1.5} />, color: "var(--green)" },
 };
 
+/* ─── Fuzzy Highlight ─── */
+function FuzzyHighlight({ text, indices }: { text: string; indices: number[] }) {
+  if (indices.length === 0) return <span>{text}</span>;
+
+  const indexSet = new Set(indices);
+  const parts: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < text.length) {
+    if (indexSet.has(i)) {
+      let end = i;
+      while (end < text.length && indexSet.has(end)) end++;
+      parts.push(
+        <span key={i} style={{ color: "var(--tint)", fontWeight: 600 }}>
+          {text.slice(i, end)}
+        </span>,
+      );
+      i = end;
+    } else {
+      let end = i;
+      while (end < text.length && !indexSet.has(end)) end++;
+      parts.push(<span key={i}>{text.slice(i, end)}</span>);
+      i = end;
+    }
+  }
+
+  return <>{parts}</>;
+}
+
+/* ─── Smart Path Truncation ─── */
+function truncatePath(path: string, maxLen = 32): string {
+  if (path.length <= maxLen) return path;
+  const parts = path.split("/");
+  if (parts.length <= 2) return `…${path.slice(-(maxLen - 1))}`;
+  const first = parts[0];
+  const last = parts[parts.length - 1];
+  const mid = parts.length - 2;
+  return `${first}/…${mid > 1 ? `(${mid})` : ""}/${last}`;
+}
+
+/* ─── Popup Item Types ─── */
+type PopupItem =
+  | { kind: "mention"; option: MentionOption; result: FuzzyResult }
+  | { kind: "command"; command: SlashCommand; result: FuzzyResult }
+  | { kind: "chat-ref"; ref: ChatReference; result: FuzzyResult };
+
 /* ─── Mention Popup ─── */
 function MentionPopup({
-  options,
+  items,
   selectedIndex,
   onSelect,
-  rect,
+  triggerType,
+  query,
+  floatingRef,
+  floatingStyles,
 }: {
-  options: MentionOption[];
+  items: PopupItem[];
   selectedIndex: number;
-  onSelect: (opt: MentionOption) => void;
-  rect: { top: number; left: number; width: number } | null;
+  onSelect: (index: number) => void;
+  triggerType: TriggerType;
+  query: string;
+  floatingRef: (node: HTMLElement | null) => void;
+  floatingStyles: React.CSSProperties;
 }) {
-  if (options.length === 0 || !rect) return null;
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  let lastType: MentionType | null = null;
-  const popupWidth = Math.min(300, window.innerWidth - 48);
+  useEffect(() => {
+    const el = itemRefs.current[selectedIndex];
+    if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selectedIndex]);
+
+  if (items.length === 0) {
+    return (
+      <div
+        ref={floatingRef}
+        style={{
+          ...floatingStyles,
+          zIndex: 9999,
+          width: "min(300px, calc(100vw - 48px))",
+          background: "var(--bg-elevated)",
+          border: "0.5px solid var(--separator)",
+          boxShadow: "var(--shadow-lg)",
+          borderRadius: "var(--radius-sm)",
+          animation: "slide-up var(--duration-fast) var(--ease-out)",
+        }}
+      >
+        <div className="flex items-center gap-2 px-3 py-3">
+          <Search size={13} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />
+          <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
+            {query
+              ? `未找到「${query}」相关${triggerType === "/" ? "命令" : triggerType === "#" ? "会话" : "项目"}`
+              : `输入${triggerType === "/" ? "命令名" : triggerType === "#" ? "会话关键词" : "文件名"}搜索…`}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  let lastGroup: string | null = null;
 
   return (
     <div
+      ref={floatingRef}
       style={{
-        position: "fixed",
+        ...floatingStyles,
         zIndex: 9999,
-        bottom: window.innerHeight - rect.top + 8,
-        left: rect.left,
-        width: popupWidth,
+        width: "min(300px, calc(100vw - 48px))",
         maxHeight: 320,
         overflowY: "auto",
         background: "var(--bg-elevated)",
@@ -91,25 +198,27 @@ function MentionPopup({
       }}
     >
       <div className="py-1">
-        {options.map((opt, i) => {
-          const showHeader = opt.type !== lastType;
-          lastType = opt.type;
-          const meta = MENTION_TYPE_META[opt.type];
+        {items.map((item, i) => {
+          const group = getItemGroup(item);
+          const showHeader = group !== lastGroup;
+          lastGroup = group;
+          const { icon, color } = getItemMeta(item);
 
           return (
-            <div key={opt.id}>
+            <div key={getItemKey(item)}>
               {showHeader && (
                 <div className="px-3 pt-2 pb-1">
                   <span
                     className="text-[10px] font-semibold uppercase tracking-wider"
                     style={{ color: "var(--fill-tertiary)" }}
                   >
-                    {meta.text}
+                    {group}
                   </span>
                 </div>
               )}
               <button
-                onClick={() => onSelect(opt)}
+                ref={(el) => { itemRefs.current[i] = el; }}
+                onClick={() => onSelect(i)}
                 className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors duration-75 hover:bg-[var(--tint-bg)]"
                 style={{
                   background: i === selectedIndex ? "var(--tint-bg)" : "transparent",
@@ -118,20 +227,22 @@ function MentionPopup({
               >
                 <span
                   className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[12px]"
-                  style={{ background: `color-mix(in srgb, ${meta.color} 8%, transparent)`, color: meta.color }}
+                  style={{ background: `color-mix(in srgb, ${color} 8%, transparent)`, color }}
                 >
-                  {meta.icon}
+                  {icon}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <span className="min-w-0 truncate font-medium">{opt.label}</span>
+                    <span className="min-w-0 truncate font-medium">
+                      <FuzzyHighlight text={getItemLabel(item)} indices={item.result.indices} />
+                    </span>
                   </div>
-                  {opt.desc && (
+                  {getItemDesc(item) && (
                     <div
                       className="mt-0.5 truncate text-[11px]"
                       style={{ color: "var(--fill-tertiary)" }}
                     >
-                      {opt.desc}
+                      {getItemDesc(item)}
                     </div>
                   )}
                 </div>
@@ -142,6 +253,36 @@ function MentionPopup({
       </div>
     </div>
   );
+}
+
+function getItemGroup(item: PopupItem): string {
+  if (item.kind === "mention") return MENTION_TYPE_META[item.option.type].text;
+  if (item.kind === "command") return "命令";
+  return "会话";
+}
+
+function getItemMeta(item: PopupItem): { icon: React.ReactNode; color: string } {
+  if (item.kind === "mention") return MENTION_TYPE_META[item.option.type];
+  if (item.kind === "command") return { icon: <Terminal size={12} strokeWidth={1.5} />, color: "var(--purple)" };
+  return { icon: <MessageSquare size={12} strokeWidth={1.5} />, color: "var(--fill-secondary)" };
+}
+
+function getItemKey(item: PopupItem): string {
+  if (item.kind === "mention") return `m-${item.option.id}`;
+  if (item.kind === "command") return `c-${item.command.id}`;
+  return `r-${item.ref.id}`;
+}
+
+function getItemLabel(item: PopupItem): string {
+  if (item.kind === "mention") return item.option.label;
+  if (item.kind === "command") return item.command.label;
+  return item.ref.label;
+}
+
+function getItemDesc(item: PopupItem): string | undefined {
+  if (item.kind === "mention") return item.option.desc;
+  if (item.kind === "command") return item.command.desc;
+  return item.ref.desc;
 }
 
 /* ─── Highlight Overlay ─── */
@@ -168,8 +309,10 @@ function HighlightOverlay({ text, mentions }: { text: string; mentions: InlineMe
           color: meta.color,
           borderColor: `color-mix(in srgb, ${meta.color} 20%, transparent)`,
         }}
+        title={m.label}
       >
-        @{m.label}
+        <span className="mention-chip-icon">{meta.icon}</span>
+        <span className="mention-chip-label">{truncatePath(m.label)}</span>
       </span>,
     );
     cursor = m.end;
@@ -185,7 +328,7 @@ function HighlightOverlay({ text, mentions }: { text: string; mentions: InlineMe
 /* ─── MentionInput ─── */
 export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
   function MentionInput(
-    { disabled, placeholder, options, onSend, onNewTopic, onAttach, onPasteFiles, onRecallLastMessage, onContentChange, extraKeyHandler },
+    { disabled, placeholder, options, slashCommands, chatReferences, onSend, onNewTopic, onAttach, onPasteFiles, onRecallLastMessage, onContentChange, extraKeyHandler },
     ref,
   ) {
     const [text, setText] = useState("");
@@ -195,9 +338,32 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
     const [popupQuery, setPopupQuery] = useState("");
     const [popupIndex, setPopupIndex] = useState(0);
     const [popupStart, setPopupStart] = useState(-1);
+    const [triggerType, setTriggerType] = useState<TriggerType>("@");
 
     const taRef = useRef<HTMLTextAreaElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+
+    const { refs, floatingStyles } = useFloating({
+      open: popupActive,
+      placement: "top-start",
+      middleware: [
+        offset(8),
+        flip({ fallbackPlacements: ["bottom-start", "top-end", "bottom-end"] }),
+        shift({ padding: 16 }),
+        floatingSize({
+          apply({ availableHeight, elements }) {
+            elements.floating.style.maxHeight = `${Math.min(320, availableHeight - 16)}px`;
+          },
+        }),
+      ],
+      whileElementsMounted: autoUpdate,
+    });
+
+    useEffect(() => {
+      if (containerRef.current) {
+        refs.setReference(containerRef.current);
+      }
+    }, [refs]);
 
     useImperativeHandle(ref, () => ({
       focus: () => taRef.current?.focus(),
@@ -214,16 +380,20 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
       getMentions: () => mentions,
     }));
 
-    const filteredOptions = useMemo(
-      () =>
-        options.filter(
-          (o) =>
-            !popupQuery ||
-            o.label.toLowerCase().includes(popupQuery.toLowerCase()) ||
-            o.desc?.toLowerCase().includes(popupQuery.toLowerCase()),
-        ),
-      [options, popupQuery],
-    );
+    const filteredItems = useMemo((): PopupItem[] => {
+      if (triggerType === "/") {
+        const cmds = slashCommands ?? [];
+        return fuzzyFilter(cmds, popupQuery, (c) => c.label, (c) => c.desc)
+          .map(({ item, result }) => ({ kind: "command" as const, command: item, result }));
+      }
+      if (triggerType === "#") {
+        const chatRefs = chatReferences ?? [];
+        return fuzzyFilter(chatRefs, popupQuery, (r) => r.label, (r) => r.desc)
+          .map(({ item, result }) => ({ kind: "chat-ref" as const, ref: item, result }));
+      }
+      return fuzzyFilter(options, popupQuery, (o) => o.label, (o) => o.desc)
+        .map(({ item, result }) => ({ kind: "mention" as const, option: item, result }));
+    }, [options, slashCommands, chatReferences, popupQuery, triggerType]);
 
     const updateMentionPositions = useCallback(
       (oldText: string, newText: string, cursorPos: number) => {
@@ -262,6 +432,27 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
         onContentChange?.(!!newVal.trim());
 
         const beforeCursor = newVal.slice(0, cursorPos);
+
+        const slashMatch = beforeCursor.match(/(?:^|\s)\/([^\s]*)$/);
+        if (slashMatch) {
+          setPopupActive(true);
+          setTriggerType("/");
+          setPopupQuery(slashMatch[1]);
+          setPopupStart(cursorPos - slashMatch[0].length + (slashMatch[0].startsWith(" ") ? 1 : 0));
+          setPopupIndex(0);
+          return;
+        }
+
+        const hashMatch = beforeCursor.match(/#([^\s#]*)$/);
+        if (hashMatch) {
+          setPopupActive(true);
+          setTriggerType("#");
+          setPopupQuery(hashMatch[1]);
+          setPopupStart(cursorPos - hashMatch[0].length);
+          setPopupIndex(0);
+          return;
+        }
+
         const atMatch = beforeCursor.match(/@([^\s@]*)$/);
         if (atMatch) {
           const isInsideMention = validMentions.some(
@@ -269,6 +460,7 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
           );
           if (!isInsideMention) {
             setPopupActive(true);
+            setTriggerType("@");
             setPopupQuery(atMatch[1]);
             setPopupStart(cursorPos - atMatch[0].length);
             setPopupIndex(0);
@@ -279,7 +471,7 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
         setPopupQuery("");
         setPopupStart(-1);
       },
-      [text, updateMentionPositions],
+      [text, updateMentionPositions, onContentChange],
     );
 
     const insertMention = useCallback(
@@ -302,9 +494,9 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
 
         const updatedMentions = mentions
           .map((m) => {
-            const shift = newText.length - text.length;
+            const shiftAmount = newText.length - text.length;
             if (m.start >= popupStart) {
-              return { ...m, start: m.start + shift, end: m.end + shift };
+              return { ...m, start: m.start + shiftAmount, end: m.end + shiftAmount };
             }
             return m;
           })
@@ -327,26 +519,77 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
       [text, mentions, popupStart],
     );
 
+    const handlePopupSelect = useCallback(
+      (index: number) => {
+        const item = filteredItems[index];
+        if (!item) return;
+
+        if (item.kind === "mention") {
+          insertMention(item.option);
+          return;
+        }
+
+        if (item.kind === "command") {
+          const before = text.slice(0, popupStart);
+          const cursorPos = taRef.current?.selectionStart ?? text.length;
+          const after = text.slice(cursorPos);
+          setText(before + after);
+          setPopupActive(false);
+          setPopupQuery("");
+          setPopupStart(-1);
+          item.command.action();
+          return;
+        }
+
+        if (item.kind === "chat-ref") {
+          if (popupStart < 0 || !taRef.current) return;
+          const cursorPos = taRef.current.selectionStart ?? text.length;
+          const before = text.slice(0, popupStart);
+          const after = text.slice(cursorPos);
+          const refText = `#${item.ref.label} `;
+          setText(before + refText + after);
+          setPopupActive(false);
+          setPopupQuery("");
+          setPopupStart(-1);
+
+          const newCursorPos = popupStart + refText.length;
+          setTimeout(() => {
+            if (taRef.current) {
+              taRef.current.setSelectionRange(newCursorPos, newCursorPos);
+              taRef.current.focus();
+            }
+          }, 0);
+        }
+      },
+      [filteredItems, insertMention, text, popupStart],
+    );
+
     const handleKeyDown = useCallback(
       (e: KeyboardEvent<HTMLTextAreaElement>) => {
         if (extraKeyHandler?.(e)) return;
 
         const isMod = e.metaKey || e.ctrlKey;
 
-        if (popupActive && filteredOptions.length > 0) {
+        if (popupActive) {
           if (e.key === "ArrowDown") {
             e.preventDefault();
-            setPopupIndex((i) => (i + 1) % filteredOptions.length);
+            if (filteredItems.length > 0) {
+              setPopupIndex((i) => (i + 1) % filteredItems.length);
+            }
             return;
           }
           if (e.key === "ArrowUp") {
             e.preventDefault();
-            setPopupIndex((i) => (i - 1 + filteredOptions.length) % filteredOptions.length);
+            if (filteredItems.length > 0) {
+              setPopupIndex((i) => (i - 1 + filteredItems.length) % filteredItems.length);
+            }
             return;
           }
           if (e.key === "Enter" || e.key === "Tab") {
             e.preventDefault();
-            insertMention(filteredOptions[popupIndex]);
+            if (filteredItems.length > 0) {
+              handlePopupSelect(popupIndex);
+            }
             return;
           }
           if (e.key === "Escape") {
@@ -428,8 +671,9 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
         text,
         mentions,
         popupActive,
-        filteredOptions,
+        filteredItems,
         popupIndex,
+        handlePopupSelect,
         insertMention,
         onSend,
         onNewTopic,
@@ -467,23 +711,15 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
       return () => ro.disconnect();
     }, [autoGrow]);
 
-    const [popupRect, setPopupRect] = useState<{ top: number; left: number; width: number } | null>(null);
-
-    useEffect(() => {
-      if (!popupActive || !containerRef.current) {
-        setPopupRect(null);
-        return;
-      }
-      const r = containerRef.current.getBoundingClientRect();
-      setPopupRect({ top: r.top, left: r.left, width: r.width });
-    }, [popupActive, text]);
-
     const popupEl = popupActive ? (
       <MentionPopup
-        options={filteredOptions}
+        items={filteredItems}
         selectedIndex={popupIndex}
-        onSelect={insertMention}
-        rect={popupRect}
+        onSelect={handlePopupSelect}
+        triggerType={triggerType}
+        query={popupQuery}
+        floatingRef={refs.setFloating}
+        floatingStyles={floatingStyles}
       />
     ) : null;
 

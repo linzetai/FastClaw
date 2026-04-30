@@ -15,6 +15,7 @@
     "test:all": "vitest run && playwright test --project=regression"
   },
   "dependencies": {
+    "@floating-ui/react": "^0.27.19",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-dialog": "^2.7.0",

@@ -226,14 +226,21 @@
       "title": "配色系统修复 + 品牌色 Tint",
       "phase": "配色系统",
       "description": "默认主题 --tint 从纯灰 (#1d1d1f / #e5e5ea) 改为品牌蓝 (#2563EB / #60A5FA)，保留原灰色为 data-accent='monochrome'。暗色模式 --fill-tertiary 从 #636366 提升至 #8E8E93 (对比度 4.2:1 → 5.5:1)。--bg-selected 与 --bg-secondary 区分（暗色模式从 #1c1c1e 改为 #2c2c2e）。--separator 暗色模式透明度从 0.36 提升到 0.48。User bubble 配色跟随 --tint。新增 sage/rose 两套 accent theme。",
-      "status": "pending",
+      "status": "done",
       "dependencies": [],
       "attentions": [
         "改变默认 tint 会影响全局所有使用 var(--tint) 的元素（按钮、链接、选中态、focus ring 等）",
         "原灰色方案需要完整保留为 monochrome accent，包括 light/dark 两套",
         "暗色对比度修复后需用 WebAIM Contrast Checker 验证所有 fill vs bg 组合",
         "user bubble 跟随 tint 后，各 accent theme 的 bubble 颜色需要逐一验证可读性",
-        "每套新 accent 都需要 light + dark 两套完整变量"
+        "每套新 accent 都需要 light + dark 两套完整变量",
+        "[FE-008 结果] 默认主题 tint: light=#2563EB, dark=#60A5FA。bubble-user 跟随 tint",
+        "[FE-008 结果] monochrome accent 保留原灰色 (light=#1d1d1f, dark=#e5e5ea)",
+        "[FE-008 结果] 暗色 fill-tertiary: #636366→#8E8E93; bg-selected: #1c1c1e→#2c2c2e; separator opacity: 0.36→0.48",
+        "[FE-008 结果] 新增 sage (绿) 和 rose (玫红) accent，各含 light+dark 完整变量集",
+        "[FE-008 结果] AccentTheme 类型新增 monochrome/sage/rose，ACCENT_PRESETS 从 4→7 个",
+        "[FE-008 结果] 回归测试 22/23 pass (1 skipped)。Visual 25/25 pass (基线已更新)。Build 无回归 index=32.40KB gzip",
+        "[FE-008 注意] 视觉截图测试在此任务后生成新基线（默认主题颜色变化），后续任务使用新基线对比"
       ],
       "gate": "1) 默认主题 tint 为蓝色，按钮/链接/选中态有明确视觉区分；2) WebAIM Contrast Checker 验证暗色模式所有 fill vs bg ≥ 4.5:1；3) accent='monochrome' 还原原灰色；4) sage/rose light+dark 渲染正确；5) 所有 accent × theme 下 user bubble 文字可读；6) screenshot diff 全量 25 张通过（阈值 < 0.5% 不适用，此任务生成新基线）；7) Core C1-C10 通过"
     },
@@ -242,13 +249,20 @@
       "title": "输入框体验 + 发送状态增强",
       "phase": "输入体验",
       "description": "MentionInput 最小高度从 72px 降为 44px（单行），MAX_HEIGHT 从 160px 升至 240px。用 ResizeObserver 替代 onInput→autoGrow 消除 1-frame 闪烁。始终 overflow-y: auto + scrollbar-gutter: stable。StreamFooter 发送按钮：空输入时 opacity 0.3 + disabled；有内容时变 --tint 色 + hover scale(1.02)；发送到 streaming 开始前变 loading spinner。添加 ↑ 键空输入框时调出最近用户消息编辑重发。拖拽文件到窗口任意位置显示全屏 drop zone overlay。",
-      "status": "pending",
+      "status": "done",
       "dependencies": ["FE-007"],
       "attentions": [
         "ResizeObserver 在 Tauri WebView 中需验证兼容性（WebKit 版本）",
         "scrollbar-gutter: stable 在部分 WebView 中可能不支持，需要 fallback",
         "↑ 键编辑最近消息需要从 store 中找到当前 chat 最后一条 role=user 的消息",
-        "全屏 drop zone 需要监听 document 级 dragenter/dragleave 事件，注意子元素冒泡问题"
+        "全屏 drop zone 需要监听 document 级 dragenter/dragleave 事件，注意子元素冒泡问题",
+        "[FE-009 结果] MentionInput CSS: min-height 44px, max-height 240px, padding 减小 (16px→12px top), overflow-y:auto + scrollbar-gutter:stable",
+        "[FE-009 结果] ResizeObserver 监听 textarea 尺寸变化触发 autoGrow，消除 input→resize 1-frame 闪烁",
+        "[FE-009 结果] 发送按钮三态：空=opacity 0.3+disabled; 有内容=tint色+hover:scale(1.02); sendPending=Loader2 spinner (streaming 开始后自动清除)",
+        "[FE-009 结果] ↑键: 输入框为空时按 ArrowUp 从 chat.stream 倒序查找最近 user message 填入编辑",
+        "[FE-009 结果] 全屏 drop zone: document 级 dragenter/dragleave/dragover/drop 监听，拖入文件显示 fixed overlay (z-9998) + pulse 动画",
+        "[FE-009 结果] MentionInput 新增 onContentChange + onRecallLastMessage props，不破坏现有 API",
+        "[FE-009 结果] 回归测试 22/23 pass (1 skipped)。Visual 25/25 pass。Build index=33.00KB gzip"
       ],
       "gate": "1) 空状态输入框为单行高度 44px；2) 输入多行文本无闪烁跳变（录屏逐帧验证）；3) 空输入时发送按钮不可点击且视觉降级；4) ↑ 键可调出最近消息；5) 拖拽文件到窗口任意位置显示 drop zone；6) Core C1/C3/C7 通过；7) screenshot diff 通过（输入框区域）"
     },
@@ -257,14 +271,25 @@
       "title": "Mention Popup 增强 + Fuzzy 匹配",
       "phase": "Mention 体验",
       "description": "MentionPopup 增强：空匹配显示'未找到 xxx'提示；选中项 scrollIntoView；使用 @floating-ui/react 替代手动定位。替换 includes() 为 fzf-style fuzzy scoring，匹配字符高亮。添加 / 触发 slash commands（/new, /clear, /model, /tools）、# 触发会话引用。Mention chip 添加 type icon 前缀，hover 可点击跳转，长路径智能截断。",
-      "status": "pending",
+      "status": "done",
       "dependencies": ["FE-009"],
       "attentions": [
         "新增 @floating-ui/react 依赖",
         "fuzzy scoring 需要轻量实现或引入 fzf-for-js / fuse.js",
         "slash commands 需要定义命令注册机制和执行逻辑",
         "# 会话引用需要从当前 agent 的 chatList 中搜索历史消息标题",
-        "三种触发符（@/#//）需要各自的 popup 分组样式和 icon"
+        "三种触发符（@/#//）需要各自的 popup 分组样式和 icon",
+        "[FE-010 结果] 新增 @floating-ui/react 0.27.19，单独 vendor-floating-ui chunk (12.21KB gzip)",
+        "[FE-010 结果] 自研 lib/fuzzy.ts 实现 fzf-style sequential fuzzy matching，支持连续匹配/词边界加分/大小写匹配加分",
+        "[FE-010 结果] MentionPopup 用 @floating-ui/react useFloating + flip + shift + offset 替代手动定位，四边自动翻转",
+        "[FE-010 结果] 空匹配时显示「未找到 xxx」提示 + Search icon",
+        "[FE-010 结果] 选中项 scrollIntoView({ block: nearest, behavior: smooth })",
+        "[FE-010 结果] fuzzy 匹配字符高亮：FuzzyHighlight 组件渲染命中字符为 tint 色 + bold",
+        "[FE-010 结果] / 触发 slash commands: /new, /clear, /model, /tools 四个命令",
+        "[FE-010 结果] # 触发会话引用：从 agentChats chatList 列出其他会话",
+        "[FE-010 结果] Mention chip 增强：type icon 前缀 + 长路径 truncatePath 智能截断 + hover title + hover brightness",
+        "[FE-010 结果] vite.config.ts 新增 @floating-ui manualChunks 规则避免 vendor-react 超限",
+        "[FE-010 结果] 回归测试 22/23 pass (1 skipped)。Visual 25/25 pass。Build max=75.00KB gzip (vendor-react), index=34.67KB gzip"
       ],
       "gate": "1) @ 无匹配时显示空状态提示；2) 选中项自动滚动可见；3) popup 在窗口四边均正确翻转（resize 测试）；4) fuzzy 输入时匹配字符高亮；5) / 触发命令菜单功能正常；6) 长路径 chip 截断 + hover title；7) Core C3 通过（发消息含 mention）；8) screenshot diff 通过（MentionPopup 场景）"
     },

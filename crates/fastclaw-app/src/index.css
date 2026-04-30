@@ -732,12 +732,34 @@
   }
 
   .mention-chip {
-    display: inline;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
     font-weight: 500;
     border-radius: 3px;
-    padding: 0;
-    border: none;
-    font-size: inherit;
+    padding: 1px 4px;
+    border: 0.5px solid;
+    font-size: 0.92em;
+    max-width: 200px;
+    vertical-align: baseline;
+    cursor: pointer;
+    transition: filter var(--duration-fast) var(--ease-out);
+  }
+
+  .mention-chip:hover {
+    filter: brightness(0.92);
+  }
+
+  .mention-chip-icon {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .mention-chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

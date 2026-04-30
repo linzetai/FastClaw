@@ -16,6 +16,9 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes("node_modules")) {
+            if (id.includes("@floating-ui")) {
+              return "vendor-floating-ui";
+            }
             if (id.includes("react-dom") || id.includes("/react/")) {
               return "vendor-react";
             }
