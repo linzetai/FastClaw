@@ -72,6 +72,8 @@ pub mod memory_selection;
 pub mod prompt_suggestion;
 #[allow(dead_code)]
 pub mod magic_docs;
+#[allow(dead_code)]
+pub mod file_persistence;
 mod session_memory;
 #[allow(dead_code)]
 mod stop_hooks;

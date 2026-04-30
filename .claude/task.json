@@ -1048,7 +1048,8 @@
             "写入 session SQLite 用于 resume",
             "4 个测试"
           ],
-          "status": "pending"
+          "status": "done",
+          "completion_notes": "Created file_persistence.rs with SessionFileTracker: record(path, op, tool_name), list_session_files(), change_summary() with +/~/- format, to_json()/from_json() for SQLite persistence. FileOp enum (Created/Modified/Deleted) with Display impl. Latest op wins for dedup. 4 tests covering record/list, dedup behavior, summary format, and JSON roundtrip."
         },
         {
           "id": "7D-06",
