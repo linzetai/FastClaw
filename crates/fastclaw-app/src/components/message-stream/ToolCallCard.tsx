@@ -89,7 +89,11 @@ function extractKeyInfo(tool: ToolCall): string | null {
     if (args.url) return args.url;
     if (args.directory || args.dir) return args.directory ?? args.dir;
     const keys = Object.keys(args);
-    if (keys.length === 1) return String(args[keys[0]]).slice(0, 120);
+    if (keys.length === 1) {
+      const val = args[keys[0]];
+      if (typeof val === "string") return val.slice(0, 120);
+      if (typeof val === "number" || typeof val === "boolean") return String(val);
+    }
   } catch {
     return tool.args.length < 120 ? tool.args : null;
   }
