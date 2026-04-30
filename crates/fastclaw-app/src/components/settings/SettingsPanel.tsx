@@ -1,14 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { Settings2, Box, Wrench, Server, Info, Search, Shield, Plug, X, RotateCcw } from "lucide-react";
-import { GeneralTab } from "./GeneralTab";
-import { ModelTab } from "./ModelTab";
-import { WebSearchTab } from "./WebSearchTab";
-import { SkillsTab } from "./SkillsTab";
-import { McpTab } from "./McpTab";
-import { SecurityTab } from "./SecurityTab";
-import { GatewayTab } from "./GatewayTab";
-import { AboutTab } from "./AboutTab";
-import { MigrationTab } from "./MigrationTab";
+
+const GeneralTab = lazy(() => import("./GeneralTab").then((m) => ({ default: m.GeneralTab })));
+const ModelTab = lazy(() => import("./ModelTab").then((m) => ({ default: m.ModelTab })));
+const WebSearchTab = lazy(() => import("./WebSearchTab").then((m) => ({ default: m.WebSearchTab })));
+const SkillsTab = lazy(() => import("./SkillsTab").then((m) => ({ default: m.SkillsTab })));
+const McpTab = lazy(() => import("./McpTab").then((m) => ({ default: m.McpTab })));
+const SecurityTab = lazy(() => import("./SecurityTab").then((m) => ({ default: m.SecurityTab })));
+const GatewayTab = lazy(() => import("./GatewayTab").then((m) => ({ default: m.GatewayTab })));
+const AboutTab = lazy(() => import("./AboutTab").then((m) => ({ default: m.AboutTab })));
+const MigrationTab = lazy(() => import("./MigrationTab").then((m) => ({ default: m.MigrationTab })));
 
 interface SettingsPanelProps {
   open: boolean;
@@ -85,15 +86,17 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto px-6 py-5">
-            {tab === "general" && <GeneralTab />}
-            {tab === "models" && <ModelTab />}
-            {tab === "web-search" && <WebSearchTab />}
-            {tab === "skills" && <SkillsTab />}
-            {tab === "mcp" && <McpTab />}
-            {tab === "security" && <SecurityTab />}
-            {tab === "gateway" && <GatewayTab />}
-            {tab === "migration" && <MigrationTab />}
-            {tab === "about" && <AboutTab />}
+            <Suspense fallback={<div className="h-full" style={{ background: "var(--bg-elevated)" }} />}>
+              {tab === "general" && <GeneralTab />}
+              {tab === "models" && <ModelTab />}
+              {tab === "web-search" && <WebSearchTab />}
+              {tab === "skills" && <SkillsTab />}
+              {tab === "mcp" && <McpTab />}
+              {tab === "security" && <SecurityTab />}
+              {tab === "gateway" && <GatewayTab />}
+              {tab === "migration" && <MigrationTab />}
+              {tab === "about" && <AboutTab />}
+            </Suspense>
           </div>
         </div>
       </div>

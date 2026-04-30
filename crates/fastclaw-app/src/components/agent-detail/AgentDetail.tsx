@@ -1,12 +1,14 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, lazy, Suspense } from "react";
 import { useAgentStore } from "../../lib/agent-store";
 import { X, Camera } from "lucide-react";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
 import { useAvatarUrl, loadAvatarBlobUrl } from "../../lib/use-avatar-url";
-import { ChatsTab } from "./AgentChatsTab";
-import { CronTab } from "./AgentCronTab";
-import { AgentConfigForm, type ConfigSection } from "./AgentConfigForm";
+import type { ConfigSection } from "./AgentConfigForm";
+
+const ChatsTab = lazy(() => import("./AgentChatsTab").then((m) => ({ default: m.ChatsTab })));
+const CronTab = lazy(() => import("./AgentCronTab").then((m) => ({ default: m.CronTab })));
+const AgentConfigForm = lazy(() => import("./AgentConfigForm").then((m) => ({ default: m.AgentConfigForm })));
 
 export interface AgentDetailProps {
   open: boolean;
@@ -120,9 +122,11 @@ export function AgentDetail({ open, onClose, agentName, agentInitial, agentColor
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {tab === "chats" ? <ChatsTab /> : tab === "cron" ? <CronTab key={`cron-${activeAgentId}`} /> : (
-          <AgentConfigForm key={activeAgentId} section={tab} />
-        )}
+        <Suspense fallback={<div className="h-full" style={{ background: "var(--bg-secondary)" }} />}>
+          {tab === "chats" ? <ChatsTab /> : tab === "cron" ? <CronTab key={`cron-${activeAgentId}`} /> : (
+            <AgentConfigForm key={activeAgentId} section={tab} />
+          )}
+        </Suspense>
       </div>
     </aside>
   );

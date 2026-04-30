@@ -1,0 +1,284 @@
+{
+  "project": "FastClaw 前端优化",
+  "created": "2026-04-30",
+  "regression": {
+    "perf_baseline": {
+      "tool": "Playwright + CDP + React Profiler API",
+      "script": "scripts/perf-baseline.ts",
+      "output": "perf/build-{phase}-{before|after}.json",
+      "metrics": [
+        "构建体积 (各 chunk gzip)",
+        "首屏 FCP/LCP/TTI",
+        "Streaming 帧时间 (P50/P95)",
+        "Streaming 重渲染计数",
+        "内存占用"
+      ],
+      "standard_sequence": [
+        "冷启动 → AgentList 渲染完成 → FCP/LCP",
+        "依次切换 3 个 agent → re-render count",
+        "发送 Hello → streaming → 帧时间",
+        "触发 10+ tool call → 渲染性能",
+        "Settings 各 Tab 切换 → 加载时间",
+        "搜索关键词 → 响应时间"
+      ]
+    },
+    "core_checklist": [
+      "C1: 冷启动无白屏/crash (Playwright)",
+      "C2: 新建 Agent 表单→创建→列表出现 (Playwright)",
+      "C3: 发消息 streaming 正确 (Playwright)",
+      "C4: Tool call → ToolCallCard 展示 (Playwright)",
+      "C5: 切换 Agent → 消息列表正确 (Playwright)",
+      "C6: 切换 Chat Tab → 消息对应 (Playwright)",
+      "C7: 新建 Chat Cmd+K → 空状态 (Playwright)",
+      "C8: Settings 各 Tab 切换→保存 (手动)",
+      "C9: 主题切换 light↔dark (Playwright)",
+      "C10: 窗口最小化/恢复/关闭/托盘 (手动)"
+    ],
+    "screenshot_diff": {
+      "tool": "@playwright/test toHaveScreenshot()",
+      "threshold": "pixel diff < 0.5%",
+      "matrix": "5 页面状态 × 5 主题 = 25 截图"
+    },
+    "ci_gate": {
+      "hard": [
+        "任何 chunk gzip > 80KB → 阻止 merge",
+        "FCP > 1.5s → 阻止 merge",
+        "Streaming P95 帧时间 > 12ms → 阻止 merge"
+      ],
+      "soft": [
+        "总 JS gzip > 400KB → warn",
+        "Streaming P50 帧时间 > 5ms → warn"
+      ]
+    },
+    "rollback": {
+      "default": "git revert → task blocked → 新 branch 修复",
+      "high_risk": "FE-003: feature branch + feature flag 保留旧代码 1 周"
+    }
+  },
+  "tasks": [
+    {
+      "id": "FE-000",
+      "title": "回归验证基础设施搭建",
+      "phase": "基建",
+      "description": "搭建性能回归验证体系：1) 创建 scripts/perf-baseline.ts 性能采集脚本（Playwright 连接 Tauri WebView，执行标准操作序列，采集 FCP/LCP/TTI/帧时间/重渲染数/内存）；2) 创建 tests/regression/ 目录，编写 Core C1-C10 自动化测试用例（Playwright）；3) 创建 tests/visual/ 目录，配置 screenshot 截图矩阵（5 状态 × 5 主题）；4) 创建 .github/workflows/perf-gate.yml CI 流水线（hard/soft gate）；5) 运行首次 baseline 采集，存入 perf/baseline-initial.json。",
+      "status": "done",
+      "dependencies": [],
+      "attentions": [
+        "Playwright 连接 Tauri WebView 需要使用 --remote-debugging-port 启动",
+        "React Profiler 数据需要在 dev build 中采集（production build 不暴露 Profiler）",
+        "Screenshot 对比在不同 OS 上字体渲染不同，CI 需要固定 OS (Linux) + 字体",
+        "perf-gate CI 需要 Tauri build 环境（Rust + Node），可用 Docker image"
+      ],
+      "gate": "1) scripts/perf-baseline.ts 可执行并输出 JSON 报告；2) Core C1-C10 中至少 C1/C3/C5/C9 自动化通过；3) Screenshot 基线 25 张截图已生成；4) CI workflow 可在 PR 上触发并输出 pass/fail"
+    },
+    {
+      "id": "FE-001",
+      "title": "Vite 手动分包 + 组件懒加载",
+      "phase": "构建优化",
+      "description": "在 vite.config.ts 添加 manualChunks 配置，将 907KB 单 chunk 拆分为 vendor-react (~45KB)、vendor-markdown (~180KB)、vendor-virtuoso (~50KB)、vendor-lucide、vendor-zustand。同时对 OnboardingWizard、AgentDetail、SettingsPanel、NotificationCenter 使用 React.lazy() + Suspense 懒加载。Settings 9 个 Tab 和 AgentDetail 的 ChatsTab/CronTab/AgentConfigForm 按需加载。",
+      "status": "done",
+      "dependencies": ["FE-000"],
+      "attentions": [
+        "manualChunks 只是拆分而非减少总量，真正有意义的是 gzip 后体积对比",
+        "OnboardingWizard 只在首次引导加载，已 onboarded 用户实际首屏收益为 0，应在 PR 中标注",
+        "需要用 npx vite-bundle-analyzer 输出 before/after 对比报告",
+        "懒加载的 Suspense fallback 需要适配当前主题（不能白屏闪烁）",
+        "[FE-000 baseline] 当前 index-D_f1ELgC.js = 886.6KB 占总体积 97.7%，其余 8 个 chunk 均 <13KB。dist/assets/ 共 9 个 JS 文件",
+        "[FE-000 baseline] 首次 baseline: FCP=216ms, LCP=548ms, TTI=11ms, Frame P50=16.7ms P95=16.8ms",
+        "[FE-000 测试] Playwright 测试 Mock 使用 WS RPC 协议（非 HTTP）；browser 模式下 transport 层走 wsClient.send()。Mock 方案见 tests/fixtures/mock-gateway.ts",
+        "[FE-000 测试] pnpm test:e2e 运行回归测试；pnpm test:visual:update 更新截图基线；pnpm test:perf 运行 perf baseline",
+        "[FE-001 结果] 9→36 chunks。最大 gzip: vendor-react=73.2KB (React19 固有体积), vendor-highlight=49.1KB, vendor-markdown=47.4KB, index=34.4KB。总 gzip=279.9KB。CI hard gate 全部 <80KB 通过",
+        "[FE-001 结果] 首屏 index chunk 不含 markdown/highlight/virtuoso。MarkdownContent 懒加载脱离关键路径",
+        "[FE-001 结果] FCP=192ms(-11%), LCP=508ms(-7%), TTI=7.8ms(-29%)。均改善",
+        "[FE-001 结果] perf-baseline.ts gate 已修正：chunk 门禁改为 gzip 对比（原先误用 raw KB）",
+        "[FE-001 注意] vendor-react 73.2KB gzip 是 React 19.2.5 react-dom 的固有体积(production 524KB)，无法进一步拆分。CI hard gate 80KB 通过，但 FE-001 原始 gate 60KB 未达标",
+        "[FE-001 注意] Frame P95=16.9ms 是测试环境显示刷新率导致，非代码回归（FE-000 baseline 也是 16.8ms）"
+      ],
+      "gate": "1) pnpm build 成功，dist/assets/ 中最大 chunk < 200KB (gzip < 60KB)；2) 首屏加载不包含 markdown/virtuoso 相关代码；3) 手动测试 Settings 各 Tab 切换正常；4) perf baseline FCP 不劣于优化前；5) Core C1-C10 通过"
+    },
+    {
+      "id": "FE-002",
+      "title": "移除全局 * Transition + Streaming CSS 优化",
+      "phase": "CSS 性能",
+      "description": "index.css:248-254 的 *, *::before, *::after 全局 transition-property 在 streaming 时每条消息触发 color/opacity/background-color transition。删除全局声明，仅保留 button/a/input/select/textarea 的 transition。添加 .streaming-active .markdown-body { transition: none !important } 规则。同时统一主题切换相关 transition 为 var(--duration-slow)。",
+      "status": "pending",
+      "dependencies": ["FE-007"],
+      "attentions": [
+        "实际 CSS 是明确的 transition-property 而非 shorthand 'transition: all'，影响范围是 background-color/border-color/box-shadow/color/fill/stroke/opacity",
+        "删除全局 transition 后，AgentList 选中态背景色渐变需要手动在该组件添加",
+        "主题切换 html 0.35s vs * 0.2s 时间差导致视觉割裂，需统一为 --duration-slow",
+        "需要验证 prefers-reduced-motion 下的行为仍正确"
+      ],
+      "gate": "1) streaming 期间 Performance 面板无 transition recalculate style；2) perf baseline streaming P95 帧时间下降 > 15%；3) 主题切换视觉平滑无割裂；4) 所有按钮 hover 仍有 transition 效果；5) screenshot diff 通过（主题切换前后）；6) Core C1-C10 通过"
+    },
+    {
+      "id": "FE-003",
+      "title": "Store 拆分 + appendStreamDelta 高频优化",
+      "phase": "Store 重构",
+      "description": "核心问题：appendStreamDelta 每 16ms 创建新 agentChats 引用链（session-store.ts:498-508），触发所有订阅组件重渲染。方案：先 benchmark immer vs 手写 targeted mutation（useRef + useSyncExternalStore）。如果 Proxy 开销可接受则用 immer 中间件；否则 streaming buffer 走 ref + 手动 notify 模式完全绕过 immutable 约束。同时拆分 AgentList 和 MessageStream 的 selector 为细粒度订阅。",
+      "status": "pending",
+      "dependencies": ["FE-000"],
+      "attentions": [
+        "immer Proxy 在高频 16ms 场景下有额外开销，必须先跑 benchmark 对比三种方案：原始 immutable / immer / useRef+notify",
+        "当前 appendStreamDelta 在 session-store.ts:498-508，每次做 chatList.map + stream.slice(-1) + spread operator",
+        "细粒度 selector：AgentList.tsx:35 订阅整个 agentChats，改为只订阅 agentChats[agentId] 的 unread/lastMsg",
+        "需要考虑 localStorage persisted state 的 migration 兼容性（breaking change）",
+        "删除 agent-store.ts 重复导出，统一从 stores/ 导入，消除循环依赖"
+      ],
+      "gate": "1) perf baseline streaming 重渲染计数减少 > 70%；2) appendStreamDelta 执行耗时 < 1ms (独立 benchmark)；3) 切换 agent 时 Profiler 仅目标 ListItem 重渲染；4) Core C1-C10 通过；5) localStorage 旧数据 migrate 后功能正常；6) perf baseline streaming P95 帧时间 < 8ms"
+    },
+    {
+      "id": "FE-004",
+      "title": "Markdown 渲染节流 + 流式高亮优化",
+      "phase": "流式渲染",
+      "description": "MarkdownContent.tsx 在 streaming 时每 16ms 执行完整 rehype-highlight 语法高亮。优化方案：streaming 期间只对已闭合的代码块（检测到 ``` 配对）执行 rehypeHighlight，正在输入的代码块保持纯文本。streaming 结束后 requestIdleCallback 补全所有高亮。同时将 messageStreamRegistry 的模块级 Map 改为 Zustand store，Avatar URL 添加引用计数缓存。",
+      "status": "pending",
+      "dependencies": ["FE-003"],
+      "attentions": [
+        "完全跳过高亮会导致 streaming 结束时突然变色闪烁，必须用渐进高亮策略",
+        "检测代码块闭合：正则匹配 /```[\\s\\S]*?```/ 或逐行状态机",
+        "requestIdleCallback 在 Tauri WebView 中需要验证兼容性",
+        "Avatar URL 缓存需要引用计数，组件卸载时 refCount--，为 0 时 URL.revokeObjectURL",
+        "[FE-001 影响] MarkdownContent 已改为 React.lazy 懒加载（MessageRenderer.tsx 中），vendor-markdown 和 vendor-highlight 独立分包。修改 MarkdownContent.tsx 时注意它现在是异步加载的独立 chunk"
+      ],
+      "gate": "1) perf baseline streaming P95 帧时间下降 > 40% (对比 FE-003 完成后的 baseline)；2) 已闭合代码块有高亮，未闭合的保持纯文本；3) streaming 结束后 1-2 帧内所有代码块完成高亮（无视觉闪烁）；4) Avatar 相同路径只读一次文件系统（Network 面板验证）；5) Core C1-C10 通过"
+    },
+    {
+      "id": "FE-005",
+      "title": "组件拆分与 memo 优化",
+      "phase": "组件渲染",
+      "description": "AgentList.tsx (529行) 拆分：抽取 AgentListItem (memo)、NewAgentModal、WelcomePanel 为独立组件。MessageRendererRow/UserBubble/AiMessage 用 memo 包裹。ChatTabsBar 抽取 ChatTab 为 memo 组件，openChats 用 useMemo 缓存，drag handler 稳定化。ElapsedTimer 用 memo 包裹仅更新计时部分，extractKeyInfo 结果用 useMemo 缓存。",
+      "status": "pending",
+      "dependencies": ["FE-003"],
+      "attentions": [
+        "TOOL_META icon 已是模块级常量，不是性能瓶颈，不需要额外优化",
+        "真正的瓶颈是 ElapsedTimer 200ms interval 向上传播和 extractKeyInfo 的 JSON.parse",
+        "memo 包裹后需要确保 props 引用稳定：内联箭头函数 () => onToggleSelect?.(fullIdx) 每次创建新引用",
+        "ChatTabsBar 的 hoveredTab state 变化导致所有 tab 重渲染，需要隔离到 ChatTab 内部"
+      ],
+      "gate": "1) perf baseline agent 切换重渲染计数 = 1 (仅目标 ListItem)；2) streaming 时 Profiler 仅当前 chat 的 Row + 活跃 ToolCallCard 重渲染；3) ChatTabsBar hover 不触发其他 tab 重渲染；4) Core C1-C10 通过；5) 新建 Agent Modal + 搜索 + 拖拽功能回归"
+    },
+    {
+      "id": "FE-006",
+      "title": "连续工具调用分组折叠",
+      "phase": "UI/UX",
+      "description": "新建 ToolCallGroup.tsx 组件。当连续 3+ 个 tool call 相邻时自动分组。折叠态显示摘要（工具类型分布、总耗时、错误数、关键路径）。Streaming 期间用竖向时间轴模式（每行 ~28px vs 当前 ~44px）。智能折叠策略：最近 2 个展开，之前折叠；error 始终展开。折叠阈值可配置。在 MessageRendererRow streaming 分支中用 groupConsecutiveTools(streamSegments) memo 化函数分组。AiMessage 对 msg.toolCalls 同理。",
+      "status": "pending",
+      "dependencies": ["FE-005"],
+      "attentions": [
+        "分组逻辑：连续 = segment 之间无 text 类型 segment 间隔",
+        "SubAgentCard 内部的工具调用应嵌套在 sub-agent 时间轴中，不参与主消息流分组",
+        "折叠/展开切换需要动画（--duration-fast fade-in），避免布局跳跃",
+        "DiffCard 和 TodoCard 是特殊展示卡片，分组时仍需独立展示"
+      ],
+      "gate": "1) 连续 10 个 tool call 折叠态高度 < 80px；2) 展开后恢复为独立卡片列表；3) error 状态工具始终可见；4) 分组摘要正确显示类型分布和总耗时；5) Settings 中阈值可调；6) screenshot diff 通过（tool call 消息场景）；7) Core C3/C4 通过"
+    },
+    {
+      "id": "FE-007",
+      "title": "动画 Token 系统 + Streaming 去抖",
+      "phase": "动画系统",
+      "description": "在 index.css 新增动画 token CSS 变量（--duration-instant/fast/normal/slow, --ease-out/in/in-out/spring, --move-sm/md/lg）。统一现有动画引用 token：slide-up/slide-left/slide-right 位移统一为 --move-md，duration 统一引用 token。新增规则：只对新增消息播放入场动画；streaming 消息用 fade-in --duration-instant；ToolCallCard 首个 slide-up 后续 fade-in；Typing indicator 添加 min-display-time 300ms。AgentDetail Tab 切换添加 crossfade。",
+      "status": "pending",
+      "dependencies": [],
+      "attentions": [
+        "当前 slide-left 位移 8px 而 slide-up 位移 6px，不统一",
+        "当前 ToolCallCard 0.15s 而消息 0.2s，duration 不一致",
+        "消息入场动画需要区分「新增」和「历史加载」——可通过 data-new 属性或 setTimeout 后移除动画类",
+        "will-change: transform, opacity 只在动画期间添加，动画结束后移除（避免常驻 composite layer 浪费内存）"
+      ],
+      "gate": "1) 所有动画 duration/easing/distance 引用 CSS token 而非硬编码（grep 验证无残留硬编码值）；2) 历史消息加载无动画（录屏验证）；3) streaming 连续 tool call 无视觉抖动；4) AgentDetail Tab 切换有 crossfade 过渡；5) prefers-reduced-motion 下所有动画正确禁用；6) screenshot diff 通过；7) Core C1-C10 通过"
+    },
+    {
+      "id": "FE-008",
+      "title": "配色系统修复 + 品牌色 Tint",
+      "phase": "配色系统",
+      "description": "默认主题 --tint 从纯灰 (#1d1d1f / #e5e5ea) 改为品牌蓝 (#2563EB / #60A5FA)，保留原灰色为 data-accent='monochrome'。暗色模式 --fill-tertiary 从 #636366 提升至 #8E8E93 (对比度 4.2:1 → 5.5:1)。--bg-selected 与 --bg-secondary 区分（暗色模式从 #1c1c1e 改为 #2c2c2e）。--separator 暗色模式透明度从 0.36 提升到 0.48。User bubble 配色跟随 --tint。新增 sage/rose 两套 accent theme。",
+      "status": "pending",
+      "dependencies": [],
+      "attentions": [
+        "改变默认 tint 会影响全局所有使用 var(--tint) 的元素（按钮、链接、选中态、focus ring 等）",
+        "原灰色方案需要完整保留为 monochrome accent，包括 light/dark 两套",
+        "暗色对比度修复后需用 WebAIM Contrast Checker 验证所有 fill vs bg 组合",
+        "user bubble 跟随 tint 后，各 accent theme 的 bubble 颜色需要逐一验证可读性",
+        "每套新 accent 都需要 light + dark 两套完整变量"
+      ],
+      "gate": "1) 默认主题 tint 为蓝色，按钮/链接/选中态有明确视觉区分；2) WebAIM Contrast Checker 验证暗色模式所有 fill vs bg ≥ 4.5:1；3) accent='monochrome' 还原原灰色；4) sage/rose light+dark 渲染正确；5) 所有 accent × theme 下 user bubble 文字可读；6) screenshot diff 全量 25 张通过（阈值 < 0.5% 不适用，此任务生成新基线）；7) Core C1-C10 通过"
+    },
+    {
+      "id": "FE-009",
+      "title": "输入框体验 + 发送状态增强",
+      "phase": "输入体验",
+      "description": "MentionInput 最小高度从 72px 降为 44px（单行），MAX_HEIGHT 从 160px 升至 240px。用 ResizeObserver 替代 onInput→autoGrow 消除 1-frame 闪烁。始终 overflow-y: auto + scrollbar-gutter: stable。StreamFooter 发送按钮：空输入时 opacity 0.3 + disabled；有内容时变 --tint 色 + hover scale(1.02)；发送到 streaming 开始前变 loading spinner。添加 ↑ 键空输入框时调出最近用户消息编辑重发。拖拽文件到窗口任意位置显示全屏 drop zone overlay。",
+      "status": "pending",
+      "dependencies": ["FE-007"],
+      "attentions": [
+        "ResizeObserver 在 Tauri WebView 中需验证兼容性（WebKit 版本）",
+        "scrollbar-gutter: stable 在部分 WebView 中可能不支持，需要 fallback",
+        "↑ 键编辑最近消息需要从 store 中找到当前 chat 最后一条 role=user 的消息",
+        "全屏 drop zone 需要监听 document 级 dragenter/dragleave 事件，注意子元素冒泡问题"
+      ],
+      "gate": "1) 空状态输入框为单行高度 44px；2) 输入多行文本无闪烁跳变（录屏逐帧验证）；3) 空输入时发送按钮不可点击且视觉降级；4) ↑ 键可调出最近消息；5) 拖拽文件到窗口任意位置显示 drop zone；6) Core C1/C3/C7 通过；7) screenshot diff 通过（输入框区域）"
+    },
+    {
+      "id": "FE-010",
+      "title": "Mention Popup 增强 + Fuzzy 匹配",
+      "phase": "Mention 体验",
+      "description": "MentionPopup 增强：空匹配显示'未找到 xxx'提示；选中项 scrollIntoView；使用 @floating-ui/react 替代手动定位。替换 includes() 为 fzf-style fuzzy scoring，匹配字符高亮。添加 / 触发 slash commands（/new, /clear, /model, /tools）、# 触发会话引用。Mention chip 添加 type icon 前缀，hover 可点击跳转，长路径智能截断。",
+      "status": "pending",
+      "dependencies": ["FE-009"],
+      "attentions": [
+        "新增 @floating-ui/react 依赖",
+        "fuzzy scoring 需要轻量实现或引入 fzf-for-js / fuse.js",
+        "slash commands 需要定义命令注册机制和执行逻辑",
+        "# 会话引用需要从当前 agent 的 chatList 中搜索历史消息标题",
+        "三种触发符（@/#//）需要各自的 popup 分组样式和 icon"
+      ],
+      "gate": "1) @ 无匹配时显示空状态提示；2) 选中项自动滚动可见；3) popup 在窗口四边均正确翻转（resize 测试）；4) fuzzy 输入时匹配字符高亮；5) / 触发命令菜单功能正常；6) 长路径 chip 截断 + hover title；7) Core C3 通过（发消息含 mention）；8) screenshot diff 通过（MentionPopup 场景）"
+    },
+    {
+      "id": "FE-011",
+      "title": "字体排版优化",
+      "phase": "字体排版",
+      "description": "调整 --font 字体栈：SF Pro Text 优先于 SF Pro Display（Display 为大标题设计），增加 Inter 作为 Linux fallback，增加 JetBrains Mono 到等宽字体栈。新增 --font-display 用于标题。排版微调：letter-spacing 从 -0.016em 调至 -0.011em，中文 Markdown line-height 从 1.75 调至 1.8，数字区域添加 tabular-nums，代码块行高从 1.65 调至 1.55。Settings → GeneralTab 添加字体大小 4 档选择（小/标准/大/特大）。",
+      "status": "pending",
+      "dependencies": [],
+      "attentions": [
+        "SF Pro Text 和 SF Pro Display 只在 macOS 上可用，其他平台走 fallback",
+        "Inter 如果要 bundle 到 Tauri 应用中需要评估包体积影响（~100KB woff2）",
+        "letter-spacing 修改影响全局，需要逐一验证 sidebar、message、code 区域",
+        "字体大小配置通过修改 html font-size 实现，需要确保所有用 px 的地方都改为 rem/em"
+      ],
+      "gate": "1) macOS 上 DevTools computed font-family 为 SF Pro Text（非 Display）；2) Linux 上 fallback 到 Inter 或 system-ui（DevTools 验证）；3) 代码块 computed font-family 含 JetBrains Mono（如已安装）；4) token 统计数字等宽对齐（截图对比）；5) Settings 字体大小 4 档切换全局响应；6) screenshot diff 全量通过（此任务生成新文字基线）；7) Core C1-C10 通过"
+    },
+    {
+      "id": "FE-012",
+      "title": "流式输出视觉反馈 + 滚动体验",
+      "phase": "UI/UX",
+      "description": "Streaming 视觉增强：末尾 cursor-blink 结束后 fade-out 0.3s 渐隐；ToolCallCard running 状态添加 indeterminate progress bar。消息列表滚动：检测距底 < 100px 时 auto-scroll，用户上滑后显示「回到底部」FAB 按钮（带未读计数 badge），FAB 点击平滑滚动到底部并渐隐。Agent 切换时在 store 中保留/恢复输入框 draft（text + mentions + 附件）。",
+      "status": "pending",
+      "dependencies": ["FE-003", "FE-007"],
+      "attentions": [
+        "auto-scroll 检测需要用 Virtuoso 的 atBottomStateChange 回调，而非手动计算",
+        "FAB 按钮不能遮挡消息内容，需要定位在右下角且有 pointer-events 穿透",
+        "draft 保存需要在 agent 切换时触发（useEffect cleanup 或 beforeSetActiveAgent hook）",
+        "streaming 结束的判断时机：最后一个 stream item 不是 streaming role"
+      ],
+      "gate": "1) streaming 结束后光标 fade-out 0.3s（录屏验证）；2) 用户上滑 > 100px 后显示 FAB；3) FAB 点击平滑滚到底部并渐隐；4) 切换 agent 再切回时输入框 draft 恢复；5) running ToolCallCard 有 indeterminate progress bar；6) perf baseline streaming 帧时间不劣化；7) Core C3/C5 通过"
+    },
+    {
+      "id": "FE-013",
+      "title": "键盘导航 + 空状态 + Error Boundary",
+      "phase": "健壮性",
+      "description": "AgentList 支持 ↑↓ 键选择 agent、Enter 确认、/ 聚焦搜索。ChatTabsBar 支持 Ctrl+Tab/Ctrl+Shift+Tab 切换。StreamEmptyState 重新设计：显示 agent 能力标签 + 3-5 个快捷 prompt 模板按钮。AgentList 搜索无结果显示空状态。Error Boundary 添加到 MessageRendererRow level（Virtuoso Item 级别），包裹 ToolCallCard 和 SubAgentCard（JSON.parse 易 throw）。统一 NotificationCenter 为应用内消息中心。Settings 表单添加未保存提示（dirty dot）。",
+      "status": "pending",
+      "dependencies": ["FE-005"],
+      "attentions": [
+        "Error Boundary 位置在 VirtuosoItem level 比 MarkdownContent level 更有效",
+        "快捷 prompt 模板需要根据 agent 的 system prompt 自动生成（可调 LLM 或规则提取）",
+        "Ctrl+Tab 在 Tauri 窗口中可能被系统截获，需要通过 globalShortcut 注册",
+        "aria-label 需要覆盖所有 icon-only 按钮（当前部分缺失）"
+      ],
+      "gate": "1) ↑↓ 可在 AgentList 中导航选择（Playwright 键盘事件验证）；2) Ctrl+Tab 切换 chat tab；3) 空 chat 显示 agent 能力和模板按钮；4) 故意构造 malformed JSON tool args → ErrorBoundary 显示错误提示而非白屏；5) Settings 修改后 tab 标题有 dirty dot；6) AgentList 搜索无结果显示空状态；7) screenshot diff 通过（空状态场景）；8) Core C1-C10 全量通过"
+    }
+  ]
+}

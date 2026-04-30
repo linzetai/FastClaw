@@ -1,12 +1,15 @@
-import { useState, useEffect, useCallback, type MouseEvent as RME } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense, type MouseEvent as RME } from "react";
 import { useThemeStore, type ThemeMode } from "../../lib/theme";
 import { useGatewayStore } from "../../lib/store";
-import { SettingsPanel } from "../settings/SettingsPanel";
 import { NotificationCenter } from "../notification/NotificationCenter";
 import { NotificationDetailPanel } from "../notification/NotificationDetailPanel";
 import { Sun, Moon, Monitor, Settings, Minus, Square, Maximize2, X } from "lucide-react";
 import { ClawIcon } from "./ClawIcon";
 import type { AppNotification } from "../../lib/transport";
+
+const SettingsPanel = lazy(() =>
+  import("../settings/SettingsPanel").then((m) => ({ default: m.SettingsPanel })),
+);
 
 const isTauri =
   typeof window !== "undefined" &&
@@ -140,7 +143,11 @@ export function TitleBar() {
 
   return (
     <>
-      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        </Suspense>
+      )}
       {detailNotification && (
         <NotificationDetailPanel
           notification={detailNotification}

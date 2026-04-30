@@ -1,8 +1,11 @@
-import { useMemo, useState, useRef, useCallback, useEffect } from "react";
+import { useMemo, useState, useRef, useCallback, useEffect, lazy, Suspense } from "react";
 import type { ChatMessage, ChatUsage, SubAgentRunUI } from "../../lib/agent-store";
-import { MarkdownContent } from "./MarkdownContent";
 import { ToolCallCard } from "./ToolCallCard";
 import { SubAgentCard } from "./SubAgentCard";
+
+const MarkdownContent = lazy(() =>
+  import("./MarkdownContent").then((m) => ({ default: m.MarkdownContent })),
+);
 import {
   Clock, ArrowUpRight, ArrowDownRight, Copy, Check,
 } from "lucide-react";
@@ -153,7 +156,9 @@ function AiMessage({ msg, usage, copyable, selected, onToggleSelect }: { msg: Ch
           ))}
         </div>
       )}
-      <MarkdownContent content={msg.content} />
+      <Suspense fallback={<div className="animate-pulse rounded py-2" style={{ background: "var(--bg-tertiary)", height: 20 }} />}>
+        <MarkdownContent content={msg.content} />
+      </Suspense>
       <div className="mt-1 flex items-center gap-2.5 text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
         <span>{ts(msg.timestamp)}</span>
         {usage && (
@@ -466,7 +471,9 @@ export function MessageRendererRow({
             const isLast = si === streamSegments.length - 1;
             return (
               <div key={seg.id} className="pb-1" style={{ maxWidth: "75%" }}>
-                <MarkdownContent content={seg.content} />
+                <Suspense fallback={<div className="animate-pulse rounded py-1" style={{ background: "var(--bg-tertiary)", height: 16 }} />}>
+                  <MarkdownContent content={seg.content} />
+                </Suspense>
                 {isLast && (
                   <span
                     className="ml-0.5 inline-block h-[16px] w-[2px] translate-y-[3px] rounded-full"

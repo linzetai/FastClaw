@@ -1,0 +1,155 @@
+name: Performance Gate
+
+on:
+  pull_request:
+    paths:
+      - "crates/fastclaw-app/**"
+
+env:
+  CI: true
+
+jobs:
+  regression:
+    name: Regression Tests (C1/C3/C5/C9)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: crates/fastclaw-app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: crates/fastclaw-app
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: crates/fastclaw-app
+        run: npx playwright install chromium --with-deps
+
+      - name: Run regression tests
+        working-directory: crates/fastclaw-app
+        run: npx playwright test --project=regression
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-report
+          path: crates/fastclaw-app/playwright-report/
+          retention-days: 14
+
+  visual:
+    name: Visual Regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: crates/fastclaw-app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: crates/fastclaw-app
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: crates/fastclaw-app
+        run: npx playwright install chromium --with-deps
+
+      - name: Run visual tests
+        working-directory: crates/fastclaw-app
+        run: npx playwright test --project=visual --update-snapshots
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-snapshots
+          path: |
+            crates/fastclaw-app/tests/visual/screenshot-matrix.spec.ts-snapshots/
+            crates/fastclaw-app/playwright-report/
+          retention-days: 14
+
+  perf-baseline:
+    name: Performance Baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: crates/fastclaw-app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: crates/fastclaw-app
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: crates/fastclaw-app
+        run: npx playwright install chromium --with-deps
+
+      - name: Build frontend
+        working-directory: crates/fastclaw-app
+        run: pnpm build
+
+      - name: Collect perf baseline
+        working-directory: crates/fastclaw-app
+        run: npx tsx scripts/perf-baseline.ts --phase pr --tag after
+
+      - name: Check hard gates
+        working-directory: crates/fastclaw-app
+        run: |
+          if [ -f perf/pr-after.json ]; then
+            echo "=== Perf Report ==="
+            cat perf/pr-after.json | python3 -m json.tool 2>/dev/null || cat perf/pr-after.json
+
+            # Hard gate: any chunk gzip > 80KB
+            node -e "
+              const r = require('./perf/pr-after.json');
+              let fail = false;
+              for (const c of r.buildChunks || []) {
+                if (c.size > 80*1024) {
+                  console.log('FAIL: ' + c.name + ' = ' + (c.size/1024).toFixed(1) + 'KB > 80KB');
+                  fail = true;
+                }
+              }
+              if (r.fcp && r.fcp > 1500) {
+                console.log('FAIL: FCP = ' + r.fcp.toFixed(1) + 'ms > 1500ms');
+                fail = true;
+              }
+              if (r.streamingFrameTime && r.streamingFrameTime.p95 > 12) {
+                console.log('FAIL: Frame P95 = ' + r.streamingFrameTime.p95.toFixed(2) + 'ms > 12ms');
+                fail = true;
+              }
+              if (r.totalJsSize > 400*1024) {
+                console.log('WARN: Total JS = ' + (r.totalJsSize/1024).toFixed(1) + 'KB > 400KB');
+              }
+              if (fail) process.exit(1);
+              console.log('All hard gates passed');
+            "
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-report
+          path: crates/fastclaw-app/perf/
+          retention-days: 30

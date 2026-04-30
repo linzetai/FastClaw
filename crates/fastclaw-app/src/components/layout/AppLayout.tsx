@@ -1,14 +1,19 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { useGatewayStore } from "../../lib/store";
 import { useAgentStore } from "../../lib/agent-store";
 import { AgentList } from "../agent-list/AgentList";
-import { AgentDetail } from "../agent-detail/AgentDetail";
 import { MessageStream } from "../message-stream/MessageStream";
 import { TitleBar } from "./TitleBar";
 import { ClawIcon } from "./ClawIcon";
 import { UpdateBanner } from "./UpdateBanner";
-import { OnboardingWizard } from "../onboarding/OnboardingWizard";
 import * as api from "../../lib/api";
+
+const OnboardingWizard = lazy(() =>
+  import("../onboarding/OnboardingWizard").then((m) => ({ default: m.OnboardingWizard })),
+);
+const AgentDetail = lazy(() =>
+  import("../agent-detail/AgentDetail").then((m) => ({ default: m.AgentDetail })),
+);
 
 function Loading({ error }: { error: string | null }) {
   return (
@@ -92,7 +97,9 @@ export function AppLayout() {
     return (
       <div className="flex h-full flex-col" style={{ background: "var(--bg-primary)" }}>
         <TitleBar />
-        <OnboardingWizard onComplete={handleOnboardingComplete} />
+        <Suspense fallback={<div className="flex-1" style={{ background: "var(--bg-primary)" }} />}>
+          <OnboardingWizard onComplete={handleOnboardingComplete} />
+        </Suspense>
       </div>
     );
   }
@@ -120,13 +127,15 @@ export function AppLayout() {
             </div>
           )}
         </main>
-        <AgentDetail
-          open={detailOpen}
-          onClose={closeDetail}
-          agentName={activeAgent.name}
-          agentInitial={activeAgent.initial}
-          agentColor={activeAgent.color}
-        />
+        <Suspense fallback={null}>
+          <AgentDetail
+            open={detailOpen}
+            onClose={closeDetail}
+            agentName={activeAgent.name}
+            agentInitial={activeAgent.initial}
+            agentColor={activeAgent.color}
+          />
+        </Suspense>
       </div>
     </div>
   );
