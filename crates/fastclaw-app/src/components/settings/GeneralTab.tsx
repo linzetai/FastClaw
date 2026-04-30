@@ -4,6 +4,7 @@ import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
 import { SectionTitle, SettingRow, Toggle, ThemeCard } from "./SettingsShared";
 import { NotificationTab } from "./NotificationTab";
+import { useConfigStore } from "../../lib/stores/config-store";
 
 export function GeneralTab() {
   const { mode, setMode, accent, setAccent, resolved } = useThemeStore();
@@ -108,6 +109,9 @@ export function GeneralTab() {
         loaded={loaded}
         persist={persist}
       />
+
+      <DisplaySection />
+
       {transport.isTauri && (
         <div>
           <SectionTitle>系统</SectionTitle>
@@ -118,6 +122,45 @@ export function GeneralTab() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+const THRESHOLD_OPTIONS = [
+  { value: 2, label: "2" },
+  { value: 3, label: "3" },
+  { value: 5, label: "5" },
+  { value: 10, label: "10" },
+];
+
+function DisplaySection() {
+  const { display, setDisplayConfig, loadDisplayConfig } = useConfigStore();
+
+  useEffect(() => { loadDisplayConfig(); }, [loadDisplayConfig]);
+
+  return (
+    <div>
+      <SectionTitle>显示</SectionTitle>
+      <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
+        <SettingRow label="工具调用折叠阈值" description="连续工具调用达到此数量时自动分组折叠" isLast>
+          <div className="flex rounded-[var(--radius-xs)] p-0.5" style={{ background: "var(--bg-tertiary)" }}>
+            {THRESHOLD_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setDisplayConfig({ toolCallGroupThreshold: opt.value })}
+                className="cursor-pointer rounded-[4px] px-2.5 py-1 text-center text-[12px] font-medium transition-all duration-200"
+                style={{
+                  background: display.toolCallGroupThreshold === opt.value ? "var(--bg-elevated)" : "transparent",
+                  color: display.toolCallGroupThreshold === opt.value ? "var(--fill-primary)" : "var(--fill-tertiary)",
+                  boxShadow: display.toolCallGroupThreshold === opt.value ? "var(--shadow-sm)" : "none",
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </SettingRow>
+      </div>
     </div>
   );
 }

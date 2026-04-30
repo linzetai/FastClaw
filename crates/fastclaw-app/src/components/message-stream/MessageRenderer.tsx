@@ -2,6 +2,12 @@ import { memo, useMemo, useState, useRef, useCallback, useEffect, lazy, Suspense
 import type { ChatMessage, ChatUsage, SubAgentRunUI } from "../../lib/agent-store";
 import { ToolCallCard } from "./ToolCallCard";
 import { SubAgentCard } from "./SubAgentCard";
+import {
+  groupConsecutiveSegments,
+  groupConsecutiveToolCalls,
+  ToolCallGroupCard,
+  ToolCallGroupTimeline,
+} from "./ToolCallGroup";
 
 const MarkdownContent = lazy(() =>
   import("./MarkdownContent").then((m) => ({ default: m.MarkdownContent })),
@@ -10,6 +16,7 @@ import {
   Clock, ArrowUpRight, ArrowDownRight, Copy, Check,
 } from "lucide-react";
 import type { StreamSegment } from "./types";
+import { useConfigStore } from "../../lib/stores/config-store";
 
 function ts(d: Date) {
   return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
@@ -130,6 +137,12 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
       setTimeout(() => setCopied(false), 1500);
     });
   }, [msg.content]);
+  const aiThreshold = useConfigStore((s) => s.display.toolCallGroupThreshold);
+  const groupedToolCalls = useMemo(() => {
+    if (!toolCalls || toolCalls.length === 0) return null;
+    const typed = toolCalls.map((tc) => ({ ...tc, status: tc.status as "running" | "success" | "error" }));
+    return groupConsecutiveToolCalls(typed, aiThreshold);
+  }, [toolCalls, aiThreshold]);
   return (
     <div className="pb-7 group/message" style={{ animation: animate ? "slide-left var(--duration-normal) var(--ease-out)" : "none", maxWidth: "75%" }}>
       <div className="flex items-start gap-2">
@@ -146,14 +159,19 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
           </button>
         )}
         <div className="flex-1 min-w-0">
-      {toolCalls && toolCalls.length > 0 && (
+      {groupedToolCalls && groupedToolCalls.length > 0 && (
         <div className="mb-2">
-          {toolCalls.map((tc) => (
-            <ToolCallCard
-              key={tc.id}
-              tool={{ ...tc, status: tc.status as "running" | "success" | "error" }}
-            />
-          ))}
+          {groupedToolCalls.map((item) => {
+            if (item.type === "single") {
+              return <ToolCallCard key={item.tool.id} tool={item.tool} />;
+            }
+            return (
+              <ToolCallGroupCard
+                key={item.tools[0].id}
+                tools={item.tools}
+              />
+            );
+          })}
         </div>
       )}
       <Suspense fallback={<div className="animate-pulse rounded py-2" style={{ background: "var(--bg-tertiary)", height: 20 }} />}>
@@ -459,6 +477,8 @@ export function MessageRendererRow({
   animate = true,
 }: MessageRendererRowProps) {
   const m = item.data as StreamableMsg;
+  const threshold = useConfigStore((s) => s.display.toolCallGroupThreshold);
+  const grouped = useMemo(() => groupConsecutiveSegments(streamSegments, threshold), [streamSegments, threshold]);
 
   if (m.role === "streaming") {
     const hasContent = streamSegments.length > 0;
@@ -468,15 +488,15 @@ export function MessageRendererRow({
     return (
       <div className="px-8 pb-4">
         {!hasContent && activeSubRuns.length === 0 && <Typing />}
-        {streamSegments.map((seg, si) => {
-          if (seg.type === "text" && seg.content) {
-            const isLast = si === streamSegments.length - 1;
+        {grouped.map((group, gi) => {
+          if (group.type === "text" && group.segment.content) {
+            const isLastSegment = gi === grouped.length - 1 && lastIsText;
             return (
-              <div key={seg.id} className="pb-1" style={{ maxWidth: "75%" }}>
+              <div key={group.segment.id} className="pb-1" style={{ maxWidth: "75%" }}>
                 <Suspense fallback={<div className="animate-pulse rounded py-1" style={{ background: "var(--bg-tertiary)", height: 16 }} />}>
-                  <MarkdownContent content={seg.content} streaming />
+                  <MarkdownContent content={group.segment.content} streaming />
                 </Suspense>
-                {isLast && (
+                {isLastSegment && (
                   <span
                     className="ml-0.5 inline-block h-[16px] w-[2px] translate-y-[3px] rounded-full"
                     style={{ background: "var(--tint)", animation: "cursor-blink 1s step-end infinite" }}
@@ -485,8 +505,19 @@ export function MessageRendererRow({
               </div>
             );
           }
-          if (seg.type === "tool" && seg.toolCall) {
-            return <ToolCallCard key={seg.id} tool={seg.toolCall} />;
+          if (group.type === "single-tool" && group.segment.toolCall) {
+            return <ToolCallCard key={group.segment.id} tool={group.segment.toolCall} />;
+          }
+          if (group.type === "tool-group") {
+            const tools = group.segments
+              .map((s) => s.toolCall)
+              .filter((tc): tc is NonNullable<typeof tc> => !!tc);
+            return (
+              <ToolCallGroupTimeline
+                key={group.segments[0].id}
+                tools={tools}
+              />
+            );
           }
           return null;
         })}
