@@ -146,7 +146,7 @@ export const ToolCallGroupCard = memo(function ToolCallGroupCard({
 }: {
   tools: ToolCall[];
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const summary = useMemo(() => computeSummary(tools), [tools]);
 
   const topTypes = useMemo(() => {
@@ -180,13 +180,13 @@ export const ToolCallGroupCard = memo(function ToolCallGroupCard({
           <Layers size={13} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
         </span>
 
-        <span className="flex min-w-0 flex-1 items-center gap-2 text-[12px]">
+        <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-[12px]">
           <span className="shrink-0 font-medium" style={{ color: "var(--fill-primary)" }}>
             {tools.length} 个工具调用
           </span>
-          <span className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
             {topTypes.map(([name, count]) => (
-              <span key={name} className="inline-flex items-center gap-0.5 rounded px-1 py-0.5" style={{ background: "var(--bg-primary)" }}>
+              <span key={name} className="inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5" style={{ background: "var(--bg-primary)" }}>
                 {name.replace(/_/g, " ")}
                 {count > 1 && <span className="text-[10px] tabular-nums">×{count}</span>}
               </span>

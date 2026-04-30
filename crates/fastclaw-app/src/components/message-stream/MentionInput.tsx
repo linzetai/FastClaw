@@ -17,12 +17,12 @@ import {
   autoUpdate,
   size as floatingSize,
 } from "@floating-ui/react";
-import { File, Folder, Sparkles, Search, MessageSquare, Terminal } from "lucide-react";
+import { File, Folder, Sparkles, Search, Terminal } from "lucide-react";
 import { fuzzyFilter, type FuzzyResult } from "../../lib/fuzzy";
 
 /* ─── Types ─── */
 export type MentionType = "file" | "dir" | "skill";
-export type TriggerType = "@" | "/" | "#";
+export type TriggerType = "@" | "/";
 
 export interface MentionOption {
   id: string;
@@ -35,14 +35,9 @@ export interface SlashCommand {
   id: string;
   label: string;
   desc: string;
-  action: () => void;
+  action?: () => void;
 }
 
-export interface ChatReference {
-  id: string;
-  label: string;
-  desc?: string;
-}
 
 export interface InlineMention {
   type: MentionType;
@@ -65,7 +60,6 @@ interface MentionInputProps {
   placeholder?: string;
   options: MentionOption[];
   slashCommands?: SlashCommand[];
-  chatReferences?: ChatReference[];
   onSend: (text: string, mentions: InlineMention[]) => void;
   onNewTopic: () => void;
   onAttach: () => void;
@@ -124,8 +118,7 @@ function truncatePath(path: string, maxLen = 32): string {
 /* ─── Popup Item Types ─── */
 type PopupItem =
   | { kind: "mention"; option: MentionOption; result: FuzzyResult }
-  | { kind: "command"; command: SlashCommand; result: FuzzyResult }
-  | { kind: "chat-ref"; ref: ChatReference; result: FuzzyResult };
+  | { kind: "command"; command: SlashCommand; result: FuzzyResult };
 
 /* ─── Mention Popup ─── */
 function MentionPopup({
@@ -171,8 +164,8 @@ function MentionPopup({
           <Search size={13} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />
           <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
             {query
-              ? `未找到「${query}」相关${triggerType === "/" ? "命令" : triggerType === "#" ? "会话" : "项目"}`
-              : `输入${triggerType === "/" ? "命令名" : triggerType === "#" ? "会话关键词" : "文件名"}搜索…`}
+              ? `未找到「${query}」相关${triggerType === "/" ? "命令" : "项目"}`
+              : `输入${triggerType === "/" ? "命令名" : "文件名"}搜索…`}
           </span>
         </div>
       </div>
@@ -257,32 +250,27 @@ function MentionPopup({
 
 function getItemGroup(item: PopupItem): string {
   if (item.kind === "mention") return MENTION_TYPE_META[item.option.type].text;
-  if (item.kind === "command") return "命令";
-  return "会话";
+  return "命令";
 }
 
 function getItemMeta(item: PopupItem): { icon: React.ReactNode; color: string } {
   if (item.kind === "mention") return MENTION_TYPE_META[item.option.type];
-  if (item.kind === "command") return { icon: <Terminal size={12} strokeWidth={1.5} />, color: "var(--purple)" };
-  return { icon: <MessageSquare size={12} strokeWidth={1.5} />, color: "var(--fill-secondary)" };
+  return { icon: <Terminal size={12} strokeWidth={1.5} />, color: "var(--purple)" };
 }
 
 function getItemKey(item: PopupItem): string {
   if (item.kind === "mention") return `m-${item.option.id}`;
-  if (item.kind === "command") return `c-${item.command.id}`;
-  return `r-${item.ref.id}`;
+  return `c-${item.command.id}`;
 }
 
 function getItemLabel(item: PopupItem): string {
   if (item.kind === "mention") return item.option.label;
-  if (item.kind === "command") return item.command.label;
-  return item.ref.label;
+  return item.command.label;
 }
 
 function getItemDesc(item: PopupItem): string | undefined {
   if (item.kind === "mention") return item.option.desc;
-  if (item.kind === "command") return item.command.desc;
-  return item.ref.desc;
+  return item.command.desc;
 }
 
 /* ─── Highlight Overlay ─── */
@@ -328,7 +316,7 @@ function HighlightOverlay({ text, mentions }: { text: string; mentions: InlineMe
 /* ─── MentionInput ─── */
 export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
   function MentionInput(
-    { disabled, placeholder, options, slashCommands, chatReferences, onSend, onNewTopic, onAttach, onPasteFiles, onRecallLastMessage, onContentChange, extraKeyHandler },
+    { disabled, placeholder, options, slashCommands, onSend, onNewTopic, onAttach, onPasteFiles, onRecallLastMessage, onContentChange, extraKeyHandler },
     ref,
   ) {
     const [text, setText] = useState("");
@@ -386,14 +374,9 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
         return fuzzyFilter(cmds, popupQuery, (c) => c.label, (c) => c.desc)
           .map(({ item, result }) => ({ kind: "command" as const, command: item, result }));
       }
-      if (triggerType === "#") {
-        const chatRefs = chatReferences ?? [];
-        return fuzzyFilter(chatRefs, popupQuery, (r) => r.label, (r) => r.desc)
-          .map(({ item, result }) => ({ kind: "chat-ref" as const, ref: item, result }));
-      }
       return fuzzyFilter(options, popupQuery, (o) => o.label, (o) => o.desc)
         .map(({ item, result }) => ({ kind: "mention" as const, option: item, result }));
-    }, [options, slashCommands, chatReferences, popupQuery, triggerType]);
+    }, [options, slashCommands, popupQuery, triggerType]);
 
     const updateMentionPositions = useCallback(
       (oldText: string, newText: string, cursorPos: number) => {
@@ -439,16 +422,6 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
           setTriggerType("/");
           setPopupQuery(slashMatch[1]);
           setPopupStart(cursorPos - slashMatch[0].length + (slashMatch[0].startsWith(" ") ? 1 : 0));
-          setPopupIndex(0);
-          return;
-        }
-
-        const hashMatch = beforeCursor.match(/#([^\s#]*)$/);
-        if (hashMatch) {
-          setPopupActive(true);
-          setTriggerType("#");
-          setPopupQuery(hashMatch[1]);
-          setPopupStart(cursorPos - hashMatch[0].length);
           setPopupIndex(0);
           return;
         }
@@ -530,36 +503,32 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
         }
 
         if (item.kind === "command") {
-          const before = text.slice(0, popupStart);
           const cursorPos = taRef.current?.selectionStart ?? text.length;
+          const before = text.slice(0, popupStart);
           const after = text.slice(cursorPos);
-          setText(before + after);
-          setPopupActive(false);
-          setPopupQuery("");
-          setPopupStart(-1);
-          item.command.action();
+          if (item.command.action) {
+            setText(before + after);
+            setPopupActive(false);
+            setPopupQuery("");
+            setPopupStart(-1);
+            item.command.action();
+          } else {
+            const cmdText = `/${item.command.label} `;
+            setText(before + cmdText + after);
+            setPopupActive(false);
+            setPopupQuery("");
+            setPopupStart(-1);
+            const newPos = popupStart + cmdText.length;
+            setTimeout(() => {
+              if (taRef.current) {
+                taRef.current.setSelectionRange(newPos, newPos);
+                taRef.current.focus();
+              }
+            }, 0);
+          }
           return;
         }
 
-        if (item.kind === "chat-ref") {
-          if (popupStart < 0 || !taRef.current) return;
-          const cursorPos = taRef.current.selectionStart ?? text.length;
-          const before = text.slice(0, popupStart);
-          const after = text.slice(cursorPos);
-          const refText = `#${item.ref.label} `;
-          setText(before + refText + after);
-          setPopupActive(false);
-          setPopupQuery("");
-          setPopupStart(-1);
-
-          const newCursorPos = popupStart + refText.length;
-          setTimeout(() => {
-            if (taRef.current) {
-              taRef.current.setSelectionRange(newCursorPos, newCursorPos);
-              taRef.current.focus();
-            }
-          }, 0);
-        }
       },
       [filteredItems, insertMention, text, popupStart],
     );

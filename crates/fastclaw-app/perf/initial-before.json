@@ -1,0 +1,209 @@
+{
+  "phase": "initial",
+  "tag": "before",
+  "timestamp": "2026-04-30T09:53:05.289Z",
+  "fcp": 336,
+  "lcp": 600,
+  "tti": 21,
+  "buildChunks": [
+    {
+      "name": "AboutTab-DVBtGGH8.js",
+      "size": 6056,
+      "gzip": 1628
+    },
+    {
+      "name": "AgentChatsTab-Cl4gOMeC.js",
+      "size": 4285,
+      "gzip": 1591
+    },
+    {
+      "name": "AgentConfigForm-6--jskX2.js",
+      "size": 27472,
+      "gzip": 7265
+    },
+    {
+      "name": "AgentCronTab-Bpm9CY89.js",
+      "size": 22429,
+      "gzip": 5601
+    },
+    {
+      "name": "AgentDetail-CTajZ0mi.js",
+      "size": 5270,
+      "gzip": 2121
+    },
+    {
+      "name": "GatewayTab-DpBLvuRt.js",
+      "size": 2829,
+      "gzip": 1175
+    },
+    {
+      "name": "GeneralTab-DkbzDc2H.js",
+      "size": 4191,
+      "gzip": 1810
+    },
+    {
+      "name": "MarkdownContent-CYjl9ihv.js",
+      "size": 2601,
+      "gzip": 1296
+    },
+    {
+      "name": "McpTab-C6O0MLM4.js",
+      "size": 22568,
+      "gzip": 4559
+    },
+    {
+      "name": "MigrationTab-3Py_9Yhx.js",
+      "size": 7311,
+      "gzip": 2174
+    },
+    {
+      "name": "ModelTab-DQhIKmiv.js",
+      "size": 16040,
+      "gzip": 5042
+    },
+    {
+      "name": "OnboardingWizard-9Ge9WrUO.js",
+      "size": 20811,
+      "gzip": 5732
+    },
+    {
+      "name": "SecurityTab-BbCUzv3O.js",
+      "size": 9276,
+      "gzip": 3438
+    },
+    {
+      "name": "SettingsPanel-DtTE_DMm.js",
+      "size": 5484,
+      "gzip": 1990
+    },
+    {
+      "name": "SettingsShared-RdA70FWg.js",
+      "size": 3930,
+      "gzip": 1357
+    },
+    {
+      "name": "SkillsTab-B1EGQcyS.js",
+      "size": 7794,
+      "gzip": 2332
+    },
+    {
+      "name": "WebSearchTab-BobDOHX0.js",
+      "size": 11206,
+      "gzip": 3788
+    },
+    {
+      "name": "common-IN1rFTg3.js",
+      "size": 4246,
+      "gzip": 1593
+    },
+    {
+      "name": "core-BcGKNf9H.js",
+      "size": 2706,
+      "gzip": 1053
+    },
+    {
+      "name": "dist-js-B4KtNAuQ.js",
+      "size": 290,
+      "gzip": 182
+    },
+    {
+      "name": "dist-js-ClkyILRE.js",
+      "size": 1041,
+      "gzip": 514
+    },
+    {
+      "name": "dist-js-D1bFUfR4.js",
+      "size": 2959,
+      "gzip": 1187
+    },
+    {
+      "name": "dist-js-DL43AOPC.js",
+      "size": 119,
+      "gzip": 128
+    },
+    {
+      "name": "dist-js-DgM81hBu.js",
+      "size": 266,
+      "gzip": 168
+    },
+    {
+      "name": "event-B16eF3wt.js",
+      "size": 1289,
+      "gzip": 625
+    },
+    {
+      "name": "index-BP54k816.js",
+      "size": 116460,
+      "gzip": 30414
+    },
+    {
+      "name": "model-utils-B9sjzyn5.js",
+      "size": 4820,
+      "gzip": 2166
+    },
+    {
+      "name": "preload-helper-DzyYoeor.js",
+      "size": 1193,
+      "gzip": 681
+    },
+    {
+      "name": "rolldown-runtime-S-ySWqyJ.js",
+      "size": 694,
+      "gzip": 422
+    },
+    {
+      "name": "store-BzbulyMt.js",
+      "size": 17959,
+      "gzip": 5584
+    },
+    {
+      "name": "transport-5_fiOlbd.js",
+      "size": 9454,
+      "gzip": 3267
+    },
+    {
+      "name": "vendor-highlight-C8kDm7X9.js",
+      "size": 159477,
+      "gzip": 50228
+    },
+    {
+      "name": "vendor-lucide-d3Uj4SRK.js",
+      "size": 24594,
+      "gzip": 8763
+    },
+    {
+      "name": "vendor-markdown-DKJC7T99.js",
+      "size": 161654,
+      "gzip": 48539
+    },
+    {
+      "name": "vendor-react-DSIVP3ID.js",
+      "size": 240821,
+      "gzip": 74913
+    },
+    {
+      "name": "vendor-zustand-oFODy1fI.js",
+      "size": 2601,
+      "gzip": 1277
+    },
+    {
+      "name": "window-Dv1AI2De.js",
+      "size": 12852,
+      "gzip": 3088
+    }
+  ],
+  "totalJsSize": 945048,
+  "totalJsGzip": 287691,
+  "memory": {
+    "usedJSHeapSize": 11900000,
+    "totalJSHeapSize": 15200000,
+    "jsHeapSizeLimit": 3760000000
+  },
+  "streamingFrameTime": {
+    "p50": 16.699999928474426,
+    "p95": 17,
+    "max": 17.200000047683716,
+    "samples": 60
+  },
+  "reRenderCount": null
+}

@@ -330,9 +330,11 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
   }, [stream.length]);
 
   const scrollToBottom = useCallback(() => {
-    virtuosoRef.current?.scrollToIndex({ index: displayData.length - 1, behavior: "smooth" });
-    setShowScrollFab(false);
-    setUnreadCount(0);
+    virtuosoRef.current?.scrollToIndex({ index: displayData.length - 1, align: "end", behavior: "smooth" });
+    setTimeout(() => {
+      setShowScrollFab(false);
+      setUnreadCount(0);
+    }, 100);
   }, [displayData.length]);
 
   const virtuosoComponents = useMemo(() => ({

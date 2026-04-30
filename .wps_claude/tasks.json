@@ -358,6 +358,24 @@
         "[FE-013 结果] 回归测试 22/23 pass (1 skipped)。Visual 25/25 pass。Build index=35.70KB gzip, max=75.00KB"
       ],
       "gate": "1) ↑↓ 可在 AgentList 中导航选择（Playwright 键盘事件验证）；2) Ctrl+Tab 切换 chat tab；3) 空 chat 显示 agent 能力和模板按钮；4) 故意构造 malformed JSON tool args → ErrorBoundary 显示错误提示而非白屏；5) Settings 修改后 tab 标题有 dirty dot；6) AgentList 搜索无结果显示空状态；7) screenshot diff 通过（空状态场景）；8) Core C1-C10 全量通过"
+    },
+    {
+      "id": "FE-BUGFIX-001",
+      "title": "4项 Bug 修复：FAB 滚动 / Context 弹层 / 工具分组 / 斜杠命令",
+      "phase": "Bug 修复",
+      "description": "1) FAB 点击 scrollToIndex 缺少 align:'end'，无法滚到最底部；2) ContextRing 弹层被父容器 overflow:hidden 截断，改为 createPortal 到 body；3) ToolCallGroupCard 默认折叠导致执行完后工具结果被汇总隐藏，改为默认展开 + 修复标题行 type tags 溢出挤压时长显示；4) /model /tools 不应直接调用 UI 配置，改为将命令文本插入输入框提示用法；移除 # 会话引用功能。",
+      "status": "done",
+      "dependencies": ["FE-010", "FE-012"],
+      "attentions": [
+        "[BUGFIX-001 结果] FAB scrollToIndex 增加 align:'end'，setState 延迟 100ms 确保滚动完成后再隐藏",
+        "[BUGFIX-001 结果] ContextRing tooltip 改用 createPortal(document.body)，通过 ringRef.getBoundingClientRect() 定位",
+        "[BUGFIX-001 结果] ToolCallGroupCard expanded 默认 true，始终展示运行时分组视图",
+        "[BUGFIX-001 结果] ToolCallGroupCard header 左侧 type tags 区域增加 overflow-hidden + min-w-0，右侧 shrink-0 防止时长被挤压",
+        "[BUGFIX-001 结果] SlashCommand.action 改为可选(?)，无 action 的命令(/model /tools)选中后插入 '/cmd ' 到输入框",
+        "[BUGFIX-001 结果] 移除 ChatReference 类型和 # 触发器，MentionInput TriggerType 缩减为 '@' | '/'",
+        "[BUGFIX-001 结果] 回归测试 22/23 pass (1 skipped)。Visual 25/25 pass。Build max=75.00KB gzip"
+      ],
+      "gate": "1) FAB 点击后滚到最底部；2) Context window tooltip 完整展示不被截断；3) 工具调用组默认展开，时长不被截断；4) /model 选中后插入文本而非调用配置面板；5) # 不再触发弹窗；6) E2E + Visual 全通过"
     }
   ]
 }

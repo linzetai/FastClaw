@@ -2,8 +2,9 @@ import {
   Image as ImageIcon, FileText, Paperclip, Settings2, FolderOpen, ArrowUp,
   Square, X, Loader2,
 } from "lucide-react";
-import { useState, useCallback, useEffect, useMemo } from "react";
-import { MentionInput, type MentionInputHandle, type InlineMention, type MentionOption, type SlashCommand, type ChatReference } from "./MentionInput";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
+import { MentionInput, type MentionInputHandle, type InlineMention, type MentionOption, type SlashCommand } from "./MentionInput";
 import { useAgentStore } from "../../lib/agent-store";
 import { QuestionPanel } from "./MessageRenderer";
 import * as transport from "../../lib/transport";
@@ -104,6 +105,7 @@ function formatTokens(n: number): string {
 
 function ContextRing({ used, limit }: { used: number; limit: number }) {
   const [hover, setHover] = useState(false);
+  const ringRef = useRef<HTMLDivElement>(null);
   const ratio = limit > 0 ? used / limit : 0;
   const clampedRatio = Math.min(ratio, 1);
   const pct = clampedRatio * 100;
@@ -125,6 +127,7 @@ function ContextRing({ used, limit }: { used: number; limit: number }) {
 
   return (
     <div
+      ref={ringRef}
       className="relative flex items-center justify-center"
       style={{
         width: size,
@@ -160,17 +163,18 @@ function ContextRing({ used, limit }: { used: number; limit: number }) {
       >
         {pct < 1 ? "<1" : Math.round(pct)}
       </span>
-      {hover && (
+      {hover && createPortal(
         <div
-          className="absolute bottom-full mb-2 rounded-xl px-3 py-2.5"
+          className="fixed rounded-xl px-3 py-2.5"
           style={{
             background: "var(--bg-elevated)",
             border: "1px solid var(--separator)",
             boxShadow: "var(--shadow-lg)",
             color: "var(--fill-primary)",
-            zIndex: 50,
-            right: -8,
-            minWidth: 180,
+            zIndex: 9999,
+            bottom: window.innerHeight - (ringRef.current?.getBoundingClientRect().top ?? 0) + 8,
+            right: window.innerWidth - (ringRef.current?.getBoundingClientRect().right ?? 0) - 8,
+            minWidth: 200,
             animation: "fade-in var(--duration-instant) var(--ease-out)",
           }}
         >
@@ -210,7 +214,7 @@ function ContextRing({ used, limit }: { used: number; limit: number }) {
             </div>
           )}
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }
@@ -271,30 +275,12 @@ export function StreamFooter({
     if (streaming) setSendPending(false);
   }, [streaming]);
 
-  const slashCommands: SlashCommand[] = useMemo(() => [
+  const slashCommands = useMemo((): SlashCommand[] => [
     { id: "new", label: "new", desc: "开始新话题", action: handleNewTopic },
     { id: "clear", label: "clear", desc: "新建对话（清空当前）", action: handleNewTopic },
-    { id: "model", label: "model", desc: "切换模型", action: () => {
-      if (onToggleDetail) onToggleDetail();
-    }},
-    { id: "tools", label: "tools", desc: "管理工具配置", action: () => {
-      if (onToggleDetail) onToggleDetail();
-    }},
-  ], [handleNewTopic, onToggleDetail]);
-
-  const chatReferences: ChatReference[] = useMemo(() => {
-    const state = useAgentStore.getState();
-    const agentId = state.activeAgentId;
-    const ac = state.agentChats[agentId];
-    if (!ac) return [];
-    return ac.chatList
-      .filter((c) => c.id !== ac.activeChatId && c.stream.length > 0)
-      .map((c) => ({
-        id: c.id,
-        label: c.title || `对话 ${c.id.slice(0, 6)}`,
-        desc: c.stream.length > 0 ? `${c.stream.length} 条消息` : undefined,
-      }));
-  }, [activeChat]);
+    { id: "model", label: "model", desc: "在消息中指定模型，如 /model gpt-4o" },
+    { id: "tools", label: "tools", desc: "在消息中指定工具，如 /tools search" },
+  ], [handleNewTopic]);
 
   const wrappedSend = useCallback((txt: string, mentions: InlineMention[]) => {
     setSendPending(true);
@@ -408,10 +394,9 @@ export function StreamFooter({
         <MentionInput
           ref={mentionInputRef}
           disabled={streaming}
-          placeholder="描述任务，或输入 @ 引用文件、/ 命令、# 会话..."
+          placeholder="描述任务，或输入 @ 引用文件、/ 命令..."
           options={mentionOptions}
           slashCommands={slashCommands}
-          chatReferences={chatReferences}
           onSend={wrappedSend}
           onNewTopic={handleNewTopic}
           onAttach={() => fileInputRef.current?.click()}

@@ -1,0 +1,100 @@
+[
+  {
+    "id": "CTX-001",
+    "title": "read_file budget 豁免修复（根因）",
+    "phase": "上下文管理",
+    "description": "修复上下文快速填满的根因。当前 ReadFileTool::max_result_size_chars() 返回 usize::MAX，导致 build_skip_tool_names() 将 read_file 加入豁免列表，enforce_per_message_budget() 完全不约束 read_file 结果。模型一轮内连续读 4 个大文件 → 4×32K=128K → 上下文直接满。修复：将 max_result_size_chars 改为 32_768（与 DEFAULT_READ_FILE_MAX_CHARS 一致），让 read_file 参与 budget enforcement。同时验证 process_result() 中的 PERSISTED_OUTPUT_TAG 检查能防止循环持久化问题。",
+    "status": "pending",
+    "completion_note": "",
+    "dependencies": [],
+    "attentions": [
+      "修改位置：crates/fastclaw-agent/src/builtin_tools/filesystem.rs line 1283",
+      "之前设 usize::MAX 的理由是防止循环（持久化 read_file 结果后模型再 read_file 持久文件），但 process_result() 已有 starts_with(PERSISTED_OUTPUT_TAG) 检查，不会重复持久化",
+      "修改后需验证：per-message budget 超限时，read_file 结果能正确持久化到磁盘，preview 可读",
+      "search_in_files 已有 max_result_size_chars = 20_000 的正常设置可作为参照"
+    ],
+    "gate": "1) 一轮内连续 read_file 5 个 32K 文件后，verify 总上下文 token 不超过 context_window 的 60%；2) 超 budget 的 read_file 结果被持久化到 session tool-results 目录；3) 持久化后模型收到的 preview 包含文件前 2000 bytes + 磁盘路径引用；4) 现有 tool_result_storage 单元测试全部通过"
+  },
+  {
+    "id": "CTX-002",
+    "title": "权限白名单 + 错误消息优化",
+    "phase": "权限管理",
+    "description": "扩展 ensure_within_workspace 函数，在 Workspace 模式下额外允许访问 skill 安装目录（~/.cursor/skills/、~/.agents/skills/、~/.codex/skills/）、FastClaw 数据目录（~/.fastclaw/）等合法外部路径。同时改进 PermissionDenied 错误消息，列出已允许的路径并给出具体解决建议（如切换 Full 模式或使用允许的路径），替换当前笼统的 'Change to YOLO mode' 提示。",
+    "status": "pending",
+    "completion_note": "",
+    "dependencies": [],
+    "attentions": [
+      "修改位置：crates/fastclaw-agent/src/builtin_tools/filesystem.rs ensure_within_workspace 函数（line 54-136）",
+      "白名单路径应在 workspace_root 和 state_dir_root 检查之后、返回 Err 之前插入",
+      "对于尚未创建的目录（如 ~/.cursor/skills/ 首次使用），canonicalize 会失败，需用 starts_with 前缀匹配作为 fallback",
+      "config/default.json 中可选增加 security.additional_allowed_paths 字段支持用户自定义"
+    ],
+    "gate": "1) Workspace 模式下 read_file ~/.cursor/skills/some-skill/SKILL.md 成功；2) write_file ~/.cursor/skills/new-skill/SKILL.md 成功（目录自动创建）；3) 访问 ~/Desktop/random.txt 仍被拒绝；4) PermissionDenied 错误消息包含 'Allowed locations' 列表和具体建议"
+  },
+  {
+    "id": "CTX-003",
+    "title": "SUMMARIZE_TOOL_RESULTS 提示词 + 行为心理学指导",
+    "phase": "提示词工程",
+    "description": "在 doing_tasks_en() 和 doing_tasks_zh() 中追加 4 条高阶行为指导（对齐 claude-code 经 A/B 验证的模型行为调优）：1) REPORT FAITHFULLY（忠实报告，禁止虚报 pass）；2) BE A COLLABORATOR（主动纠正误解、指出相邻 bug）；3) STAY STEADY（承认错误但不崩溃）；4) SAVE CONTEXT（工具结果可能被清除，先记住关键信息到回复文本中）。其中第 4 条是 microcompact 的必要配套——没有它，旧工具结果被清除后模型会丢失关键事实。",
+    "status": "pending",
+    "completion_note": "",
+    "dependencies": ["CTX-001"],
+    "attentions": [
+      "修改位置：crates/fastclaw-agent/src/runtime/prompt_sections/mod.rs doing_tasks_en() 和 doing_tasks_zh()",
+      "追加到 </making_code_changes> 闭合标签之前（当前有 6 条规则，追加为 7-10）",
+      "SAVE CONTEXT 指导必须在 microcompact 生效前加入，否则模型不知道工具结果会被清除",
+      "中文版需保持同等信息密度，不是简单翻译而是适配中文用户习惯"
+    ],
+    "gate": "1) prompt_sections 单元测试中验证 doing_tasks output 包含 'REPORT FAITHFULLY'、'SAVE CONTEXT' 等关键词；2) 中文模式验证包含对应中文表述；3) 现有测试 doing_tasks_en_covers_principles 和 doing_tasks_zh_covers_principles 通过"
+  },
+  {
+    "id": "CTX-004",
+    "title": "评估现有 microcompact 参数 + TOOL_RESULT_CLEARED_MESSAGE 接通",
+    "phase": "上下文管理",
+    "description": "评估 unified_pre_query_compact 中已有的 microcompact_tool_results(messages, 3) 效果：当前保留最近 3 个 full、3 个 faded、其余 one-liner。对比 cc 的策略（保留最近 5 个，其余完全清除为 '[Old tool result content cleared]'）。如果现有 3-tier 渐进策略效果足够（faded ~150 chars + one-liner ~50 chars 已经很小），则只需确认 TOOL_RESULT_CLEARED_MESSAGE 用在 time_based_microcompact 中。否则考虑将最旧 tier 从 one-liner 改为完全清除。",
+    "status": "pending",
+    "completion_note": "",
+    "dependencies": ["CTX-001"],
+    "attentions": [
+      "现有实现位置：crates/fastclaw-agent/src/runtime/tool_executor.rs microcompact_tool_results() line 313",
+      "time_based_microcompact() line 392 用 TIME_COMPACTED_MARKER 而非 TOOL_RESULT_CLEARED_MESSAGE",
+      "TOOL_RESULT_CLEARED_MESSAGE 定义在 tool_result_storage.rs line 18 但从未使用",
+      "需要做 token 占用对比测试：10 轮对话后，一liner vs cleared 的 token 差异",
+      "cc 的 microcompact 完全清除内容（更激进），FastClaw 的 one-liner 保留摘要（更保守但占用稍多）",
+      "非流式执行路径 execute_inner()（channel REST API）不调用 unified_pre_query_compact，仅流式路径有完整压缩管线。如 REST API 用于多轮会话需补齐"
+    ],
+    "gate": "1) 量化测试：20 个 tool_result 经 microcompact 后，总 token 降幅 ≥ 70%；2) 如需修改策略，one-liner 改为 TOOL_RESULT_CLEARED_MESSAGE 后不影响模型行为（因 SAVE CONTEXT 指导已引导模型提前保存关键信息）；3) 现有 microcompact_progressive_fading 测试通过"
+  },
+  {
+    "id": "CTX-005",
+    "title": "un-feature-gate self-iter 恢复指导",
+    "phase": "失败容错",
+    "description": "当前 inject_tool_recovery_guidance 和 try_self_iter_tool_recovery 被 #[cfg(feature = \"self-iter\")] 门控。不启用 self-iter 时，连续工具失败只有 grace_turn 给一次机会但无具体指导（模型不知道该怎么换方向）。将核心的「失败诊断 + 恢复指导注入」逻辑解耦为独立模块，始终可用。self-iter 的高级功能（SelfIterEngine 完整诊断）可保持 feature-gated，但基础的 system-reminder 注入应默认启用。",
+    "status": "pending",
+    "completion_note": "",
+    "dependencies": [],
+    "attentions": [
+      "当前 self-iter 路径：runtime/mod.rs try_self_iter_tool_recovery() → SelfIterEngine.diagnose_tool_failure_streak() → format_recovery_guidance() → inject_tool_recovery_guidance()",
+      "非 self-iter 路径（#[cfg(not(feature = \"self-iter\"))]）在 line 1636 有空 stub",
+      "Grace turn 逻辑在 query_state.rs check_error_limit() — 达阈值时重置 error count 给一轮机会",
+      "目标：grace turn 触发时注入具体恢复指导（如方案中 ToolFailureTracker 的 system-reminder 模板），而非仅给空白一轮"
+    ],
+    "gate": "1) 不启用 self-iter feature 时，连续 3 次工具失败后 messages 中出现 system-reminder 恢复指导；2) 指导内容包含失败工具名、错误摘要、替代方案建议；3) 恢复成功（模型换方向后工具成功）时计数器重置；4) 现有 check_error_limit grace turn 测试通过"
+  },
+  {
+    "id": "CTX-006",
+    "title": "Compact Prompt 模板升级",
+    "phase": "提示词工程",
+    "description": "将 context_compressor.rs 的 COMPRESSION_SYSTEM_PROMPT 从当前 5 字段简短模板（goal/facts/files/progress/errors，~160 words）升级为更详细的结构化模板。参考 cc 的 9 段 compact prompt，关键改进：1) 加入 <analysis> 中间推理步骤（生成后 strip，提升摘要质量）；2) 显式要求列出所有 user messages；3) 要求保留代码片段（不再禁止 code blocks）；4) 加入 Next Step + 原文引用防漂移；5) NO_TOOLS 约束（max_tokens 不为摘要模型提供 tool definitions）。",
+    "status": "pending",
+    "completion_note": "",
+    "dependencies": ["CTX-003"],
+    "attentions": [
+      "修改位置：crates/fastclaw-agent/src/runtime/context_compressor.rs COMPRESSION_SYSTEM_PROMPT (line 18)",
+      "当前模板的 'no code blocks' 规则可能导致摘要丢失关键代码上下文",
+      "cc 的 partial compact（from/up_to 变体）是未来优化方向，当前保持全量模式即可",
+      "摘要模型调用应确保 tools 参数为空/None，防止浪费 turn 在工具调用上"
+    ],
+    "gate": "1) 使用升级后的模板对一段 50 轮对话做压缩，验证摘要包含所有 user messages 列表；2) 摘要中保留关键代码片段（如修改的函数签名）；3) 摘要最后有 'Next Step' 段落含原文引用；4) 摘要模型不调用任何工具"
+  }
+]

@@ -1,0 +1,1016 @@
+{
+  "config": {
+    "configFile": "/home/linzetai/workspace/my_tools/FastClaw/crates/fastclaw-app/playwright.config.ts",
+    "rootDir": "/home/linzetai/workspace/my_tools/FastClaw/crates/fastclaw-app/tests",
+    "forbidOnly": true,
+    "fullyParallel": true,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/home/linzetai/workspace/my_tools/FastClaw/crates/fastclaw-app/test-results",
+        "repeatEach": 1,
+        "retries": 2,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "regression",
+        "name": "regression",
+        "testDir": "/home/linzetai/workspace/my_tools/FastClaw/crates/fastclaw-app/tests/regression",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/home/linzetai/workspace/my_tools/FastClaw/crates/fastclaw-app/test-results",
+        "repeatEach": 1,
+        "retries": 2,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "visual",
+        "name": "visual",
+        "testDir": "/home/linzetai/workspace/my_tools/FastClaw/crates/fastclaw-app/tests/visual",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/home/linzetai/workspace/my_tools/FastClaw/crates/fastclaw-app/test-results",
+        "repeatEach": 1,
+        "retries": 2,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "perf",
+        "name": "perf",
+        "testDir": "/home/linzetai/workspace/my_tools/FastClaw/crates/fastclaw-app/tests/perf",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "html",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "perf/pw-report.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.59.1",
+    "workers": 1,
+    "webServer": {
+      "command": "pnpm dev",
+      "url": "http://localhost:1420",
+      "reuseExistingServer": false,
+      "timeout": 30000
+    }
+  },
+  "suites": [
+    {
+      "title": "visual/screenshot-matrix.spec.ts",
+      "file": "visual/screenshot-matrix.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "截图矩阵 (5 × 5)",
+          "file": "visual/screenshot-matrix.spec.ts",
+          "line": 53,
+          "column": 6,
+          "specs": [],
+          "suites": [
+            {
+              "title": "Theme: light-default",
+              "file": "visual/screenshot-matrix.spec.ts",
+              "line": 55,
+              "column": 10,
+              "specs": [
+                {
+                  "title": "AgentList sidebar - light-default",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1359,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:35.085Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-298e18cf8d8320d39f96",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 57,
+                  "column": 11
+                },
+                {
+                  "title": "MessageStream empty - light-default",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1275,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:36.496Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-0675581ded182725e1ba",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 66,
+                  "column": 11
+                },
+                {
+                  "title": "MessageStream with messages - light-default",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1776,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:37.778Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-66264b237c81ad25fcd3",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 75,
+                  "column": 11
+                },
+                {
+                  "title": "Settings panel - light-default",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1779,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:39.560Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-4dab3858fcd723bbceef",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 103,
+                  "column": 11
+                },
+                {
+                  "title": "Full app dark mode - light-default",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1253,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:41.344Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-c5f2171366a34d194807",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 119,
+                  "column": 11
+                }
+              ]
+            },
+            {
+              "title": "Theme: dark-default",
+              "file": "visual/screenshot-matrix.spec.ts",
+              "line": 55,
+              "column": 10,
+              "specs": [
+                {
+                  "title": "AgentList sidebar - dark-default",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1271,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:42.602Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-df7003d31f5414a408c2",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 57,
+                  "column": 11
+                },
+                {
+                  "title": "MessageStream empty - dark-default",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1314,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:43.879Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-3128dc9665efd7eef919",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 66,
+                  "column": 11
+                },
+                {
+                  "title": "MessageStream with messages - dark-default",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1782,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:45.199Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-3da83ef8764c3fbf21c6",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 75,
+                  "column": 11
+                },
+                {
+                  "title": "Settings panel - dark-default",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1802,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:46.987Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-60df6a1c727a0a7c3ffb",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 103,
+                  "column": 11
+                },
+                {
+                  "title": "Full app dark mode - dark-default",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1261,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:48.795Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-9e934c1e149304dfa7c4",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 119,
+                  "column": 11
+                }
+              ]
+            },
+            {
+              "title": "Theme: light-ocean",
+              "file": "visual/screenshot-matrix.spec.ts",
+              "line": 55,
+              "column": 10,
+              "specs": [
+                {
+                  "title": "AgentList sidebar - light-ocean",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1280,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:50.061Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-afc8deb54adb1e5811b5",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 57,
+                  "column": 11
+                },
+                {
+                  "title": "MessageStream empty - light-ocean",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1273,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:51.347Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-ceaaa6b93f572494a6bd",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 66,
+                  "column": 11
+                },
+                {
+                  "title": "MessageStream with messages - light-ocean",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1763,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:52.626Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-48881a1370d8a21b4ae7",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 75,
+                  "column": 11
+                },
+                {
+                  "title": "Settings panel - light-ocean",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1786,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:54.396Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-35675a8cd1adf84224c5",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 103,
+                  "column": 11
+                },
+                {
+                  "title": "Full app dark mode - light-ocean",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1251,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:56.187Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-b114567afb82f3459a70",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 119,
+                  "column": 11
+                }
+              ]
+            },
+            {
+              "title": "Theme: dark-ocean",
+              "file": "visual/screenshot-matrix.spec.ts",
+              "line": 55,
+              "column": 10,
+              "specs": [
+                {
+                  "title": "AgentList sidebar - dark-ocean",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1247,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:57.443Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-9bcfa32060a30ade3b68",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 57,
+                  "column": 11
+                },
+                {
+                  "title": "MessageStream empty - dark-ocean",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1296,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:58.696Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-38b6d34635a57ad5a1f8",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 66,
+                  "column": 11
+                },
+                {
+                  "title": "MessageStream with messages - dark-ocean",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1790,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:38:59.998Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-273eb5c97228fc708d89",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 75,
+                  "column": 11
+                },
+                {
+                  "title": "Settings panel - dark-ocean",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1797,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:39:01.793Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-4f492ce9c61bf6d21652",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 103,
+                  "column": 11
+                },
+                {
+                  "title": "Full app dark mode - dark-ocean",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1274,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:39:03.596Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-7f57c45bd8072fc39d88",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 119,
+                  "column": 11
+                }
+              ]
+            },
+            {
+              "title": "Theme: dark-midnight",
+              "file": "visual/screenshot-matrix.spec.ts",
+              "line": 55,
+              "column": 10,
+              "specs": [
+                {
+                  "title": "AgentList sidebar - dark-midnight",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1262,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:39:04.876Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-243c97d658bf171628f9",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 57,
+                  "column": 11
+                },
+                {
+                  "title": "MessageStream empty - dark-midnight",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1276,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:39:06.144Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-2f732e1384a53b6ad170",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 66,
+                  "column": 11
+                },
+                {
+                  "title": "MessageStream with messages - dark-midnight",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1796,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:39:07.426Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-2b418d1127d96d7d7b44",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 75,
+                  "column": 11
+                },
+                {
+                  "title": "Settings panel - dark-midnight",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1821,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:39:09.229Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-77c86eadce089287cbb5",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 103,
+                  "column": 11
+                },
+                {
+                  "title": "Full app dark mode - dark-midnight",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "visual",
+                      "projectName": "visual",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "passed",
+                          "duration": 1268,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-04-30T16:39:11.055Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "20a8f01e0f372b59c6bd-bb5461a5c4fc0ca76c0f",
+                  "file": "visual/screenshot-matrix.spec.ts",
+                  "line": 119,
+                  "column": 11
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-04-30T16:38:34.422Z",
+    "duration": 37960.098000000005,
+    "expected": 25,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
