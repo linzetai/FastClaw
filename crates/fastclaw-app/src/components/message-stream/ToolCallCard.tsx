@@ -234,7 +234,7 @@ function OutputBlock({ content, error }: { content: string; error?: boolean }) {
               background: "var(--bg-primary)",
               color: error ? "var(--red)" : "var(--fill-secondary)",
               border: `0.5px solid var(--separator)`,
-              fontFamily: '"SF Mono","Fira Code",Menlo,Monaco,monospace',
+              fontFamily: 'var(--font-mono)',
               maxHeight: expanded ? "none" : "280px",
               overflowY: expanded ? "visible" : "hidden",
             }}
@@ -341,6 +341,13 @@ export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCal
         )}
       </button>
 
+      {/* Indeterminate progress bar for running state */}
+      {isRunning && (
+        <div className="h-[2px] w-full overflow-hidden" style={{ background: "var(--separator)" }}>
+          <div className="h-full w-1/3 rounded-full" style={{ background: "var(--tint)", animation: "indeterminate-bar 1.5s ease-in-out infinite" }} />
+        </div>
+      )}
+
       {/* Auto-display images from tool results without needing to expand */}
       {resultImages.length > 0 && (
         <div className="px-3 pb-2 space-y-2">
@@ -380,7 +387,7 @@ export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCal
                   background: "var(--bg-primary)",
                   color: "var(--fill-secondary)",
                   border: `0.5px solid var(--separator)`,
-                  fontFamily: '"SF Mono","Fira Code",Menlo,Monaco,monospace',
+                  fontFamily: 'var(--font-mono)',
                   maxHeight: "200px",
                   overflowY: "auto",
                 }}

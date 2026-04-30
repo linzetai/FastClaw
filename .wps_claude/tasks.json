@@ -322,13 +322,20 @@
       "title": "流式输出视觉反馈 + 滚动体验",
       "phase": "UI/UX",
       "description": "Streaming 视觉增强：末尾 cursor-blink 结束后 fade-out 0.3s 渐隐；ToolCallCard running 状态添加 indeterminate progress bar。消息列表滚动：检测距底 < 100px 时 auto-scroll，用户上滑后显示「回到底部」FAB 按钮（带未读计数 badge），FAB 点击平滑滚动到底部并渐隐。Agent 切换时在 store 中保留/恢复输入框 draft（text + mentions + 附件）。",
-      "status": "pending",
+      "status": "done",
       "dependencies": ["FE-003", "FE-007"],
       "attentions": [
         "auto-scroll 检测需要用 Virtuoso 的 atBottomStateChange 回调，而非手动计算",
         "FAB 按钮不能遮挡消息内容，需要定位在右下角且有 pointer-events 穿透",
         "draft 保存需要在 agent 切换时触发（useEffect cleanup 或 beforeSetActiveAgent hook）",
-        "streaming 结束的判断时机：最后一个 stream item 不是 streaming role"
+        "streaming 结束的判断时机：最后一个 stream item 不是 streaming role",
+        "[FE-012 结果] ToolCallCard running 状态新增 indeterminate progress bar (2px h, tint color, translateX animation)",
+        "[FE-012 结果] 新增 CSS keyframes: cursor-fade-out (opacity 1→0) + indeterminate-bar (translateX -100%→400%)",
+        "[FE-012 结果] ToolCallCard OutputBlock fontFamily 统一为 var(--font-mono)",
+        "[FE-012 结果] 回到底部 FAB: Virtuoso atBottomStateChange 驱动 showScrollFab 状态，距底 >120px 显示",
+        "[FE-012 结果] FAB 带未读计数 badge (tint 圆形背景)，点击 smooth scrollToIndex + 隐藏",
+        "[FE-012 结果] Draft 保存/恢复: chatKey 切换时保存当前 text+files 到 draftsRef，切回时恢复",
+        "[FE-012 结果] 回归测试 22/23 pass (1 skipped)。Visual 25/25 pass。Build index=35.10KB gzip, max=75.00KB"
       ],
       "gate": "1) streaming 结束后光标 fade-out 0.3s（录屏验证）；2) 用户上滑 > 100px 后显示 FAB；3) FAB 点击平滑滚到底部并渐隐；4) 切换 agent 再切回时输入框 draft 恢复；5) running ToolCallCard 有 indeterminate progress bar；6) perf baseline streaming 帧时间不劣化；7) Core C3/C5 通过"
     },

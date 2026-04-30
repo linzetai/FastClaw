@@ -8,7 +8,7 @@ import { MessageRendererRow } from "./MessageRenderer";
 import { StreamFooter, type AttachedFile, MOD_KEY } from "./StreamFooter";
 import { useStreamScroll, STREAM_PAGE_SIZE } from "./useStreamScroll";
 import { useMessageStreamChat } from "./useMessageStreamChat";
-import { X, ChevronUp, ChevronDown, Settings2, Upload, Search } from "lucide-react";
+import { X, ChevronUp, ChevronDown, Settings2, Upload, Search, ArrowDown } from "lucide-react";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
 import { useAvatarUrl } from "../../lib/use-avatar-url";
@@ -94,6 +94,9 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
   const attachedFilesRef = useRef<AttachedFile[]>([]);
   attachedFilesRef.current = attachedFiles;
 
+  const draftsRef = useRef<Record<string, { text: string; files: AttachedFile[] }>>({});
+  const prevAgentChatKey = useRef<string>("");
+
   const [isDragging, setIsDragging] = useState(false);
   const dragCounter = useRef(0);
 
@@ -101,6 +104,9 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
   const [searchQuery, setSearchQuery] = useState("");
   const [searchIdx, setSearchIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [showScrollFab, setShowScrollFab] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const prevStreamLenRef = useRef(stream.length);
   const chatScrollKey = useCallback((chatId: string | undefined) => {
     if (!chatId) return undefined;
     const chat = ac?.chatList.find((c) => c.id === chatId);
@@ -260,6 +266,23 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
     setVisibleCount(STREAM_PAGE_SIZE);
   }, [chatKey]);
 
+  useEffect(() => {
+    const key = chatKey;
+    if (prevAgentChatKey.current && prevAgentChatKey.current !== key) {
+      const text = mentionInputRef.current?.getText() ?? "";
+      draftsRef.current[prevAgentChatKey.current] = { text, files: [...attachedFilesRef.current] };
+      mentionInputRef.current?.clear();
+      setAttachedFiles([]);
+    }
+    const draft = draftsRef.current[key];
+    if (draft) {
+      mentionInputRef.current?.setText(draft.text);
+      setAttachedFiles(draft.files);
+      delete draftsRef.current[key];
+    }
+    prevAgentChatKey.current = key;
+  }, [chatKey]);
+
   const hasMore = stream.length > visibleCount;
   const paginationOffset = hasMore ? stream.length - visibleCount : 0;
   paginationOffsetRef.current = paginationOffset;
@@ -275,7 +298,7 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
     return visibleStream;
   }, [visibleStream, streaming]);
 
-  const { handleAtBottomChange, handleScroll, handleStartReached } = useStreamScroll({
+  const { handleAtBottomChange: rawAtBottomChange, handleScroll, handleStartReached } = useStreamScroll({
     virtuosoRef,
     scrollPositions,
     chatKey,
@@ -292,6 +315,25 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
     suppressScrollTrackingUntilRef,
     runProgrammaticScroll,
   });
+
+  const handleAtBottomChange = useCallback((atBottom: boolean) => {
+    rawAtBottomChange(atBottom);
+    setShowScrollFab(!atBottom);
+    if (atBottom) setUnreadCount(0);
+  }, [rawAtBottomChange]);
+
+  useEffect(() => {
+    if (!atBottomRef.current && stream.length > prevStreamLenRef.current) {
+      setUnreadCount((c) => c + (stream.length - prevStreamLenRef.current));
+    }
+    prevStreamLenRef.current = stream.length;
+  }, [stream.length]);
+
+  const scrollToBottom = useCallback(() => {
+    virtuosoRef.current?.scrollToIndex({ index: displayData.length - 1, behavior: "smooth" });
+    setShowScrollFab(false);
+    setUnreadCount(0);
+  }, [displayData.length]);
 
   const virtuosoComponents = useMemo(() => ({
     Header: hasMore ? VirtuosoHeaderWithMore : VirtuosoHeaderEmpty,
@@ -481,6 +523,31 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
           increaseViewportBy={VIEWPORT_INCREASE}
           components={virtuosoComponents}
         />
+      )}
+
+      {showScrollFab && !isEmpty && (
+        <div className="absolute right-6 bottom-[140px] z-20" style={{ animation: "fade-in var(--duration-fast) var(--ease-out)" }}>
+          <button
+            onClick={scrollToBottom}
+            className="flex h-9 items-center gap-1.5 rounded-full px-3 shadow-lg transition-all duration-150 hover:scale-105 active:scale-95"
+            style={{
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--separator)",
+              color: "var(--fill-secondary)",
+              boxShadow: "var(--shadow-lg)",
+            }}
+          >
+            <ArrowDown size={14} strokeWidth={2} />
+            {unreadCount > 0 && (
+              <span
+                className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums"
+                style={{ background: "var(--tint)", color: "#fff" }}
+              >
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            )}
+          </button>
+        </div>
       )}
 
       <StreamFooter
