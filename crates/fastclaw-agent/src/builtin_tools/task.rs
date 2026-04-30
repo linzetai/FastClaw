@@ -895,6 +895,165 @@ impl Tool for TaskUpdateTool {
     }
 }
 
+// ── Agent Summary ────────────────────────────────────────────────────
+
+/// Configuration for agent output summarization.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct SummaryConfig {
+    pub model: String,
+    pub max_summary_tokens: u32,
+    pub target_compression_ratio: f32,
+}
+
+#[allow(dead_code)]
+impl Default for SummaryConfig {
+    fn default() -> Self {
+        Self {
+            model: "default".into(),
+            max_summary_tokens: 512,
+            target_compression_ratio: 0.3,
+        }
+    }
+}
+
+/// Structured summary of a SubAgent's execution result.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSummary {
+    pub result: String,
+    pub key_decisions: Vec<String>,
+    pub files_modified: Vec<String>,
+    pub raw_output_len: usize,
+    pub summary_len: usize,
+}
+
+#[allow(dead_code)]
+const SUMMARY_SYSTEM_PROMPT: &str = "\
+You are a concise summarizer. Given the full output of a sub-agent task execution, \
+produce a structured summary in the following JSON format:\n\
+{\"result\": \"<one-sentence outcome>\", \"key_decisions\": [\"<decision1>\", ...], \"files_modified\": [\"<path1>\", ...]}\n\
+Rules:\n\
+- result: a single sentence describing what was accomplished or failed\n\
+- key_decisions: 1-5 important choices the agent made (empty if none)\n\
+- files_modified: list of file paths that were created/edited (empty if none)\n\
+- Be factual and precise. Do NOT add information not present in the output.\n\
+- Output ONLY the JSON object, no markdown fences, no explanation.";
+
+/// Summarize a SubAgent's raw output using an LLM side-query.
+///
+/// On LLM failure, falls back to truncating the raw output.
+#[allow(dead_code)]
+pub async fn summarize_agent_output(
+    provider: &Arc<dyn crate::llm::LlmProvider>,
+    raw_output: &str,
+    config: &SummaryConfig,
+) -> AgentSummary {
+    use crate::runtime::side_query::{side_query, SideQueryOptions, SideQuerySource};
+    use fastclaw_core::types::ChatMessage;
+
+    let raw_len = raw_output.len();
+
+    if raw_len < 200 {
+        return AgentSummary {
+            result: raw_output.to_string(),
+            key_decisions: Vec::new(),
+            files_modified: Vec::new(),
+            raw_output_len: raw_len,
+            summary_len: raw_len,
+        };
+    }
+
+    let user_msg = format!(
+        "Summarize the following sub-agent output ({} chars):\n\n{}",
+        raw_len,
+        truncate_for_context(raw_output, 8000)
+    );
+
+    let opts = SideQueryOptions {
+        model: config.model.clone(),
+        system: Some(SUMMARY_SYSTEM_PROMPT.to_string()),
+        messages: vec![ChatMessage {
+            role: fastclaw_core::types::Role::User,
+            content: Some(serde_json::Value::String(user_msg)),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }],
+        max_tokens: Some(config.max_summary_tokens),
+        temperature: 0.0,
+        max_retries: 1,
+        query_source: SideQuerySource::Foreground,
+        optional: true,
+        abort: None,
+    };
+
+    match side_query(provider, opts).await {
+        Ok(Some(sq_result)) => parse_summary_response(&sq_result.content, raw_len),
+        _ => fallback_summary(raw_output),
+    }
+}
+
+#[allow(dead_code)]
+fn parse_summary_response(response: &str, raw_output_len: usize) -> AgentSummary {
+    #[derive(Deserialize)]
+    struct SummaryJson {
+        result: Option<String>,
+        key_decisions: Option<Vec<String>>,
+        files_modified: Option<Vec<String>>,
+    }
+
+    let trimmed = response.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+
+    match serde_json::from_str::<SummaryJson>(trimmed) {
+        Ok(parsed) => {
+            let result = parsed.result.unwrap_or_else(|| "Task completed".into());
+            let summary_len = result.len();
+            AgentSummary {
+                result,
+                key_decisions: parsed.key_decisions.unwrap_or_default(),
+                files_modified: parsed.files_modified.unwrap_or_default(),
+                raw_output_len,
+                summary_len,
+            }
+        }
+        Err(_) => {
+            let summary_len = response.len().min(500);
+            AgentSummary {
+                result: response.chars().take(500).collect(),
+                key_decisions: Vec::new(),
+                files_modified: Vec::new(),
+                raw_output_len,
+                summary_len,
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn fallback_summary(raw_output: &str) -> AgentSummary {
+    let lines: Vec<&str> = raw_output.lines().collect();
+    let last_lines: String = lines.iter().rev().take(5).rev().cloned().collect::<Vec<_>>().join("\n");
+    let summary = format!("[Summary unavailable — last output]\n{}", last_lines);
+    let summary_len = summary.len();
+    AgentSummary {
+        result: summary,
+        key_decisions: Vec::new(),
+        files_modified: Vec::new(),
+        raw_output_len: raw_output.len(),
+        summary_len,
+    }
+}
+
+#[allow(dead_code)]
+fn truncate_for_context(text: &str, max_chars: usize) -> &str {
+    if text.len() <= max_chars {
+        text
+    } else {
+        &text[..text.floor_char_boundary(max_chars)]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1494,5 +1653,39 @@ mod tests {
         mgr.update(&id, None, None, Some(TaskStatus::Completed))
             .unwrap();
         assert_eq!(mgr.running_count(), 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // AgentSummary tests
+    // ═══════════════════════════════════════════════════════════════
+
+    #[test]
+    fn parse_summary_response_valid_json() {
+        let response = r#"{"result": "Deployed backend to prod", "key_decisions": ["Used blue-green deploy"], "files_modified": ["deploy.sh", "config.yaml"]}"#;
+        let summary = parse_summary_response(response, 5000);
+        assert_eq!(summary.result, "Deployed backend to prod");
+        assert_eq!(summary.key_decisions.len(), 1);
+        assert_eq!(summary.files_modified.len(), 2);
+        assert_eq!(summary.raw_output_len, 5000);
+        assert!(summary.summary_len < 5000);
+    }
+
+    #[test]
+    fn parse_summary_response_invalid_json_uses_raw() {
+        let response = "This is not JSON at all";
+        let summary = parse_summary_response(response, 10000);
+        assert_eq!(summary.result, "This is not JSON at all");
+        assert!(summary.key_decisions.is_empty());
+        assert!(summary.files_modified.is_empty());
+    }
+
+    #[test]
+    fn fallback_summary_uses_last_lines() {
+        let raw = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8";
+        let summary = fallback_summary(raw);
+        assert!(summary.result.contains("[Summary unavailable"));
+        assert!(summary.result.contains("line8"));
+        assert!(summary.result.contains("line4"));
+        assert_eq!(summary.raw_output_len, raw.len());
     }
 }
