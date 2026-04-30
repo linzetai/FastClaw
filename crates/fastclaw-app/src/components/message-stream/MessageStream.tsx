@@ -106,7 +106,9 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [showScrollFab, setShowScrollFab] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [streamDoneLabel, setStreamDoneLabel] = useState(false);
   const prevStreamLenRef = useRef(stream.length);
+  const prevStreamingRef = useRef(false);
   const chatScrollKey = useCallback((chatId: string | undefined) => {
     if (!chatId) return undefined;
     const chat = ac?.chatList.find((c) => c.id === chatId);
@@ -319,7 +321,10 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
   const handleAtBottomChange = useCallback((atBottom: boolean) => {
     rawAtBottomChange(atBottom);
     setShowScrollFab(!atBottom);
-    if (atBottom) setUnreadCount(0);
+    if (atBottom) {
+      setUnreadCount(0);
+      setStreamDoneLabel(false);
+    }
   }, [rawAtBottomChange]);
 
   useEffect(() => {
@@ -329,11 +334,24 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
     prevStreamLenRef.current = stream.length;
   }, [stream.length]);
 
+  useEffect(() => {
+    if (prevStreamingRef.current && !streaming) {
+      if (atBottomRef.current) {
+        virtuosoRef.current?.scrollToIndex({ index: displayData.length - 1, align: "end", behavior: "smooth" });
+      } else {
+        setShowScrollFab(true);
+        setStreamDoneLabel(true);
+      }
+    }
+    prevStreamingRef.current = streaming;
+  }, [streaming, displayData.length]);
+
   const scrollToBottom = useCallback(() => {
     virtuosoRef.current?.scrollToIndex({ index: displayData.length - 1, align: "end", behavior: "smooth" });
     setTimeout(() => {
       setShowScrollFab(false);
       setUnreadCount(0);
+      setStreamDoneLabel(false);
     }, 100);
   }, [displayData.length]);
 
@@ -544,14 +562,18 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
             }}
           >
             <ArrowDown size={14} strokeWidth={2} />
-            {unreadCount > 0 && (
+            {streamDoneLabel ? (
+              <span className="text-[11px] font-medium" style={{ color: "var(--tint)" }}>
+                输出完成
+              </span>
+            ) : unreadCount > 0 ? (
               <span
                 className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums"
                 style={{ background: "var(--tint)", color: "#fff" }}
               >
                 {unreadCount > 99 ? "99+" : unreadCount}
               </span>
-            )}
+            ) : null}
           </button>
         </div>
       )}

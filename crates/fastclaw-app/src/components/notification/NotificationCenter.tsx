@@ -166,7 +166,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
           /* ignore */
         }
       }
-      if (n.detail && onDetailOpen) {
+      if ((n.body || n.detail) && onDetailOpen) {
         onDetailOpen(n);
         setOpen(false);
       }
@@ -316,17 +316,33 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                     </div>
                     {n.body && (
                       <div
-                        className="text-[11px] truncate mt-0.5"
-                        style={{ color: "var(--fill-tertiary)" }}
+                        className="mt-0.5 text-[11px]"
+                        style={{
+                          color: "var(--fill-tertiary)",
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical" as const,
+                          overflow: "hidden",
+                        }}
                       >
                         {n.body}
                       </div>
                     )}
-                    <div
-                      className="text-[10px] mt-1"
-                      style={{ color: "var(--fill-quaternary)" }}
-                    >
-                      {relativeTime(n.createdAt)}
+                    <div className="mt-1 flex items-center gap-2">
+                      <span
+                        className="text-[10px]"
+                        style={{ color: "var(--fill-quaternary)" }}
+                      >
+                        {relativeTime(n.createdAt)}
+                      </span>
+                      {(n.body || n.detail) && (
+                        <span
+                          className="text-[10px]"
+                          style={{ color: "var(--tint)" }}
+                        >
+                          查看详情
+                        </span>
+                      )}
                     </div>
                   </div>
 
