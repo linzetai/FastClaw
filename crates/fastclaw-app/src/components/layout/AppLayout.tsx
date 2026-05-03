@@ -8,6 +8,10 @@ import { ClawIcon } from "./ClawIcon";
 import { UpdateBanner } from "./UpdateBanner";
 import * as api from "../../lib/api";
 
+const isTauri =
+  typeof window !== "undefined" &&
+  ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
+
 const OnboardingWizard = lazy(() =>
   import("../onboarding/OnboardingWizard").then((m) => ({ default: m.OnboardingWizard })),
 );
@@ -60,6 +64,25 @@ export function AppLayout() {
 
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  useEffect(() => {
+    if (!isTauri) return;
+    let cancelled = false;
+    let unlistenFn: (() => void) | undefined;
+    (async () => {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      if (!cancelled) setIsMaximized(await win.isMaximized());
+      unlistenFn = await win.onResized(async () => {
+        if (!cancelled) setIsMaximized(await win.isMaximized());
+      });
+    })();
+    return () => {
+      cancelled = true;
+      unlistenFn?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (mode === "connecting" || (!connected && mode !== "embedded")) return;
@@ -91,52 +114,60 @@ export function AppLayout() {
     setShowOnboarding(false);
   }, []);
 
-  if (mode === "connecting" || !activeAgent || !onboardingChecked) return <Loading error={error} />;
+  let content: React.ReactNode;
 
-  if (showOnboarding) {
-    return (
-      <div className="flex h-full flex-col" style={{ background: "var(--bg-primary)" }}>
+  if (mode === "connecting" || !activeAgent || !onboardingChecked) {
+    content = <Loading error={error} />;
+  } else if (showOnboarding) {
+    content = (
+      <>
         <TitleBar />
         <Suspense fallback={<div className="flex-1" style={{ background: "var(--bg-primary)" }} />}>
           <OnboardingWizard onComplete={handleOnboardingComplete} />
         </Suspense>
-      </div>
+      </>
+    );
+  } else {
+    content = (
+      <>
+        <TitleBar />
+        <UpdateBanner />
+        <div className="flex min-h-0 flex-1">
+          <AgentList collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} />
+          <main className="relative flex min-w-0 flex-1 flex-col">
+            <MessageStream onToggleDetail={toggleDetail} detailOpen={detailOpen} />
+            {!connected && mode !== "browser" && (
+              <div
+                className="absolute inset-x-0 top-0 z-20 flex items-center justify-center py-1.5"
+                style={{
+                  background: "rgba(var(--bg-primary-rgb, 0, 0, 0), 0.85)",
+                  backdropFilter: "blur(8px)",
+                  animation: "fade-in var(--duration-slow)",
+                }}
+              >
+                <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
+                  连接已断开，正在重连...
+                </span>
+              </div>
+            )}
+          </main>
+          <Suspense fallback={null}>
+            <AgentDetail
+              open={detailOpen}
+              onClose={closeDetail}
+              agentName={activeAgent.name}
+              agentInitial={activeAgent.initial}
+              agentColor={activeAgent.color}
+            />
+          </Suspense>
+        </div>
+      </>
     );
   }
 
   return (
-    <div className="flex h-full flex-col" style={{ background: "var(--bg-primary)" }}>
-      <TitleBar />
-      <UpdateBanner />
-      <div className="flex min-h-0 flex-1">
-        <AgentList collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} />
-        <main className="relative flex min-w-0 flex-1 flex-col">
-          <MessageStream onToggleDetail={toggleDetail} detailOpen={detailOpen} />
-          {!connected && mode !== "browser" && (
-            <div
-              className="absolute inset-x-0 top-0 z-20 flex items-center justify-center py-1.5"
-              style={{
-                background: "rgba(var(--bg-primary-rgb, 0, 0, 0), 0.85)",
-                backdropFilter: "blur(8px)",
-                animation: "fade-in var(--duration-slow)",
-              }}
-            >
-              <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
-                连接已断开，正在重连...
-              </span>
-            </div>
-          )}
-        </main>
-        <Suspense fallback={null}>
-          <AgentDetail
-            open={detailOpen}
-            onClose={closeDetail}
-            agentName={activeAgent.name}
-            agentInitial={activeAgent.initial}
-            agentColor={activeAgent.color}
-          />
-        </Suspense>
-      </div>
+    <div className={`app-shell flex h-full flex-col${isMaximized ? " maximized" : ""}`}>
+      {content}
     </div>
   );
 }

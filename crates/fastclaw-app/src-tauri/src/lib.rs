@@ -101,6 +101,18 @@ pub fn run() {
         .setup(|app| {
             setup_tray(app)?;
 
+            // macOS: re-enable native shadow on transparent window and set
+            // framework-level rounded corners via windowEffects.
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_shadow(true);
+                let effects = tauri::window::EffectsBuilder::new()
+                    .effects(vec![tauri::window::Effect::WindowBackground])
+                    .radius(10.0)
+                    .build();
+                let _ = window.set_effects(effects);
+            }
+
             // Global shortcut: Ctrl+Shift+Space to toggle window
             if let Ok(shortcut) = "ctrl+shift+space".parse::<Shortcut>() {
                 let handle_for_shortcut = app.handle().clone();

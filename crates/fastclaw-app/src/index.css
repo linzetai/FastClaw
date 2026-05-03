@@ -336,16 +336,14 @@
 
 /* ━━━ Base styles (in Tailwind base layer to avoid cascade conflicts) ━━━ */
 @layer base {
-  html, body, #root { height: 100%; width: 100%; overflow: hidden; }
+  html, body, #root { height: 100%; width: 100%; overflow: hidden; background: transparent; }
 
   html {
     transition:
-      background-color var(--duration-slow) var(--ease-in-out),
       color var(--duration-slow) var(--ease-in-out);
   }
 
   body {
-    background: var(--bg-primary);
     color: var(--fill-primary);
     font-family: var(--font);
     font-feature-settings: "kern", "liga", "calt";
@@ -356,8 +354,21 @@
     line-height: 1.5;
     letter-spacing: -0.011em;
     transition:
-      background-color var(--duration-slow) var(--ease-in-out),
       color var(--duration-slow) var(--ease-in-out);
+  }
+
+  .app-shell {
+    height: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--bg-primary);
+    transition:
+      border-radius var(--duration-normal) var(--ease-out),
+      background-color var(--duration-slow) var(--ease-in-out);
+  }
+
+  .app-shell.maximized {
+    border-radius: 0;
   }
 
   a, button, input, textarea, select, label,
