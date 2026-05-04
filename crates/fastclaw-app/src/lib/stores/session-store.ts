@@ -260,7 +260,13 @@ export function buildSessionSlice({ set, get }: SetGet) {
         const mergedList = [...updatedExisting, ...newChats];
 
         let activeChatId = ac.activeChatId;
-        if (persistedActive && mergedList.some((c) => c.id === persistedActive)) {
+        // Preserve the current activeChatId if it still exists in the merged list
+        // (e.g. user is typing in a new local chat that hasn't been synced yet).
+        // Only fall back to persisted/recent session when the current ID is gone.
+        const currentStillValid = mergedList.some((c) => c.id === activeChatId);
+        if (currentStillValid) {
+          // Keep current activeChatId — nothing to do
+        } else if (persistedActive && mergedList.some((c) => c.id === persistedActive)) {
           activeChatId = persistedActive;
           const target = mergedList.find((c) => c.id === persistedActive);
           if (target) target.open = true;
