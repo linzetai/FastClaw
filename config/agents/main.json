@@ -44,7 +44,7 @@
     "requireConfirmationFor": [],
     "toolsAllow": [],
     "toolsDeny": [],
-    "fileAccess": "workspace"
+    "fileAccess": "full"
   },
   "mcpServers": [],
   "minTier": null,

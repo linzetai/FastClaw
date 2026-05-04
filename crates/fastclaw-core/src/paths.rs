@@ -97,16 +97,26 @@ pub fn resolve_skills_dir() -> PathBuf {
 
 /// Resolve the agent configs directory from config or default.
 ///
-/// Priority: config `agentsDir` > local `config/agents/` > `<state>/config/agents/`
+/// Priority: config `agentsDir` > `<state>/config/agents/` > local `config/agents/`
+///
+/// Global (state) directory takes precedence over local project directory,
+/// ensuring user settings from the UI are not overridden by project defaults.
 pub fn resolve_agents_dir_from(cfg: Option<&PathsConfig>) -> PathBuf {
     if let Some(p) = cfg.and_then(|c| c.agents_dir.as_deref()) {
         return PathBuf::from(p);
     }
+    // Check global (state) directory first - user settings should take precedence
+    let global = resolve_state_dir_from(cfg).join("config").join("agents");
+    if global.exists() {
+        return global;
+    }
+    // Fall back to local project directory for bootstrapping new projects
     let local = Path::new("config/agents");
     if local.exists() {
         return local.to_path_buf();
     }
-    resolve_state_dir_from(cfg).join("config").join("agents")
+    // Default to global directory (will be created if needed)
+    global
 }
 
 pub fn resolve_agents_dir() -> PathBuf {

@@ -471,6 +471,39 @@ mod tests {
     }
 
     #[test]
+    fn file_access_mode_deserialization() {
+        // Test that "full" (snake_case) deserializes to Full
+        let mode: FileAccessMode = serde_json::from_str("\"full\"").unwrap();
+        assert_eq!(mode, FileAccessMode::Full);
+
+        // Test that "workspace" (snake_case) deserializes to Workspace
+        let mode: FileAccessMode = serde_json::from_str("\"workspace\"").unwrap();
+        assert_eq!(mode, FileAccessMode::Workspace);
+
+        // Test that "none" (snake_case) deserializes to None
+        let mode: FileAccessMode = serde_json::from_str("\"none\"").unwrap();
+        assert_eq!(mode, FileAccessMode::None);
+
+        // Test serialization round-trip
+        assert_eq!(
+            serde_json::to_string(&FileAccessMode::Full).unwrap(),
+            "\"full\""
+        );
+    }
+
+    #[test]
+    fn behavior_config_file_access_from_camel_case() {
+        // This is what the JSON config file contains
+        let json = r#"{"fileAccess": "full", "maxToolCallsPerTurn": 50, "maxConsecutiveErrors": 3}"#;
+        let behavior: BehaviorConfig = json5::from_str(json).unwrap();
+        assert_eq!(behavior.file_access, FileAccessMode::Full);
+
+        let json2 = r#"{"fileAccess": "workspace", "maxToolCallsPerTurn": 50, "maxConsecutiveErrors": 3}"#;
+        let behavior2: BehaviorConfig = json5::from_str(json2).unwrap();
+        assert_eq!(behavior2.file_access, FileAccessMode::Workspace);
+    }
+
+    #[test]
     fn legacy_require_confirmation_for_merges_with_tools_ask() {
         let b = BehaviorConfig {
             require_confirmation_for: vec!["shell_exec".into()],
