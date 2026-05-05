@@ -44,7 +44,7 @@ export function buildAgentSlice({ set, get }: SetGet) {
         for (const a of merged) {
           if (!newChats[a.id]) {
             const chat = createChat();
-            newChats[a.id] = { chatList: [chat], activeChatId: chat.id, unread: 0, lastMsg: null, lastTime: null };
+            newChats[a.id] = { chatList: [chat], activeChatId: chat.id, unread: 0, lastMsg: null, lastTime: null, messageQueue: [] };
           }
         }
 

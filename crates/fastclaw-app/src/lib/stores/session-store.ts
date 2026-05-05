@@ -12,6 +12,7 @@ import type {
   ChatMessageImage,
   ChatMessageToolCall,
   ChatUsage,
+  QueuedMessage,
   StreamItem,
   SubAgentRunUI,
   SubAgentToolCall,
@@ -522,6 +523,105 @@ export function buildSessionSlice({ set, get }: SetGet) {
           return { ...c, stream: [...c.stream, { type: "message" as const, data: newMsg }] };
         });
         return { agentChats: { ...state.agentChats, [agentId]: { ...ac, chatList } } };
+      });
+    },
+
+    enqueueMessage: (agentId: string, _chatId: string, message: Omit<QueuedMessage, "id">) => {
+      set((state) => {
+        const ac = state.agentChats[agentId];
+        if (!ac) return state;
+        const queue = ac.messageQueue ?? [];
+        if (queue.length >= 10) return state; // Max 10 items
+        const newMsg: QueuedMessage = {
+          ...message,
+          id: `queue-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        };
+        return {
+          agentChats: {
+            ...state.agentChats,
+            [agentId]: { ...ac, messageQueue: [...queue, newMsg] },
+          },
+        };
+      });
+    },
+
+    dequeueMessage: (agentId: string, _chatId: string): QueuedMessage | undefined => {
+      let result: QueuedMessage | undefined;
+      set((state) => {
+        const ac = state.agentChats[agentId];
+        if (!ac) return state;
+        const queue = ac.messageQueue ?? [];
+        if (queue.length === 0) return state;
+        result = queue[0];
+        return {
+          agentChats: {
+            ...state.agentChats,
+            [agentId]: { ...ac, messageQueue: queue.slice(1) },
+          },
+        };
+      });
+      return result;
+    },
+
+    updateQueuedMessage: (agentId: string, _chatId: string, messageId: string, updates: Partial<QueuedMessage>) => {
+      set((state) => {
+        const ac = state.agentChats[agentId];
+        if (!ac) return state;
+        const queue = ac.messageQueue ?? [];
+        return {
+          agentChats: {
+            ...state.agentChats,
+            [agentId]: {
+              ...ac,
+              messageQueue: queue.map((m) => (m.id === messageId ? { ...m, ...updates } : m)),
+            },
+          },
+        };
+      });
+    },
+
+    removeQueuedMessage: (agentId: string, _chatId: string, messageId: string) => {
+      set((state) => {
+        const ac = state.agentChats[agentId];
+        if (!ac) return state;
+        const queue = ac.messageQueue ?? [];
+        return {
+          agentChats: {
+            ...state.agentChats,
+            [agentId]: { ...ac, messageQueue: queue.filter((m) => m.id !== messageId) },
+          },
+        };
+      });
+    },
+
+    clearQueue: (agentId: string, _chatId: string) => {
+      set((state) => {
+        const ac = state.agentChats[agentId];
+        if (!ac) return state;
+        return {
+          agentChats: {
+            ...state.agentChats,
+            [agentId]: { ...ac, messageQueue: [] },
+          },
+        };
+      });
+    },
+
+    reorderQueue: (agentId: string, _chatId: string, fromIndex: number, toIndex: number) => {
+      set((state) => {
+        const ac = state.agentChats[agentId];
+        if (!ac) return state;
+        const queue = ac.messageQueue ?? [];
+        if (fromIndex < 0 || fromIndex >= queue.length || toIndex < 0 || toIndex >= queue.length) return state;
+        const newQueue = [...queue];
+        const [moved] = newQueue.splice(fromIndex, 1);
+        newQueue.splice(toIndex, 0, moved);
+    return {
+          agentChats: {
+            ...state.agentChats,
+            [agentId]: { ...ac, messageQueue: newQueue },
+          },
+        };
       });
     },
   };

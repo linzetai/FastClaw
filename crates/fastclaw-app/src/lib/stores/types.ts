@@ -23,6 +23,22 @@ export interface ChatMessageImage {
   alt?: string;
 }
 
+export interface QueuedMention {
+  type: "file" | "dir" | "skill";
+  id: string;
+  label: string;
+}
+
+export interface QueuedMessage {
+  id: string;
+  content: string;
+  mentions: QueuedMention[];
+  images: ChatMessageImage[];
+  createdAt: Date;
+  status: "pending" | "sending" | "failed";
+  error?: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
@@ -87,6 +103,7 @@ export interface AgentChats {
   unread: number;
   lastMsg: string | null;
   lastTime: string | null;
+  messageQueue: QueuedMessage[];
 }
 
 export interface AgentState {
@@ -117,6 +134,13 @@ export interface AgentState {
   appendStreamDelta: (agentId: string, chatId: string, delta: string) => void;
   updateChatUsage: (agentId: string, chatId: string, usage: ChatUsage) => void;
   removeAgent: (agentId: string) => void;
+
+  enqueueMessage: (agentId: string, chatId: string, message: Omit<QueuedMessage, "id">) => void;
+  dequeueMessage: (agentId: string, chatId: string) => QueuedMessage | undefined;
+  updateQueuedMessage: (agentId: string, chatId: string, messageId: string, updates: Partial<QueuedMessage>) => void;
+  removeQueuedMessage: (agentId: string, chatId: string, messageId: string) => void;
+  clearQueue: (agentId: string, chatId: string) => void;
+  reorderQueue: (agentId: string, chatId: string, fromIndex: number, toIndex: number) => void;
 
   subAgentStart: (agentId: string, chatId: string, run: SubAgentRunUI) => void;
   subAgentDelta: (agentId: string, chatId: string, runId: string, content: string) => void;

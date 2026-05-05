@@ -35,6 +35,7 @@ export function useMessageStreamChat({
   const subAgentToolStart = useAgentStore((s) => s.subAgentToolStart);
   const subAgentToolDone = useAgentStore((s) => s.subAgentToolDone);
   const subAgentComplete = useAgentStore((s) => s.subAgentComplete);
+  const enqueueMessage = useAgentStore((s) => s.enqueueMessage);
 
   const [streaming, setStreaming] = useState(false);
   const [streamSegments, setStreamSegments] = useState<StreamSegment[]>([]);
@@ -319,6 +320,27 @@ export function useMessageStreamChat({
             if (isActive() && atBottomRef.current) {
               requestBottomScroll("smooth");
             }
+
+            // 处理队列：自动发送下一条
+            if (isActive()) {
+              const state = useAgentStore.getState();
+              const ac = state.agentChats[capturedAgentId];
+              const queue = ac?.messageQueue ?? [];
+              if (queue.length > 0) {
+                const nextMsg = state.dequeueMessage(capturedAgentId, capturedChatId);
+                if (nextMsg && nextMsg.status === "pending") {
+                  setTimeout(() => {
+                    sendRef.current(nextMsg.content, nextMsg.mentions.map((m: { type: "file" | "dir" | "skill"; id: string; label: string }) => ({
+                      type: m.type,
+                      id: m.id,
+                      label: m.label,
+                      start: 0,
+                      end: 0,
+                    })));
+                  }, 300);
+                }
+              }
+            }
             break;
           }
           case "chat.tool.start": {
@@ -494,6 +516,35 @@ export function useMessageStreamChat({
             if (isActive() && atBottomRef.current) {
               requestBottomScroll("smooth");
             }
+
+            // 标记队列第一条为失败，继续处理下一条
+            if (isActive()) {
+              const state = useAgentStore.getState();
+              const ac = state.agentChats[capturedAgentId];
+              const queue = ac?.messageQueue ?? [];
+              if (queue.length > 0) {
+                const firstItem = queue[0];
+                if (firstItem.status === "pending") {
+                  state.updateQueuedMessage(capturedAgentId, capturedChatId, firstItem.id, {
+                    status: "failed",
+                    error: e,
+                  });
+                  // 继续处理下一个 pending
+                  const nextPending = queue.find((m: { status: string; id: string }) => m.status === "pending" && m.id !== firstItem.id);
+                  if (nextPending) {
+                    setTimeout(() => {
+                      sendRef.current(nextPending.content, nextPending.mentions.map((m: { type: "file" | "dir" | "skill"; id: string; label: string }) => ({
+                        type: m.type,
+                        id: m.id,
+                        label: m.label,
+                        start: 0,
+                        end: 0,
+                      })));
+                    }, 300);
+                  }
+                }
+              }
+            }
             break;
           }
         }
@@ -515,15 +566,32 @@ export function useMessageStreamChat({
 
   const handleMentionSend = useCallback(
     (txt: string, _mentions: InlineMention[]) => {
-      if (!txt.trim() || streamingRef.current) return;
+      if (!txt.trim()) return;
       mentionInputRef.current?.clear();
+
+      if (streamingRef.current) {
+        // 流式响应期间：加入队列
+        const imageDataUrls = attachedFilesRef.current
+          .filter(f => f.type.startsWith("image/"))
+          .map(f => ({ url: f.previewUrl ?? "", alt: f.name }));
+        enqueueMessage(activeAgentId, activeChat?.id ?? "", {
+          content: txt.trim(),
+          mentions: _mentions.map(m => ({ type: m.type, id: m.id, label: m.label })),
+          images: imageDataUrls,
+          status: "pending",
+          createdAt: new Date(),
+        });
+        setAttachedFiles([]);
+        return;
+      }
+
       setAttachedFiles((prev) => {
         prev.forEach((f) => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
         return [];
       });
       sendRef.current(txt.trim(), _mentions);
     },
-    [],
+    [activeAgentId, activeChat?.id, enqueueMessage],
   );
 
   const stopStream = useCallback(() => {

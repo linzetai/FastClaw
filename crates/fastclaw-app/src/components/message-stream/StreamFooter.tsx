@@ -7,6 +7,8 @@ import { createPortal } from "react-dom";
 import { MentionInput, type MentionInputHandle, type InlineMention, type MentionOption, type SlashCommand } from "./MentionInput";
 import { useAgentStore } from "../../lib/agent-store";
 import { QuestionPanel } from "./MessageRenderer";
+import { QueueIndicator } from "./QueueIndicator";
+import { QueuePanel } from "./QueuePanel";
 import * as transport from "../../lib/transport";
 import type { Chat } from "../../lib/agent-store";
 
@@ -266,6 +268,17 @@ export function StreamFooter({
   const [inputHasContent, setInputHasContent] = useState(false);
   const [sendPending, setSendPending] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [queueExpanded, setQueueExpanded] = useState(false);
+
+  // 队列状态
+  const messageQueue = useAgentStore((s) => {
+    const agentId = s.activeAgentId;
+    const ac = s.agentChats[agentId];
+    return ac?.messageQueue ?? [];
+  });
+  const updateQueuedMessage = useAgentStore((s) => s.updateQueuedMessage);
+  const removeQueuedMessage = useAgentStore((s) => s.removeQueuedMessage);
+  const reorderQueue = useAgentStore((s) => s.reorderQueue);
 
   useEffect(() => {
     if (streaming) setSendPending(false);
@@ -379,6 +392,40 @@ export function StreamFooter({
           boxShadow: "var(--shadow-md)",
         }}
       >
+        {messageQueue.length > 0 && (
+          <div className="px-3 pt-2">
+            <QueueIndicator
+              count={messageQueue.length}
+              expanded={queueExpanded}
+              onToggle={() => setQueueExpanded(!queueExpanded)}
+            />
+          </div>
+        )}
+        {queueExpanded && messageQueue.length > 0 && (
+          <QueuePanel
+            queue={messageQueue}
+            onEdit={(id, content) => {
+              const agentId = useAgentStore.getState().activeAgentId;
+              const chatId = useAgentStore.getState().agentChats[agentId]?.activeChatId ?? "";
+              updateQueuedMessage(agentId, chatId, id, { content });
+            }}
+            onRemove={(id) => {
+              const agentId = useAgentStore.getState().activeAgentId;
+              const chatId = useAgentStore.getState().agentChats[agentId]?.activeChatId ?? "";
+              removeQueuedMessage(agentId, chatId, id);
+            }}
+            onReorder={(from, to) => {
+              const agentId = useAgentStore.getState().activeAgentId;
+              const chatId = useAgentStore.getState().agentChats[agentId]?.activeChatId ?? "";
+              reorderQueue(agentId, chatId, from, to);
+            }}
+            onRetry={(id) => {
+              const agentId = useAgentStore.getState().activeAgentId;
+              const chatId = useAgentStore.getState().agentChats[agentId]?.activeChatId ?? "";
+              updateQueuedMessage(agentId, chatId, id, { status: "pending", error: undefined });
+            }}
+          />
+        )}
         {attachedFiles.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-4 pt-3" style={{ animation: "slide-up var(--duration-fast) var(--ease-out)" }}>
             {attachedFiles.map((f, i) => (
@@ -487,14 +534,14 @@ export function StreamFooter({
                     if (t) wrappedSend(t, ref.getMentions());
                   }
                 }}
-                disabled={!inputHasContent && attachedFiles.length === 0}
+                disabled={(!inputHasContent && attachedFiles.length === 0) || messageQueue.length >= 10}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-150 hover:scale-[1.02] active:scale-95 disabled:cursor-default"
                 style={{
                   background: "var(--tint)",
                   color: "#fff",
-                  opacity: inputHasContent || attachedFiles.length > 0 ? 1 : 0.3,
+                  opacity: (inputHasContent || attachedFiles.length > 0) && messageQueue.length < 10 ? 1 : 0.3,
                 }}
-                title="发送 ↩"
+                title={messageQueue.length >= 10 ? "队列已满（最多10条）" : streaming ? "加入队列 ↩" : "发送 ↩"}
               >
                 <ArrowUp size={16} strokeWidth={2} />
               </button>

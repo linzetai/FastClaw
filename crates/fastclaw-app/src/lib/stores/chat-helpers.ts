@@ -34,6 +34,7 @@ export function initAgentChats(): Record<string, AgentChats> {
     unread: 0,
     lastMsg: null,
     lastTime: null,
+    messageQueue: [],
   };
   return result;
 }
