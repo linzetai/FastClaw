@@ -91,6 +91,26 @@ fn collect_all_allowed_prefixes() -> Vec<PathBuf> {
     prefixes
 }
 
+/// Normalize a path by resolving `.` and `..` components lexically
+/// (without hitting the filesystem). This is safe for `starts_with`
+/// checks on paths whose parents may not yet exist.
+fn lexical_clean(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push(c);
+                }
+            }
+            Component::CurDir => {}
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// Check if `resolved` falls under any of the allowed prefixes.
 /// Uses canonicalize when the prefix directory exists, falls back to
 /// raw `starts_with` for directories that haven't been created yet.
@@ -214,14 +234,19 @@ fn ensure_within_workspace(path: &Path, must_exist: bool) -> std::io::Result<Pat
         }
         Err(e) if must_exist => return Err(e),
         Err(_) => {
-            // Parent doesn't exist yet — check whitelist using raw absolute path
-            if is_path_under_allowed_prefixes(&absolute, &absolute) {
-                if let Some(parent) = absolute.parent() {
+            // Parent doesn't exist yet — normalize the path lexically
+            // (resolve `..` without touching the filesystem) before
+            // checking workspace root, state dir, and whitelist.
+            let cleaned = lexical_clean(&absolute);
+            let under_workspace = cleaned.starts_with(&root);
+            let under_state = state_dir_root().map_or(false, |sr| cleaned.starts_with(&sr));
+            if under_workspace || under_state || is_path_under_allowed_prefixes(&cleaned, &absolute) {
+                if let Some(parent) = cleaned.parent() {
                     if !parent.exists() {
                         std::fs::create_dir_all(parent)?;
                     }
                 }
-                return Ok(absolute);
+                return Ok(cleaned);
             }
         }
     }
@@ -3590,6 +3615,61 @@ mod tests {
         assert!(!out.success, "search_in_files should be blocked in none mode");
         assert!(out.output.contains("outside") || out.output.contains("file access is disabled"),
             "unexpected: {}", out.output);
+    }
+
+    #[tokio::test]
+    async fn write_file_workspace_allows_new_subdir_in_workspace() {
+        let cwd = std::env::current_dir().expect("current dir");
+        let tmp = tempdir_in(&cwd).expect("temp dir in workspace");
+        let new_subdir_file = tmp.path().join("brand-new-subdir").join("nested.txt");
+        assert!(!new_subdir_file.parent().unwrap().exists());
+
+        let tool = WriteFileTool;
+        let args = serde_json::json!({
+            "file_path": new_subdir_file.to_string_lossy(),
+            "content": "created-in-new-subdir"
+        })
+        .to_string();
+        let out = with_file_access_mode(FileAccessMode::Workspace, Tool::execute(&tool, &args)).await;
+        assert!(
+            out.success,
+            "workspace mode should allow writing to a new sub-directory within the workspace: {}",
+            out.output
+        );
+
+        let content = tokio::fs::read_to_string(&new_subdir_file).await.unwrap();
+        assert!(content.contains("created-in-new-subdir"));
+    }
+
+    #[tokio::test]
+    async fn write_file_workspace_rejects_dotdot_traversal_to_new_dir() {
+        let cwd = std::env::current_dir().expect("current dir");
+        let traversal_path = cwd.join("..").join("..").join("_traversal_test_dir").join("evil.txt");
+
+        let tool = WriteFileTool;
+        let args = serde_json::json!({
+            "file_path": traversal_path.to_string_lossy(),
+            "content": "should-not-be-created"
+        })
+        .to_string();
+        let out = with_file_access_mode(FileAccessMode::Workspace, Tool::execute(&tool, &args)).await;
+        assert!(
+            !out.success,
+            "workspace mode must reject ../../ traversal even when parent doesn't exist: {}",
+            out.output
+        );
+    }
+
+    #[test]
+    fn lexical_clean_resolves_dotdot_components() {
+        let cleaned = lexical_clean(Path::new("/a/b/c/../../d"));
+        assert_eq!(cleaned, PathBuf::from("/a/d"));
+
+        let cleaned2 = lexical_clean(Path::new("/workspace/project/../../etc/passwd"));
+        assert_eq!(cleaned2, PathBuf::from("/etc/passwd"));
+
+        let cleaned3 = lexical_clean(Path::new("/workspace/./subdir/../subdir/file.txt"));
+        assert_eq!(cleaned3, PathBuf::from("/workspace/subdir/file.txt"));
     }
 }
 
