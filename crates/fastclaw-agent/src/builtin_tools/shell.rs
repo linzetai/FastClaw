@@ -577,8 +577,13 @@ impl ShellTool {
         let shell_hint = args.get("shell").and_then(|v| v.as_str());
         let mut cmd = build_shell_command(command, shell_hint);
 
+        // Resolve working directory: explicit arg > task-local work_dir > process cwd
         if let Some(dir) = args.get("working_dir").and_then(|v| v.as_str()) {
             cmd.current_dir(dir);
+        } else if let Some(dir) = super::get_effective_work_dir() {
+            if dir.is_dir() {
+                cmd.current_dir(dir);
+            }
         }
 
         cmd.env("FASTCLAW_AGENT", "1");

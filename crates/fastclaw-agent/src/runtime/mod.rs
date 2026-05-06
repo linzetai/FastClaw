@@ -1928,7 +1928,10 @@ impl AgentRuntime {
             params.config.model.provider, params.config.model.model
         );
 
-        let cwd = std::env::current_dir().unwrap_or_default();
+        let cwd = params.request.work_dir
+            .as_ref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
         let is_git = cwd.join(".git").exists();
         let platform = std::env::consts::OS.to_string();
         let shell = std::env::var("SHELL")

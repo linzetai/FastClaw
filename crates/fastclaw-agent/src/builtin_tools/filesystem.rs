@@ -49,6 +49,12 @@ fn workspace_root() -> std::io::Result<PathBuf> {
     std::env::current_dir()
 }
 
+/// Get the effective work directory from the task-local context.
+/// Returns `None` if not set or if the task-local is not available.
+pub fn get_effective_work_dir() -> Option<PathBuf> {
+    EFFECTIVE_WORK_DIR.try_with(|d| d.clone()).ok().flatten()
+}
+
 fn state_dir_root() -> Option<PathBuf> {
     fastclaw_core::paths::resolve_state_dir_from(None).canonicalize().ok()
 }
