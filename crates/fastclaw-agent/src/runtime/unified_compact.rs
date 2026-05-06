@@ -87,6 +87,25 @@ pub(crate) async fn unified_pre_query_compact(
         *messages = compacted;
     }
 
+    // Detect and strip the [COMPACT_REQUESTED] marker injected by /compact.
+    let force_compact = messages.iter().any(|m| {
+        matches!(m.role, fastclaw_core::types::Role::System)
+            && m.content
+                .as_ref()
+                .and_then(|c| c.as_str())
+                .map_or(false, |t| t.contains("[COMPACT_REQUESTED]"))
+    });
+    if force_compact {
+        messages.retain(|m| {
+            !(matches!(m.role, fastclaw_core::types::Role::System)
+                && m.content
+                    .as_ref()
+                    .and_then(|c| c.as_str())
+                    .map_or(false, |t| t.contains("[COMPACT_REQUESTED]")))
+        });
+        tracing::info!("force-compact requested via /compact command");
+    }
+
     // Step 5.5: Session memory extraction — before LLM compression, try to
     // extract key facts/decisions/task state so that even aggressive compression
     // preserves essential context.
@@ -108,17 +127,22 @@ pub(crate) async fn unified_pre_query_compact(
         session_memory::inject_session_memory(messages, mem);
     }
 
-    // Step 6: LLM-based compression (check circuit breaker first)
-    let compress_result = if pipeline.should_attempt_autocompact() {
+    // Step 6: LLM-based compression
+    // When force_compact is set (user ran /compact), bypass the circuit breaker
+    // and use a context_window of 1 so the threshold is effectively 0 — this
+    // guarantees compression triggers regardless of current token usage.
+    let compress_result = if force_compact || pipeline.should_attempt_autocompact() {
         let local_estimate = fastclaw_context::estimate_messages_tokens(messages);
+        let effective_window = if force_compact { 1 } else { context_window };
         tracing::debug!(
             local_estimate,
             api_prompt_tokens = last_estimated_tokens,
+            force_compact,
             "pre-compact: entering LLM compression"
         );
         let result = context_compressor::try_compress_chat(
             messages,
-            context_window,
+            effective_window,
             provider,
             model,
             last_estimated_tokens,
@@ -131,9 +155,10 @@ pub(crate) async fn unified_pre_query_compact(
                 original = result.original_tokens,
                 new = result.new_tokens,
                 saved = result.original_tokens.saturating_sub(result.new_tokens),
+                force_compact,
                 "post-compact: LLM compression reduced context"
             );
-        } else if result.original_tokens > 0 {
+        } else if result.original_tokens > 0 && !force_compact {
             pipeline.record_autocompact_failure();
         }
         result

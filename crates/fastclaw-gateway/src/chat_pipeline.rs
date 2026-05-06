@@ -181,6 +181,36 @@ pub async fn setup_chat(
         "perf: context_process"
     );
 
+    // Detect /compact in user message text (frontend sends it via the slash command).
+    let is_compact_request = user_messages
+        .iter()
+        .any(|m| m.role == Role::User && m.text_content().map_or(false, |t| t.trim() == "/compact"));
+    if is_compact_request {
+        // Replace the raw "/compact" user message with a nicer prompt and inject
+        // a system marker that the agent loop's compression pipeline can detect.
+        if let Some(last_user) = enriched_request
+            .messages
+            .iter_mut()
+            .rev()
+            .find(|m| m.role == Role::User && m.text_content().map_or(false, |t| t.trim() == "/compact"))
+        {
+            last_user.content = Some(serde_json::Value::String(
+                "请压缩上下文并简要确认压缩结果。".to_string(),
+            ));
+        }
+        enriched_request.messages.push(ChatMessage {
+            role: Role::System,
+            content: Some(serde_json::Value::String(
+                "[COMPACT_REQUESTED] The user explicitly requested context compression. \
+                 The compression pipeline will force-compress regardless of threshold."
+                    .to_string(),
+            )),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        });
+    }
+
     let t0 = std::time::Instant::now();
     let slash_meta =
         inject_slash_intent_context(state, request, &agent_id, &mut enriched_request.messages);

@@ -1595,6 +1595,23 @@ impl AgentRuntime {
                 }
             }
 
+            // Post-tool-call context usage update — re-estimate after tool
+            // results have been appended so the frontend stays current.
+            {
+                let post_tool_tokens = fastclaw_context::estimate_messages_tokens(&messages);
+                state.last_estimated_tokens = post_tool_tokens;
+                let _ = send_stream_event(
+                    tx,
+                    StreamEvent::ContextUsageUpdate {
+                        used_tokens: post_tool_tokens as u32,
+                        limit_tokens: context_window,
+                        compressed: false,
+                        tokens_saved: 0,
+                    },
+                    false,
+                ).await;
+            }
+
             if let (Some(before), Some(ms)) = (mode_before, mode_state.as_ref()) {
                 let after = ms.current_mode();
                 if before != after {

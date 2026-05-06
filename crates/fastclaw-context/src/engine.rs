@@ -1030,7 +1030,7 @@ impl ContextEngine {
     /// 1. If already within budget, returns the estimated token count without modification.
     /// 2. Applies `ImportanceBased` compaction first (preserves recent + tool results).
     /// 3. Falls back to sliding-window truncation (drop oldest non-system messages) if still over.
-    /// 4. Never drops system messages or the current user turn (last user message).
+    /// 4. Truncates oversized system messages (except the first) as a last resort.
     pub fn fit_to_context_window(
         messages: &mut Vec<ChatMessage>,
         context_window: u32,
@@ -1115,7 +1115,89 @@ impl ContextEngine {
         final_msgs.extend(kept);
         *messages = final_msgs;
 
+        let estimated = crate::compressor::estimate_messages_tokens(messages);
+        if estimated <= budget {
+            return estimated;
+        }
+
+        // Phase 4: System message truncation — last resort when system prompts
+        // (skills, rules, MCP tool descriptions, etc.) dominate the context.
+        // The first system message (primary persona) is preserved; others are
+        // truncated from longest to shortest until we fit.
+        Self::truncate_system_messages(messages, budget);
+
         crate::compressor::estimate_messages_tokens(messages)
+    }
+
+    /// Truncate oversized system messages to fit within `budget`.
+    ///
+    /// Preserves the first system message intact (primary persona prompt).
+    /// Remaining system messages are sorted by size and truncated from
+    /// largest first, capping each at a progressively smaller per-message
+    /// allowance until the total fits.
+    fn truncate_system_messages(messages: &mut Vec<ChatMessage>, budget: usize) {
+        let sys_indices: Vec<usize> = messages
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| matches!(m.role, Role::System))
+            .map(|(i, _)| i)
+            .collect();
+
+        if sys_indices.len() <= 1 {
+            return;
+        }
+
+        let sys_total: usize = sys_indices
+            .iter()
+            .map(|&i| crate::compressor::estimate_messages_tokens(std::slice::from_ref(&messages[i])))
+            .sum();
+        let non_sys_total: usize = messages
+            .iter()
+            .filter(|m| !matches!(m.role, Role::System))
+            .map(|m| crate::compressor::estimate_messages_tokens(std::slice::from_ref(m)))
+            .sum();
+
+        let half_budget = budget / 2;
+        if sys_total <= half_budget {
+            return;
+        }
+
+        tracing::warn!(
+            sys_total,
+            non_sys_total,
+            budget,
+            sys_count = sys_indices.len(),
+            "system messages exceed 50% of budget — truncating"
+        );
+
+        let sys_budget = budget.saturating_sub(non_sys_total);
+        let first_sys_tokens = crate::compressor::estimate_messages_tokens(
+            std::slice::from_ref(&messages[sys_indices[0]]),
+        );
+        let remaining_budget = sys_budget.saturating_sub(first_sys_tokens);
+        let truncatable_count = sys_indices.len() - 1;
+        if truncatable_count == 0 {
+            return;
+        }
+
+        let per_msg_budget_chars = (remaining_budget * 4) / truncatable_count;
+        let min_chars = 200;
+
+        for &idx in &sys_indices[1..] {
+            let text = messages[idx]
+                .content
+                .as_ref()
+                .and_then(|c| c.as_str())
+                .unwrap_or("");
+            let char_limit = per_msg_budget_chars.max(min_chars);
+            if text.len() > char_limit {
+                let truncated: String = text.chars().take(char_limit).collect();
+                messages[idx].content = Some(serde_json::Value::String(format!(
+                    "{truncated}\n\n[... truncated to fit context window ({} chars removed)]",
+                    text.len() - char_limit,
+                )));
+            }
+        }
     }
 }
 
@@ -1469,5 +1551,76 @@ mod tests {
         let mut msgs = vec![user("run it"), asst_with_tool];
         hook.on_assemble(&mut msgs).await.unwrap();
         assert_eq!(msgs.len(), 2, "assistant with tool_calls must not be dropped");
+    }
+
+    // ── fit_to_context_window tests ──────────────────────────────────
+
+    #[test]
+    fn fit_no_op_when_under_budget() {
+        let mut msgs = vec![sys("system"), user("hi"), assistant("hello")];
+        let est = ContextEngine::fit_to_context_window(&mut msgs, 128_000, None);
+        assert!(est <= 128_000);
+        assert_eq!(msgs.len(), 3);
+    }
+
+    #[test]
+    fn fit_truncates_large_conversation() {
+        let mut msgs = vec![sys("system prompt")];
+        for i in 0..200 {
+            msgs.push(user(&format!("question {i} {}", "x".repeat(500))));
+            msgs.push(assistant(&format!("answer {i} {}", "y".repeat(500))));
+        }
+        let window = 8_000u32;
+        let est = ContextEngine::fit_to_context_window(&mut msgs, window, Some(1_000));
+        assert!(
+            est <= window as usize,
+            "estimated {est} should be <= context_window {window}"
+        );
+        assert!(msgs.len() < 401, "should have dropped messages");
+    }
+
+    #[test]
+    fn fit_phase4_truncates_oversized_system_messages() {
+        let big_sys1 = sys("primary persona prompt");
+        let big_sys2 = sys(&"skill A content ".repeat(5000));
+        let big_sys3 = sys(&"skill B content ".repeat(5000));
+        let mut msgs = vec![big_sys1, big_sys2, big_sys3, user("hi"), assistant("hello")];
+
+        let window = 4_000u32;
+        let est = ContextEngine::fit_to_context_window(&mut msgs, window, Some(500));
+        assert!(
+            est <= window as usize,
+            "estimated {est} should be <= context_window {window} after phase 4"
+        );
+        let sys_msgs: Vec<_> = msgs.iter().filter(|m| matches!(m.role, Role::System)).collect();
+        assert!(sys_msgs.len() >= 2, "should still have system messages");
+        let first_sys = sys_msgs[0].text_content().unwrap();
+        assert_eq!(first_sys, "primary persona prompt", "first system msg preserved");
+        for s in &sys_msgs[1..] {
+            let text = s.text_content().unwrap_or_default();
+            if text.contains("truncated to fit context window") {
+                continue;
+            }
+            if text.contains("truncated") {
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn fit_preserves_first_system_message() {
+        let first = sys(&"primary ".repeat(100));
+        let second = sys(&"secondary ".repeat(10000));
+        let mut msgs = vec![first, second, user("hi")];
+
+        let window = 2_000u32;
+        ContextEngine::fit_to_context_window(&mut msgs, window, Some(200));
+        let sys_msgs: Vec<_> = msgs.iter().filter(|m| matches!(m.role, Role::System)).collect();
+        assert!(!sys_msgs.is_empty());
+        let first_text = sys_msgs[0].text_content().unwrap();
+        assert!(
+            first_text.starts_with("primary"),
+            "first system message content should be preserved"
+        );
     }
 }

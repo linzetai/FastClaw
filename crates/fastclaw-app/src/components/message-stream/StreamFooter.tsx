@@ -284,12 +284,18 @@ export function StreamFooter({
     if (streaming) setSendPending(false);
   }, [streaming]);
 
+  const handleCompact = useCallback(() => {
+    if (streaming) return;
+    handleMentionSend("/compact", []);
+  }, [streaming, handleMentionSend]);
+
   const slashCommands = useMemo((): SlashCommand[] => [
     { id: "new", label: "new", desc: "开始新话题", action: handleNewTopic },
     { id: "clear", label: "clear", desc: "新建对话（清空当前）", action: handleNewTopic },
+    { id: "compact", label: "compact", desc: "压缩上下文以释放空间", action: handleCompact },
     { id: "model", label: "model", desc: "在消息中指定模型，如 /model gpt-4o" },
     { id: "tools", label: "tools", desc: "在消息中指定工具，如 /tools search" },
-  ], [handleNewTopic]);
+  ], [handleNewTopic, handleCompact]);
 
   const wrappedSend = useCallback((txt: string, mentions: InlineMention[]) => {
     setSendPending(true);
