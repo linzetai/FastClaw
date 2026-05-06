@@ -1,6 +1,13 @@
 import { X, Clock, AlertTriangle, Info, Zap } from "lucide-react";
 import type { AppNotification } from "../../lib/transport";
 import type { ReactNode } from "react";
+import { MarkdownContent } from "../message-stream/MarkdownContent";
+
+function parseUtc(ts: string): Date {
+  if (!ts) return new Date();
+  if (ts.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(ts)) return new Date(ts);
+  return new Date(ts.replace(" ", "T") + "Z");
+}
 
 function categoryLabel(category: string): { icon: ReactNode; label: string } {
   switch (category) {
@@ -68,7 +75,7 @@ export function NotificationDetailPanel({ notification, onClose }: Props) {
                 className="text-[10px]"
                 style={{ color: "var(--fill-quaternary)" }}
               >
-                {label} · {new Date(notification.createdAt.endsWith("Z") ? notification.createdAt : notification.createdAt.replace(" ", "T") + "Z").toLocaleString()}
+                {label} · {parseUtc(notification.createdAt).toLocaleString()}
               </div>
             </div>
           </div>
@@ -93,16 +100,16 @@ export function NotificationDetailPanel({ notification, onClose }: Props) {
           )}
 
           {notification.detail && (
-            <pre
-              className="rounded-lg p-3 text-[11px] leading-relaxed whitespace-pre-wrap break-words"
+            <div
+              className="rounded-lg p-3 text-[11px] leading-relaxed"
               style={{
                 background: "var(--bg-secondary)",
                 color: "var(--fill-secondary)",
                 border: "0.5px solid var(--separator)",
               }}
             >
-              {notification.detail}
-            </pre>
+              <MarkdownContent content={notification.detail} />
+            </div>
           )}
         </div>
       </div>
