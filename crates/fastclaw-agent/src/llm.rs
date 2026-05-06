@@ -61,13 +61,16 @@ impl Default for RetryConfig {
 pub struct TimeoutConfig {
     pub connect_timeout_ms: u64,
     pub request_timeout_ms: u64,
+    /// Stream timeout for SSE streaming requests (default 10 minutes).
+    pub stream_timeout_ms: u64,
 }
 
 impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
             connect_timeout_ms: 10000,
-            request_timeout_ms: 120000,
+            request_timeout_ms: 300000, // 5 minutes (was 2 minutes)
+            stream_timeout_ms: 600000, // 10 minutes for streaming
         }
     }
 }
@@ -130,6 +133,8 @@ fn openai_backoff_delay_ms(cfg: &RetryConfig, consecutive_failures_before_wait: 
 
 pub struct OpenAiProvider {
     client: reqwest::Client,
+    /// Separate client with longer timeout for SSE streaming requests.
+    stream_client: reqwest::Client,
     base_url: String,
     api_key: String,
     retry: RetryConfig,
@@ -160,8 +165,14 @@ impl OpenAiProvider {
             let n = max_concurrent_requests.unwrap_or(10).max(1) as usize;
             Some(Arc::new(tokio::sync::Semaphore::new(n)))
         };
+        let stream_timeouts = TimeoutConfig {
+            connect_timeout_ms: timeouts.connect_timeout_ms,
+            request_timeout_ms: timeouts.stream_timeout_ms,
+            stream_timeout_ms: timeouts.stream_timeout_ms,
+        };
         Self {
             client: build_openai_http_client(&timeouts),
+            stream_client: build_openai_http_client(&stream_timeouts),
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key: api_key.to_string(),
             retry,
@@ -195,7 +206,8 @@ impl OpenAiProvider {
     ) -> Result<reqwest::Response, reqwest::Error> {
         let url = format!("{}/chat/completions", self.base_url);
         let body = self.build_request(params, stream);
-        self.client
+        let client = if stream { &self.stream_client } else { &self.client };
+        client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&body)
@@ -424,7 +436,14 @@ impl LlmProvider for OpenAiProvider {
                     let _hold = &llm_permit;
                     let chunk = match chunk_result {
                         Ok(c) => c,
-                        Err(e) => return vec![Err(anyhow::anyhow!("stream read error: {e}"))],
+                        Err(e) => {
+                            if e.is_timeout() || e.is_connect() {
+                                tracing::warn!(error = %e, "stream interrupted (reconnectable)");
+                                return vec![Err(anyhow::anyhow!("stream read error (reconnectable): {e}"))];
+                            }
+                            tracing::warn!(error = %e, "stream decode error, partial data may be lost");
+                            return vec![Err(anyhow::anyhow!("stream read error: {e}"))];
+                        }
                     };
                     let text = String::from_utf8_lossy(&chunk);
                     line_buf.push_str(&text);
@@ -953,7 +972,14 @@ impl LlmProvider for AnthropicProvider {
                     let _hold = &llm_permit;
                     let chunk = match chunk_result {
                         Ok(c) => c,
-                        Err(e) => return vec![Err(anyhow::anyhow!("stream read error: {e}"))],
+                        Err(e) => {
+                            if e.is_timeout() || e.is_connect() {
+                                tracing::warn!(error = %e, "stream interrupted (reconnectable)");
+                                return vec![Err(anyhow::anyhow!("stream read error (reconnectable): {e}"))];
+                            }
+                            tracing::warn!(error = %e, "stream decode error, partial data may be lost");
+                            return vec![Err(anyhow::anyhow!("stream read error: {e}"))];
+                        }
                     };
                     let text = String::from_utf8_lossy(&chunk);
                     line_buf.push_str(&text);

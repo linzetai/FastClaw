@@ -212,6 +212,12 @@ pub fn evaluate_retry(
             RetryDecision::Retry { delay }
         }
 
+        // Stream interrupted — retry with backoff (may resume)
+        ApiErrorKind::StreamInterrupted => {
+            let delay = backoff_delay(state.attempt, config);
+            RetryDecision::Retry { delay }
+        }
+
         // Unknown errors — retry with backoff (may be transient)
         ApiErrorKind::Unknown(_) => {
             let delay = backoff_delay(state.attempt, config);

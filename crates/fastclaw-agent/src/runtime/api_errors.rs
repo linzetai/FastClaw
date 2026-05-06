@@ -24,6 +24,8 @@ pub enum ApiErrorKind {
     },
     ConnectionTimeout,
     ConnectionReset,
+    /// SSE stream interrupted mid-response (decode error, partial body, etc.).
+    StreamInterrupted,
     ModelNotAvailable {
         model: String,
     },
@@ -134,6 +136,13 @@ impl ApiErrorClassifier {
             return ApiErrorKind::ConnectionReset;
         }
 
+        if lower.contains("stream read error")
+            || lower.contains("error decoding response body")
+            || (lower.contains("stream") && lower.contains("interrupted"))
+        {
+            return ApiErrorKind::StreamInterrupted;
+        }
+
         ApiErrorKind::Unknown(error_text.to_string())
     }
 
@@ -220,6 +229,9 @@ impl ApiErrorClassifier {
             }
             ApiErrorKind::ConnectionReset => {
                 "Connection was reset. Retrying...".to_string()
+            }
+            ApiErrorKind::StreamInterrupted => {
+                "Stream was interrupted. Attempting to resume...".to_string()
             }
             ApiErrorKind::ModelNotAvailable { model } => {
                 format!(
@@ -599,6 +611,7 @@ mod tests {
             ApiErrorKind::PdfTooLarge { path: "doc.pdf".into(), pages: 500 },
             ApiErrorKind::ConnectionTimeout,
             ApiErrorKind::ConnectionReset,
+            ApiErrorKind::StreamInterrupted,
             ApiErrorKind::ModelNotAvailable { model: "gpt-99".into() },
             ApiErrorKind::BudgetExhausted,
             ApiErrorKind::Unknown("something".into()),
