@@ -277,14 +277,17 @@ export const ToolCallGroupTimeline = memo(function ToolCallGroupTimeline({
   const summary = useMemo(() => computeSummary(tools), [tools]);
   const handleToggle = useCallback(() => setExpanded((v) => !v), []);
 
-  const visibleTools = useMemo(() => {
-    if (expanded) return tools;
+  const { visibleTools, hiddenCount } = useMemo(() => {
+    if (expanded) {
+      return { visibleTools: tools, hiddenCount: tools.length - 2 - tools.filter((tc) => tc.status === "error").length };
+    }
     const last2 = tools.slice(-2);
     const errors = tools.filter((tc) => tc.status === "error" && !last2.includes(tc));
-    return [...errors, ...last2];
+    return { visibleTools: [...errors, ...last2], hiddenCount: tools.length - errors.length - 2 };
   }, [tools, expanded]);
 
-  const hiddenCount = tools.length - visibleTools.length;
+  // 始终显示按钮，只要有多于2个工具或有错误
+  const showToggle = tools.length > 2 || summary.errorCount > 0;
 
   return (
     <div
@@ -295,7 +298,7 @@ export const ToolCallGroupTimeline = memo(function ToolCallGroupTimeline({
         maxWidth: "min(100%, 600px)",
       }}
     >
-      {hiddenCount > 0 && (
+      {showToggle && (
         <button
           onClick={handleToggle}
           className="flex w-full items-center gap-2 px-3 py-1 text-left transition-colors duration-100"
