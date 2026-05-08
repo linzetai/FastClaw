@@ -162,6 +162,7 @@ mod tests {
         ChatMessage {
             role: Role::User,
             content: Some(serde_json::Value::String(content.to_string())),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -200,6 +201,7 @@ mod tests {
             ChatMessage {
                 role: Role::Assistant,
                 content: None,
+                reasoning_content: None,
                 name: None,
                 tool_calls: Some(vec![fastclaw_core::types::ToolCall {
                     id: "1".into(),
@@ -217,6 +219,7 @@ mod tests {
             ChatMessage {
                 role: Role::Tool,
                 content: Some("ok".into()),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: Some("1".into()),

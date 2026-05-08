@@ -473,6 +473,7 @@ impl SessionStore {
             let msg = fastclaw_core::types::ChatMessage {
                 role: fastclaw_core::types::Role::Assistant,
                 content: Some(serde_json::Value::String(content.to_string())),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -581,6 +582,7 @@ impl SessionStore {
             messages.push(ChatMessage {
                 role,
                 content,
+                reasoning_content: None,
                 name: row.name,
                 tool_calls,
                 tool_call_id: row.tool_call_id,
@@ -987,6 +989,7 @@ mod tests {
             ChatMessage {
                 role: Role::User,
                 content: Some("a".into()),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -994,6 +997,7 @@ mod tests {
             ChatMessage {
                 role: Role::Assistant,
                 content: Some("b".into()),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -1028,6 +1032,7 @@ mod tests {
             ChatMessage {
                 role: Role::User,
                 content: Some("first".into()),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -1035,6 +1040,7 @@ mod tests {
             ChatMessage {
                 role: Role::User,
                 content: Some("second".into()),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -1059,6 +1065,7 @@ mod tests {
         let msgs = vec![ChatMessage {
             role: Role::User,
             content: Some("x".into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,

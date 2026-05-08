@@ -490,6 +490,7 @@ impl AutoModeClassifier {
         let messages = vec![ChatMessage {
             role: Role::User,
             content: Some(serde_json::Value::String(prompt)),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,

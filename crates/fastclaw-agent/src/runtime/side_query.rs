@@ -197,6 +197,7 @@ mod tests {
                     message: ChatMessage {
                         role: Role::Assistant,
                         content: Some(serde_json::Value::String(content)),
+                        reasoning_content: None,
                         name: None,
                         tool_calls: None,
                         tool_call_id: None,
@@ -235,6 +236,7 @@ mod tests {
             messages: vec![ChatMessage {
                 role: Role::User,
                 content: Some(serde_json::Value::String("test".into())),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,

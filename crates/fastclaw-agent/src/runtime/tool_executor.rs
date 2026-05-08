@@ -1093,6 +1093,7 @@ mod tool_result_truncation_tests {
             .map(|i| ChatMessage {
                 role: Role::Tool,
                 content: Some(serde_json::Value::String(format!("output {i}"))),
+                reasoning_content: None,
                 name: Some("read_file".into()),
                 tool_calls: None,
                 tool_call_id: Some(format!("id-{i}")),
@@ -1126,6 +1127,7 @@ mod tool_result_truncation_tests {
             ChatMessage {
                 role: Role::Tool,
                 content: Some(serde_json::Value::String("Error: file not found".into())),
+                reasoning_content: None,
                 name: Some("read_file".into()),
                 tool_calls: None,
                 tool_call_id: Some("id-0".into()),
@@ -1133,6 +1135,7 @@ mod tool_result_truncation_tests {
             ChatMessage {
                 role: Role::Tool,
                 content: Some(serde_json::Value::String("success output 1".into())),
+                reasoning_content: None,
                 name: Some("shell_exec".into()),
                 tool_calls: None,
                 tool_call_id: Some("id-1".into()),
@@ -1140,6 +1143,7 @@ mod tool_result_truncation_tests {
             ChatMessage {
                 role: Role::Tool,
                 content: Some(serde_json::Value::String("Failed to connect".into())),
+                reasoning_content: None,
                 name: Some("web_fetch".into()),
                 tool_calls: None,
                 tool_call_id: Some("id-2".into()),
@@ -1147,6 +1151,7 @@ mod tool_result_truncation_tests {
             ChatMessage {
                 role: Role::Tool,
                 content: Some(serde_json::Value::String("success output 2".into())),
+                reasoning_content: None,
                 name: Some("grep".into()),
                 tool_calls: None,
                 tool_call_id: Some("id-3".into()),
@@ -1154,6 +1159,7 @@ mod tool_result_truncation_tests {
             ChatMessage {
                 role: Role::Tool,
                 content: Some(serde_json::Value::String("recent output".into())),
+                reasoning_content: None,
                 name: Some("read_file".into()),
                 tool_calls: None,
                 tool_call_id: Some("id-4".into()),
@@ -1234,6 +1240,7 @@ mod tool_result_truncation_tests {
             ChatMessage {
                 role: Role::Tool,
                 content: Some(serde_json::json!("file content here...")),
+                reasoning_content: None,
                 name: Some("read_file".into()),
                 tool_calls: None,
                 tool_call_id: Some("tc-1".into()),
@@ -1241,6 +1248,7 @@ mod tool_result_truncation_tests {
             ChatMessage {
                 role: Role::User,
                 content: Some(serde_json::json!("user msg")),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -1275,6 +1283,7 @@ mod tool_result_truncation_tests {
             ChatMessage {
                 role: Role::Tool,
                 content: Some(serde_json::json!("stale output")),
+                reasoning_content: None,
                 name: Some("read_file".into()),
                 tool_calls: None,
                 tool_call_id: Some("tc-1".into()),
@@ -1282,6 +1291,7 @@ mod tool_result_truncation_tests {
             ChatMessage {
                 role: Role::Tool,
                 content: Some(serde_json::json!("Error: file not found")),
+                reasoning_content: None,
                 name: Some("read_file".into()),
                 tool_calls: None,
                 tool_call_id: Some("tc-2".into()),
@@ -1289,6 +1299,7 @@ mod tool_result_truncation_tests {
             ChatMessage {
                 role: Role::Tool,
                 content: Some(serde_json::json!("fresh output")),
+                reasoning_content: None,
                 name: Some("read_file".into()),
                 tool_calls: None,
                 tool_call_id: Some("tc-3".into()),
@@ -1317,6 +1328,7 @@ mod tool_result_truncation_tests {
         let mut msgs = vec![ChatMessage {
             role: Role::Tool,
             content: Some(serde_json::json!("some output")),
+            reasoning_content: None,
             name: Some("read_file".into()),
             tool_calls: None,
             tool_call_id: Some("tc-1".into()),
@@ -1337,6 +1349,7 @@ mod tool_result_truncation_tests {
             .map(|i| ChatMessage {
                 role: Role::Tool,
                 content: Some(serde_json::Value::String(large_content.clone())),
+                reasoning_content: None,
                 name: Some("read_file".into()),
                 tool_calls: None,
                 tool_call_id: Some(format!("id-{i}")),

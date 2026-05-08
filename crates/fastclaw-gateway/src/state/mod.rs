@@ -118,6 +118,7 @@ impl LlmExtractionCallback for LlmSkillExtraction {
         let messages = vec![fastclaw_core::types::ChatMessage {
             role: fastclaw_core::types::Role::User,
             content: Some(serde_json::Value::String(prompt)),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -1411,6 +1412,7 @@ mod reload_tests {
                     message: ChatMessage {
                         role: Role::Assistant,
                         content: Some("ok".into()),
+                        reasoning_content: None,
                         name: None,
                         tool_calls: None,
                         tool_call_id: None,

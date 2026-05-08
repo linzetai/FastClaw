@@ -102,6 +102,7 @@ pub async fn select_relevant_memories(
         messages: vec![fastclaw_core::types::ChatMessage {
             role: fastclaw_core::types::Role::User,
             content: Some(serde_json::Value::String(prompt)),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,

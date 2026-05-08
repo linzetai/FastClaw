@@ -67,6 +67,7 @@ pub async fn generate_suggestions(
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some(serde_json::Value::String(user_msg)),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -172,8 +173,8 @@ mod tests {
             ..Default::default()
         };
         let messages = vec![
-            ChatMessage { role: Role::User, content: Some(serde_json::Value::String("hi".into())), name: None, tool_calls: None, tool_call_id: None },
-            ChatMessage { role: Role::Assistant, content: Some(serde_json::Value::String("hello".into())), name: None, tool_calls: None, tool_call_id: None },
+            ChatMessage { role: Role::User, content: Some(serde_json::Value::String("hi".into())), reasoning_content: None, name: None, tool_calls: None, tool_call_id: None },
+            ChatMessage { role: Role::Assistant, content: Some(serde_json::Value::String("hello".into())), reasoning_content: None, name: None, tool_calls: None, tool_call_id: None },
         ];
         let result = generate_suggestions(&provider, &messages, &config).await;
         assert!(result.is_empty());

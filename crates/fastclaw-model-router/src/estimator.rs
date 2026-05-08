@@ -280,6 +280,7 @@ mod tests {
         let msgs = vec![ChatMessage {
             role: Role::User,
             content: Some("a".repeat(400).into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,

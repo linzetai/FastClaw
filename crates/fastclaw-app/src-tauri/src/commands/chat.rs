@@ -57,6 +57,7 @@ pub async fn chat_stream(
             ChatMessage {
                 role,
                 content,
+                reasoning_content: None,
                 name,
                 tool_calls: None,
                 tool_call_id,
@@ -263,6 +264,7 @@ pub async fn chat_stream(
                     let assistant_msg = ChatMessage {
                         role: Role::Assistant,
                         content: Some(serde_json::Value::String(assistant_content.clone())),
+                        reasoning_content: None,
                         name: None,
                         tool_calls: saved_tool_calls,
                         tool_call_id: None,
@@ -344,6 +346,7 @@ pub async fn chat_stream(
                     let assistant_msg = ChatMessage {
                         role: Role::Assistant,
                         content: Some(serde_json::Value::String(assistant_content.clone())),
+                        reasoning_content: None,
                         name: None,
                         tool_calls: err_tc,
                         tool_call_id: None,
@@ -354,6 +357,7 @@ pub async fn chat_stream(
                 let error_system_msg = ChatMessage {
                     role: Role::System,
                     content: Some(serde_json::Value::String(format!("[error] {error_msg}"))),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -479,6 +483,7 @@ pub async fn chat_stream(
                 let assistant_msg = ChatMessage {
                     role: Role::Assistant,
                     content: Some(serde_json::Value::String(assistant_content.clone())),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: build_tc_for_persist(),
                     tool_call_id: None,
@@ -489,6 +494,7 @@ pub async fn chat_stream(
             let error_system_msg = ChatMessage {
                 role: Role::System,
                 content: Some(serde_json::Value::String(format!("[error] {error_msg}"))),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -508,6 +514,7 @@ pub async fn chat_stream(
                 let assistant_msg = ChatMessage {
                     role: Role::Assistant,
                     content: Some(serde_json::Value::String(std::mem::take(&mut assistant_content))),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: build_tc_for_persist(),
                     tool_call_id: None,
@@ -518,6 +525,7 @@ pub async fn chat_stream(
             let error_system_msg = ChatMessage {
                 role: Role::System,
                 content: Some(serde_json::Value::String(format!("[error] {error_msg}"))),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,

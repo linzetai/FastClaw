@@ -986,6 +986,7 @@ impl AnthropicProvider {
                     } else {
                         Some(serde_json::Value::String(content_parts.join("")))
                     },
+                    reasoning_content: None,
                     name: None,
                     tool_calls: if tool_calls.is_empty() {
                         None
@@ -1222,6 +1223,7 @@ impl LlmProvider for AnthropicProvider {
                                                             delta: DeltaContent {
                                                                 role: None,
                                                                 content: Some(text.to_string()),
+                                                                reasoning_content: None,
                                                                 tool_calls: None,
                                                             },
                                                             finish_reason: None,
@@ -1264,6 +1266,7 @@ impl LlmProvider for AnthropicProvider {
                                                     delta: DeltaContent {
                                                         role: None,
                                                         content: None,
+                                                        reasoning_content: None,
                                                         tool_calls: Some(vec![
                                                             StreamToolCallDelta {
                                                                 index,
@@ -1318,6 +1321,7 @@ impl LlmProvider for AnthropicProvider {
                                         delta: DeltaContent {
                                             role: None,
                                             content: None,
+                                            reasoning_content: None,
                                             tool_calls: None,
                                         },
                                         finish_reason: finish,

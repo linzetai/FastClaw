@@ -193,6 +193,7 @@ pub fn assemble_context(budget: &ContextBudget, layers: &ContextLayers) -> Assem
         messages.push(ChatMessage {
             role: Role::System,
             content: Some(system_body.into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -205,6 +206,7 @@ pub fn assemble_context(budget: &ContextBudget, layers: &ContextLayers) -> Assem
         messages.push(ChatMessage {
             role: Role::System,
             content: Some(block.into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -217,6 +219,7 @@ pub fn assemble_context(budget: &ContextBudget, layers: &ContextLayers) -> Assem
         messages.push(ChatMessage {
             role: Role::System,
             content: Some(block.into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -229,6 +232,7 @@ pub fn assemble_context(budget: &ContextBudget, layers: &ContextLayers) -> Assem
         messages.push(ChatMessage {
             role: Role::System,
             content: Some(block.into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -511,6 +515,7 @@ impl ContextHook for SystemReminderHook {
                 ChatMessage {
                     role: Role::System,
                     content: Some(DEFAULT_SYSTEM_REMINDER_TEXT.into()),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -677,6 +682,7 @@ impl ContextHook for PersonalityHook {
                 ChatMessage {
                     role: fastclaw_core::types::Role::System,
                     content: Some(soul.clone().into()),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -690,6 +696,7 @@ impl ContextHook for PersonalityHook {
                 ChatMessage {
                     role: fastclaw_core::types::Role::System,
                     content: Some(format!("[User Profile]\n{user}").into()),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -800,6 +807,7 @@ impl ContextHook for MemoryIngestHook {
                 ChatMessage {
                     role: fastclaw_core::types::Role::System,
                     content: Some(memory_block.into()),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -869,6 +877,7 @@ impl ContextHook for AgentPersonalityHook {
                 ChatMessage {
                     role: fastclaw_core::types::Role::System,
                     content: Some(soul_content.clone().into()),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -882,6 +891,7 @@ impl ContextHook for AgentPersonalityHook {
                 ChatMessage {
                     role: fastclaw_core::types::Role::System,
                     content: Some(format!("[Operating Rules]\n{agents_content}").into()),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -895,6 +905,7 @@ impl ContextHook for AgentPersonalityHook {
                 ChatMessage {
                     role: fastclaw_core::types::Role::System,
                     content: Some(format!("[User Profile]\n{user_content}").into()),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -1005,6 +1016,7 @@ impl ContextHook for AgentMemoryIngestHook {
                 ChatMessage {
                     role: fastclaw_core::types::Role::System,
                     content: Some(block.into()),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -1107,6 +1119,7 @@ impl ContextEngine {
             final_msgs.push(ChatMessage {
                 role: Role::System,
                 content: Some("[Earlier conversation history was truncated to fit context window]".into()),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -1125,6 +1138,8 @@ impl ContextEngine {
         // The first system message (primary persona) is preserved; others are
         // truncated from longest to shortest until we fit.
         Self::truncate_system_messages(messages, budget);
+
+        crate::compressor::sanitize_tool_call_pairing(messages);
 
         crate::compressor::estimate_messages_tokens(messages)
     }
@@ -1314,6 +1329,7 @@ mod tests {
         ChatMessage {
             role: Role::User,
             content: Some(text.to_string().into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -1324,6 +1340,7 @@ mod tests {
         ChatMessage {
             role: Role::Assistant,
             content: Some(text.to_string().into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -1361,6 +1378,7 @@ mod tests {
                     ChatMessage {
                         role: Role::System,
                         content: Some(text.clone().into()),
+                        reasoning_content: None,
                         name: None,
                         tool_calls: None,
                         tool_call_id: None,
@@ -1458,6 +1476,7 @@ mod tests {
         ChatMessage {
             role: Role::Tool,
             content: Some(content.to_string().into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: Some("id-1".to_string()),
@@ -1468,6 +1487,7 @@ mod tests {
         ChatMessage {
             role: Role::System,
             content: Some(text.to_string().into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -1501,6 +1521,7 @@ mod tests {
         let empty = ChatMessage {
             role: Role::Assistant,
             content: None,
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -1534,6 +1555,7 @@ mod tests {
         let asst_with_tool = ChatMessage {
             role: Role::Assistant,
             content: None,
+            reasoning_content: None,
             name: None,
             tool_calls: Some(vec![ToolCall {
                 id: "tc1".into(),

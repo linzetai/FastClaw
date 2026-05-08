@@ -135,6 +135,7 @@ impl QueryEngine {
         let user_msg = ChatMessage {
             role: Role::User,
             content: Some(serde_json::json!(user_text)),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -214,6 +215,7 @@ impl QueryEngine {
                                     s.messages.push(ChatMessage {
                                         role: Role::Assistant,
                                         content: Some(serde_json::json!(assistant_text)),
+                                        reasoning_content: None,
                                         name: None,
                                         tool_calls: None,
                                         tool_call_id: None,
@@ -284,6 +286,7 @@ mod tests {
                 delta: DeltaContent {
                     role: None,
                     content: Some(text.into()),
+                    reasoning_content: None,
                     tool_calls: None,
                 },
                 finish_reason: None,
@@ -303,6 +306,7 @@ mod tests {
                 delta: DeltaContent {
                     role: None,
                     content: None,
+                    reasoning_content: None,
                     tool_calls: None,
                 },
                 finish_reason: Some("stop".into()),
@@ -592,6 +596,7 @@ mod tests {
         let msg = ChatMessage {
             role: Role::User,
             content: Some(serde_json::json!(text)),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,

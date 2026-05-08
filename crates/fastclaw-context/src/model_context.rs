@@ -162,6 +162,8 @@ static MODEL_LIMITS: &[PatternEntry] = &[
     PatternEntry { prefix: "qwen-max",  input: 256_000,   output: 32_000 },
     PatternEntry { prefix: "qwen",      input: 256_000,   output: 32_000 },
     // DeepSeek
+    PatternEntry { prefix: "deepseek-v4-pro",   input: 128_000, output: 64_000 },
+    PatternEntry { prefix: "deepseek-v4-flash", input: 128_000, output: 64_000 },
     PatternEntry { prefix: "deepseek-reasoner", input: 128_000, output: 64_000 },
     PatternEntry { prefix: "deepseek-r1",       input: 128_000, output: 64_000 },
     PatternEntry { prefix: "deepseek-chat",     input: 128_000, output: 8_192 },

@@ -73,6 +73,7 @@ impl LlmProvider for ScriptedProvider {
                 message: ChatMessage {
                     role: Role::Assistant,
                     content,
+                    reasoning_content: None,
                     name: None,
                     tool_calls,
                     tool_call_id: None,
@@ -101,6 +102,7 @@ impl LlmProvider for ScriptedProvider {
                     delta: DeltaContent {
                         role: Some(Role::Assistant),
                         content: choice.message.text_content(),
+                        reasoning_content: None,
                         tool_calls: None,
                     },
                     finish_reason: None,
@@ -117,6 +119,7 @@ impl LlmProvider for ScriptedProvider {
                     delta: DeltaContent {
                         role: None,
                         content: None,
+                        reasoning_content: None,
                         tool_calls: None,
                     },
                     finish_reason: Some("stop".into()),

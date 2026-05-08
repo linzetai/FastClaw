@@ -411,6 +411,7 @@ async fn handle_stream(
                             } else {
                                 Some(serde_json::Value::String(assistant_content.clone()))
                             },
+                            reasoning_content: None,
                             name: None,
                             tool_calls: final_tool_calls,
                             tool_call_id: None,
@@ -481,6 +482,7 @@ async fn handle_stream(
                         let assistant_msg = fastclaw_core::types::ChatMessage {
                             role: fastclaw_core::types::Role::Assistant,
                             content: Some(serde_json::Value::String(assistant_content.clone())),
+                            reasoning_content: None,
                             name: None,
                             tool_calls: None,
                             tool_call_id: None,

@@ -165,6 +165,7 @@ async fn run_consolidation(
     let messages = vec![ChatMessage {
         role: Role::User,
         content: Some(serde_json::Value::String(prompt_text)),
+        reasoning_content: None,
         name: None,
         tool_calls: None,
         tool_call_id: None,
@@ -331,6 +332,7 @@ FACT: user | prefers_theme | dark mode";
             ChatMessage {
                 role: Role::User,
                 content: Some("hello".into()),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -338,6 +340,7 @@ FACT: user | prefers_theme | dark mode";
             ChatMessage {
                 role: Role::Tool,
                 content: Some(serde_json::Value::String("x".repeat(500))),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: Some("tc1".into()),

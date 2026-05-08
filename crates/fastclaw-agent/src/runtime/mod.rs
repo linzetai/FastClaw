@@ -325,6 +325,7 @@ pub(crate) fn inject_tool_recovery_guidance(messages: &mut Vec<ChatMessage>, gui
             content: Some(serde_json::Value::String(format!(
                 "[Tool execution recovery — review before your next tool_calls]\n{guidance}"
             ))),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -559,6 +560,8 @@ impl AgentRuntime {
             let newly_replaced = apply_message_budget(&tool_storage, &mut messages, &mut replacement_state, &skip_tool_names);
             Self::persist_replacement_records(session_store, request.session_id.as_deref(), &newly_replaced).await;
 
+            fastclaw_context::compressor::sanitize_tool_call_pairing(&mut messages);
+
             let params = CompletionParams {
                 model,
                 messages: &messages,
@@ -677,6 +680,7 @@ impl AgentRuntime {
                 messages.push(ChatMessage {
                     role: Role::Tool,
                     content: Some(content),
+                    reasoning_content: None,
                     name: Some(tool_name.clone()),
                     tool_calls: None,
                     tool_call_id: Some(call_id),
@@ -734,6 +738,7 @@ impl AgentRuntime {
                              3. Ask the user if they want you to try a different approach.\n\n\
                              Do NOT retry the same failing tool calls.",
                         ))),
+                        reasoning_content: None,
                         name: None,
                         tool_calls: None,
                         tool_call_id: None,
@@ -769,6 +774,7 @@ impl AgentRuntime {
                             break the work into smaller edit_file calls instead of one large write_file."
                                 .to_string(),
                         )),
+                        reasoning_content: None,
                         name: None,
                         tool_calls: None,
                         tool_call_id: None,
@@ -1061,7 +1067,10 @@ impl AgentRuntime {
             let newly_replaced = apply_message_budget(&tool_storage, &mut messages, &mut replacement_state, &skip_tool_names);
             Self::persist_replacement_records(session_store, request.session_id.as_deref(), &newly_replaced).await;
 
+            fastclaw_context::compressor::sanitize_tool_call_pairing(&mut messages);
+
             let mut accumulated_content = String::new();
+            let mut accumulated_reasoning = String::new();
             let mut tool_call_accum: Vec<ToolCallAccumulator> = Vec::new();
             let mut stream_errored = false;
             let mut last_finish_reason: Option<String> = None;
@@ -1150,11 +1159,13 @@ impl AgentRuntime {
                                     partial_len = accumulated_content.len(),
                                     "streaming LLM interrupted; best-effort resume with partial assistant context"
                                 );
+                                let rc = std::mem::take(&mut accumulated_reasoning);
                                 messages.push(ChatMessage {
                                     role: Role::Assistant,
                                     content: Some(serde_json::Value::String(
                                         std::mem::take(&mut accumulated_content),
                                     )),
+                                    reasoning_content: if rc.is_empty() { None } else { Some(rc) },
                                     name: None,
                                     tool_calls: None,
                                     tool_call_id: None,
@@ -1177,6 +1188,9 @@ impl AgentRuntime {
                     if let Some(choice) = delta.choices.first() {
                         if let Some(ref content) = choice.delta.content {
                             accumulated_content.push_str(content);
+                        }
+                        if let Some(ref rc) = choice.delta.reasoning_content {
+                            accumulated_reasoning.push_str(rc);
                         }
 
                         if let Some(ref tc_deltas) = choice.delta.tool_calls {
@@ -1282,11 +1296,13 @@ impl AgentRuntime {
                         "max_output_tokens recovery — retrying with escalated limit"
                     );
                     max_tokens = Some(escalated);
+                    let rc = std::mem::take(&mut accumulated_reasoning);
                     messages.push(ChatMessage {
                         role: Role::Assistant,
                         content: Some(serde_json::Value::String(
                             std::mem::take(&mut accumulated_content),
                         )),
+                        reasoning_content: if rc.is_empty() { None } else { Some(rc) },
                         name: None,
                         tool_calls: None,
                         tool_call_id: None,
@@ -1374,6 +1390,11 @@ impl AgentRuntime {
                     None
                 } else {
                     Some(serde_json::Value::String(accumulated_content.clone()))
+                },
+                reasoning_content: if accumulated_reasoning.is_empty() {
+                    None
+                } else {
+                    Some(accumulated_reasoning.clone())
                 },
                 name: None,
                 tool_calls: Some(assembled_calls.clone()),
@@ -1556,6 +1577,7 @@ impl AgentRuntime {
                 messages.push(ChatMessage {
                     role: Role::Tool,
                     content: Some(content),
+                    reasoning_content: None,
                     name: Some(tool_name.clone()),
                     tool_calls: None,
                     tool_call_id: Some(call_id),
@@ -1605,6 +1627,7 @@ impl AgentRuntime {
                              3. Ask the user if they want you to try a different approach.\n\n\
                              Do NOT retry the same failing tool calls.",
                         ))),
+                        reasoning_content: None,
                         name: None,
                         tool_calls: None,
                         tool_call_id: None,
@@ -1672,6 +1695,7 @@ impl AgentRuntime {
                                 break the work into smaller edit_file calls instead of one large write_file."
                                     .to_string(),
                             )),
+                            reasoning_content: None,
                             name: None,
                             tool_calls: None,
                             tool_call_id: None,
@@ -1888,6 +1912,7 @@ impl AgentRuntime {
             ChatMessage {
                 role: Role::System,
                 content: Some(serde_json::Value::String(block.to_string())),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -1924,6 +1949,7 @@ impl AgentRuntime {
         messages.push(ChatMessage {
             role: Role::System,
             content: Some(serde_json::Value::String(system_text)),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -2117,6 +2143,7 @@ mod stream_resume_tests {
                 delta: DeltaContent {
                     role: None,
                     content: Some(text.into()),
+                    reasoning_content: None,
                     tool_calls: None,
                 },
                 finish_reason: None,
@@ -2136,6 +2163,7 @@ mod stream_resume_tests {
                 delta: DeltaContent {
                     role: None,
                     content: None,
+                    reasoning_content: None,
                     tool_calls: None,
                 },
                 finish_reason: Some("stop".into()),
@@ -2184,6 +2212,7 @@ mod stream_resume_tests {
             messages: vec![ChatMessage {
                 role: Role::User,
                 content: Some("hi".into()),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,

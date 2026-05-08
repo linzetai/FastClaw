@@ -288,6 +288,7 @@ fn spawn_cron_scheduler(state: AppState) {
             let user_msg = fastclaw_core::types::ChatMessage {
                 role: fastclaw_core::types::Role::User,
                 content: Some(serde_json::Value::String(message.to_string())),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -351,6 +352,7 @@ fn spawn_cron_scheduler(state: AppState) {
             let assistant_msg = fastclaw_core::types::ChatMessage {
                 role: fastclaw_core::types::Role::Assistant,
                 content: Some(serde_json::Value::String(reply.clone())),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,

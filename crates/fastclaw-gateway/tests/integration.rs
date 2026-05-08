@@ -29,6 +29,7 @@ impl LlmProvider for MockProvider {
                 message: fastclaw_core::types::ChatMessage {
                     role: fastclaw_core::types::Role::Assistant,
                     content: Some("Hello from mock".into()),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -55,6 +56,7 @@ impl LlmProvider for MockProvider {
                     delta: DeltaContent {
                         role: Some(fastclaw_core::types::Role::Assistant),
                         content: Some("Mock streamed".into()),
+                        reasoning_content: None,
                         tool_calls: None,
                     },
                     finish_reason: None,
@@ -71,6 +73,7 @@ impl LlmProvider for MockProvider {
                     delta: DeltaContent {
                         role: None,
                         content: None,
+                        reasoning_content: None,
                         tool_calls: None,
                     },
                     finish_reason: Some("stop".into()),

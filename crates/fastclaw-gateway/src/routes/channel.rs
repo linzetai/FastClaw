@@ -277,6 +277,7 @@ pub(crate) async fn handle_channel_message(
             &ChatMessage {
                 role: Role::User,
                 content: Some(serde_json::Value::String(text.to_string())),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -305,6 +306,7 @@ pub(crate) async fn handle_channel_message(
             ChatMessage {
                 role: Role::System,
                 content: Some(serde_json::Value::String(system_context)),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -368,6 +370,7 @@ pub(crate) async fn handle_channel_message(
                 &ChatMessage {
                     role: Role::Assistant,
                     content: Some(serde_json::Value::String(text.clone())),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -410,6 +413,7 @@ pub(crate) async fn handle_channel_message(
                     &ChatMessage {
                         role: Role::Assistant,
                         content: Some(serde_json::Value::String(reply_text.clone())),
+                        reasoning_content: None,
                         name: None,
                         tool_calls: None,
                         tool_call_id: None,

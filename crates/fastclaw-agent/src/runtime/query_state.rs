@@ -726,6 +726,7 @@ mod tests {
             ChatMessage {
                 role: Role::System,
                 content: Some(serde_json::Value::String("You are a helpful assistant.".into())),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -733,6 +734,7 @@ mod tests {
             ChatMessage {
                 role: Role::User,
                 content: Some(serde_json::Value::String("hello".into())),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -846,6 +848,7 @@ mod tests {
         let mut messages = vec![ChatMessage {
             role: Role::User,
             content: Some(serde_json::Value::String("hello".into())),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,

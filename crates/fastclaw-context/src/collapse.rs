@@ -387,6 +387,7 @@ pub fn project(messages: &[ChatMessage], store: &CollapseStore) -> Vec<ChatMessa
                         "[Summary of rounds {}–{}]: {}",
                         span.start_round, span.end_round, span.summary
                     ))),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -428,6 +429,7 @@ mod tests {
         ChatMessage {
             role,
             content: Some(json!(text)),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,

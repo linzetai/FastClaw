@@ -86,6 +86,7 @@ impl WorkingMemory {
             out.push(ChatMessage {
                 role: fastclaw_core::types::Role::System,
                 content: Some(serde_json::Value::String(sp.clone())),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -105,6 +106,7 @@ impl WorkingMemory {
             content: Some(serde_json::Value::String(format!(
                 "[conversation recap] {summary}"
             ))),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -141,6 +143,7 @@ mod tests {
         ChatMessage {
             role: Role::User,
             content: Some(serde_json::Value::String(text.to_string())),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -151,6 +154,7 @@ mod tests {
         ChatMessage {
             role: Role::Assistant,
             content: Some(serde_json::Value::String(text.to_string())),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,

@@ -205,6 +205,7 @@ pub async fn setup_chat(
                  The compression pipeline will force-compress regardless of threshold."
                     .to_string(),
             )),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -415,6 +416,7 @@ fn inject_slash_intent_context(
                     ChatMessage {
                         role: Role::System,
                         content: Some(serde_json::Value::String(injected)),
+                        reasoning_content: None,
                         name: None,
                         tool_calls: None,
                         tool_call_id: None,
@@ -433,6 +435,7 @@ fn inject_slash_intent_context(
             ChatMessage {
                 role: Role::System,
                 content: Some(serde_json::Value::String(injected)),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -523,6 +526,7 @@ fn apply_prompt_router(
                 ChatMessage {
                     role: Role::System,
                     content: Some(serde_json::Value::String(dynamic)),
+                    reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -551,6 +555,7 @@ fn inject_skills_prompt(state: &AppState, agent_id: &str, messages: &mut Vec<Cha
         ChatMessage {
             role: Role::System,
             content: Some(serde_json::Value::String(skills_prompt)),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -601,6 +606,7 @@ Guidance:\n\
         ChatMessage {
             role: Role::System,
             content: Some(serde_json::Value::String(prompt)),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -678,6 +684,7 @@ fn inject_mcp_tools_prompt(state: &AppState, messages: &mut Vec<ChatMessage>) {
         ChatMessage {
             role: Role::System,
             content: Some(serde_json::Value::String(prompt)),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -736,6 +743,7 @@ fn spawn_trace_write(state: &AppState, setup: &ChatSetup, assistant: &ChatMessag
         .unwrap_or(ChatMessage {
             role: Role::User,
             content: None,
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -832,6 +840,7 @@ pub async fn generate_smart_title(
                  Reply with ONLY the title, no quotes, no explanation."
                     .to_string(),
             )),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -841,6 +850,7 @@ pub async fn generate_smart_title(
             content: Some(serde_json::Value::String(format!(
                 "User: {user_preview}\nAssistant: {assistant_preview}"
             ))),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,

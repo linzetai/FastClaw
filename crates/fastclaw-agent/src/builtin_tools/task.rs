@@ -976,6 +976,7 @@ pub async fn summarize_agent_output(
         messages: vec![ChatMessage {
             role: fastclaw_core::types::Role::User,
             content: Some(serde_json::Value::String(user_msg)),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,

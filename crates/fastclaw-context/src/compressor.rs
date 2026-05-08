@@ -107,6 +107,89 @@ pub struct CompactionResult {
     pub evicted_count: usize,
 }
 
+/// Repair broken `Assistant(tool_calls) → Tool` pairing in a message sequence.
+///
+/// Some APIs (notably DeepSeek) strictly require every assistant message that
+/// carries `tool_calls` to be followed by `Tool` messages responding to each
+/// call. After compaction/eviction this invariant may be violated.
+///
+/// Repairs applied:
+/// - An `Assistant` message whose `tool_calls` reference IDs not present in the
+///   immediately following `Tool` messages has its `tool_calls` stripped (the
+///   content text is preserved).
+/// - Orphan `Tool` messages that have no preceding `Assistant` with a matching
+///   `tool_calls` entry are removed entirely.
+pub fn sanitize_tool_call_pairing(messages: &mut Vec<ChatMessage>) {
+    use std::collections::HashSet;
+
+    // Pass 1: collect (index, set_of_tool_call_ids) for each assistant with tool_calls.
+    let mut asst_indices: Vec<(usize, HashSet<String>)> = Vec::new();
+    for (i, msg) in messages.iter().enumerate() {
+        if msg.role == Role::Assistant {
+            if let Some(ref tc) = msg.tool_calls {
+                if !tc.is_empty() {
+                    let ids: HashSet<String> = tc.iter().map(|c| c.id.clone()).collect();
+                    asst_indices.push((i, ids));
+                }
+            }
+        }
+    }
+
+    if asst_indices.is_empty() {
+        return;
+    }
+
+    // Pass 2: for each assistant(tool_calls), check the immediately following
+    // contiguous Tool messages. Build a set of tool_call_ids that are answered.
+    let mut strip_tool_calls_at: Vec<usize> = Vec::new();
+    for &(asst_idx, ref expected_ids) in &asst_indices {
+        let mut answered: HashSet<&str> = HashSet::new();
+        for j in (asst_idx + 1)..messages.len() {
+            if messages[j].role != Role::Tool {
+                break;
+            }
+            if let Some(ref tcid) = messages[j].tool_call_id {
+                answered.insert(tcid.as_str());
+            }
+        }
+        if !expected_ids.iter().all(|id| answered.contains(id.as_str())) {
+            strip_tool_calls_at.push(asst_idx);
+        }
+    }
+
+    for &idx in &strip_tool_calls_at {
+        messages[idx].tool_calls = None;
+        tracing::debug!(
+            idx,
+            "sanitize_tool_call_pairing: stripped orphaned tool_calls from assistant message"
+        );
+    }
+
+    // Pass 3: remove orphan Tool messages whose tool_call_id doesn't match
+    // any preceding assistant's tool_calls.
+    let valid_ids: HashSet<String> = messages
+        .iter()
+        .filter(|m| m.role == Role::Assistant)
+        .filter_map(|m| m.tool_calls.as_ref())
+        .flat_map(|tc| tc.iter().map(|c| c.id.clone()))
+        .collect();
+
+    let before_len = messages.len();
+    messages.retain(|m| {
+        if m.role != Role::Tool {
+            return true;
+        }
+        match &m.tool_call_id {
+            Some(id) => valid_ids.contains(id),
+            None => false,
+        }
+    });
+    let removed = before_len - messages.len();
+    if removed > 0 {
+        tracing::debug!(removed, "sanitize_tool_call_pairing: removed orphan tool messages");
+    }
+}
+
 /// Compacts conversation history to stay within context window limits.
 ///
 /// This is a rule-based compactor that doesn't require LLM calls.
@@ -149,7 +232,7 @@ impl ContextCompactor {
             .iter()
             .partition(|m| matches!(m.role, Role::System));
 
-        match self.strategy {
+        let mut result = match self.strategy {
             CompactionStrategy::SlidingWindow { keep_recent } => self.compact_sliding_window(
                 &system_msgs,
                 &conversation,
@@ -175,7 +258,10 @@ impl ContextCompactor {
             CompactionStrategy::Layered(ref cfg) => {
                 self.compact_layered(&system_msgs, &conversation, cfg, None, original_count)
             }
-        }
+        };
+        sanitize_tool_call_pairing(&mut result.messages);
+        result.compacted_count = result.messages.len();
+        result
     }
 
     /// Same as [`Self::compact`], but mid / archive tiers may call `llm` when provided.
@@ -197,12 +283,15 @@ impl ContextCompactor {
         let (system_msgs, conversation): (Vec<_>, Vec<_>) = messages
             .iter()
             .partition(|m| matches!(m.role, Role::System));
-        match &self.strategy {
+        let mut result = match &self.strategy {
             CompactionStrategy::Layered(cfg) => {
                 self.compact_layered(&system_msgs, &conversation, cfg, llm, original_count)
             }
-            _ => self.compact(messages),
-        }
+            _ => return self.compact(messages),
+        };
+        sanitize_tool_call_pairing(&mut result.messages);
+        result.compacted_count = result.messages.len();
+        result
     }
 
     fn importance_score(msg: &ChatMessage, idx: usize, n: usize, recent_window: usize) -> u32 {
@@ -271,6 +360,7 @@ impl ContextCompactor {
             result.push(ChatMessage {
                 role: Role::System,
                 content: Some(format!("[Conversation history summary]\n{summary}").into()),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -316,6 +406,7 @@ impl ContextCompactor {
         result.push(ChatMessage {
             role: Role::System,
             content: Some(format!("[Conversation history summary]\n{summary}").into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -366,6 +457,7 @@ impl ContextCompactor {
             result.push(ChatMessage {
                 role: Role::System,
                 content: Some(format!("[Conversation history summary]\n{s}").into()),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -397,6 +489,7 @@ impl ContextCompactor {
         result.push(ChatMessage {
             role: Role::System,
             content: Some(format!("[Full conversation summary]\n{summary}").into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -489,6 +582,7 @@ impl ContextCompactor {
                 content: Some(
                     format!("[Layered conversation summary — older & mid bands]\n{s}").into(),
                 ),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -805,6 +899,7 @@ mod tests {
         ChatMessage {
             role: Role::User,
             content: Some(text.to_string().into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -815,6 +910,7 @@ mod tests {
         ChatMessage {
             role: Role::Assistant,
             content: Some(text.to_string().into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -825,6 +921,7 @@ mod tests {
         ChatMessage {
             role: Role::System,
             content: Some(text.to_string().into()),
+            reasoning_content: None,
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -935,6 +1032,7 @@ mod tests {
             ChatMessage {
                 role: Role::Tool,
                 content: Some(out.to_string().into()),
+                reasoning_content: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: Some(id.to_string()),
@@ -944,6 +1042,7 @@ mod tests {
             ChatMessage {
                 role: Role::Assistant,
                 content: None,
+                reasoning_content: None,
                 name: None,
                 tool_calls: Some(vec![fastclaw_core::types::ToolCall {
                     id: "1".into(),
