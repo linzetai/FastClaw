@@ -1143,11 +1143,17 @@ impl AppState {
 
         let mut registered = 0usize;
         let mut failed = 0usize;
+        let mut default_refreshed = false;
         for agent in agents {
             match create_provider_chain(&agent.model, Some(&credentials)) {
                 Ok(provider) => {
+                    let provider: Arc<dyn fastclaw_agent::LlmProvider> = Arc::from(provider);
+                    if !default_refreshed {
+                        self.rt.runtime.set_default_provider(provider.clone());
+                        default_refreshed = true;
+                    }
                     self.rt.runtime
-                        .register_provider(&agent.agent_id, Arc::from(provider));
+                        .register_provider(&agent.agent_id, provider);
                     registered += 1;
                 }
                 Err(e) => {
@@ -1164,6 +1170,7 @@ impl AppState {
         tracing::info!(
             registered,
             failed,
+            default_refreshed,
             "agent hot-reload: refreshed runtime provider map"
         );
     }

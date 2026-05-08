@@ -335,8 +335,10 @@ pub(crate) fn inject_tool_recovery_guidance(messages: &mut Vec<ChatMessage>, gui
 
 /// Manages the execution of a single agent invocation, including
 /// the tool-calling loop: LLM → tool_calls → execute → inject result → repeat.
+/// Internal key for the default/fallback provider inside `agent_providers`.
+const DEFAULT_PROVIDER_KEY: &str = "";
+
 pub struct AgentRuntime {
-    default_provider: Arc<dyn LlmProvider>,
     agent_providers: ArcSwap<HashMap<String, Arc<dyn LlmProvider>>>,
     prompt_engine: PromptEngine,
     #[cfg(feature = "self-iter")]
@@ -349,9 +351,10 @@ pub struct AgentRuntime {
 
 impl AgentRuntime {
     pub fn new(provider: Arc<dyn LlmProvider>) -> Self {
+        let mut initial = HashMap::new();
+        initial.insert(DEFAULT_PROVIDER_KEY.to_string(), provider);
         Self {
-            default_provider: provider,
-            agent_providers: ArcSwap::new(Arc::new(HashMap::new())),
+            agent_providers: ArcSwap::new(Arc::new(initial)),
             prompt_engine: Self::default_prompt_engine(),
             #[cfg(feature = "self-iter")]
             self_iter_engine: None,
@@ -422,13 +425,26 @@ impl AgentRuntime {
         self
     }
 
-    pub fn provider(&self) -> &dyn LlmProvider {
-        &*self.default_provider
+    pub fn provider(&self) -> Arc<dyn LlmProvider> {
+        self.default_provider_arc()
     }
 
     /// Get a shared reference to the default LLM provider.
     pub fn default_provider_arc(&self) -> Arc<dyn LlmProvider> {
-        self.default_provider.clone()
+        let guard = self.agent_providers.load();
+        guard
+            .get(DEFAULT_PROVIDER_KEY)
+            .cloned()
+            .expect("default provider must exist")
+    }
+
+    /// Atomically replace the default LLM provider used as fallback when no
+    /// per-agent provider is registered.
+    pub fn set_default_provider(&self, provider: Arc<dyn LlmProvider>) {
+        let mut m = self.agent_providers.load().as_ref().clone();
+        m.insert(DEFAULT_PROVIDER_KEY.to_string(), provider);
+        self.agent_providers.store(Arc::new(m));
+        tracing::info!("default LLM provider hot-swapped");
     }
 
     pub fn register_provider(&self, agent_id: &str, provider: Arc<dyn LlmProvider>) {
@@ -437,20 +453,24 @@ impl AgentRuntime {
         self.agent_providers.store(Arc::new(m));
     }
 
-    /// Drop all per-agent provider overrides.
-    ///
-    /// The runtime-level default provider remains unchanged and is still used as
-    /// fallback when an agent has no dedicated provider entry.
+    /// Drop all per-agent provider overrides, keeping only the default provider.
     pub fn clear_registered_providers(&self) {
-        self.agent_providers.store(Arc::new(HashMap::new()));
+        let guard = self.agent_providers.load();
+        let default = guard.get(DEFAULT_PROVIDER_KEY).cloned();
+        let mut fresh = HashMap::new();
+        if let Some(p) = default {
+            fresh.insert(DEFAULT_PROVIDER_KEY.to_string(), p);
+        }
+        self.agent_providers.store(Arc::new(fresh));
     }
 
     fn resolve_provider(&self, agent_id: &str) -> anyhow::Result<Arc<dyn LlmProvider>> {
         let guard = self.agent_providers.load();
         Ok(guard
             .get(agent_id)
+            .or_else(|| guard.get(DEFAULT_PROVIDER_KEY))
             .cloned()
-            .unwrap_or_else(|| self.default_provider.clone()))
+            .ok_or_else(|| anyhow::anyhow!("no provider found for agent '{agent_id}'"))?)
     }
 
     pub async fn execute(
