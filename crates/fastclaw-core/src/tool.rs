@@ -5,6 +5,32 @@ use std::sync::Arc;
 
 use crate::error::{FastClawError, FastClawResult};
 
+/// Functional domain groups for tools. Used to selectively expose
+/// relevant tools based on task context, reducing model selection cost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ToolGroup {
+    /// File system operations: read, write, edit, glob, list
+    File,
+    /// Code intelligence: LSP, symbols, search, outline
+    Code,
+    /// Web and network: fetch, search, APIs
+    Web,
+    /// System operations: shell, process, terminal
+    System,
+    /// Communication: sessions, messages, channels
+    Communication,
+    /// Memory and knowledge: store, search, recall
+    Memory,
+    /// Meta/utility: time, sleep, plan mode, todo
+    Utility,
+    /// Browser automation
+    Browser,
+    /// Git version control
+    Git,
+    /// Task and workflow management
+    Task,
+}
+
 /// Categorizes a tool by the nature of its operation.
 /// Used for concurrent scheduling (read-only tools run in parallel)
 /// and for permission decisions.
@@ -290,6 +316,13 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    /// Functional domain group for selective tool exposure.
+    /// Tools can belong to multiple groups but return their primary group here.
+    /// Default is `Utility`. Override in tools to enable group-based filtering.
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Utility
+    }
+
     /// Additional keywords that help the tool-search system match this tool
     /// against free-text queries. Default is empty (name + description used).
     fn search_hint(&self) -> &str {
@@ -465,28 +498,91 @@ impl ToolRegistry {
             .collect()
     }
 
+    /// Returns eager tool definitions filtered to only include tools from the specified groups.
+    /// Useful for reducing the tool set exposed to the model based on task context.
+    pub fn eager_definitions_for_groups(&self, groups: &[ToolGroup]) -> Vec<ToolDefinition> {
+        let deferred = self.deferred.read().expect("deferred set poisoned");
+        let tools = self.tools.read().expect("ToolRegistry poisoned");
+        tools
+            .values()
+            .filter(|t| !deferred.contains(t.name()) && groups.contains(&t.group()))
+            .map(|t| t.to_definition())
+            .collect()
+    }
+
+    /// Returns the set of all groups present among eager (non-deferred) tools.
+    pub fn available_groups(&self) -> HashSet<ToolGroup> {
+        let deferred = self.deferred.read().expect("deferred set poisoned");
+        let tools = self.tools.read().expect("ToolRegistry poisoned");
+        tools
+            .values()
+            .filter(|t| !deferred.contains(t.name()))
+            .map(|t| t.group())
+            .collect()
+    }
+
     /// Search deferred tools by matching `query` against name, description,
-    /// and `search_hint`. Returns matching tool definitions.
+    /// and `search_hint`. Uses a scoring approach:
+    /// - All query words match (exact substring) → highest score
+    /// - Partial word matches (prefix ≥3 chars) → medium score
+    /// - At least one word matches → included with lower score
+    /// Results are sorted by score descending; tools with zero matches are excluded.
     pub fn search_deferred(&self, query: &str) -> Vec<ToolDefinition> {
         let deferred = self.deferred.read().expect("deferred set poisoned");
         let tools = self.tools.read().expect("ToolRegistry poisoned");
         let q = query.to_lowercase();
-        tools
+        let query_words: Vec<&str> = q.split_whitespace().collect();
+        if query_words.is_empty() {
+            return Vec::new();
+        }
+
+        let mut scored: Vec<(u32, ToolDefinition)> = tools
             .values()
-            .filter(|t| {
-                deferred.contains(t.name()) && {
-                    let haystack = format!(
-                        "{} {} {}",
-                        t.name(),
-                        t.description(),
-                        t.search_hint()
-                    )
-                    .to_lowercase();
-                    q.split_whitespace().all(|word| haystack.contains(word))
+            .filter(|t| deferred.contains(t.name()))
+            .filter_map(|t| {
+                let haystack = format!(
+                    "{} {} {}",
+                    t.name(),
+                    t.description(),
+                    t.search_hint()
+                )
+                .to_lowercase();
+                let haystack_words: Vec<&str> = haystack.split_whitespace().collect();
+
+                let mut score: u32 = 0;
+                let mut matched_words = 0u32;
+
+                for &qw in &query_words {
+                    if haystack.contains(qw) {
+                        score += 10;
+                        matched_words += 1;
+                    } else if qw.len() >= 3 {
+                        let has_prefix = haystack_words.iter().any(|hw| hw.starts_with(qw));
+                        if has_prefix {
+                            score += 5;
+                            matched_words += 1;
+                        }
+                    }
                 }
+
+                if matched_words == 0 {
+                    return None;
+                }
+
+                if matched_words == query_words.len() as u32 {
+                    score += 20;
+                }
+
+                if t.name().to_lowercase().contains(&q) {
+                    score += 15;
+                }
+
+                Some((score, t.to_definition()))
             })
-            .map(|t| t.to_definition())
-            .collect()
+            .collect();
+
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.into_iter().map(|(_, def)| def).collect()
     }
 
     /// Move a deferred tool into the eager set so it appears in
@@ -670,7 +766,37 @@ mod tests {
         reg.register_deferred(make_tool("web_fetch", "http download curl"));
         let results = reg.search_deferred("http curl");
         assert_eq!(results.len(), 1);
+        // Partial match: "http" matches but "missing" doesn't → still returned (partial)
         let results = reg.search_deferred("http missing");
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn search_deferred_no_match_returns_empty() {
+        let reg = ToolRegistry::new();
+        reg.register_deferred(make_tool("web_fetch", "http download"));
+        let results = reg.search_deferred("completely_unrelated_xyz");
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn search_deferred_prefix_match() {
+        let reg = ToolRegistry::new();
+        reg.register_deferred(make_tool("notebook_edit", "jupyter notebook"));
+        // "note" (4 chars) should prefix-match "notebook"
+        let results = reg.search_deferred("note");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].function.name, "notebook_edit");
+    }
+
+    #[test]
+    fn search_deferred_sorted_by_relevance() {
+        let reg = ToolRegistry::new();
+        reg.register_deferred(make_tool("task_list", "list running tasks"));
+        reg.register_deferred(make_tool("task_stop", "stop cancel terminate task"));
+        // "task list" → task_list should rank higher (all words match + name match)
+        let results = reg.search_deferred("task list");
+        assert!(results.len() >= 1);
+        assert_eq!(results[0].function.name, "task_list");
     }
 }

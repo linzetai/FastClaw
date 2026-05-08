@@ -901,6 +901,14 @@ impl Tool for FileOutlineTool {
          For reading actual code in semantic blocks, use `code_sections` instead."
     }
 
+    fn search_hint(&self) -> &str {
+        "outline structure symbols functions classes methods ast tree-sitter"
+    }
+
+    fn is_deferred(&self) -> bool {
+        true
+    }
+
     fn parameters_schema(&self) -> ToolParameterSchema {
         let mut props = HashMap::new();
         props.insert("path".to_string(), serde_json::json!({
@@ -986,6 +994,14 @@ impl Tool for CodeSectionsTool {
          calls on large files — first get the section map, then read only the \
          sections you need. Unlike `file_outline` which lists symbol metadata, \
          this tool shows how the file is divided into readable blocks."
+    }
+
+    fn search_hint(&self) -> &str {
+        "sections blocks split semantic chunks ast code navigation"
+    }
+
+    fn is_deferred(&self) -> bool {
+        true
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {

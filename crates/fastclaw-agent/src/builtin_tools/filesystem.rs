@@ -311,10 +311,50 @@ struct ReadFileArgs {
     file_path: String,
     offset: Option<i64>,
     limit: Option<usize>,
+    /// Shorthand line range, e.g. "10-30" or "50-". Overrides offset/limit when present.
+    lines: Option<String>,
     #[serde(default)]
     number_lines: bool,
     max_chars: Option<usize>,
     pages: Option<String>,
+}
+
+/// Parse a line range string like "10-30", "50-", or "100" into (offset, limit).
+/// Returns (1-indexed start line, Option<number of lines>).
+fn parse_line_range(range: &str) -> Result<(i64, Option<usize>), String> {
+    let range = range.trim();
+    if range.is_empty() {
+        return Err("empty line range".to_string());
+    }
+
+    if let Some((start_s, end_s)) = range.split_once('-') {
+        let start: i64 = start_s.trim().parse().map_err(|_| {
+            format!("invalid start line number in range '{range}'")
+        })?;
+        if start < 1 {
+            return Err(format!("start line must be >= 1, got {start}"));
+        }
+        let end_s = end_s.trim();
+        if end_s.is_empty() {
+            return Ok((start, None));
+        }
+        let end: i64 = end_s.parse().map_err(|_| {
+            format!("invalid end line number in range '{range}'")
+        })?;
+        if end < start {
+            return Err(format!("end line ({end}) must be >= start line ({start})"));
+        }
+        let count = (end - start + 1) as usize;
+        Ok((start, Some(count)))
+    } else {
+        let line: i64 = range.parse().map_err(|_| {
+            format!("invalid line number '{range}', expected number or 'start-end' range")
+        })?;
+        if line < 1 {
+            return Err(format!("line number must be >= 1, got {line}"));
+        }
+        Ok((line, Some(1)))
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -772,6 +812,24 @@ enum MatchMode {
 struct EditFileArgs {
     #[serde(alias = "path")]
     file_path: String,
+    #[serde(default)]
+    old_string: String,
+    #[serde(default)]
+    new_string: String,
+    #[serde(default)]
+    replace_all: bool,
+    expected_replacements: Option<usize>,
+    #[serde(default)]
+    match_mode: MatchMode,
+    /// Batch mode: apply multiple changes to the same file atomically.
+    /// When provided, old_string/new_string at the top level are ignored.
+    edits: Option<Vec<EditChangeItem>>,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct EditChangeItem {
     old_string: String,
     new_string: String,
     #[serde(default)]
@@ -1568,8 +1626,8 @@ assume that path is valid. It is okay to read a file that does not exist; an err
 Usage:\n\
 - The file_path parameter must be an absolute path, not a relative path\n\
 - By default, it reads up to 2000 lines starting from the beginning of the file\n\
-- You can optionally specify a line offset and limit (especially handy for long files), \
-but it's recommended to read the whole file by not providing these parameters\n\
+- Use the 'lines' parameter for easy range reading: '10-30' (lines 10-30), '50-' (from 50 to EOF), '100' (single line)\n\
+- Alternatively, use offset+limit for pagination (offset is 1-indexed, negative = from end)\n\
 - When you already know which part of the file you need, only read that part. This is important for larger files\n\
 - Results are returned with line numbers starting at 1, using the format: LINE_NUMBER|LINE_CONTENT\n\
 - This tool can read images (PNG, JPG, GIF, WEBP, SVG, BMP). When reading an image file \
@@ -1602,17 +1660,28 @@ it provides structured output with line numbers, handles encoding detection, and
             }),
         );
         props.insert(
+            "lines".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Optional: line range shorthand (e.g., '10-30', '50-', '100'). \
+                                Preferred over offset+limit for readability. '10-30' reads lines 10 through 30, \
+                                '50-' reads from line 50 to EOF, '100' reads only line 100."
+            }),
+        );
+        props.insert(
             "offset".to_string(),
             serde_json::json!({
                 "type": "integer",
-                "description": "Optional: starting line number (1-indexed). Negative values count from end (-1 = last line). Requires 'limit' to be set for pagination."
+                "description": "Optional: starting line number (1-indexed). Negative values count from end (-1 = last line). \
+                                Ignored if 'lines' is provided."
             }),
         );
         props.insert(
             "limit".to_string(),
             serde_json::json!({
                 "type": "integer",
-                "description": "Optional: maximum number of lines to return. Use with 'offset' to paginate through large files."
+                "description": "Optional: maximum number of lines to return. Use with 'offset' to paginate. \
+                                Ignored if 'lines' is provided."
             }),
         );
         props.insert(
@@ -1645,14 +1714,30 @@ it provides structured output with line numbers, handles encoding detection, and
     }
 
     async fn execute(&self, arguments: &str) -> ToolResult {
-        let args: ReadFileArgs = match serde_json::from_str(arguments) {
+        let mut args: ReadFileArgs = match serde_json::from_str(arguments) {
             Ok(v) => v,
             Err(e) => return ToolResult::err(format!(
                 "read_file arguments are not valid JSON: {e}. \
                  Pass a JSON object like {{\"file_path\": \"/absolute/path/to/file.rs\"}}; \
-                 optional fields: offset, limit, number_lines, max_chars, pages."
+                 optional fields: lines, offset, limit, number_lines, max_chars, pages."
             )),
         };
+
+        if let Some(ref range_str) = args.lines {
+            match parse_line_range(range_str) {
+                Ok((start, count)) => {
+                    args.offset = Some(start);
+                    args.limit = count;
+                }
+                Err(e) => {
+                    return ToolResult::err(format!(
+                        "read_file: invalid 'lines' parameter: {e}. \
+                         Expected format: '10-30' (range), '50-' (from line to EOF), or '100' (single line)."
+                    ));
+                }
+            }
+        }
+
         let path = args.file_path.as_str();
 
         let validated = match ensure_within_workspace(Path::new(path), true) {
@@ -2076,6 +2161,196 @@ Always use this tool or edit_file — they provide atomic writes, encoding prese
 /// Edit text in a file by replacing an exact snippet.
 pub struct EditFileTool;
 
+impl EditFileTool {
+    async fn execute_batch(&self, file_path: &str, edits: &[EditChangeItem], dry_run: bool) -> ToolResult {
+        if edits.is_empty() {
+            return ToolResult::err("edit_file: 'edits' array is empty. Provide at least one change.".to_string());
+        }
+
+        let validated = match ensure_within_workspace(Path::new(file_path), true) {
+            Ok(p) => p,
+            Err(e) => {
+                let err_type = classify_workspace_error(&e);
+                return ToolResult::typed_err(err_type, create_user_friendly_error(err_type, file_path));
+            }
+        };
+
+        if let Some(cache) = get_file_state_cache() {
+            if let StaleCheckResult::Stale = cache.check_stale(&validated) {
+                return ToolResult::typed_err(
+                    ToolErrorType::EditPreparationFailure,
+                    format!(
+                        "File '{}' has been modified since you last read it. \
+                         Read the file again before editing.",
+                        file_path
+                    ),
+                );
+            }
+        }
+
+        let raw_bytes = match tokio::fs::read(&validated).await {
+            Ok(b) => b,
+            Err(e) => {
+                let err_type = if e.kind() == std::io::ErrorKind::NotFound {
+                    ToolErrorType::FileNotFound
+                } else {
+                    ToolErrorType::ReadContentFailure
+                };
+                return ToolResult::typed_err(err_type, create_user_friendly_error(err_type, file_path));
+            }
+        };
+
+        let (original, enc_meta) = detect_file_encoding_meta(&raw_bytes);
+        if original.is_empty() && !raw_bytes.is_empty() {
+            return ToolResult::typed_err(
+                ToolErrorType::ReadContentFailure,
+                format!("File '{}' contains binary data which cannot be edited.", file_path),
+            );
+        }
+
+        let mut current = original.replace("\r\n", "\n");
+        let mut change_log: Vec<serde_json::Value> = Vec::new();
+
+        for (idx, change) in edits.iter().enumerate() {
+            if change.old_string.is_empty() {
+                return ToolResult::err(format!(
+                    "edit_file batch: edit #{idx} has empty old_string. All edits aborted, file unchanged."
+                ));
+            }
+
+            let old_norm = change.old_string.replace("\r\n", "\n");
+            let new_norm = change.new_string.replace("\r\n", "\n");
+
+            match change.match_mode {
+                MatchMode::Contains => {
+                    match try_contains_match(&current, &old_norm) {
+                        FuzzyMatchResult::UniqueMatch { start, end } => {
+                            let mut result = String::with_capacity(current.len());
+                            result.push_str(&current[..start]);
+                            result.push_str(&new_norm);
+                            result.push_str(&current[end..]);
+                            current = result;
+                            change_log.push(serde_json::json!({"index": idx, "replacements": 1, "mode": "contains"}));
+                        }
+                        FuzzyMatchResult::NoMatch => {
+                            return ToolResult::err(format!(
+                                "edit_file batch: edit #{idx} old_string not found (contains mode). All edits aborted."
+                            ));
+                        }
+                        FuzzyMatchResult::MultipleMatches(n) => {
+                            return ToolResult::err(format!(
+                                "edit_file batch: edit #{idx} found {n} matches (contains mode). Provide more context. All edits aborted."
+                            ));
+                        }
+                    }
+                }
+                MatchMode::Fuzzy => {
+                    match try_fuzzy_match(&current, &old_norm) {
+                        FuzzyMatchResult::UniqueMatch { start, end } => {
+                            let mut result = String::with_capacity(current.len());
+                            result.push_str(&current[..start]);
+                            result.push_str(&new_norm);
+                            result.push_str(&current[end..]);
+                            current = result;
+                            change_log.push(serde_json::json!({"index": idx, "replacements": 1, "mode": "fuzzy"}));
+                        }
+                        FuzzyMatchResult::NoMatch => {
+                            return ToolResult::err(format!(
+                                "edit_file batch: edit #{idx} old_string not found (fuzzy mode). All edits aborted."
+                            ));
+                        }
+                        FuzzyMatchResult::MultipleMatches(n) => {
+                            return ToolResult::err(format!(
+                                "edit_file batch: edit #{idx} found {n} fuzzy matches. Provide more context. All edits aborted."
+                            ));
+                        }
+                    }
+                }
+                MatchMode::Exact => {
+                    let match_count = current.matches(&*old_norm).count();
+
+                    if let Some(expected) = change.expected_replacements {
+                        if match_count != expected {
+                            return ToolResult::err(format!(
+                                "edit_file batch: edit #{idx} expected {expected} matches but found {match_count}. All edits aborted."
+                            ));
+                        }
+                    }
+
+                    if match_count == 0 {
+                        match try_fuzzy_match(&current, &old_norm) {
+                            FuzzyMatchResult::UniqueMatch { start, end } => {
+                                let mut result = String::with_capacity(current.len());
+                                result.push_str(&current[..start]);
+                                result.push_str(&new_norm);
+                                result.push_str(&current[end..]);
+                                current = result;
+                                change_log.push(serde_json::json!({"index": idx, "replacements": 1, "fuzzy": true}));
+                            }
+                            _ => {
+                                return ToolResult::err(format!(
+                                    "edit_file batch: edit #{idx} old_string not found. All edits aborted, file unchanged. \
+                                     Re-read the file to get current content."
+                                ));
+                            }
+                        }
+                    } else if !change.replace_all && change.expected_replacements.is_none() && match_count > 1 {
+                        return ToolResult::err(format!(
+                            "edit_file batch: edit #{idx} found {match_count} matches. \
+                             Set replace_all=true or provide more context. All edits aborted."
+                        ));
+                    } else {
+                        let replaced = if change.replace_all { match_count } else { 1 };
+                        current = if change.replace_all {
+                            current.replace(&*old_norm, &new_norm)
+                        } else {
+                            current.replacen(&*old_norm, &new_norm, 1)
+                        };
+                        change_log.push(serde_json::json!({"index": idx, "replacements": replaced}));
+                    }
+                }
+            }
+        }
+
+        if dry_run {
+            return ToolResult::ok(serde_json::json!({
+                "dry_run": true,
+                "file_path": file_path,
+                "edits_valid": change_log.len(),
+                "status": "all edits valid, file not written",
+            }).to_string());
+        }
+
+        let final_bytes = encode_with_meta(&current, &enc_meta);
+        match atomic_write_bytes(&validated, &final_bytes).await {
+            Ok(()) => {
+                if let Some(cache) = get_file_state_cache() {
+                    cache.update(&validated, &current);
+                }
+
+                let old_lines = original.lines().count();
+                let new_lines = current.lines().count();
+                let added = new_lines.saturating_sub(old_lines);
+                let removed = old_lines.saturating_sub(new_lines);
+
+                ToolResult::ok(serde_json::json!({
+                    "edited": true,
+                    "file_path": file_path,
+                    "edits_applied": change_log,
+                    "bytes": final_bytes.len(),
+                    "diffStat": format!("+{added} -{removed} lines"),
+                    "linesAdded": added,
+                    "linesRemoved": removed,
+                }).to_string())
+            }
+            Err(e) => ToolResult::typed_err(
+                ToolErrorType::FileWriteFailure,
+                format!("edit_file batch: failed to write '{}': {e}", file_path),
+            ),
+        }
+    }
+}
+
 #[async_trait]
 impl Tool for EditFileTool {
     fn kind(&self) -> ToolKind { ToolKind::Edit }
@@ -2084,14 +2359,16 @@ impl Tool for EditFileTool {
     }
 
     fn description(&self) -> &str {
-        "Replaces text within a file. By default, replaces a single occurrence. \
+        "Replaces text within a file. Supports single edit (old_string + new_string) or batch mode \
+         (edits array for multiple changes in one file, applied atomically). \
          Set replace_all=true to replace every instance. Use empty old_string to create a new file. \
          old_string MUST be the exact literal text from the file including all whitespace and indentation. \
          Include at least 3 lines of context BEFORE and AFTER for unique identification. \
          Preserves file encoding (BOM, line endings) automatically. \
          Falls back to Unicode-normalized and whitespace-normalized fuzzy matching if exact match fails. \
          Use match_mode='fuzzy' to skip exact match and directly use whitespace-tolerant matching. \
-         Use match_mode='contains' when old_string is a partial substring of the actual file text."
+         Use match_mode='contains' when old_string is a partial substring of the actual file text. \
+         Use dry_run=true to validate edits without writing."
     }
 
     fn prompt(&self) -> String {
@@ -2172,13 +2449,27 @@ it provides atomic writes, encoding preservation, fuzzy matching, and stale-file
                                 'contains'=old_string is a substring of the file text; matches if unique."
             }),
         );
+        props.insert(
+            "edits".to_string(),
+            serde_json::json!({
+                "type": "array",
+                "description": "Optional: batch mode. Array of {old_string, new_string, replace_all?, match_mode?} \
+                                for multiple edits on the same file, applied atomically in order. \
+                                When provided, top-level old_string/new_string are ignored."
+            }),
+        );
+        props.insert(
+            "dry_run".to_string(),
+            serde_json::json!({
+                "type": "boolean",
+                "description": "Optional: if true, validate all edits but do not write to disk. Default false."
+            }),
+        );
         ToolParameterSchema {
             schema_type: "object".to_string(),
             properties: props,
             required: vec![
                 "file_path".to_string(),
-                "old_string".to_string(),
-                "new_string".to_string(),
             ],
         }
     }
@@ -2189,10 +2480,15 @@ it provides atomic writes, encoding preservation, fuzzy matching, and stale-file
             Err(e) => {
                 return ToolResult::err(format!(
                     "edit_file arguments are not valid JSON: {e}. \
-                     Pass {{\"file_path\":\"/absolute/path\", \"old_string\":\"...\", \"new_string\":\"...\"}}."
+                     Pass {{\"file_path\":\"/absolute/path\", \"old_string\":\"...\", \"new_string\":\"...\"}} \
+                     or {{\"file_path\":\"/path\", \"edits\": [{{\"old_string\":\"...\", \"new_string\":\"...\"}}]}}."
                 ))
             }
         };
+
+        if let Some(ref edits) = args.edits {
+            return self.execute_batch(&args.file_path, edits, args.dry_run).await;
+        }
 
         if args.old_string.is_empty() {
             if args.new_string.is_empty() {
@@ -3498,10 +3794,18 @@ impl Tool for MultiEditTool {
     fn name(&self) -> &str { "multi_edit" }
 
     fn description(&self) -> &str {
-        "Atomically apply edits across one or more files. All edits are validated in memory first; \
+        "Atomically apply edits across MULTIPLE files. All edits are validated in memory first; \
          only if every edit succeeds are results written to disk. If any edit fails, no files are \
-         modified (all-or-nothing transaction). Use for: single-file multi-edit (replaces apply_patch), \
-         or cross-file atomic edits. Supports dry_run, match_mode (exact/fuzzy/contains), and replace_all."
+         modified (all-or-nothing transaction). Use when you need cross-file atomic guarantees. \
+         For single-file multi-edit, prefer edit_file with the 'edits' array parameter instead."
+    }
+
+    fn search_hint(&self) -> &str {
+        "multi file cross atomic batch refactor rename"
+    }
+
+    fn is_deferred(&self) -> bool {
+        true
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {

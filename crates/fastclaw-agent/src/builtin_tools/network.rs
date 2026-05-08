@@ -73,10 +73,11 @@ impl Tool for HttpFetchTool {
     }
 
     fn description(&self) -> &str {
-        "General-purpose HTTP client for API calls. Use for REST APIs, webhooks, and \
-         non-HTML responses. Supports GET/POST/PUT/DELETE/PATCH/HEAD with custom headers and body. \
-         Body truncated at ~4KB; timeout 10s. For reading web pages (HTML → text/markdown), \
-         use web_fetch instead. SSRF protection blocks localhost and private IPs."
+        "Raw HTTP client for REST API calls, webhooks, and JSON/XML responses. \
+         Supports GET/POST/PUT/DELETE/PATCH/HEAD with custom headers, auth tokens, and request body. \
+         Returns raw response (status, headers, body). Body truncated at ~4KB; timeout 10s. \
+         SSRF protection blocks localhost and private IPs. \
+         DO NOT use for reading web pages — use web_fetch (which extracts readable text from HTML)."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -1122,10 +1123,11 @@ impl Tool for WebFetchTool {
     }
 
     fn description(&self) -> &str {
-        "Fetch and read web page content (HTML → clean text/markdown). Use for documentation, \
-         articles, READMEs, and any HTML page. GET-only; extract_mode: 'text' (default, strips \
-         HTML tags), 'markdown' (preserves structure), 'raw' (HTML). Content up to ~32KB. \
-         For API calls needing POST/PUT/headers, use http_fetch instead. No JS execution."
+        "Read web page content as clean text or markdown. Designed for documentation, articles, \
+         READMEs, and any HTML page — extracts human-readable content from HTML. GET-only; \
+         extract_mode: 'text' (default, strips tags), 'markdown' (preserves structure), 'raw' (HTML). \
+         Content up to ~32KB. No JS execution (won't work for client-rendered SPAs). \
+         DO NOT use for API calls — use http_fetch (which supports POST/PUT/headers/auth)."
     }
 
     fn prompt(&self) -> String {

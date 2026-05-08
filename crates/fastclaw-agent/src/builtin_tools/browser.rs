@@ -1602,6 +1602,14 @@ impl Tool for BrowserTool {
         "browser"
     }
 
+    fn search_hint(&self) -> &str {
+        "chrome headless automation web page click screenshot navigate form"
+    }
+
+    fn is_deferred(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Browser automation via Chrome DevTools Protocol.\n\n\
          ## Core Workflow\n\
@@ -1860,7 +1868,7 @@ impl Tool for BrowserTool {
 }
 
 pub fn register_browser_tool(registry: &ToolRegistry) {
-    registry.register(Arc::new(BrowserTool::new()));
+    registry.register_deferred(Arc::new(BrowserTool::new()));
 }
 
 #[cfg(test)]

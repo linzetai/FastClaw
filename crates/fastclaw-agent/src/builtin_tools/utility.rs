@@ -18,6 +18,14 @@ impl Tool for CurrentTimeTool {
         "Get current time in UTC (RFC3339). Returns JSON {\"utc\": \"...\"}. No parameters needed."
     }
 
+    fn search_hint(&self) -> &str {
+        "time date now clock timestamp utc"
+    }
+
+    fn is_deferred(&self) -> bool {
+        true
+    }
+
     fn parameters_schema(&self) -> ToolParameterSchema {
         ToolParameterSchema {
             schema_type: "object".to_string(),
@@ -117,6 +125,14 @@ impl Tool for SleepTool {
         "Wait for a specified number of seconds (max 300). \
          Input: {\"seconds\": <positive number>}. \
          Returns JSON {\"slept_seconds\": <actual>} on success."
+    }
+
+    fn search_hint(&self) -> &str {
+        "wait pause delay backoff rate limit"
+    }
+
+    fn is_deferred(&self) -> bool {
+        true
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {

@@ -91,8 +91,7 @@ pub fn register_builtin_tools(registry: &ToolRegistry) {
 
 /// Register built-in tools, optionally with sandbox enforcement on shell_exec.
 pub fn register_builtin_tools_with_sandbox(registry: &ToolRegistry, sandboxed: bool) {
-    registry.register(Arc::new(CurrentTimeTool));
-    registry.register(Arc::new(SleepTool));
+    // ── Core eager tools (~15) ──────────────────────────────────────────────
     registry.register(Arc::new(GitTool));
     registry.register(Arc::new(HttpFetchTool::new()));
     registry.register(Arc::new(WebSearchTool::unconfigured()));
@@ -110,11 +109,14 @@ pub fn register_builtin_tools_with_sandbox(registry: &ToolRegistry, sandboxed: b
     registry.register(Arc::new(SearchInFilesTool));
     registry.register(Arc::new(GlobTool));
     registry.register(Arc::new(UnifiedLspTool));
-    registry.register(Arc::new(FileOutlineTool));
-    registry.register(Arc::new(CodeSectionsTool));
-    registry.register(Arc::new(MultiEditTool));
     registry.register(Arc::new(ListDirectoryTool));
 
+    // ── Deferred tools (available via tool_search) ──────────────────────────
+    registry.register_deferred(Arc::new(CurrentTimeTool));
+    registry.register_deferred(Arc::new(SleepTool));
+    registry.register_deferred(Arc::new(FileOutlineTool));
+    registry.register_deferred(Arc::new(CodeSectionsTool));
+    registry.register_deferred(Arc::new(MultiEditTool));
     registry.register_deferred(Arc::new(NotebookEditTool));
     registry.register_deferred(Arc::new(TerminalCaptureTool::new()));
 }
@@ -125,10 +127,10 @@ pub fn register_web_tools(registry: &ToolRegistry, backend: WebSearchBackend) {
     registry.register(Arc::new(WebFetchTool::with_defaults()));
 }
 
-/// Register media generation tools (requires API credentials).
+/// Register media generation tools as deferred (requires API credentials).
 pub fn register_media_tools(registry: &ToolRegistry, base_url: &str, api_key: &str) {
-    registry.register(Arc::new(ImageGenerateTool::new(base_url, api_key)));
-    registry.register(Arc::new(TtsTool::new(base_url, api_key)));
+    registry.register_deferred(Arc::new(ImageGenerateTool::new(base_url, api_key)));
+    registry.register_deferred(Arc::new(TtsTool::new(base_url, api_key)));
 }
 
 /// Register the unified skill tool (read-only: list + read).
@@ -206,10 +208,10 @@ pub fn register_session_tools(
     sessions: Arc<SessionStore>,
     bus: Arc<MessageBus>,
 ) {
-    registry.register(Arc::new(SessionsSpawnTool::new(
+    registry.register_deferred(Arc::new(SessionsSpawnTool::new(
         sessions.clone(),
         bus.clone(),
     )));
-    registry.register(Arc::new(SessionsSendTool::new(sessions, bus)));
+    registry.register_deferred(Arc::new(SessionsSendTool::new(sessions, bus)));
 }
 

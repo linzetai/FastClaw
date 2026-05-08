@@ -122,6 +122,14 @@ impl Tool for NotebookEditTool {
          cell_type ('code'|'markdown') and source."
     }
 
+    fn search_hint(&self) -> &str {
+        "jupyter notebook ipynb cell edit python data science"
+    }
+
+    fn is_deferred(&self) -> bool {
+        true
+    }
+
     fn parameters_schema(&self) -> ToolParameterSchema {
         let mut props = HashMap::new();
         props.insert(

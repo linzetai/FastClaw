@@ -522,7 +522,7 @@ impl AgentRuntime {
 
         let mut trajectory_steps: Vec<TrajectoryStep> = Vec::new();
         let t0 = std::time::Instant::now();
-        let all_tool_defs = tool_registry.definitions();
+        let all_tool_defs = tool_registry.eager_definitions();
         let tool_defs = filter_tool_definitions(&all_tool_defs, config);
         tracing::info!(elapsed_ms = t0.elapsed().as_millis() as u64, count = tool_defs.len(), "perf: tool_definitions");
         let tools_for_llm = if tool_defs.is_empty() {
@@ -887,7 +887,7 @@ impl AgentRuntime {
 
         let mut trajectory_steps: Vec<TrajectoryStep> = Vec::new();
         let t0 = std::time::Instant::now();
-        let all_tool_defs = tool_registry.definitions();
+        let all_tool_defs = tool_registry.eager_definitions();
         let tool_defs = filter_tool_definitions(&all_tool_defs, config);
         let tool_defs_json_chars: usize = tool_defs.iter().map(|td| {
             serde_json::to_string(td).map(|s| s.len()).unwrap_or(0)
@@ -1188,16 +1188,17 @@ impl AgentRuntime {
                                     "streaming LLM interrupted; best-effort resume with partial assistant context"
                                 );
                                 let rc = std::mem::take(&mut accumulated_reasoning);
-                                messages.push(ChatMessage {
-                                    role: Role::Assistant,
-                                    content: Some(serde_json::Value::String(
-                                        std::mem::take(&mut accumulated_content),
-                                    )),
-                                    reasoning_content: if rc.is_empty() { None } else { Some(rc) },
-                                    name: None,
-                                    tool_calls: None,
-                                    tool_call_id: None,
-                                });
+                                let partial = std::mem::take(&mut accumulated_content);
+                                if !partial.is_empty() || !rc.is_empty() {
+                                    messages.push(ChatMessage {
+                                        role: Role::Assistant,
+                                        content: if partial.is_empty() { None } else { Some(serde_json::Value::String(partial)) },
+                                        reasoning_content: if rc.is_empty() { None } else { Some(rc) },
+                                        name: None,
+                                        tool_calls: None,
+                                        tool_call_id: None,
+                                    });
+                                }
                                 stream_resume_attempts += 1;
                                 should_resume = true;
                                 break;
@@ -1325,16 +1326,17 @@ impl AgentRuntime {
                     );
                     max_tokens = Some(escalated);
                     let rc = std::mem::take(&mut accumulated_reasoning);
-                    messages.push(ChatMessage {
-                        role: Role::Assistant,
-                        content: Some(serde_json::Value::String(
-                            std::mem::take(&mut accumulated_content),
-                        )),
-                        reasoning_content: if rc.is_empty() { None } else { Some(rc) },
-                        name: None,
-                        tool_calls: None,
-                        tool_call_id: None,
-                    });
+                    let partial = std::mem::take(&mut accumulated_content);
+                    if !partial.is_empty() || !rc.is_empty() {
+                        messages.push(ChatMessage {
+                            role: Role::Assistant,
+                            content: if partial.is_empty() { None } else { Some(serde_json::Value::String(partial)) },
+                            reasoning_content: if rc.is_empty() { None } else { Some(rc) },
+                            name: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                        });
+                    }
                     continue;
                 }
             }

@@ -208,6 +208,26 @@ pub fn sanitize_tool_call_pairing(messages: &mut Vec<ChatMessage>) {
         );
     }
 
+    // Pass 2b: Remove assistant messages that became empty after stripping tool_calls.
+    // An empty assistant message (no content, no tool_calls) causes 400 errors from LLM APIs.
+    if !strip_tool_calls_at.is_empty() {
+        messages.retain(|m| {
+            if m.role != Role::Assistant {
+                return true;
+            }
+            let has_tool_calls = m.tool_calls.as_ref().is_some_and(|tc| !tc.is_empty());
+            let has_content = m.content.as_ref().is_some_and(|c| {
+                match c {
+                    serde_json::Value::String(s) => !s.trim().is_empty(),
+                    serde_json::Value::Array(arr) => !arr.is_empty(),
+                    _ => false,
+                }
+            });
+            let has_reasoning = m.reasoning_content.as_ref().is_some_and(|r| !r.trim().is_empty());
+            has_tool_calls || has_content || has_reasoning
+        });
+    }
+
     // Pass 3: remove orphan Tool messages whose tool_call_id doesn't match
     // any preceding assistant's tool_calls.
     let valid_ids: HashSet<String> = messages
