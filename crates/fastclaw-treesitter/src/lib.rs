@@ -4,7 +4,7 @@ pub mod chunker;
 pub mod shell_ast;
 
 pub use parser::{CodeParser, ParsedTree};
-pub use symbols::{Symbol, SymbolKind, extract_symbols};
+pub use symbols::{Symbol, SymbolKind, extract_symbols, extract_callees, extract_trait_impls};
 pub use chunker::{CodeChunk, chunk_file};
 pub use shell_ast::{
     ShellAst, ShellArg, CaseArm, Redirection, RedirectOp,

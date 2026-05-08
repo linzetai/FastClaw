@@ -43,6 +43,8 @@ fastclaw-treesitter = { path = "../fastclaw-treesitter" }
 encoding_rs = "0.8"
 chardetng = "1.0"
 pdf-extract = "0.10"
+rusqlite = { version = "0.29", features = ["bundled"] }
+notify.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

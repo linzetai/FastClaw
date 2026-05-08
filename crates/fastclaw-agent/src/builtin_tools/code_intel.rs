@@ -167,6 +167,37 @@ impl Tool for WorkspaceSymbolsTool {
         if args.query.trim().is_empty() {
             return ToolResult::err("workspace_symbols requires non-empty query.".to_string());
         }
+
+        // Try local symbol index first (fast, no LSP needed).
+        let index_results = crate::symbol_index::SymbolIndex::global().lookup(args.query.trim());
+        if !index_results.is_empty() {
+            let limit = args.limit.unwrap_or(50).clamp(1, 500);
+            let symbols: Vec<serde_json::Value> = index_results
+                .into_iter()
+                .take(limit)
+                .map(|s| {
+                    serde_json::json!({
+                        "name": s.name,
+                        "kind": s.kind,
+                        "path": s.file_path,
+                        "line": s.start_line,
+                        "endLine": s.end_line,
+                        "signature": s.signature,
+                        "engine": "symbol_index",
+                    })
+                })
+                .collect();
+            return ToolResult::ok(
+                serde_json::json!({
+                    "query": args.query,
+                    "symbols": symbols,
+                    "count": symbols.len(),
+                    "engine": "symbol_index",
+                })
+                .to_string(),
+            );
+        }
+
         let escaped = regex::escape(args.query.trim());
         let pattern = format!(
             r"\b(fn|struct|enum|trait|impl|class|interface|type)\s+{escaped}\b"
@@ -314,6 +345,33 @@ impl Tool for GoToDefinitionTool {
             }
         };
 
+        // Try local symbol index first for fast definition lookup.
+        let index_results = crate::symbol_index::SymbolIndex::global().lookup(&symbol);
+        let exact_defs: Vec<_> = index_results
+            .iter()
+            .filter(|s| s.name == symbol)
+            .collect();
+        if exact_defs.len() == 1 {
+            let d = &exact_defs[0];
+            return ToolResult::ok(
+                serde_json::json!({
+                    "query": symbol,
+                    "symbols": [{
+                        "name": d.name,
+                        "kind": d.kind,
+                        "path": d.file_path,
+                        "line": d.start_line,
+                        "endLine": d.end_line,
+                        "signature": d.signature,
+                        "engine": "symbol_index",
+                    }],
+                    "count": 1,
+                    "engine": "symbol_index",
+                })
+                .to_string(),
+            );
+        }
+
         let read_args_full = serde_json::json!({
             "path": file_path.clone(),
         })
@@ -359,6 +417,35 @@ impl Tool for GoToDefinitionTool {
                     }
                 }
             }
+        }
+
+        // If the symbol index found multiple matches but not a unique one, return them.
+        if !index_results.is_empty() {
+            let limit = args.limit.unwrap_or(20);
+            let symbols: Vec<serde_json::Value> = index_results
+                .into_iter()
+                .take(limit)
+                .map(|s| {
+                    serde_json::json!({
+                        "name": s.name,
+                        "kind": s.kind,
+                        "path": s.file_path,
+                        "line": s.start_line,
+                        "endLine": s.end_line,
+                        "signature": s.signature,
+                        "engine": "symbol_index",
+                    })
+                })
+                .collect();
+            return ToolResult::ok(
+                serde_json::json!({
+                    "query": symbol,
+                    "symbols": symbols,
+                    "count": symbols.len(),
+                    "engine": "symbol_index",
+                })
+                .to_string(),
+            );
         }
 
         let symbol_args = serde_json::json!({
@@ -433,6 +520,36 @@ impl Tool for FindReferencesTool {
                 }
             }
         };
+
+        // Try local symbol index first for fast reference lookup.
+        let index_refs = crate::symbol_index::SymbolIndex::global().find_references(&symbol);
+        if !index_refs.is_empty() {
+            let limit = args.limit.unwrap_or(200).clamp(1, 2000);
+            let arr: Vec<serde_json::Value> = index_refs
+                .into_iter()
+                .take(limit)
+                .map(|s| {
+                    serde_json::json!({
+                        "path": s.file_path,
+                        "line": s.start_line,
+                        "endLine": s.end_line,
+                        "name": s.name,
+                        "kind": s.kind,
+                        "signature": s.signature,
+                        "engine": "symbol_index",
+                    })
+                })
+                .collect();
+            return ToolResult::ok(
+                serde_json::json!({
+                    "symbol": symbol,
+                    "references": arr,
+                    "count": arr.len(),
+                    "engine": "symbol_index",
+                })
+                .to_string(),
+            );
+        }
 
         let read_args_full = serde_json::json!({
             "path": file_path.clone(),

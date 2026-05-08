@@ -69,6 +69,7 @@ mod tool_executor;
 pub mod tool_result_storage;
 mod trajectory;
 mod unified_compact;
+pub(crate) mod context_budget;
 
 pub use prompt_builder::{build_subagent_prompt_block, SubAgentPromptContext};
 
@@ -353,6 +354,14 @@ impl AgentRuntime {
     pub fn new(provider: Arc<dyn LlmProvider>) -> Self {
         let mut initial = HashMap::new();
         initial.insert(DEFAULT_PROVIDER_KEY.to_string(), provider);
+
+        // Kick off background symbol indexing if we're in a workspace.
+        if let Ok(root) = std::env::current_dir() {
+            let index = crate::symbol_index::SymbolIndex::global().clone();
+            crate::symbol_index::start_background_scan(root.clone(), index.clone());
+            crate::symbol_index::start_watcher(root, index);
+        }
+
         Self {
             agent_providers: ArcSwap::new(Arc::new(initial)),
             prompt_engine: Self::default_prompt_engine(),
@@ -371,8 +380,9 @@ impl AgentRuntime {
             system_section, tone_and_style_section, using_tools_section,
         };
         use prompt_sections::dynamic::{
-            environment_section, frc_section, language_section, mcp_instructions_section,
-            memory_section, session_guidance_section, token_budget_section,
+            code_context_section, environment_section, frc_section, language_section,
+            mcp_instructions_section, memory_section, session_guidance_section,
+            token_budget_section,
         };
 
         let static_sections: Vec<PromptSection> = vec![
@@ -392,6 +402,7 @@ impl AgentRuntime {
             language_section(),
             mcp_instructions_section(),
             token_budget_section(),
+            code_context_section(),
             frc_section(),
         ];
 

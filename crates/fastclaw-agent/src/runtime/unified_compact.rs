@@ -4,10 +4,11 @@ use fastclaw_core::types::ChatMessage;
 
 use crate::llm::LlmProvider;
 use super::context_compressor;
+use super::context_budget::{apply_token_budget, BudgetConfig};
 use super::session_memory;
 use super::tool_executor::{
     dedup_repeated_tool_calls, microcompact_tool_results, time_based_microcompact,
-    DEFAULT_CACHE_WINDOW_DURATION,
+    rebuild_recall_registry, DEFAULT_CACHE_WINDOW_DURATION,
 };
 
 /// Result of the unified pre-query compression pipeline.
@@ -54,8 +55,20 @@ pub(crate) async fn unified_pre_query_compact(
         tracing::debug!(time_compacted, "time-based microcompact collapsed stale tool results");
     }
 
-    // Step 1: Microcompact old tool results (keep last 3 fully, next 3 faded)
+    // Step 1: Tier-aware microcompact of old tool results.
     microcompact_tool_results(messages, 3);
+
+    // Step 1.5: Token budget allocation — enforce the 30/40/20/10 split
+    // so that older tool results don't crowd out recent ones.
+    let budget_result = apply_token_budget(messages, context_window, &BudgetConfig::default());
+    if budget_result.total_tokens_freed > 0 {
+        tracing::debug!(
+            older_summarized = budget_result.older_tools_summarized,
+            recent_trimmed = budget_result.recent_tools_trimmed,
+            tokens_freed = budget_result.total_tokens_freed,
+            "token budget allocation freed context"
+        );
+    }
 
     // Step 2: Deduplicate repeated tool calls on the same target
     dedup_repeated_tool_calls(messages);
@@ -179,6 +192,10 @@ pub(crate) async fn unified_pre_query_compact(
         context_window,
         max_tokens,
     );
+
+    // Step 8: Rebuild the auto-recall registry from the compacted messages
+    // so cleared results can be re-executed on demand.
+    rebuild_recall_registry(messages);
 
     let tokens_saved_by_llm = if compress_result.compressed {
         compress_result

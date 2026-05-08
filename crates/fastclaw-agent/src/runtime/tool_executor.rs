@@ -180,6 +180,193 @@ const COMPACTABLE_TOOLS: &[&str] = &[
     "mcp_",
 ];
 
+// ─── Tool Result Retention Tiers ──────────────────────────────────────────
+//
+// Level 0 (Ephemeral):   Immediate discard — low-value metadata results.
+// Level 1 (Summarize):   Retain a compact summary — search/list results.
+// Level 2 (Full Retain): Keep full content as long as possible — file reads,
+//                         test output, error output, edit confirmations.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum RetentionTier {
+    /// Discard immediately when not in the keep-recent window.
+    Ephemeral = 0,
+    /// Fade to a compact summary (first N lines + stats).
+    Summarize = 1,
+    /// Keep full content; only fade under extreme pressure.
+    FullRetain = 2,
+}
+
+/// Tools whose results are ephemeral (Level 0): low-value metadata that the
+/// model rarely needs to re-read once it has processed the output.
+const TIER0_EPHEMERAL: &[&str] = &[
+    "list_dir", "list_directory", "glob", "web_search",
+    "web_fetch", "fetch_url",
+];
+
+/// Tools whose results should be summarized (Level 1): contain useful
+/// information but can be represented compactly.
+const TIER1_SUMMARIZE: &[&str] = &[
+    "grep", "ripgrep", "search_in_files",
+    "workspace_symbols", "find_references", "go_to_definition",
+    "file_outline", "code_sections", "lsp",
+];
+
+/// Tools whose results should be fully retained (Level 2): high-value
+/// content that the model frequently needs to reference.
+const TIER2_FULL_RETAIN: &[&str] = &[
+    "read_file", "shell_exec", "shell", "run_command",
+    "write_file", "edit_file", "apply_patch", "multi_edit",
+];
+
+/// Classify a tool by name into a retention tier.
+pub(crate) fn classify_retention_tier(tool_name: &str) -> RetentionTier {
+    if TIER2_FULL_RETAIN.iter().any(|t| tool_name.starts_with(t)) {
+        return RetentionTier::FullRetain;
+    }
+    if TIER1_SUMMARIZE.iter().any(|t| tool_name.starts_with(t)) {
+        return RetentionTier::Summarize;
+    }
+    if TIER0_EPHEMERAL.iter().any(|t| tool_name.starts_with(t)) {
+        return RetentionTier::Ephemeral;
+    }
+    // MCP tools default to Summarize; unknown tools default to Summarize.
+    if tool_name.starts_with("mcp_") {
+        return RetentionTier::Summarize;
+    }
+    RetentionTier::Summarize
+}
+
+/// Generate a compact summary for a tool result (Level 1 retention).
+///
+/// Preserves the first few lines (up to `max_summary_lines`) and appends
+/// a stats line showing how much was trimmed.
+pub(crate) fn summarize_tool_result(tool_name: &str, content: &str, max_summary_chars: usize) -> String {
+    if content.len() <= max_summary_chars {
+        return content.to_string();
+    }
+
+    let total_lines = content.lines().count();
+    let total_chars = content.len();
+
+    // For search results, keep the match lines (they're the most useful part)
+    if tool_name.starts_with("grep")
+        || tool_name.starts_with("ripgrep")
+        || tool_name.starts_with("search_in_files")
+    {
+        return summarize_search_result(content, max_summary_chars, total_lines, total_chars);
+    }
+
+    // Generic summary: keep first N lines that fit the budget
+    let mut summary = String::new();
+    let mut lines_kept = 0;
+    for line in content.lines() {
+        if summary.len() + line.len() + 1 > max_summary_chars.saturating_sub(80) {
+            break;
+        }
+        if !summary.is_empty() {
+            summary.push('\n');
+        }
+        summary.push_str(line);
+        lines_kept += 1;
+    }
+
+    let omitted = total_lines.saturating_sub(lines_kept);
+    if omitted > 0 {
+        summary.push_str(&format!(
+            "\n[… {omitted} more lines, {total_chars} total chars. Use the tool again to see full output.]"
+        ));
+    }
+    summary
+}
+
+/// Summarize search/grep results: keep file paths and match counts.
+fn summarize_search_result(content: &str, max_chars: usize, total_lines: usize, total_chars: usize) -> String {
+    let mut summary = String::new();
+    let mut files_seen = std::collections::HashSet::new();
+    let mut match_count = 0;
+
+    for line in content.lines() {
+        match_count += 1;
+        // Extract file path (lines typically start with "path:line:content")
+        if let Some(colon_pos) = line.find(':') {
+            let path = &line[..colon_pos];
+            if !path.is_empty() && !path.contains(' ') {
+                files_seen.insert(path.to_string());
+            }
+        }
+
+        if summary.len() + line.len() + 1 < max_chars.saturating_sub(100) {
+            if !summary.is_empty() {
+                summary.push('\n');
+            }
+            summary.push_str(line);
+        }
+    }
+
+    let omitted = total_lines.saturating_sub(summary.lines().count());
+    if omitted > 0 || !files_seen.is_empty() {
+        summary.push_str(&format!(
+            "\n[{match_count} matches across {} files, {total_chars} chars total. \
+             {omitted} lines omitted. Re-run search to see full results.]",
+            files_seen.len()
+        ));
+    }
+    summary
+}
+
+/// Metadata stored alongside a cleared tool result so it can be
+/// re-executed on demand (auto-recall).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct ClearedToolMeta {
+    pub tool_name: String,
+    pub arguments_json: String,
+}
+
+pub(crate) const RECALL_HINT_MARKER: &str = "[recall-available]";
+
+/// Build the cleared message with recall metadata embedded, and register
+/// the tool for potential auto-recall.
+pub(crate) fn build_cleared_with_recall(
+    tool_name: &str,
+    tier: RetentionTier,
+    original_content: &str,
+    arguments_json: Option<&str>,
+) -> String {
+    let stats = format!(
+        "{} lines, {} chars",
+        original_content.lines().count(),
+        original_content.len()
+    );
+
+    let tier_label = match tier {
+        RetentionTier::Ephemeral => "ephemeral",
+        RetentionTier::Summarize => "summarized",
+        RetentionTier::FullRetain => "full-retain",
+    };
+
+    match arguments_json {
+        Some(args) if !args.is_empty() => {
+            let short_args = if args.len() > 120 {
+                format!("{}…", &args[..args.floor_char_boundary(120)])
+            } else {
+                args.to_string()
+            };
+            format!(
+                "{RECALL_HINT_MARKER} [{tool_name}({short_args}) → {stats}, tier={tier_label}. \
+                 Re-call the tool to retrieve this result.]"
+            )
+        }
+        _ => {
+            format!(
+                "{RECALL_HINT_MARKER} [{tool_name} → {stats}, tier={tier_label}. \
+                 Re-call the tool to retrieve this result.]"
+            )
+        }
+    }
+}
+
 /// Extract the "command" field from shell_exec tool arguments JSON.
 fn extract_command_from_args(args: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(args)
@@ -322,42 +509,74 @@ fn truncate_str(s: &str, max: usize) -> String {
     }
 }
 
-/// Progressive fading: tool results are kept at three tiers based on recency.
+/// Retention-aware progressive fading using per-tool retention tiers.
 ///
-/// - **Tier 1** (most recent `full_keep` results): kept in full.
-/// - **Tier 2** (next `preview_keep` results): faded to a short preview (~150 chars).
-/// - **Tier 3** (all older): collapsed to a single-line summary.
+/// Each tool result is classified into a `RetentionTier` (Ephemeral / Summarize
+/// / FullRetain). The compaction strategy varies by tier:
 ///
-/// Error results are always preserved regardless of age.
-/// Results already faded/collapsed are not re-processed.
+/// - **FullRetain** tools (read_file, shell, edit_file, …):
+///   Most recent `full_keep + 2` kept in full, next 3 faded to preview,
+///   older ones get a recall-enabled summary.
+/// - **Summarize** tools (grep, search, lsp, …):
+///   Most recent `full_keep` kept in full, older ones get a compact summary.
+/// - **Ephemeral** tools (list_dir, glob, web_search, …):
+///   Most recent 1 kept in full, all older immediately cleared with recall hint.
+///
+/// Error results are always preserved regardless of age or tier.
 pub(crate) fn microcompact_tool_results(
     messages: &mut [fastclaw_core::types::ChatMessage],
     keep_recent: usize,
 ) {
     use fastclaw_core::types::Role;
 
-    let full_keep = keep_recent.min(3);
-    let preview_keep: usize = 3;
+    let base_keep = keep_recent.max(1);
 
-    let tool_indices: Vec<usize> = messages
+    // Collect (msg_index, tool_name) for all compactable tool results.
+    let tool_entries: Vec<(usize, String)> = messages
         .iter()
         .enumerate()
         .filter(|(_, m)| matches!(m.role, Role::Tool))
-        .filter(|(_, m)| {
-            m.name
-                .as_deref()
-                .map(|n| COMPACTABLE_TOOLS.iter().any(|t| n.starts_with(t)))
-                .unwrap_or(false)
+        .filter_map(|(i, m)| {
+            let name = m.name.as_deref()?;
+            if COMPACTABLE_TOOLS.iter().any(|t| name.starts_with(t)) {
+                Some((i, name.to_string()))
+            } else {
+                None
+            }
         })
-        .map(|(i, _)| i)
         .collect();
 
-    let total = tool_indices.len();
-    if total <= full_keep {
+    if tool_entries.len() <= base_keep {
         return;
     }
 
-    for (rank_from_end, &idx) in tool_indices.iter().rev().enumerate() {
+    // Pre-collect arguments for each tool entry (avoids borrow conflict).
+    let args_for_entry: Vec<Option<String>> = tool_entries
+        .iter()
+        .map(|&(idx, _)| {
+            let call_id = messages[idx].tool_call_id.as_deref()?;
+            messages[..idx]
+                .iter()
+                .rev()
+                .filter(|m| matches!(m.role, Role::Assistant))
+                .find_map(|m| {
+                    m.tool_calls.as_ref()?.iter().find_map(|tc| {
+                        if tc.id == call_id {
+                            Some(tc.function.arguments.clone())
+                        } else {
+                            None
+                        }
+                    })
+                })
+        })
+        .collect();
+
+    for (rank_from_end, (entry_idx_from_end, &(idx, ref tool_name))) in
+        tool_entries.iter().rev().enumerate().map(|(r, e)| {
+            let entry_idx = tool_entries.len() - 1 - r;
+            (r, (entry_idx, e))
+        })
+    {
         let msg = &mut messages[idx];
         let text = match msg.text_content() {
             Some(t) => t,
@@ -366,6 +585,7 @@ pub(crate) fn microcompact_tool_results(
 
         if text.starts_with(ONELINER_MARKER)
             || text.starts_with(FADED_MARKER)
+            || text.starts_with(RECALL_HINT_MARKER)
             || text == TOOL_RESULT_CLEARED_MESSAGE
         {
             continue;
@@ -374,17 +594,44 @@ pub(crate) fn microcompact_tool_results(
             continue;
         }
 
-        if rank_from_end < full_keep {
-            // Tier 1: keep fully
-        } else if rank_from_end < full_keep + preview_keep {
-            // Tier 2: fade to preview
-            let faded = format!("{FADED_MARKER} {}", fade_to_preview(&text, 150));
-            msg.content = Some(serde_json::Value::String(faded));
-        } else {
-            // Tier 3: fully clear (SAVE CONTEXT guidance ensures the model
-            // has already extracted key facts into its reply text)
-            msg.content =
-                Some(serde_json::Value::String(TOOL_RESULT_CLEARED_MESSAGE.to_string()));
+        let tier = classify_retention_tier(tool_name);
+        let args_json = args_for_entry[entry_idx_from_end].as_deref();
+
+        match tier {
+            RetentionTier::FullRetain => {
+                let full_window = base_keep + 2;
+                let preview_window = 3;
+                if rank_from_end < full_window {
+                    // Keep fully
+                } else if rank_from_end < full_window + preview_window {
+                    let faded = format!("{FADED_MARKER} {}", fade_to_preview(&text, 300));
+                    msg.content = Some(serde_json::Value::String(faded));
+                } else {
+                    let cleared = build_cleared_with_recall(
+                        tool_name, tier, &text, args_json,
+                    );
+                    msg.content = Some(serde_json::Value::String(cleared));
+                }
+            }
+            RetentionTier::Summarize => {
+                if rank_from_end < base_keep {
+                    // Keep fully
+                } else {
+                    let summary = summarize_tool_result(tool_name, &text, 400);
+                    let compacted = format!("[summarized] {summary}");
+                    msg.content = Some(serde_json::Value::String(compacted));
+                }
+            }
+            RetentionTier::Ephemeral => {
+                if rank_from_end < 1 {
+                    // Keep most recent one
+                } else {
+                    let cleared = build_cleared_with_recall(
+                        tool_name, tier, &text, args_json,
+                    );
+                    msg.content = Some(serde_json::Value::String(cleared));
+                }
+            }
         }
     }
 }
@@ -395,22 +642,15 @@ pub(crate) const DEFAULT_CACHE_WINDOW_DURATION: std::time::Duration =
 
 const TIME_COMPACTED_MARKER: &str = "[time-compacted]";
 
-/// Time-driven microcompact: compresses tool results that are older than
-/// `cache_window_duration` from the most recent assistant turn boundary.
+/// Time-driven microcompact with tier awareness.
 ///
-/// This complements the count-based `microcompact_tool_results` by using
-/// wall-clock time to determine staleness. Tool results outside the cache
-/// window won't benefit from LLM prompt caching, so keeping them verbatim
-/// wastes context. They are collapsed to a one-liner summary.
+/// Tool results older than `cache_window` are compressed according to their
+/// retention tier:
+/// - **FullRetain**: summarized (preserving key content).
+/// - **Summarize**: compacted to a brief summary.
+/// - **Ephemeral**: cleared with a recall hint.
 ///
-/// # Arguments
-/// - `messages`: mutable slice of chat messages
-/// - `iteration_boundaries`: `(msg_index, wall_time)` pairs marking when each
-///   iteration started
-/// - `cache_window`: how far back from `now` to consider results "fresh"
-///
-/// # Returns
-/// Number of tool results that were compacted.
+/// Error results are always preserved regardless of tier.
 pub(crate) fn time_based_microcompact(
     messages: &mut [fastclaw_core::types::ChatMessage],
     iteration_boundaries: &[(usize, std::time::Instant)],
@@ -425,8 +665,6 @@ pub(crate) fn time_based_microcompact(
     let now = std::time::Instant::now();
     let cutoff = now.checked_sub(cache_window).unwrap_or(now);
 
-    // Find the earliest message index that is within the cache window.
-    // All tool results before this index are candidates for compaction.
     let fresh_boundary_idx = iteration_boundaries
         .iter()
         .rev()
@@ -446,36 +684,46 @@ pub(crate) fn time_based_microcompact(
             continue;
         }
 
-        let is_compactable = msg
-            .name
-            .as_deref()
-            .map(|n| COMPACTABLE_TOOLS.iter().any(|t| n.starts_with(t)))
-            .unwrap_or(false);
-        if !is_compactable {
-            continue;
-        }
+        let tool_name = match msg.name.as_deref() {
+            Some(n) if COMPACTABLE_TOOLS.iter().any(|t| n.starts_with(t)) => n.to_string(),
+            _ => continue,
+        };
 
         let text = match msg.text_content() {
             Some(t) => t,
             None => continue,
         };
 
-        // Skip already-compacted results
         if text.starts_with(ONELINER_MARKER)
             || text.starts_with(FADED_MARKER)
             || text.starts_with(TIME_COMPACTED_MARKER)
+            || text.starts_with(RECALL_HINT_MARKER)
+            || text.starts_with("[summarized]")
             || text == TOOL_RESULT_CLEARED_MESSAGE
         {
             continue;
         }
 
-        // Preserve error results
         if is_error_tool_result(&text) {
             continue;
         }
 
-        messages[i].content =
-            Some(serde_json::Value::String(TOOL_RESULT_CLEARED_MESSAGE.to_string()));
+        let tier = classify_retention_tier(&tool_name);
+        let replacement = match tier {
+            RetentionTier::FullRetain => {
+                let summary = summarize_tool_result(&tool_name, &text, 600);
+                format!("{TIME_COMPACTED_MARKER} {summary}")
+            }
+            RetentionTier::Summarize => {
+                let summary = summarize_tool_result(&tool_name, &text, 300);
+                format!("{TIME_COMPACTED_MARKER} {summary}")
+            }
+            RetentionTier::Ephemeral => {
+                build_cleared_with_recall(&tool_name, tier, &text, None)
+            }
+        };
+
+        messages[i].content = Some(serde_json::Value::String(replacement));
         compacted += 1;
     }
 
@@ -760,6 +1008,89 @@ fn validate_tool_arguments(tool: &dyn fastclaw_core::tool::Tool, arguments: &str
             missing.join(", "),
             schema.required
         ))
+    }
+}
+
+// ─── Auto-Recall Registry ─────────────────────────────────────────────
+//
+// Stores metadata for cleared tool results so they can be re-executed
+// on demand. The registry is populated during compaction and queried
+// when the LLM asks for a result that was previously cleared.
+
+use std::sync::OnceLock;
+use dashmap::DashMap;
+
+/// Global registry mapping tool_call_id → recall metadata.
+static AUTO_RECALL_REGISTRY: OnceLock<DashMap<String, ClearedToolMeta>> = OnceLock::new();
+
+fn recall_registry() -> &'static DashMap<String, ClearedToolMeta> {
+    AUTO_RECALL_REGISTRY.get_or_init(DashMap::new)
+}
+
+/// Register a cleared tool result for potential auto-recall.
+pub(crate) fn register_for_recall(tool_call_id: &str, meta: ClearedToolMeta) {
+    recall_registry().insert(tool_call_id.to_string(), meta);
+}
+
+/// Look up recall metadata for a tool_call_id.
+#[allow(dead_code)]
+pub(crate) fn lookup_recall(tool_call_id: &str) -> Option<ClearedToolMeta> {
+    recall_registry().get(tool_call_id).map(|r| r.clone())
+}
+
+/// Check all Tool messages in the conversation for recall-available markers
+/// and populate the global registry from any embedded metadata.
+///
+/// Call this during pipeline startup / session resume to rebuild the
+/// registry from conversation state.
+pub(crate) fn rebuild_recall_registry(messages: &[fastclaw_core::types::ChatMessage]) {
+    use fastclaw_core::types::Role;
+
+    for msg in messages {
+        if !matches!(msg.role, Role::Tool) {
+            continue;
+        }
+        let text = match msg.text_content() {
+            Some(t) if t.starts_with(RECALL_HINT_MARKER) => t,
+            _ => continue,
+        };
+
+        let tool_name = match msg.name.as_deref() {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        let tool_call_id = match &msg.tool_call_id {
+            Some(id) => id.clone(),
+            None => continue,
+        };
+
+        // Try to extract arguments from the marker text.
+        // Format: "[recall-available] [tool_name(args_json) → ..."
+        let args = extract_args_from_recall_marker(&text);
+
+        register_for_recall(
+            &tool_call_id,
+            ClearedToolMeta {
+                tool_name,
+                arguments_json: args.unwrap_or_default(),
+            },
+        );
+    }
+}
+
+fn extract_args_from_recall_marker(text: &str) -> Option<String> {
+    let after_bracket = text.strip_prefix(RECALL_HINT_MARKER)?.trim();
+    let after_bracket = after_bracket.strip_prefix('[')?;
+    let paren_start = after_bracket.find('(')?;
+    let paren_end = after_bracket.find(')')?;
+    if paren_start >= paren_end {
+        return None;
+    }
+    let args = &after_bracket[paren_start + 1..paren_end];
+    if args.is_empty() || args == "…" {
+        None
+    } else {
+        Some(args.to_string())
     }
 }
 
@@ -1085,10 +1416,12 @@ mod tool_result_truncation_tests {
 
     #[test]
     fn microcompact_progressive_fading() {
-        use super::{microcompact_tool_results, FADED_MARKER, TOOL_RESULT_CLEARED_MESSAGE};
+        use super::{microcompact_tool_results, FADED_MARKER, RECALL_HINT_MARKER};
         use fastclaw_core::types::{ChatMessage, Role};
 
-        // 10 tool results: indices 0..9, most recent = index 9
+        // 10 read_file results (FullRetain tier): with keep_recent=3,
+        // full_window = 3+2 = 5, preview_window = 3.
+        // So: indices 0-1 → cleared (recall), 2-4 → faded, 5-9 → kept.
         let mut msgs: Vec<ChatMessage> = (0..10)
             .map(|i| ChatMessage {
                 role: Role::Tool,
@@ -1102,25 +1435,28 @@ mod tool_result_truncation_tests {
 
         microcompact_tool_results(&mut msgs, 3);
 
-        // Tier 3 (oldest, indices 0..4): fully cleared
-        for msg in &msgs[..4] {
+        // Oldest 2: cleared with recall hint
+        for msg in &msgs[..2] {
             let text = msg.text_content().unwrap();
-            assert_eq!(text, TOOL_RESULT_CLEARED_MESSAGE, "expected cleared, got: {text}");
+            assert!(
+                text.starts_with(RECALL_HINT_MARKER),
+                "expected recall-cleared, got: {text}"
+            );
         }
-        // Tier 2 (indices 4..7): faded to preview
-        for msg in &msgs[4..7] {
+        // Next 3 (indices 2..5): faded to preview
+        for msg in &msgs[2..5] {
             let text = msg.text_content().unwrap();
             assert!(text.starts_with(FADED_MARKER), "expected faded, got: {text}");
         }
-        // Tier 1 (most recent 3, indices 7..10): kept fully
-        for msg in &msgs[7..] {
+        // Most recent 5 (indices 5..10): kept fully
+        for msg in &msgs[5..] {
             assert!(msg.text_content().unwrap().starts_with("output"));
         }
     }
 
     #[test]
     fn microcompact_preserves_error_results() {
-        use super::{microcompact_tool_results, FADED_MARKER, TOOL_RESULT_CLEARED_MESSAGE};
+        use super::{microcompact_tool_results, FADED_MARKER, RECALL_HINT_MARKER};
         use fastclaw_core::types::{ChatMessage, Role};
 
         let mut msgs: Vec<ChatMessage> = vec![
@@ -1170,19 +1506,23 @@ mod tool_result_truncation_tests {
 
         // Error results preserved even though old
         assert!(msgs[0].text_content().unwrap().contains("Error: file not found"));
-        // Non-error old results get faded or cleared (not full)
+        // Non-error old results get faded/cleared/summarized (not kept full)
         let t1 = msgs[1].text_content().unwrap();
         assert!(
-            t1.starts_with(FADED_MARKER) || t1 == TOOL_RESULT_CLEARED_MESSAGE,
-            "expected faded/cleared, got: {t1}"
+            t1.starts_with(FADED_MARKER)
+                || t1.starts_with(RECALL_HINT_MARKER)
+                || t1.starts_with("[summarized]"),
+            "expected faded/cleared/summarized, got: {t1}"
         );
         // Error results preserved
         assert!(msgs[2].text_content().unwrap().contains("Failed to connect"));
-        // Non-error older results get faded or cleared
+        // Non-error older results get faded/cleared/summarized
         let t3 = msgs[3].text_content().unwrap();
         assert!(
-            t3.starts_with(FADED_MARKER) || t3 == TOOL_RESULT_CLEARED_MESSAGE,
-            "expected faded/cleared, got: {t3}"
+            t3.starts_with(FADED_MARKER)
+                || t3.starts_with(RECALL_HINT_MARKER)
+                || t3.starts_with("[summarized]"),
+            "expected faded/cleared/summarized, got: {t3}"
         );
         // Most recent result preserved fully
         assert!(msgs[4].text_content().unwrap().contains("recent output"));
@@ -1229,7 +1569,7 @@ mod tool_result_truncation_tests {
 
     #[test]
     fn time_microcompact_collapses_stale_tool_results() {
-        use super::{time_based_microcompact, TOOL_RESULT_CLEARED_MESSAGE};
+        use super::{time_based_microcompact, TIME_COMPACTED_MARKER, RECALL_HINT_MARKER};
         use fastclaw_core::types::{ChatMessage, Role};
         use std::time::{Duration, Instant};
 
@@ -1258,9 +1598,10 @@ mod tool_result_truncation_tests {
         let count = time_based_microcompact(&mut msgs, &boundaries, Duration::from_secs(300));
         assert_eq!(count, 1, "should compact 1 stale tool result");
         let text = msgs[0].text_content().unwrap();
-        assert_eq!(
-            text, TOOL_RESULT_CLEARED_MESSAGE,
-            "expected cleared message, got: {text}"
+        // read_file is FullRetain, so time-based compact summarizes instead of clearing.
+        assert!(
+            text.starts_with(TIME_COMPACTED_MARKER) || text.starts_with(RECALL_HINT_MARKER),
+            "expected time-compacted or recall marker, got: {text}"
         );
         assert_eq!(
             msgs[1].text_content().unwrap(),
@@ -1271,7 +1612,7 @@ mod tool_result_truncation_tests {
 
     #[test]
     fn time_microcompact_preserves_fresh_and_errors() {
-        use super::{time_based_microcompact, TOOL_RESULT_CLEARED_MESSAGE};
+        use super::{time_based_microcompact, TIME_COMPACTED_MARKER, RECALL_HINT_MARKER};
         use fastclaw_core::types::{ChatMessage, Role};
         use std::time::{Duration, Instant};
 
@@ -1310,7 +1651,10 @@ mod tool_result_truncation_tests {
         assert_eq!(count, 1, "only 1 stale non-error should be compacted");
 
         let t0 = msgs[0].text_content().unwrap();
-        assert_eq!(t0, TOOL_RESULT_CLEARED_MESSAGE, "stale result cleared: {t0}");
+        assert!(
+            t0.starts_with(TIME_COMPACTED_MARKER) || t0.starts_with(RECALL_HINT_MARKER),
+            "stale result should be summarized: {t0}"
+        );
 
         let t1 = msgs[1].text_content().unwrap();
         assert!(t1.contains("Error"), "error result preserved: {t1}");
@@ -1369,9 +1713,11 @@ mod tool_result_truncation_tests {
             .sum();
 
         let reduction = 1.0 - (after as f64 / before as f64);
+        // Tier-aware compaction preserves more info (summaries, recall hints)
+        // so the raw byte reduction is lower than the old blunt clearing.
         assert!(
-            reduction >= 0.70,
-            "expected ≥70% reduction, got {:.1}% (before={before}, after={after})",
+            reduction >= 0.55,
+            "expected ≥55% reduction, got {:.1}% (before={before}, after={after})",
             reduction * 100.0
         );
     }
@@ -1433,5 +1779,177 @@ mod tool_result_truncation_tests {
         assert!(!is_model_supported_for_cache_editing("claude-3-5-sonnet-20241022"));
         assert!(!is_model_supported_for_cache_editing("gpt-4o"));
         assert!(!is_model_supported_for_cache_editing("deepseek-chat"));
+    }
+
+    // ─── Retention Tier Tests ──────────────────────────────────────────
+
+    #[test]
+    fn classify_retention_tier_full_retain() {
+        use super::{classify_retention_tier, RetentionTier};
+        assert_eq!(classify_retention_tier("read_file"), RetentionTier::FullRetain);
+        assert_eq!(classify_retention_tier("shell_exec"), RetentionTier::FullRetain);
+        assert_eq!(classify_retention_tier("shell"), RetentionTier::FullRetain);
+        assert_eq!(classify_retention_tier("edit_file"), RetentionTier::FullRetain);
+        assert_eq!(classify_retention_tier("write_file"), RetentionTier::FullRetain);
+        assert_eq!(classify_retention_tier("multi_edit"), RetentionTier::FullRetain);
+    }
+
+    #[test]
+    fn classify_retention_tier_summarize() {
+        use super::{classify_retention_tier, RetentionTier};
+        assert_eq!(classify_retention_tier("grep"), RetentionTier::Summarize);
+        assert_eq!(classify_retention_tier("ripgrep"), RetentionTier::Summarize);
+        assert_eq!(classify_retention_tier("search_in_files"), RetentionTier::Summarize);
+        assert_eq!(classify_retention_tier("workspace_symbols"), RetentionTier::Summarize);
+        assert_eq!(classify_retention_tier("find_references"), RetentionTier::Summarize);
+    }
+
+    #[test]
+    fn classify_retention_tier_ephemeral() {
+        use super::{classify_retention_tier, RetentionTier};
+        assert_eq!(classify_retention_tier("list_dir"), RetentionTier::Ephemeral);
+        assert_eq!(classify_retention_tier("list_directory"), RetentionTier::Ephemeral);
+        assert_eq!(classify_retention_tier("glob"), RetentionTier::Ephemeral);
+        assert_eq!(classify_retention_tier("web_search"), RetentionTier::Ephemeral);
+        assert_eq!(classify_retention_tier("web_fetch"), RetentionTier::Ephemeral);
+    }
+
+    #[test]
+    fn classify_retention_tier_mcp_defaults_to_summarize() {
+        use super::{classify_retention_tier, RetentionTier};
+        assert_eq!(classify_retention_tier("mcp_some_tool"), RetentionTier::Summarize);
+    }
+
+    #[test]
+    fn summarize_tool_result_short_passthrough() {
+        use super::summarize_tool_result;
+        let short = "hello world";
+        assert_eq!(summarize_tool_result("grep", short, 100), short);
+    }
+
+    #[test]
+    fn summarize_tool_result_truncates_long() {
+        use super::summarize_tool_result;
+        let long = "line\n".repeat(200);
+        let summary = summarize_tool_result("read_file", &long, 100);
+        assert!(summary.len() < long.len(), "summary should be shorter");
+        assert!(summary.contains("more lines"), "should indicate omission");
+    }
+
+    #[test]
+    fn summarize_search_result_preserves_match_info() {
+        use super::summarize_tool_result;
+        let content = "src/main.rs:10:fn main() {}\nsrc/lib.rs:5:pub fn foo() {}\n".repeat(50);
+        let summary = summarize_tool_result("grep", &content, 200);
+        assert!(summary.contains("matches"), "should report match count");
+        assert!(summary.contains("files"), "should report file count");
+    }
+
+    #[test]
+    fn build_cleared_with_recall_includes_marker() {
+        use super::{build_cleared_with_recall, RetentionTier, RECALL_HINT_MARKER};
+        let result = build_cleared_with_recall(
+            "read_file",
+            RetentionTier::FullRetain,
+            "file content\nline 2\nline 3",
+            Some(r#"{"path":"src/main.rs"}"#),
+        );
+        assert!(result.starts_with(RECALL_HINT_MARKER));
+        assert!(result.contains("read_file"));
+        assert!(result.contains("3 lines"));
+        assert!(result.contains("full-retain"));
+    }
+
+    #[test]
+    fn microcompact_tier_aware_ephemeral_cleared_fast() {
+        use super::{microcompact_tool_results, RECALL_HINT_MARKER};
+        use fastclaw_core::types::{ChatMessage, Role};
+
+        // 5 list_dir results (Ephemeral): only most recent 1 kept.
+        let mut msgs: Vec<ChatMessage> = (0..5)
+            .map(|i| ChatMessage {
+                role: Role::Tool,
+                content: Some(serde_json::Value::String(format!("dir listing {i}"))),
+                reasoning_content: None,
+                name: Some("list_dir".into()),
+                tool_calls: None,
+                tool_call_id: Some(format!("id-{i}")),
+            })
+            .collect();
+
+        microcompact_tool_results(&mut msgs, 3);
+
+        // Only most recent (index 4) should be kept full
+        assert!(msgs[4].text_content().unwrap().starts_with("dir listing"));
+        // All older ones should be cleared with recall
+        for msg in &msgs[..4] {
+            let text = msg.text_content().unwrap();
+            assert!(
+                text.starts_with(RECALL_HINT_MARKER),
+                "ephemeral tool should be cleared fast: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn microcompact_tier_aware_summarize_gets_summary() {
+        use super::microcompact_tool_results;
+        use fastclaw_core::types::{ChatMessage, Role};
+
+        // 5 grep results (Summarize): most recent 3 kept, others summarized.
+        let mut msgs: Vec<ChatMessage> = (0..5)
+            .map(|i| ChatMessage {
+                role: Role::Tool,
+                content: Some(serde_json::Value::String(format!("match result {i}"))),
+                reasoning_content: None,
+                name: Some("grep".into()),
+                tool_calls: None,
+                tool_call_id: Some(format!("id-{i}")),
+            })
+            .collect();
+
+        microcompact_tool_results(&mut msgs, 3);
+
+        // Most recent 3 kept fully
+        for msg in &msgs[2..] {
+            assert!(
+                msg.text_content().unwrap().starts_with("match result"),
+                "recent grep results should be kept"
+            );
+        }
+        // Older ones summarized
+        for msg in &msgs[..2] {
+            let text = msg.text_content().unwrap();
+            assert!(
+                text.starts_with("[summarized]"),
+                "old grep should be summarized: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn recall_registry_rebuild_from_messages() {
+        use super::{rebuild_recall_registry, lookup_recall, RECALL_HINT_MARKER};
+        use fastclaw_core::types::{ChatMessage, Role};
+
+        let marker_text = format!(
+            "{RECALL_HINT_MARKER} [read_file({{\"path\":\"src/main.rs\"}}) → 10 lines, 200 chars, tier=full-retain. Re-call the tool to retrieve this result.]"
+        );
+        let msgs = vec![ChatMessage {
+            role: Role::Tool,
+            content: Some(serde_json::Value::String(marker_text)),
+            reasoning_content: None,
+            name: Some("read_file".into()),
+            tool_calls: None,
+            tool_call_id: Some("call-123".into()),
+        }];
+
+        rebuild_recall_registry(&msgs);
+
+        let meta = lookup_recall("call-123");
+        assert!(meta.is_some(), "should find registered recall");
+        let meta = meta.unwrap();
+        assert_eq!(meta.tool_name, "read_file");
+        assert!(meta.arguments_json.contains("src/main.rs"));
     }
 }

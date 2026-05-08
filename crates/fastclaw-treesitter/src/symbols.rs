@@ -269,6 +269,190 @@ fn extract_variable_symbol(node: &Node, source: &str) -> Option<Symbol> {
     None
 }
 
+/// Extract deduplicated callee names (function/method calls and macro invocations)
+/// from the entire AST. Useful for building call-relationship graphs.
+pub fn extract_callees(tree: &Tree, source: &str, language: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    collect_callees(&tree.root_node(), source, language, &mut names);
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+fn collect_callees(node: &Node, source: &str, language: &str, out: &mut Vec<String>) {
+    let kind = node.kind();
+
+    let callee_name: Option<String> = match language {
+        "rust" => match kind {
+            "call_expression" => node
+                .child_by_field_name("function")
+                .and_then(|n| callee_ident_text(&n, source)),
+            "macro_invocation" => node
+                .child_by_field_name("macro")
+                .or_else(|| node.child(0))
+                .map(|n| node_text(&n, source)),
+            _ => None,
+        },
+        "python" => match kind {
+            "call" => node
+                .child_by_field_name("function")
+                .and_then(|n| callee_ident_text(&n, source)),
+            _ => None,
+        },
+        "javascript" | "typescript" | "tsx" | "jsx" => match kind {
+            "call_expression" => node
+                .child_by_field_name("function")
+                .and_then(|n| callee_ident_text(&n, source)),
+            _ => None,
+        },
+        "go" => match kind {
+            "call_expression" => node
+                .child_by_field_name("function")
+                .and_then(|n| callee_ident_text(&n, source)),
+            _ => None,
+        },
+        "java" | "kotlin" => match kind {
+            "method_invocation" => node
+                .child_by_field_name("name")
+                .map(|n| node_text(&n, source)),
+            _ => None,
+        },
+        _ => None,
+    };
+
+    if let Some(ref name) = callee_name {
+        if !name.is_empty() && name.len() < 120 {
+            out.push(name.clone());
+        }
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_callees(&child, source, language, out);
+    }
+}
+
+/// For call expressions, get the most meaningful identifier text.
+/// Handles `foo`, `self.foo`, `module::bar`, `obj.method`.
+fn callee_ident_text(node: &Node, source: &str) -> Option<String> {
+    match node.kind() {
+        "identifier" | "type_identifier" => Some(node_text(node, source)),
+        "field_expression" | "member_expression" => {
+            let field = node.child_by_field_name("field")
+                .or_else(|| node.child_by_field_name("property"));
+            field.map(|f| node_text(&f, source))
+        }
+        "scoped_identifier" | "qualified_name" => {
+            Some(node_text(node, source))
+        }
+        "attribute" => {
+            node.child_by_field_name("attribute")
+                .map(|n| node_text(&n, source))
+                .or_else(|| Some(node_text(node, source)))
+        }
+        _ => {
+            let text = node_text(node, source);
+            if text.len() < 80 && !text.contains('\n') {
+                Some(text)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Extract (type_name, trait_name) pairs from `impl Trait for Type` blocks.
+/// For non-Rust languages, extracts class inheritance / interface implementations.
+pub fn extract_trait_impls(tree: &Tree, source: &str, language: &str) -> Vec<(String, String)> {
+    let mut impls = Vec::new();
+    collect_trait_impls(&tree.root_node(), source, language, &mut impls);
+    impls
+}
+
+fn collect_trait_impls(node: &Node, source: &str, language: &str, out: &mut Vec<(String, String)>) {
+    match language {
+        "rust" => {
+            if node.kind() == "impl_item" {
+                if let Some(trait_node) = node.child_by_field_name("trait") {
+                    if let Some(type_node) = node.child_by_field_name("type") {
+                        let trait_name = node_text(&trait_node, source);
+                        let type_name = node_text(&type_node, source);
+                        if !trait_name.is_empty() && !type_name.is_empty() {
+                            out.push((type_name, trait_name));
+                        }
+                    }
+                }
+            }
+        }
+        "python" => {
+            if node.kind() == "class_definition" {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let class_name = node_text(&name_node, source);
+                    if let Some(bases) = node.child_by_field_name("superclasses") {
+                        let mut cursor = bases.walk();
+                        for base in bases.children(&mut cursor) {
+                            if base.kind() == "identifier" || base.kind() == "attribute" {
+                                out.push((class_name.clone(), node_text(&base, source)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "java" | "kotlin" => {
+            if node.kind() == "class_declaration" {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let class_name = node_text(&name_node, source);
+                    if let Some(interfaces) = node.child_by_field_name("interfaces") {
+                        let mut cursor = interfaces.walk();
+                        for iface in interfaces.children(&mut cursor) {
+                            if iface.kind() == "type_identifier" || iface.kind() == "identifier" {
+                                out.push((class_name.clone(), node_text(&iface, source)));
+                            }
+                        }
+                    }
+                    if let Some(superclass) = node.child_by_field_name("superclass") {
+                        out.push((class_name, node_text(&superclass, source)));
+                    }
+                }
+            }
+        }
+        "typescript" | "tsx" => {
+            if node.kind() == "class_declaration" {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let class_name = node_text(&name_node, source);
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "class_heritage" {
+                            let heritage_text = node_text(&child, source);
+                            if let Some(rest) = heritage_text.strip_prefix("extends ") {
+                                let base = rest.split_whitespace().next().unwrap_or("");
+                                if !base.is_empty() {
+                                    out.push((class_name.clone(), base.to_string()));
+                                }
+                            }
+                            if let Some(rest) = heritage_text.strip_prefix("implements ") {
+                                for iface in rest.split(',') {
+                                    let name = iface.trim().split('<').next().unwrap_or("").trim();
+                                    if !name.is_empty() {
+                                        out.push((class_name.clone(), name.to_string()));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_trait_impls(&child, source, language, out);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,5 +520,94 @@ def standalone_function(x, y):
         assert!(names.contains(&"MyClass"), "missing MyClass, got: {names:?}");
         assert!(names.contains(&"standalone_function"), "missing standalone_function, got: {names:?}");
         assert!(names.contains(&"method"), "missing method, got: {names:?}");
+    }
+
+    #[test]
+    fn extract_rust_callees() {
+        if !CodeParser::is_language_available("rust") {
+            return;
+        }
+        let source = r#"
+fn main() {
+    let x = foo();
+    bar::baz(x);
+    println!("hello");
+    obj.method_call();
+}
+"#;
+        let parsed = CodeParser::parse(source, "rust").unwrap();
+        let callees = extract_callees(&parsed.tree, source, "rust");
+        assert!(callees.contains(&"foo".to_string()), "missing foo, got: {callees:?}");
+        assert!(callees.contains(&"bar::baz".to_string()), "missing bar::baz, got: {callees:?}");
+        assert!(callees.contains(&"println".to_string()), "missing println, got: {callees:?}");
+        assert!(callees.contains(&"method_call".to_string()), "missing method_call, got: {callees:?}");
+    }
+
+    #[test]
+    fn extract_rust_trait_impls() {
+        if !CodeParser::is_language_available("rust") {
+            return;
+        }
+        let source = r#"
+struct MyType;
+
+trait Foo {
+    fn foo(&self);
+}
+
+impl Foo for MyType {
+    fn foo(&self) {}
+}
+
+impl Default for MyType {
+    fn default() -> Self { MyType }
+}
+
+impl MyType {
+    fn inherent() {}
+}
+"#;
+        let parsed = CodeParser::parse(source, "rust").unwrap();
+        let impls = extract_trait_impls(&parsed.tree, source, "rust");
+        assert!(impls.contains(&("MyType".to_string(), "Foo".to_string())),
+            "missing (MyType, Foo), got: {impls:?}");
+        assert!(impls.contains(&("MyType".to_string(), "Default".to_string())),
+            "missing (MyType, Default), got: {impls:?}");
+        assert_eq!(impls.len(), 2, "inherent impl should not appear: {impls:?}");
+    }
+
+    #[test]
+    fn extract_python_callees() {
+        if !CodeParser::is_language_available("python") {
+            return;
+        }
+        let source = r#"
+def main():
+    x = foo()
+    bar.baz(x)
+    print("hello")
+"#;
+        let parsed = CodeParser::parse(source, "python").unwrap();
+        let callees = extract_callees(&parsed.tree, source, "python");
+        assert!(callees.contains(&"foo".to_string()), "missing foo, got: {callees:?}");
+        assert!(callees.contains(&"print".to_string()), "missing print, got: {callees:?}");
+    }
+
+    #[test]
+    fn extract_python_class_inheritance() {
+        if !CodeParser::is_language_available("python") {
+            return;
+        }
+        let source = r#"
+class Animal:
+    pass
+
+class Dog(Animal):
+    pass
+"#;
+        let parsed = CodeParser::parse(source, "python").unwrap();
+        let impls = extract_trait_impls(&parsed.tree, source, "python");
+        assert!(impls.contains(&("Dog".to_string(), "Animal".to_string())),
+            "missing (Dog, Animal), got: {impls:?}");
     }
 }

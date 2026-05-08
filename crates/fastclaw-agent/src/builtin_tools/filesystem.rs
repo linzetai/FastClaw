@@ -2165,6 +2165,18 @@ it provides structured output with line numbers, handles encoding detection, and
             cache.update_with_range(&validated, &text, args.offset, args.limit);
         }
 
+        // Fire-and-forget: extract code context for the auto code graph.
+        if let Some(lang) = fastclaw_treesitter::CodeParser::detect_language(&validated) {
+            if fastclaw_treesitter::CodeParser::is_language_available(&lang) {
+                let content_for_graph = text.clone();
+                let path_for_graph = validated.clone();
+                tokio::spawn(async move {
+                    crate::code_graph::CodeGraphCache::global()
+                        .extract_and_store(&path_for_graph, &content_for_graph, &lang);
+                });
+            }
+        }
+
         let mut result = ToolResult::ok(text);
         result.metadata = Some(serde_json::json!({
             "fileType": "text",

@@ -394,6 +394,21 @@ pub fn token_budget_section() -> PromptSection {
     }
 }
 
+/// Code context section: injects structural context from recently-read files.
+///
+/// Recomputed every turn (`cache_break: true`) because the code graph
+/// changes as the agent reads new files. Returns `None` when no files
+/// have been read yet this session.
+pub fn code_context_section() -> PromptSection {
+    PromptSection {
+        name: "code_context",
+        compute: Box::new(|_ctx| {
+            crate::code_graph::CodeGraphCache::global().format_for_prompt(2000)
+        }),
+        cache_break: true,
+    }
+}
+
 /// Function result clearing section: informs the model that old tool results
 /// may be automatically compacted or cleared to save context space.
 pub fn frc_section() -> PromptSection {

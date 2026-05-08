@@ -1,9 +1,11 @@
 pub mod agent_discovery;
 pub mod builtin_tools;
+pub mod code_graph;
 mod llm;
 mod runtime;
 pub mod subagent;
 pub mod subagent_manager;
+pub mod symbol_index;
 
 pub use builtin_tools::{
     ImageGenerateTool, MemorySearchTool,
