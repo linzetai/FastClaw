@@ -3,6 +3,7 @@ mod brief;
 mod confirm;
 mod code_intel;
 mod filesystem;
+mod git;
 mod identity;
 mod lsp_manager;
 mod media;
@@ -75,6 +76,7 @@ pub use plan_mode::{EnterPlanModeTool, ExitPlanModeTool, ExecutionModeState, Ver
 pub use snip::SnipTool;
 pub use terminal::TerminalCaptureTool;
 pub use tool_search::ToolSearchTool;
+pub use git::GitTool;
 pub use utility::{CurrentTimeTool, SleepTool};
 pub use workflow::{WorkflowStore, WorkflowTool, WorkflowDefinition, WorkflowRun, WorkflowStatus};
 pub use worktree::{EnterWorktreeTool, ExitWorktreeTool, WorktreeState};
@@ -91,6 +93,7 @@ pub fn register_builtin_tools(registry: &ToolRegistry) {
 pub fn register_builtin_tools_with_sandbox(registry: &ToolRegistry, sandboxed: bool) {
     registry.register(Arc::new(CurrentTimeTool));
     registry.register(Arc::new(SleepTool));
+    registry.register(Arc::new(GitTool));
     registry.register(Arc::new(HttpFetchTool::new()));
     registry.register(Arc::new(WebSearchTool::unconfigured()));
     registry.register(Arc::new(WebFetchTool::with_defaults()));
