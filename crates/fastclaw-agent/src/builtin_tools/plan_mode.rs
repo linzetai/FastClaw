@@ -355,6 +355,7 @@ pub struct VerifyPlanExecutionTool {
     mode_state: ExecutionModeState,
 }
 
+#[allow(dead_code)]
 impl VerifyPlanExecutionTool {
     pub fn new(mode_state: ExecutionModeState) -> Self {
         Self { mode_state }
