@@ -853,6 +853,10 @@ struct SearchInFilesArgs {
     case_sensitive: Option<bool>,
     max_results: Option<usize>,
     context_lines: Option<usize>,
+    /// When true, enrich each match with structural context: what function,
+    /// struct, or class the match lives in. Helps the model understand results
+    /// semantically without extra read_file calls.
+    semantic_context: Option<bool>,
 }
 
 #[allow(dead_code)]
@@ -1907,6 +1911,9 @@ the pages parameter to read specific page ranges (e.g., pages: \"1-5\"). Maximum
 - This tool can only read files, not directories. To list a directory, use `list_directory` or `shell_exec`\n\
 - If you read a file that exists but has empty contents you will receive a system reminder warning\n\n\
 Large file strategy:\n\
+- For files with 200+ lines, the output automatically starts with a **file outline** showing \
+all symbols (functions, structs, classes, etc.) with their line ranges. Use this to decide \
+which section to read next — no need to call file_outline separately\n\
 - If the file is truncated, the output will show exactly where truncation happened and \
 suggest the offset/limit values for continuation\n\
 - For targeted edits on large files: first read the section you need (offset + limit), \
@@ -2177,6 +2184,17 @@ it provides structured output with line numbers, handles encoding detection, and
             }
         }
 
+        // Smart read: prepend a compact outline for large files so the LLM
+        // immediately understands the file's structure before seeing content.
+        let (text, has_outline) = if total_lines >= SMART_READ_OUTLINE_THRESHOLD {
+            match generate_compact_outline(&validated, total_lines) {
+                Some(outline) => (format!("{outline}{text}"), true),
+                None => (text, false),
+            }
+        } else {
+            (text, false)
+        };
+
         let mut result = ToolResult::ok(text);
         result.metadata = Some(serde_json::json!({
             "fileType": "text",
@@ -2186,6 +2204,7 @@ it provides structured output with line numbers, handles encoding detection, and
             "lineEnding": line_ending,
             "encoding": encoding,
             "isTruncated": is_truncated,
+            "hasOutline": has_outline,
         }));
         result
     }
@@ -3147,6 +3166,186 @@ it provides atomic writes, encoding preservation, fuzzy matching, and stale-file
     }
 }
 
+/// Enrich search results with structural context from tree-sitter.
+///
+/// For each match line like `src/foo.rs:42:  some_code`, resolve the
+/// enclosing symbol (function, struct, impl, class) and annotate the line
+/// with `[in fn bar()]` or `[in struct Foo]`.
+fn enrich_search_with_symbols(text_output: &str, root: &Path) -> String {
+    use std::collections::HashMap;
+
+    // Cache: file path → Vec<(name, kind, start_line, end_line)>
+    let mut symbol_cache: HashMap<String, Vec<(String, String, usize, usize)>> = HashMap::new();
+
+    let mut enriched_lines = Vec::new();
+
+    for line in text_output.lines() {
+        // Parse ripgrep-style output: "file:line:content" or "file:line-content"
+        let annotated = annotate_match_line(line, root, &mut symbol_cache);
+        enriched_lines.push(annotated);
+    }
+
+    enriched_lines.join("\n")
+}
+
+/// Annotate a single search result line with the enclosing symbol.
+fn annotate_match_line(
+    line: &str,
+    root: &Path,
+    symbol_cache: &mut std::collections::HashMap<String, Vec<(String, String, usize, usize)>>,
+) -> String {
+    // Match lines look like: "path:linenum:content" or "path:linenum-content" (context)
+    let (file_part, line_num, _rest) = match parse_rg_line(line) {
+        Some(v) => v,
+        None => return line.to_string(),
+    };
+
+    let file_path = if Path::new(&file_part).is_absolute() {
+        file_part.clone()
+    } else {
+        root.join(&file_part).to_string_lossy().to_string()
+    };
+
+    let symbols = symbol_cache
+        .entry(file_path.clone())
+        .or_insert_with(|| extract_file_symbols(&file_path));
+
+    // Find the innermost (narrowest) symbol that contains this line.
+    let enclosing = symbols
+        .iter()
+        .filter(|(_, _, start, end)| line_num >= *start && line_num <= *end)
+        .min_by_key(|(_, _, start, end)| end - start);
+
+    match enclosing {
+        Some((name, kind, start, _)) => {
+            format!("{line}  // [in {kind} {name}, line {start}]")
+        }
+        None => line.to_string(),
+    }
+}
+
+/// Parse a ripgrep-style match line into (file_path, line_number, rest).
+fn parse_rg_line(line: &str) -> Option<(String, usize, &str)> {
+    // Formats: "path:123:content" or "path:123-content" (context line)
+    // Also handle Windows paths with drive letters like "C:\path:123:content"
+    let bytes = line.as_bytes();
+    let mut colon_positions = Vec::new();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b':' {
+            colon_positions.push(i);
+        }
+    }
+
+    // Need at least 2 colons (or 1 colon + 1 dash) for path:linenum:content
+    for &pos in &colon_positions {
+        if pos == 0 {
+            continue;
+        }
+        let after_colon = &line[pos + 1..];
+        // Try to parse a line number starting at pos+1
+        let num_end = after_colon
+            .find(|c: char| c == ':' || c == '-')
+            .unwrap_or(after_colon.len());
+        if num_end == 0 {
+            continue;
+        }
+        let num_str = &after_colon[..num_end];
+        if let Ok(line_num) = num_str.parse::<usize>() {
+            let file_part = &line[..pos];
+            let rest = if num_end < after_colon.len() {
+                &after_colon[num_end + 1..]
+            } else {
+                ""
+            };
+            return Some((file_part.to_string(), line_num, rest));
+        }
+    }
+    None
+}
+
+/// Extract symbols from a file using tree-sitter, returning (name, kind, start_line, end_line).
+fn extract_file_symbols(file_path: &str) -> Vec<(String, String, usize, usize)> {
+    let path = Path::new(file_path);
+    let lang = match fastclaw_treesitter::CodeParser::detect_language(path) {
+        Some(l) if fastclaw_treesitter::CodeParser::is_language_available(&l) => l,
+        _ => return Vec::new(),
+    };
+
+    let parsed = match fastclaw_treesitter::CodeParser::parse_file(path) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+
+    fastclaw_treesitter::extract_symbols(&parsed.tree, &parsed.source, &lang)
+        .into_iter()
+        .filter(|s| matches!(
+            s.kind,
+            fastclaw_treesitter::SymbolKind::Function
+            | fastclaw_treesitter::SymbolKind::Method
+            | fastclaw_treesitter::SymbolKind::Class
+            | fastclaw_treesitter::SymbolKind::Struct
+            | fastclaw_treesitter::SymbolKind::Enum
+            | fastclaw_treesitter::SymbolKind::Trait
+            | fastclaw_treesitter::SymbolKind::Interface
+            | fastclaw_treesitter::SymbolKind::Module
+        ))
+        .map(|s| (s.name, s.kind.to_string(), s.start_line, s.end_line))
+        .collect()
+}
+
+/// Threshold (lines) above which read_file auto-prepends a file outline.
+const SMART_READ_OUTLINE_THRESHOLD: usize = 200;
+
+/// Generate a compact file outline string for prepending to large file reads.
+fn generate_compact_outline(file_path: &Path, total_lines: usize) -> Option<String> {
+    let lang = fastclaw_treesitter::CodeParser::detect_language(file_path)?;
+    if !fastclaw_treesitter::CodeParser::is_language_available(&lang) {
+        return None;
+    }
+    let parsed = fastclaw_treesitter::CodeParser::parse_file(file_path).ok()?;
+    let symbols = fastclaw_treesitter::extract_symbols(&parsed.tree, &parsed.source, &lang);
+
+    if symbols.is_empty() {
+        return None;
+    }
+
+    let mut outline = format!(
+        "── File outline ({total_lines} lines, {} symbols) ──\n",
+        symbols.len()
+    );
+
+    for s in &symbols {
+        if matches!(s.kind, fastclaw_treesitter::SymbolKind::Import) {
+            continue;
+        }
+        let kind_label = match s.kind {
+            fastclaw_treesitter::SymbolKind::Function => "fn",
+            fastclaw_treesitter::SymbolKind::Method => "method",
+            fastclaw_treesitter::SymbolKind::Class => "class",
+            fastclaw_treesitter::SymbolKind::Struct => "struct",
+            fastclaw_treesitter::SymbolKind::Enum => "enum",
+            fastclaw_treesitter::SymbolKind::Trait => "trait",
+            fastclaw_treesitter::SymbolKind::Interface => "interface",
+            fastclaw_treesitter::SymbolKind::Module => "mod",
+            fastclaw_treesitter::SymbolKind::Constant => "const",
+            fastclaw_treesitter::SymbolKind::Variable => "var",
+            _ => "other",
+        };
+        let sig = if s.signature.is_empty() { &s.name } else { &s.signature };
+        let sig_short = if sig.len() > 80 {
+            format!("{}…", &sig[..sig.floor_char_boundary(80)])
+        } else {
+            sig.to_string()
+        };
+        outline.push_str(&format!(
+            "  L{}-{}: {kind_label} {sig_short}\n",
+            s.start_line, s.end_line
+        ));
+    }
+    outline.push_str("──────────────────────\n\n");
+    Some(outline)
+}
+
 /// Search text across files under a directory.
 /// Uses ripgrep (rg) when available for blazing fast search; otherwise falls back to built-in Rust implementation.
 pub struct SearchInFilesTool;
@@ -3353,7 +3552,8 @@ impl Tool for SearchInFilesTool {
     fn description(&self) -> &str {
         "Search files using regex. Returns matches with file paths and line numbers in ripgrep-style format. \
          Uses ripgrep (rg) for fast search when available; falls back to built-in implementation. \
-         Case-insensitive by default. Supports glob filter, context lines (0-5). Respects .gitignore."
+         Case-insensitive by default. Supports glob filter, context lines (0-5). Respects .gitignore. \
+         Set semantic_context=true to annotate each match with the enclosing function/class/struct."
     }
 
     fn prompt(&self) -> String {
@@ -3370,7 +3570,11 @@ This tool has been optimized for correct permissions and access\n\
 - Multiline matching: By default patterns match within single lines only. For cross-line patterns \
 like `struct \\\\{[\\\\s\\\\S]*?field`, use `multiline: true`\n\
 - Case-insensitive by default\n\
-- Respects .gitignore automatically".to_string()
+- Respects .gitignore automatically\n\
+- semantic_context: when true, each match is annotated with the enclosing symbol \
+(function, struct, class) so you can understand WHERE in the code the match lives \
+without extra read_file calls. Use for exploratory queries like \
+\"find all places that handle user login\" or \"where is this error processed\"".to_string()
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -3415,6 +3619,13 @@ like `struct \\\\{[\\\\s\\\\S]*?field`, use `multiline: true`\n\
             serde_json::json!({
                 "type": "integer",
                 "description": "Optional number of lines to show before and after each match (0-15). Default 0. Useful for understanding match context without a separate read_file call."
+            }),
+        );
+        props.insert(
+            "semantic_context".to_string(),
+            serde_json::json!({
+                "type": "boolean",
+                "description": "Optional. When true, enriches each match with structural context: which function, class, or struct the match is inside. Helps understand search results without extra read_file calls. Default false."
             }),
         );
         ToolParameterSchema {
@@ -3533,6 +3744,15 @@ like `struct \\\\{[\\\\s\\\\S]*?field`, use `multiline: true`\n\
             }
         };
 
+        // Semantic context enrichment: annotate each match with the enclosing
+        // symbol (function/struct/class/method) so the LLM can understand
+        // results structurally without extra read_file calls.
+        let enriched_output = if args.semantic_context.unwrap_or(false) && match_count > 0 {
+            enrich_search_with_symbols(&text_output, &root)
+        } else {
+            text_output.clone()
+        };
+
         // LLM-friendly text output (like ripgrep format)
         let header = format!(
             "Found {} matches in {} files for pattern \"{}\" in \"{}\"{}:\n",
@@ -3547,7 +3767,7 @@ like `struct \\\\{[\\\\s\\\\S]*?field`, use `multiline: true`\n\
         } else {
             String::new()
         };
-        let llm_output = format!("{header}{text_output}{truncation_note}");
+        let llm_output = format!("{header}{enriched_output}{truncation_note}");
 
         // JSON metadata for the UI
         let mut result = ToolResult::ok_split(
@@ -5178,5 +5398,216 @@ mod multi_edit_tests {
         assert!(!content.contains("line3"));
         assert!(content.contains("line1"));
         assert!(content.contains("line4"));
+    }
+
+    // ── Semantic search & smart read tests ──────────────────────────────
+
+    #[test]
+    fn parse_rg_line_extracts_file_line_content() {
+        let (file, line, rest) = parse_rg_line("src/main.rs:42:fn main() {").unwrap();
+        assert_eq!(file, "src/main.rs");
+        assert_eq!(line, 42);
+        assert_eq!(rest, "fn main() {");
+    }
+
+    #[test]
+    fn parse_rg_line_handles_context_dash() {
+        let (file, line, rest) = parse_rg_line("src/lib.rs:10-    use std::io;").unwrap();
+        assert_eq!(file, "src/lib.rs");
+        assert_eq!(line, 10);
+        assert_eq!(rest, "    use std::io;");
+    }
+
+    #[test]
+    fn parse_rg_line_returns_none_for_no_match() {
+        assert!(parse_rg_line("-- separator --").is_none());
+        assert!(parse_rg_line("").is_none());
+    }
+
+    #[test]
+    fn extract_file_symbols_for_nonexistent_returns_empty() {
+        let syms = extract_file_symbols("/nonexistent/file.rs");
+        assert!(syms.is_empty());
+    }
+
+    #[test]
+    fn generate_compact_outline_for_nonexistent_returns_none() {
+        let result = generate_compact_outline(Path::new("/nonexistent/file.rs"), 500);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn generate_compact_outline_includes_symbol_lines() {
+        let tmp = tempdir_in(".").unwrap();
+        let file = tmp.path().join("test_outline.rs");
+        std::fs::write(&file, "\
+fn alpha() {
+    println!(\"a\");
+}
+
+struct Beta {
+    x: i32,
+}
+
+fn gamma() {
+    let _ = 1;
+    let _ = 2;
+    let _ = 3;
+}
+").unwrap();
+        let ts_available = fastclaw_treesitter::CodeParser::detect_language(&file)
+            .is_some_and(|l| fastclaw_treesitter::CodeParser::is_language_available(&l));
+        let outline = generate_compact_outline(&file, 250);
+        if ts_available {
+            let text = outline.expect("outline should be Some when tree-sitter is available");
+            assert!(text.contains("alpha"), "outline should contain 'alpha': {text}");
+            assert!(text.contains("fn"), "outline should contain kind label 'fn': {text}");
+            assert!(text.contains("250 lines"), "outline should mention total lines: {text}");
+        } else {
+            assert!(outline.is_none(), "outline should be None without tree-sitter");
+        }
+    }
+
+    #[test]
+    fn annotate_match_line_without_symbols() {
+        let mut cache = std::collections::HashMap::new();
+        let annotated = annotate_match_line(
+            "/nonexistent/file.rs:10:let x = 1;",
+            Path::new("/nonexistent"),
+            &mut cache,
+        );
+        assert_eq!(annotated, "/nonexistent/file.rs:10:let x = 1;");
+    }
+
+    #[test]
+    fn enrich_search_preserves_non_match_lines() {
+        let input = "Found 1 match in 1 file\n--\nsrc/foo.rs:10:hello";
+        let root = Path::new("/nonexistent");
+        let result = enrich_search_with_symbols(input, root);
+        assert!(result.contains("Found 1 match"));
+    }
+
+    #[tokio::test]
+    async fn search_in_files_semantic_context_parameter() {
+        let tmp = tempdir_in(".").unwrap();
+        let file = tmp.path().join("sample.rs");
+        std::fs::write(&file, "\
+fn target_function() {
+    let needle = 42;
+}
+
+fn other_function() {
+    println!(\"no match here\");
+}
+").unwrap();
+
+        let tool = SearchInFilesTool;
+        let args = serde_json::json!({
+            "pattern": "needle",
+            "path": tmp.path().to_string_lossy(),
+            "semantic_context": true
+        }).to_string();
+
+        let result = Tool::execute(&tool, &args).await;
+        assert!(result.success, "search should succeed: {}", result.output);
+        assert!(result.output.contains("needle"), "should find the match");
+
+        // Semantic annotations depend on tree-sitter availability.
+        let ts_available = fastclaw_treesitter::CodeParser::detect_language(&file)
+            .is_some_and(|l| fastclaw_treesitter::CodeParser::is_language_available(&l));
+        if ts_available && result.output.contains("[in ") {
+            assert!(result.output.contains("target_function"),
+                "should annotate with enclosing function: {}", result.output);
+        }
+    }
+
+    #[tokio::test]
+    async fn read_file_auto_outline_for_large_file() {
+        let tmp = tempdir_in(".").unwrap();
+        let file = tmp.path().join("large.rs");
+        let mut content = String::new();
+        content.push_str("fn first_function() {\n");
+        for i in 0..100 {
+            content.push_str(&format!("    let var_{i} = {i};\n"));
+        }
+        content.push_str("}\n\n");
+        content.push_str("struct MyStruct {\n    x: i32,\n}\n\n");
+        content.push_str("fn second_function() {\n");
+        for i in 0..100 {
+            content.push_str(&format!("    let other_{i} = {i};\n"));
+        }
+        content.push_str("}\n");
+        std::fs::write(&file, &content).unwrap();
+
+        let line_count = content.lines().count();
+        assert!(line_count >= SMART_READ_OUTLINE_THRESHOLD,
+            "test file should be >= {SMART_READ_OUTLINE_THRESHOLD} lines, got {line_count}");
+
+        // Tree-sitter language availability varies across test environments.
+        let ts_available = fastclaw_treesitter::CodeParser::detect_language(&file)
+            .is_some_and(|l| fastclaw_treesitter::CodeParser::is_language_available(&l));
+
+        let tool = ReadFileTool;
+        let args = serde_json::json!({
+            "file_path": file.to_string_lossy()
+        }).to_string();
+
+        let result = Tool::execute(&tool, &args).await;
+        assert!(result.success, "read should succeed: {}", result.output);
+
+        if ts_available {
+            let preview = &result.output[..result.output.len().min(600)];
+            assert!(result.output.contains("File outline") || result.output.contains("── File outline"),
+                "should have auto outline in output. Preview: {preview}");
+            if let Some(meta) = &result.metadata {
+                assert_eq!(meta["hasOutline"], true);
+            }
+        } else {
+            assert!(!result.output.contains("── File outline"),
+                "without tree-sitter, outline should not appear");
+            if let Some(meta) = &result.metadata {
+                assert_eq!(meta["hasOutline"], false);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn read_file_no_outline_for_small_file() {
+        let tmp = tempdir_in(".").unwrap();
+        let file = tmp.path().join("small.rs");
+        std::fs::write(&file, "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
+
+        let tool = ReadFileTool;
+        let args = serde_json::json!({
+            "file_path": file.to_string_lossy()
+        }).to_string();
+
+        let result = Tool::execute(&tool, &args).await;
+        assert!(result.success);
+        assert!(!result.output.contains("File outline"),
+            "small file should NOT have outline: {}", result.output);
+    }
+
+    #[tokio::test]
+    async fn read_file_no_outline_for_offset_read() {
+        let tmp = tempdir_in(".").unwrap();
+        let file = tmp.path().join("big.rs");
+        let mut content = String::new();
+        for i in 0..300 {
+            content.push_str(&format!("// line {i}\n"));
+        }
+        std::fs::write(&file, &content).unwrap();
+
+        let tool = ReadFileTool;
+        let args = serde_json::json!({
+            "file_path": file.to_string_lossy(),
+            "offset": 10,
+            "limit": 20
+        }).to_string();
+
+        let result = Tool::execute(&tool, &args).await;
+        assert!(result.success);
+        assert!(!result.output.contains("File outline"),
+            "offset reads should NOT get outline: {}", result.output);
     }
 }
