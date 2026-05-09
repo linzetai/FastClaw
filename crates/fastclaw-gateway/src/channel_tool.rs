@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fastclaw_core::config_access::{navigate_config, persist_config_key, set_nested_key};
-use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolResult};
+use fastclaw_core::tool::{Tool, ToolGroup, ToolKind, ToolParameterSchema, ToolResult};
 use serde_json::json;
 
 use crate::state::AppState;
@@ -368,5 +368,166 @@ impl Tool for RemoveChannelTool {
         ToolResult::ok(format!(
             "Channel '{channel}' disabled, stopped, and saved. It will not reconnect on restart."
         ))
+    }
+}
+
+/// Tool that lets agents proactively push messages to IM channels.
+///
+/// Bridges the gap between coding sessions and IM: an agent can call this tool
+/// to send build results, test reports, or any notification to a Feishu/Slack/etc.
+/// chat. Works from any session type (HTTP, WebSocket, IM, or cron).
+pub struct NotifyChannelTool {
+    state: AppState,
+}
+
+impl NotifyChannelTool {
+    pub fn new(state: AppState) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl Tool for NotifyChannelTool {
+    fn name(&self) -> &str {
+        "notify_channel"
+    }
+
+    fn description(&self) -> &str {
+        "Send a message to an IM channel (Feishu, Slack, Discord, etc.). \
+         Use this to push notifications, build results, test reports, or any status update \
+         to a team chat. Requires a running channel plugin.\n\n\
+         Parameters:\n\
+         - channel_id: The channel plugin id (e.g. \"feishu\", \"slack\")\n\
+         - target_id: The chat/group/user id to send to (platform-specific)\n\
+         - message: The text message to send (supports the channel's native formatting)\n\
+         - target_type: \"p2p\" for direct message, \"group\" for group chat (default: \"p2p\")\n\n\
+         Use list_channels first if you don't know which channels are available."
+    }
+
+    fn parameters_schema(&self) -> ToolParameterSchema {
+        let mut props = HashMap::new();
+        props.insert(
+            "channel_id".to_string(),
+            json!({
+                "type": "string",
+                "description": "Channel plugin id (e.g. \"feishu\", \"slack\", \"discord\")"
+            }),
+        );
+        props.insert(
+            "target_id".to_string(),
+            json!({
+                "type": "string",
+                "description": "The chat/group/user id on the platform to send the message to"
+            }),
+        );
+        props.insert(
+            "message".to_string(),
+            json!({
+                "type": "string",
+                "description": "The text message to send"
+            }),
+        );
+        props.insert(
+            "target_type".to_string(),
+            json!({
+                "type": "string",
+                "enum": ["p2p", "group"],
+                "description": "Message target type: \"p2p\" for direct message, \"group\" for group chat. Default: \"p2p\""
+            }),
+        );
+        ToolParameterSchema {
+            schema_type: "object".to_string(),
+            properties: props,
+            required: vec![
+                "channel_id".to_string(),
+                "target_id".to_string(),
+                "message".to_string(),
+            ],
+        }
+    }
+
+    fn kind(&self) -> ToolKind {
+        ToolKind::Execute
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Communication
+    }
+
+    async fn execute(&self, arguments: &str) -> ToolResult {
+        let args: serde_json::Value = match serde_json::from_str(arguments) {
+            Ok(v) => v,
+            Err(e) => return ToolResult::err(format!("invalid JSON: {e}")),
+        };
+
+        let channel_id = match args.get("channel_id").and_then(|v| v.as_str()) {
+            Some(c) => c.to_string(),
+            None => return ToolResult::err("missing required field 'channel_id'".to_string()),
+        };
+
+        let target_id = match args.get("target_id").and_then(|v| v.as_str()) {
+            Some(t) => t.to_string(),
+            None => return ToolResult::err("missing required field 'target_id'".to_string()),
+        };
+
+        let message = match args.get("message").and_then(|v| v.as_str()) {
+            Some(m) if !m.trim().is_empty() => m.to_string(),
+            _ => return ToolResult::err("missing or empty 'message' field".to_string()),
+        };
+
+        let target_type = args
+            .get("target_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("p2p")
+            .to_string();
+
+        let registry = self.state.ext.channel_registry.read().await;
+        let channel = match registry.get(&channel_id) {
+            Some(ch) => ch.clone(),
+            None => {
+                let available: Vec<_> = registry.list().iter().map(|m| m.id.clone()).collect();
+                return ToolResult::err(format!(
+                    "channel '{channel_id}' not found or not running. Available: {}",
+                    if available.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        available.join(", ")
+                    }
+                ));
+            }
+        };
+        drop(registry);
+
+        let outbound = fastclaw_core::channel::OutboundMessage {
+            target_id: target_id.clone(),
+            target_type: target_type.clone(),
+            text: message.clone(),
+            reply_to: None,
+            image_key: None,
+        };
+
+        match channel.send_message(&outbound).await {
+            Ok(_) => {
+                tracing::info!(
+                    channel = %channel_id,
+                    target = %target_id,
+                    target_type = %target_type,
+                    msg_len = message.len(),
+                    "notify_channel: message sent"
+                );
+                ToolResult::ok(format!(
+                    "Message sent to {channel_id} (target: {target_id}, type: {target_type})"
+                ))
+            }
+            Err(e) => {
+                tracing::warn!(
+                    channel = %channel_id,
+                    target = %target_id,
+                    error = %e,
+                    "notify_channel: send failed"
+                );
+                ToolResult::err(format!("Failed to send message via {channel_id}: {e}"))
+            }
+        }
     }
 }

@@ -710,7 +710,13 @@ impl StateBuilder {
             .register(Arc::new(crate::channel_tool::RemoveChannelTool::new(
                 state.clone(),
             )));
-        tracing::info!("registered channel management tools");
+        state
+            .rt
+            .tool_registry
+            .register(Arc::new(crate::channel_tool::NotifyChannelTool::new(
+                state.clone(),
+            )));
+        tracing::info!("registered channel management tools (incl. notify_channel)");
 
         state
             .rt

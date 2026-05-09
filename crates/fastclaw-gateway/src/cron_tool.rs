@@ -25,17 +25,21 @@ impl Tool for ManageCronTool {
 
     fn description(&self) -> &str {
         "Manage scheduled cron jobs. \
-         Actions: \"list\" — list all cron jobs for this agent; \
-         \"create\" — create a new cron job; \
-         \"update\" — update an existing cron job by id; \
-         \"delete\" — delete a cron job by id. \
-         Cron jobs can trigger an agent chat message on a schedule, or call a webhook URL. \
-         The schedule uses 6-field cron syntax: 'sec min hour day_of_month month day_of_week'. \
-         Examples: '0 */5 * * * *' = every 5 minutes, '0 0 9 * * 1-5' = 9am weekdays, '0 30 8 1 * *' = 8:30am on the 1st. \
-         For agent_chat action, 'message' is the prompt sent to the agent. \
-         For webhook action, 'url', optional 'method' (POST/GET/PUT/DELETE), and optional 'body' (JSON) are supported. \
-         Use 'notify_channels' to send completion/failure notifications to messaging channels (e.g. Feishu, Slack). \
-         Each entry needs channel_id (e.g. 'feishu') and target_id (chat/group ID to send to)."
+         Actions: \"list\" — list all cron jobs; \
+         \"create\" — create a new job; \
+         \"update\" — update by id; \
+         \"delete\" — delete by id; \
+         \"presets\" — list ready-made CI/CD automation templates.\n\n\
+         Schedule uses 6-field cron syntax: 'sec min hour day_of_month month day_of_week'.\n\
+         Examples: '0 */5 * * * *' = every 5 min, '0 0 9 * * 1-5' = 9am weekdays, '0 0 2 * * *' = 2am daily.\n\n\
+         For agent_chat action, 'message' is the prompt sent to the agent (with full coding tools).\n\
+         For webhook action, 'url', optional 'method', and optional 'body' are supported.\n\
+         Use 'notify_channels' to push results to IM channels (Feishu, Slack, etc.).\n\n\
+         CI/CD Presets (use action=\"presets\" to list, or action=\"create\" with preset=\"<name>\"):\n\
+         - lint_fix: Auto-fix lint/clippy warnings nightly\n\
+         - test_check: Run test suite and report results\n\
+         - build_check: Compile/build and report errors\n\
+         - deps_audit: Check for outdated/vulnerable dependencies"
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -44,8 +48,16 @@ impl Tool for ManageCronTool {
             "action".to_string(),
             serde_json::json!({
                 "type": "string",
-                "enum": ["list", "create", "update", "delete"],
-                "description": "The action to perform."
+                "enum": ["list", "create", "update", "delete", "presets"],
+                "description": "The action to perform. Use 'presets' to list CI/CD templates."
+            }),
+        );
+        props.insert(
+            "preset".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "enum": ["lint_fix", "test_check", "build_check", "deps_audit"],
+                "description": "Use with action=\"create\" to create a job from a CI/CD preset template. The preset fills in name, schedule, and message automatically."
             }),
         );
         props.insert(
@@ -167,8 +179,9 @@ impl Tool for ManageCronTool {
             "create" => self.handle_create(&args).await,
             "update" => self.handle_update(&args).await,
             "delete" => self.handle_delete(&args).await,
+            "presets" => self.handle_presets().await,
             other => ToolResult::err(format!(
-                "unknown action '{other}'. Must be one of: list, create, update, delete"
+                "unknown action '{other}'. Must be one of: list, create, update, delete, presets"
             )),
         }
     }
@@ -189,18 +202,108 @@ impl ManageCronTool {
         }
     }
 
+    async fn handle_presets(&self) -> ToolResult {
+        let presets = serde_json::json!({
+            "presets": [
+                {
+                    "id": "lint_fix",
+                    "name": "自动修复 Lint 错误",
+                    "description": "每天凌晨运行 linter，自动修复可修复的警告，提交修复并报告结果。",
+                    "default_schedule": "0 0 2 * * *",
+                    "message_template": "Run the project linter/clippy in the workspace. For each auto-fixable warning, apply the fix. After all fixes, run the full build to verify. Report: (1) how many warnings found, (2) how many fixed, (3) whether the build passes. If you made changes, commit them with message 'chore: auto-fix lint warnings'."
+                },
+                {
+                    "id": "test_check",
+                    "name": "定时测试检查",
+                    "description": "定时运行测试套件并报告通过率和失败的测试。",
+                    "default_schedule": "0 0 8 * * 1-5",
+                    "message_template": "Run the full test suite in the workspace. Report: (1) total tests, (2) passed, (3) failed with names and error summaries, (4) test coverage if available. Keep the report concise."
+                },
+                {
+                    "id": "build_check",
+                    "name": "定时编译检查",
+                    "description": "定时编译项目，发现编译错误时尝试修复。",
+                    "default_schedule": "0 30 7 * * *",
+                    "message_template": "Build/compile the project in the workspace. If there are compile errors, analyze each error and attempt to fix it. After fixing, rebuild to verify. Report: (1) initial error count, (2) fixes applied, (3) final build status (pass/fail). If you made changes, commit with message 'fix: resolve compile errors'."
+                },
+                {
+                    "id": "deps_audit",
+                    "name": "依赖安全审计",
+                    "description": "每周检查依赖更新和已知安全漏洞。",
+                    "default_schedule": "0 0 9 * * 1",
+                    "message_template": "Audit the project dependencies for known vulnerabilities and outdated packages. Report: (1) total dependencies, (2) outdated packages with current vs latest version, (3) any known security advisories. Do NOT auto-update — just report findings."
+                }
+            ],
+            "usage": "Use action='create' with preset='<id>' to create a job from a template. You can override name, schedule, or message."
+        });
+        ToolResult::ok(serde_json::to_string_pretty(&presets).unwrap_or_default())
+    }
+
+    fn resolve_preset(preset_id: &str) -> Option<(&'static str, &'static str, &'static str)> {
+        match preset_id {
+            "lint_fix" => Some((
+                "自动修复 Lint 错误",
+                "0 0 2 * * *",
+                "Run the project linter/clippy in the workspace. For each auto-fixable warning, apply the fix. After all fixes, run the full build to verify. Report: (1) how many warnings found, (2) how many fixed, (3) whether the build passes. If you made changes, commit them with message 'chore: auto-fix lint warnings'.",
+            )),
+            "test_check" => Some((
+                "定时测试检查",
+                "0 0 8 * * 1-5",
+                "Run the full test suite in the workspace. Report: (1) total tests, (2) passed, (3) failed with names and error summaries, (4) test coverage if available. Keep the report concise.",
+            )),
+            "build_check" => Some((
+                "定时编译检查",
+                "0 30 7 * * *",
+                "Build/compile the project in the workspace. If there are compile errors, analyze each error and attempt to fix it. After fixing, rebuild to verify. Report: (1) initial error count, (2) fixes applied, (3) final build status (pass/fail). If you made changes, commit with message 'fix: resolve compile errors'.",
+            )),
+            "deps_audit" => Some((
+                "依赖安全审计",
+                "0 0 9 * * 1",
+                "Audit the project dependencies for known vulnerabilities and outdated packages. Report: (1) total dependencies, (2) outdated packages with current vs latest version, (3) any known security advisories. Do NOT auto-update — just report findings.",
+            )),
+            _ => None,
+        }
+    }
+
     async fn handle_create(&self, args: &serde_json::Value) -> ToolResult {
         let agent_id = args
             .get("agent_id")
             .and_then(|v| v.as_str())
             .unwrap_or("main")
             .to_string();
-        let name = match args.get("name").and_then(|v| v.as_str()) {
-            Some(n) => n.to_string(),
+
+        // Apply preset defaults if specified, then let explicit fields override.
+        let preset = args.get("preset").and_then(|v| v.as_str());
+        let (default_name, default_schedule, default_message) = if let Some(pid) = preset {
+            match Self::resolve_preset(pid) {
+                Some((n, s, m)) => (Some(n), Some(s), Some(m)),
+                None => {
+                    return ToolResult::err(format!(
+                        "unknown preset '{pid}'. Use action='presets' to list available templates."
+                    ));
+                }
+            }
+        } else {
+            (None, None, None)
+        };
+
+        let name = args
+            .get("name")
+            .and_then(|v| v.as_str())
+            .or(default_name)
+            .map(String::from);
+        let name = match name {
+            Some(n) => n,
             None => return ToolResult::err("'name' is required for create".to_string()),
         };
-        let schedule = match args.get("schedule").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
+
+        let schedule = args
+            .get("schedule")
+            .and_then(|v| v.as_str())
+            .or(default_schedule)
+            .map(String::from);
+        let schedule = match schedule {
+            Some(s) => s,
             None => return ToolResult::err("'schedule' is required for create".to_string()),
         };
 
@@ -218,6 +321,7 @@ impl ManageCronTool {
                 let message = args
                     .get("message")
                     .and_then(|v| v.as_str())
+                    .or(default_message)
                     .unwrap_or("scheduled task triggered")
                     .to_string();
                 let session_id = args

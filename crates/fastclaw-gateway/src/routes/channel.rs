@@ -10,12 +10,10 @@ use serde_json::{json, Value};
 
 use fastclaw_core::types::{ChatMessage, ChatRequest, Role};
 
+use crate::chat_pipeline::{self, SetupChatOptions};
 use crate::state::AppState;
 
-use super::common::{
-    apply_model_router_for_chat, filtered_tool_definitions, record_chat_budget_actual,
-    record_chat_budget_stream_estimate,
-};
+use super::common::{record_chat_budget_actual, record_chat_budget_stream_estimate};
 use super::error::AppError;
 
 fn headers_to_map(headers: &HeaderMap) -> BTreeMap<String, String> {
@@ -197,7 +195,10 @@ async fn handle_slash_command(
 
 /// Generic handler: process inbound messages from any channel plugin.
 /// If the channel supports streaming, sends a placeholder and progressively updates it.
-/// Uses multi-agent routing (bindings) and injects workspace bootstrap + skills.
+///
+/// Uses the shared `setup_chat()` pipeline so IM channels get the same capabilities
+/// as HTTP/WS sessions: workspace paths, context engine, model routing, skills,
+/// prompt routing, budget tracking, and the full coding toolchain.
 pub(crate) async fn handle_channel_message(
     state: AppState,
     channel: Arc<dyn fastclaw_core::channel::ChannelPlugin>,
@@ -262,18 +263,12 @@ pub(crate) async fn handle_channel_message(
             .create_session(&session_key, agent_id, None)
             .await?;
     }
-    let session = state
-        .store
-        .session_store
-        .get_session(&session_key)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("failed to create session"))?;
 
     state
         .store
         .session_store
         .append_message(
-            &session.id,
+            &session_key,
             &ChatMessage {
                 role: Role::User,
                 content: Some(serde_json::Value::String(text.to_string())),
@@ -285,103 +280,87 @@ pub(crate) async fn handle_channel_message(
         )
         .await?;
 
-    let mut messages = state.store.session_store.load_chat_messages(&session.id).await?;
-
-    let mut system_context = String::new();
-    if let Some(workspace) = state.rt.workspaces.get(agent_id) {
-        let bootstrap = workspace.load_bootstrap();
-        let bs_prompt = bootstrap.format_for_prompt();
-        if !bs_prompt.is_empty() {
-            system_context.push_str(&bs_prompt);
-        }
-    }
-    let agent_skill_reg = state.skill_registry_for(agent_id);
-    let skills_prompt = agent_skill_reg.format_for_prompt_mode(&state.cfg.config.skills.prompt_mode);
-    if !skills_prompt.is_empty() {
-        system_context.push_str(&skills_prompt);
-    }
-    if !system_context.is_empty() {
-        messages.insert(
-            0,
-            ChatMessage {
-                role: Role::System,
-                content: Some(serde_json::Value::String(system_context)),
-                reasoning_content: None,
-                name: None,
-                tool_calls: None,
-                tool_call_id: None,
-            },
-        );
-    }
+    // Resolve the agent's workspace root so file tools target the correct directory.
+    let work_dir = state
+        .rt
+        .workspaces
+        .get(agent_id)
+        .map(|ws| ws.root.to_string_lossy().to_string());
 
     let use_streaming = channel.capabilities().streaming;
 
-    let router = state.rt.router.read().await;
-    let agent_config = router
-        .resolve(&ChatRequest {
-            messages: messages.clone(),
-            stream: use_streaming,
-            model: None,
-            temperature: None,
-            max_tokens: None,
-            agent_id: Some(agent_id.into()),
-            session_id: Some(session.id.clone()),
-            tools: None,
-            slash_intent: None,
-            work_dir: None,
-        }).cloned()
-        .map_err(|e| anyhow::anyhow!("agent resolve: {}", e))?;
-    drop(router);
+    // Build a ChatRequest and run through the shared setup_chat() pipeline.
+    // This gives IM channels the same enrichment as HTTP/WS: Runtime Paths,
+    // context engine (memory/RAG), model routing, prompt routing, skills, and budget.
+    let user_msg = ChatMessage {
+        role: Role::User,
+        content: Some(serde_json::Value::String(text.to_string())),
+        reasoning_content: None,
+        name: None,
+        tool_calls: None,
+        tool_call_id: None,
+    };
 
-    let tools = filtered_tool_definitions(&state.rt.tool_registry, &agent_config);
-    let tool_definition_count = tools.as_ref().map_or(0, |t| t.len());
-
-    let mut request = ChatRequest {
-        messages,
+    let request = ChatRequest {
+        messages: vec![user_msg],
         stream: use_streaming,
         model: None,
         temperature: None,
         max_tokens: None,
         agent_id: Some(agent_id.into()),
-        session_id: Some(session.id.clone()),
-        tools,
+        session_id: Some(session_key.clone()),
+        tools: None,
         slash_intent: None,
-        work_dir: None,
+        work_dir,
     };
 
-    let llm_override =
-        apply_model_router_for_chat(&state, &agent_config, &mut request, tool_definition_count);
+    let options = SetupChatOptions {
+        chat_stream: use_streaming,
+        propagate_context_ingest_errors: false,
+        set_resolved_session_on_request: true,
+        record_chat_observe: true,
+    };
+
+    let setup = chat_pipeline::setup_chat(&state, &request, options)
+        .await
+        .map_err(|e| anyhow::anyhow!("channel setup_chat failed: {e}"))?;
+
+    // Inject channel context so the agent knows it is operating from IM
+    let mut enriched_request = setup.enriched_request.clone();
+    inject_channel_context(&mut enriched_request.messages, channel_id, chat_id);
 
     if use_streaming {
-        let text = handle_channel_streaming(
+        let reply_text = handle_channel_streaming(
             &state,
             &channel,
-            &agent_config,
-            &request,
+            &setup.agent_config,
+            &enriched_request,
             message_id,
-            llm_override,
+            setup.llm_override.clone(),
         )
         .await?;
-        state
-            .store
-            .session_store
-            .append_message(
-                &session.id,
-                &ChatMessage {
-                    role: Role::Assistant,
-                    content: Some(serde_json::Value::String(text.clone())),
-                    reasoning_content: None,
-                    name: None,
-                    tool_calls: None,
-                    tool_call_id: None,
-                },
-            )
-            .await?;
+
+        let assistant_msg = ChatMessage {
+            role: Role::Assistant,
+            content: Some(serde_json::Value::String(reply_text.clone())),
+            reasoning_content: None,
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        };
+        chat_pipeline::after_chat(&state, &setup, &assistant_msg, true)
+            .await
+            .map_err(|e| anyhow::anyhow!("channel after_chat failed: {e}"))?;
     } else {
         let result = state
             .rt
             .runtime
-            .execute(&agent_config, &request, &state.rt.tool_registry, llm_override)
+            .execute(
+                &setup.agent_config,
+                &enriched_request,
+                &state.rt.tool_registry,
+                setup.llm_override.clone(),
+            )
             .await?;
         let charged_model = result.response.model.clone();
         record_chat_budget_actual(
@@ -398,41 +377,64 @@ pub(crate) async fn handle_channel_message(
 
         channel.reply_message(message_id, &reply_text).await?;
 
-        if let Some(choice) = result.response.choices.first() {
-            state
-                .store
-                .session_store
-                .append_message(&session.id, &choice.message)
-                .await?;
-        } else {
-            state
-                .store
-                .session_store
-                .append_message(
-                    &session.id,
-                    &ChatMessage {
-                        role: Role::Assistant,
-                        content: Some(serde_json::Value::String(reply_text.clone())),
-                        reasoning_content: None,
-                        name: None,
-                        tool_calls: None,
-                        tool_call_id: None,
-                    },
-                )
-                .await?;
-        }
+        let assistant_msg = result
+            .response
+            .choices
+            .first()
+            .map(|c| c.message.clone())
+            .unwrap_or(ChatMessage {
+                role: Role::Assistant,
+                content: Some(serde_json::Value::String(reply_text.clone())),
+                reasoning_content: None,
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            });
+        chat_pipeline::after_chat(&state, &setup, &assistant_msg, true)
+            .await
+            .map_err(|e| anyhow::anyhow!("channel after_chat failed: {e}"))?;
     }
 
     tracing::info!(
         channel_id,
         chat_id,
         message_id,
-        session = %session.id,
+        session = %setup.session_id,
         streaming = use_streaming,
-        "channel message processed and replied"
+        agent = %setup.agent_id,
+        "channel message processed via unified pipeline"
     );
 
     Ok(())
+}
+
+/// Inject a `[Channel Context]` system message so the agent knows it is operating
+/// from an IM channel and can tailor its response format (concise, no code fences
+/// for simple answers, etc.).
+fn inject_channel_context(messages: &mut Vec<ChatMessage>, channel_id: &str, chat_id: &str) {
+    let prompt = format!(
+        "[Channel Context]\n\
+         This conversation is happening through an IM channel (not a terminal/IDE).\n\
+         Channel: {channel_id}\n\
+         Chat: {chat_id}\n\n\
+         Guidance:\n\
+         - You have FULL access to the coding toolchain (read/write files, shell, grep, etc.).\n\
+         - The user may ask you to fix code, run builds, check tests, etc. — use your tools.\n\
+         - Keep responses concise and IM-friendly. Use short summaries instead of full file dumps.\n\
+         - When you perform file edits or run commands, report a brief summary of what changed.\n\
+         - For compile/test results, report pass/fail status and key metrics."
+    );
+    messages.insert(
+        0,
+        ChatMessage {
+            role: Role::System,
+            content: Some(serde_json::Value::String(prompt)),
+            reasoning_content: None,
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    );
 }
 
 /// Streaming handler for channels that support message editing (e.g. Feishu).
