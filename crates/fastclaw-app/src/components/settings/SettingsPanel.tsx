@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from "react";
-import { Settings2, Box, Wrench, Server, Info, Search, Shield, Plug, X, RotateCcw } from "lucide-react";
+import { Settings2, Box, Wrench, Server, Info, Search, Shield, Plug, X, RotateCcw, Puzzle } from "lucide-react";
 
 const GeneralTab = lazy(() => import("./GeneralTab").then((m) => ({ default: m.GeneralTab })));
 const ModelTab = lazy(() => import("./ModelTab").then((m) => ({ default: m.ModelTab })));
@@ -10,13 +10,14 @@ const SecurityTab = lazy(() => import("./SecurityTab").then((m) => ({ default: m
 const GatewayTab = lazy(() => import("./GatewayTab").then((m) => ({ default: m.GatewayTab })));
 const AboutTab = lazy(() => import("./AboutTab").then((m) => ({ default: m.AboutTab })));
 const MigrationTab = lazy(() => import("./MigrationTab").then((m) => ({ default: m.MigrationTab })));
+const LlmPluginTab = lazy(() => import("./LlmPluginTab").then((m) => ({ default: m.LlmPluginTab })));
 
 interface SettingsPanelProps {
   open: boolean;
   onClose: () => void;
 }
 
-type SettingsTab = "general" | "models" | "web-search" | "skills" | "mcp" | "security" | "gateway" | "about" | "migration";
+type SettingsTab = "general" | "models" | "web-search" | "skills" | "mcp" | "llm-plugins" | "security" | "gateway" | "about" | "migration";
 
 const ICON_PROPS = { size: 16, strokeWidth: 1.5 } as const;
 const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
@@ -25,6 +26,7 @@ const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
   { id: "web-search", label: "联网搜索", icon: <Search {...ICON_PROPS} /> },
   { id: "skills", label: "Skills", icon: <Wrench {...ICON_PROPS} /> },
   { id: "mcp", label: "MCP", icon: <Plug {...ICON_PROPS} /> },
+  { id: "llm-plugins", label: "LLM 插件", icon: <Puzzle {...ICON_PROPS} /> },
   { id: "security", label: "安全", icon: <Shield {...ICON_PROPS} /> },
   { id: "gateway", label: "网关", icon: <Server {...ICON_PROPS} /> },
   { id: "migration", label: "迁移", icon: <RotateCcw {...ICON_PROPS} /> },
@@ -92,6 +94,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
               {tab === "web-search" && <WebSearchTab />}
               {tab === "skills" && <SkillsTab />}
               {tab === "mcp" && <McpTab />}
+              {tab === "llm-plugins" && <LlmPluginTab />}
               {tab === "security" && <SecurityTab />}
               {tab === "gateway" && <GatewayTab />}
               {tab === "migration" && <MigrationTab />}

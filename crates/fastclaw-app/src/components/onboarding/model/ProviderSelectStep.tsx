@@ -1,8 +1,9 @@
 import { Settings } from "lucide-react";
-import { PROVIDER_PRESETS } from "../../../lib/model-registry";
+import { getAllProviders } from "../../../lib/model-registry";
 import type { ModelAction } from "./model-state";
 
 export function ProviderSelectStep({ dispatch }: { dispatch: React.Dispatch<ModelAction> }) {
+  const providers = getAllProviders();
   return (
     <div
       className="overflow-hidden rounded-[var(--radius-md)]"
@@ -14,7 +15,7 @@ export function ProviderSelectStep({ dispatch }: { dispatch: React.Dispatch<Mode
     >
       <div className="p-4">
         <div className="grid grid-cols-2 gap-2.5">
-          {PROVIDER_PRESETS.map((p) => (
+          {providers.map((p) => (
             <div
               key={p.id}
               className="cursor-pointer rounded-[var(--radius-sm)] border p-3.5 transition-all hover:scale-[1.01]"

@@ -8,6 +8,7 @@ mod dynamic_routes;
 mod error;
 mod evolution;
 mod health;
+mod llm_plugin;
 mod memory;
 mod session;
 mod subagent;
@@ -122,5 +123,19 @@ pub fn api_routes() -> Router<AppState> {
         .route(
             "/api/v1/subagents/runs/:run_id",
             get(subagent::get_subagent_run).delete(subagent::cancel_subagent_run),
+        )
+        .route(
+            "/api/v1/llm-plugins",
+            get(llm_plugin::list_plugins).post(llm_plugin::create_plugin),
+        )
+        .route(
+            "/api/v1/llm-plugins/:id",
+            get(llm_plugin::get_plugin)
+                .put(llm_plugin::update_plugin)
+                .delete(llm_plugin::delete_plugin),
+        )
+        .route(
+            "/api/v1/llm-plugins/:id/test",
+            post(llm_plugin::test_plugin),
         )
 }

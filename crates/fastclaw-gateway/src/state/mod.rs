@@ -3,7 +3,7 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use fastclaw_agent::{
-    create_provider, create_provider_chain, create_provider_with_credentials, AgentRuntime,
+    create_provider, create_provider_with_credentials, AgentRuntime,
     FallbackProvider,
 };
 use fastclaw_core::agent_config::AgentConfig;
@@ -193,6 +193,7 @@ pub struct ExtensionState {
         Arc<ArcSwap<std::collections::HashMap<String, fastclaw_core::types::McpServerStatus>>>,
     pub mcp_handles: Arc<tokio::sync::Mutex<std::collections::HashMap<String, fastclaw_mcp::SharedMcpClient>>>,
     pub channel_inbound_tx: tokio::sync::mpsc::UnboundedSender<fastclaw_core::channel::InboundMessage>,
+    pub llm_plugin_registry: Arc<tokio::sync::RwLock<fastclaw_agent::LlmPluginRegistry>>,
 }
 
 /// Observability.
@@ -456,9 +457,12 @@ impl AppState {
     }
 
     /// Default LLM runtime + per-agent provider registration.
+    /// When a plugin registry is provided, providers with a `plugin:` prefix
+    /// are resolved through it.
     fn build_runtime(
         agents: &[AgentConfig],
         creds: &fastclaw_core::config::CredentialsConfig,
+        plugin_registry: Option<&fastclaw_agent::LlmPluginRegistry>,
     ) -> anyhow::Result<Arc<AgentRuntime>> {
         let primary_model_config = agents
             .first()
@@ -466,19 +470,21 @@ impl AppState {
             .cloned()
             .unwrap_or_default();
 
-        let default_provider: Box<dyn fastclaw_agent::LlmProvider> = match create_provider_chain(
-            &primary_model_config,
-            Some(creds),
-        ) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "create_provider_chain for default agent failed; assembling FallbackProvider from configured credentials"
-                );
-                Self::build_credentials_fallback_chain(creds)?
-            }
-        };
+        let default_provider: Box<dyn fastclaw_agent::LlmProvider> =
+            match fastclaw_agent::create_provider_chain_with_plugins(
+                &primary_model_config,
+                Some(creds),
+                plugin_registry,
+            ) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "create_provider_chain for default agent failed; assembling FallbackProvider from configured credentials"
+                    );
+                    Self::build_credentials_fallback_chain(creds)?
+                }
+            };
 
         let runtime = Arc::new({
             let rt = AgentRuntime::new(Arc::from(default_provider));
@@ -490,7 +496,11 @@ impl AppState {
         });
 
         for agent in agents {
-            match create_provider_chain(&agent.model, Some(creds)) {
+            match fastclaw_agent::create_provider_chain_with_plugins(
+                &agent.model,
+                Some(creds),
+                plugin_registry,
+            ) {
                 Ok(p) => {
                     runtime.register_provider(&agent.agent_id, Arc::from(p));
                     tracing::info!(
@@ -1141,11 +1151,20 @@ impl AppState {
         self.rt.runtime.clear_registered_providers();
         let credentials = self.current_credentials_snapshot();
 
+        // Try to read the plugin registry for plugin-aware provider creation.
+        // If the lock is contended we fall back to no-plugin mode.
+        let plugin_guard = self.ext.llm_plugin_registry.try_read();
+        let plugin_ref = plugin_guard.as_ref().map(|g| &**g).ok();
+
         let mut registered = 0usize;
         let mut failed = 0usize;
         let mut default_refreshed = false;
         for agent in agents {
-            match create_provider_chain(&agent.model, Some(&credentials)) {
+            match fastclaw_agent::create_provider_chain_with_plugins(
+                &agent.model,
+                Some(&credentials),
+                plugin_ref,
+            ) {
                 Ok(provider) => {
                     let provider: Arc<dyn fastclaw_agent::LlmProvider> = Arc::from(provider);
                     if !default_refreshed {

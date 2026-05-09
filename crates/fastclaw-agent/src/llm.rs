@@ -782,16 +782,16 @@ struct AnthropicRequest<'a> {
 }
 
 #[derive(Serialize, Deserialize)]
-struct AnthropicMessage {
-    role: String,
-    content: serde_json::Value,
+pub struct AnthropicMessage {
+    pub role: String,
+    pub content: serde_json::Value,
 }
 
 #[derive(Serialize)]
-struct AnthropicTool {
-    name: String,
-    description: String,
-    input_schema: serde_json::Value,
+pub struct AnthropicTool {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -823,7 +823,7 @@ struct AnthropicUsage {
 }
 
 impl AnthropicProvider {
-    fn convert_messages(messages: &[ChatMessage]) -> (Option<String>, Vec<AnthropicMessage>) {
+    pub fn convert_messages(messages: &[ChatMessage]) -> (Option<String>, Vec<AnthropicMessage>) {
         let mut system_parts: Vec<String> = Vec::new();
         let mut result = Vec::new();
 
@@ -929,7 +929,7 @@ impl AnthropicProvider {
         (system, result)
     }
 
-    fn convert_tools(defs: &[ToolDefinition]) -> Vec<AnthropicTool> {
+    pub fn convert_tools(defs: &[ToolDefinition]) -> Vec<AnthropicTool> {
         defs.iter()
             .map(|d| AnthropicTool {
                 name: d.function.name.clone(),
@@ -1574,6 +1574,81 @@ pub fn create_provider_chain(
             fb.api_key.as_deref(),
             credentials,
             Some(fb.max_concurrent_requests),
+        ) {
+            Ok(p) => chain.push((format!("{}:{}", fb.provider, fb.model), p)),
+            Err(e) => {
+                tracing::warn!(
+                    provider = %fb.provider,
+                    error = %e,
+                    "failed to create fallback provider, skipping"
+                );
+            }
+        }
+    }
+
+    Ok(Box::new(FallbackProvider::new(chain)))
+}
+
+/// Plugin-aware provider creation. If `provider_name` starts with `plugin:`,
+/// the suffix is used as a plugin ID to look up in the registry.
+/// Otherwise delegates to [`create_provider_with_credentials`].
+pub fn create_provider_with_plugins(
+    provider_name: &str,
+    base_url: Option<&str>,
+    api_key: Option<&str>,
+    credentials: Option<&fastclaw_core::config::CredentialsConfig>,
+    max_concurrent_requests: Option<u32>,
+    plugin_registry: Option<&crate::llm_plugin::LlmPluginRegistry>,
+) -> anyhow::Result<Box<dyn LlmProvider>> {
+    if let Some(plugin_id) = provider_name.strip_prefix("plugin:") {
+        if let Some(registry) = plugin_registry {
+            return registry.create_provider(plugin_id);
+        }
+        anyhow::bail!(
+            "provider '{}' refers to a plugin but no plugin registry is available",
+            provider_name
+        );
+    }
+    create_provider_with_credentials(
+        provider_name,
+        base_url,
+        api_key,
+        credentials,
+        max_concurrent_requests,
+    )
+}
+
+/// Plugin-aware provider chain creation. Extends [`create_provider_chain`]
+/// with plugin lookup for both primary and fallback providers.
+pub fn create_provider_chain_with_plugins(
+    config: &fastclaw_core::agent_config::AgentModelConfig,
+    credentials: Option<&fastclaw_core::config::CredentialsConfig>,
+    plugin_registry: Option<&crate::llm_plugin::LlmPluginRegistry>,
+) -> anyhow::Result<Box<dyn LlmProvider>> {
+    let primary = create_provider_with_plugins(
+        &config.provider,
+        None,
+        None,
+        credentials,
+        Some(config.max_concurrent_requests),
+        plugin_registry,
+    )?;
+
+    if config.fallbacks.is_empty() {
+        return Ok(primary);
+    }
+
+    let mut chain: Vec<(String, Box<dyn LlmProvider>)> = Vec::new();
+    chain.push((config.provider.clone(), primary));
+
+    for fb in &config.fallbacks {
+        match create_provider_with_plugins(
+            &fb.provider,
+            fb.base_url.as_deref(),
+            fb.api_key.as_deref(),
+            credentials,
+            Some(fb.max_concurrent_requests),
+            plugin_registry,
         ) {
             Ok(p) => chain.push((format!("{}:{}", fb.provider, fb.model), p)),
             Err(e) => {

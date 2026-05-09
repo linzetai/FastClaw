@@ -5,6 +5,7 @@ pub mod complexity;
 pub mod config;
 pub mod config_access;
 pub mod error;
+pub mod llm_plugin;
 
 pub use complexity::ComplexityTier;
 pub use error::{FastClawError, FastClawResult};

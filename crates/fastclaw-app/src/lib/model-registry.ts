@@ -133,18 +133,36 @@ export function inferContextWindow(modelId: string): number {
   return 8192;
 }
 
+// Dynamic plugin providers (populated at runtime from the backend).
+let pluginProviders: ProviderPreset[] = [];
+
 /**
- * Find a provider preset by ID.
+ * Register plugin providers fetched from the backend.
+ * Called once during app initialization.
  */
-export function getProviderPreset(providerId: string): ProviderPreset | undefined {
-  return PROVIDER_PRESETS.find((p) => p.id === providerId);
+export function setPluginProviders(providers: ProviderPreset[]): void {
+  pluginProviders = providers;
 }
 
 /**
- * Find a model's context window from presets, falling back to inference.
+ * Get all providers: built-in presets + plugin providers.
+ */
+export function getAllProviders(): ProviderPreset[] {
+  return [...PROVIDER_PRESETS, ...pluginProviders];
+}
+
+/**
+ * Find a provider preset by ID (includes plugin providers).
+ */
+export function getProviderPreset(providerId: string): ProviderPreset | undefined {
+  return getAllProviders().find((p) => p.id === providerId);
+}
+
+/**
+ * Find a model's context window from presets (including plugins), falling back to inference.
  */
 export function getModelContextWindow(modelId: string): number {
-  for (const provider of PROVIDER_PRESETS) {
+  for (const provider of getAllProviders()) {
     const model = provider.models.find((m) => m.id === modelId);
     if (model) return model.contextWindow;
   }
@@ -152,11 +170,11 @@ export function getModelContextWindow(modelId: string): number {
 }
 
 /**
- * Build a flat lookup of all preset models keyed by model ID.
+ * Build a flat lookup of all preset models keyed by model ID (including plugins).
  */
 export function getAllPresetModels(): Map<string, ModelPreset & { providerId: string; provider: string; baseUrl: string }> {
   const map = new Map<string, ModelPreset & { providerId: string; provider: string; baseUrl: string }>();
-  for (const p of PROVIDER_PRESETS) {
+  for (const p of getAllProviders()) {
     for (const m of p.models) {
       map.set(m.id, { ...m, providerId: p.id, provider: p.provider, baseUrl: p.baseUrl });
     }

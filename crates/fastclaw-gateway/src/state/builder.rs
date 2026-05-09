@@ -43,6 +43,7 @@ struct BuildPhase3 {
     base_skill_registry: SkillRegistry,
     agent_skill_registries: std::collections::HashMap<String, Arc<SkillRegistry>>,
     workspaces: std::collections::HashMap<String, AgentWorkspace>,
+    llm_plugin_registry: fastclaw_agent::LlmPluginRegistry,
 }
 
 struct BuildPhase4 {
@@ -110,8 +111,33 @@ impl StateBuilder {
         config: &FastClawConfig,
         p1: BuildPhase1,
     ) -> anyhow::Result<BuildPhase3> {
+        // Load LLM provider plugins from the plugins directory.
+        let llm_plugins_dir = fastclaw_core::llm_plugin::resolve_plugins_dir(
+            &config.llm_plugins,
+            &config.paths,
+        );
+        let llm_plugins = if config.llm_plugins.enabled {
+            let plugins = fastclaw_core::llm_plugin::load_llm_plugins(&llm_plugins_dir);
+            if !plugins.is_empty() {
+                tracing::info!(
+                    count = plugins.len(),
+                    dir = %llm_plugins_dir.display(),
+                    "loaded LLM provider plugins"
+                );
+            }
+            plugins
+        } else {
+            Vec::new()
+        };
+        let llm_plugin_registry = fastclaw_agent::LlmPluginRegistry::from_configs(llm_plugins);
+
         let creds = helpers::merge_model_base_urls_into_credentials(&config.credentials, &config.models);
-        let runtime = super::AppState::build_runtime(&p1.agents, &creds)?;
+        let plugin_ref = if llm_plugin_registry.is_empty() {
+            None
+        } else {
+            Some(&llm_plugin_registry)
+        };
+        let runtime = super::AppState::build_runtime(&p1.agents, &creds, plugin_ref)?;
         let router = AgentRouter::new(p1.agents.clone());
         let tool_registry = super::AppState::build_tools_core(config).await?;
 
@@ -249,6 +275,7 @@ impl StateBuilder {
             base_skill_registry,
             agent_skill_registries,
             workspaces,
+            llm_plugin_registry,
         })
     }
 
@@ -654,6 +681,9 @@ impl StateBuilder {
                     p5.phase2.phase4.mcp_handles_init,
                 )),
                 channel_inbound_tx: p5.phase2.phase4.channel_inbound_tx,
+                llm_plugin_registry: Arc::new(tokio::sync::RwLock::new(
+                    p5.phase2.phase4.phase3.llm_plugin_registry,
+                )),
             },
             obs: super::ObserveState {
                 metrics_collector: Arc::new(fastclaw_observe::MetricsCollector::new()),

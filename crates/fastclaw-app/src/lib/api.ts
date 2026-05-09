@@ -419,6 +419,45 @@ const SKIP_DIRS = new Set(["node_modules", ".git", "target", "dist", "build", "_
 const MAX_ENTRIES = 2000;
 const MAX_DEPTH = 5;
 
+// ─── LLM Plugin API ───
+
+export interface LlmPluginSummary {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  type: "middleware" | "process";
+  enabled: boolean;
+  models: { id: string; name: string; contextWindow: number }[];
+}
+
+export async function listLlmPlugins(): Promise<LlmPluginSummary[]> {
+  const data = await httpGet<{ plugins: LlmPluginSummary[] }>("/api/v1/llm-plugins");
+  return data.plugins;
+}
+
+export async function getLlmPlugin(id: string): Promise<LlmPluginSummary> {
+  return httpGet<LlmPluginSummary>(`/api/v1/llm-plugins/${encodeURIComponent(id)}`);
+}
+
+export async function createLlmPlugin(config: Record<string, unknown>): Promise<{ id: string; ok: boolean }> {
+  return httpPost<{ id: string; ok: boolean }>("/api/v1/llm-plugins", config);
+}
+
+export async function updateLlmPlugin(id: string, config: Record<string, unknown>): Promise<{ id: string; ok: boolean }> {
+  return httpPut<{ id: string; ok: boolean }>(`/api/v1/llm-plugins/${encodeURIComponent(id)}`, config);
+}
+
+export async function deleteLlmPlugin(id: string): Promise<void> {
+  await httpDelete(`/api/v1/llm-plugins/${encodeURIComponent(id)}`);
+}
+
+export async function testLlmPlugin(id: string): Promise<{ ok: boolean; model?: string; reply?: string; error?: string }> {
+  return httpPost<{ ok: boolean; model?: string; reply?: string; error?: string }>(
+    `/api/v1/llm-plugins/${encodeURIComponent(id)}/test`,
+  );
+}
+
 export async function listFiles(dirPath: string): Promise<{ files: string[]; dirs: string[] }> {
   if (transport.isTauri) {
     try {

@@ -129,6 +129,9 @@ pub struct FastClawConfig {
     pub onboarding: Option<serde_json::Value>,
     #[serde(default)]
     pub tracing: TracingConfig,
+    /// LLM provider plugin system configuration.
+    #[serde(default, rename = "llmPlugins")]
+    pub llm_plugins: crate::llm_plugin::LlmPluginsConfig,
 }
 
 /// Controls conversation tracing for the harness / eval subsystem.

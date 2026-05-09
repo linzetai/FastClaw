@@ -47,6 +47,32 @@ pub async fn handle_models_list(
             }));
         }
     }
+    // Append models from LLM provider plugins.
+    if let Ok(registry) = state.ext.llm_plugin_registry.try_read() {
+        for plugin in registry.list() {
+            if !plugin.enabled {
+                continue;
+            }
+            let provider_id = format!("plugin:{}", plugin.id);
+            for m in &plugin.models {
+                let dedupe_key = format!("{provider_id}::{}", m.id);
+                if !seen.insert(dedupe_key) {
+                    continue;
+                }
+                models.push(json!({
+                    "agentId": format!("plugin:{}", plugin.id),
+                    "model": m.id,
+                    "provider": provider_id,
+                    "contextWindow": m.context_window,
+                    "costPer1kInput": serde_json::Value::Null,
+                    "costPer1kOutput": serde_json::Value::Null,
+                    "supportsReasoning": serde_json::Value::Null,
+                    "pluginName": plugin.name,
+                }));
+            }
+        }
+    }
+
     send_resp(
         sender,
         &WsResponse {
