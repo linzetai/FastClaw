@@ -109,6 +109,7 @@ impl JsonRpcDispatcher {
     }
 
     /// Spawn the plugin process if not already running.
+    /// If the process has exited, it is cleared and respawned.
     pub async fn ensure_process(
         &self,
         command: &str,
@@ -116,8 +117,26 @@ impl JsonRpcDispatcher {
         env: &std::collections::HashMap<String, String>,
     ) -> anyhow::Result<()> {
         let mut guard = self.inner.process.lock().await;
-        if guard.is_some() {
-            return Ok(());
+        if let Some(handle) = guard.as_mut() {
+            match handle.child.try_wait() {
+                Ok(Some(status)) => {
+                    tracing::warn!(
+                        plugin_id = %self.inner.plugin_id,
+                        ?status,
+                        "plugin process exited, respawning"
+                    );
+                    *guard = None;
+                }
+                Ok(None) => return Ok(()),
+                Err(e) => {
+                    tracing::warn!(
+                        plugin_id = %self.inner.plugin_id,
+                        error = %e,
+                        "failed to check plugin process status, respawning"
+                    );
+                    *guard = None;
+                }
+            }
         }
 
         tracing::info!(
@@ -212,12 +231,19 @@ impl JsonRpcDispatcher {
 
         let mut line = serde_json::to_string(&req)?;
         line.push('\n');
-        handle
-            .stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|e| anyhow!("failed to write to plugin stdin: {e}"))?;
-        handle.stdin.flush().await?;
+        if let Err(e) = handle.stdin.write_all(line.as_bytes()).await {
+            tracing::warn!(
+                plugin_id = %self.inner.plugin_id,
+                error = %e,
+                "plugin stdin write failed (process may have crashed), clearing handle for respawn"
+            );
+            *guard = None;
+            anyhow::bail!("failed to write to plugin stdin: {e}");
+        }
+        if let Err(e) = handle.stdin.flush().await {
+            *guard = None;
+            anyhow::bail!("failed to flush plugin stdin: {e}");
+        }
 
         Ok(())
     }

@@ -1030,8 +1030,26 @@ impl ProcessLlmProvider {
 
     async fn ensure_process(&self) -> anyhow::Result<()> {
         let mut guard = self.process.lock().await;
-        if guard.is_some() {
-            return Ok(());
+        if let Some(handle) = guard.as_mut() {
+            match handle.child.try_wait() {
+                Ok(Some(status)) => {
+                    tracing::warn!(
+                        plugin_id = %self.plugin_id,
+                        ?status,
+                        "LLM plugin process exited, respawning"
+                    );
+                    *guard = None;
+                }
+                Ok(None) => return Ok(()),
+                Err(e) => {
+                    tracing::warn!(
+                        plugin_id = %self.plugin_id,
+                        error = %e,
+                        "failed to check plugin process status, respawning"
+                    );
+                    *guard = None;
+                }
+            }
         }
 
         tracing::info!(
@@ -1084,21 +1102,36 @@ impl ProcessLlmProvider {
 
         let mut line = serde_json::to_string(req)?;
         line.push('\n');
-        handle
-            .stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|e| anyhow::anyhow!("failed to write to plugin process stdin: {e}"))?;
-        handle.stdin.flush().await?;
+        if let Err(e) = handle.stdin.write_all(line.as_bytes()).await {
+            tracing::warn!(
+                plugin_id = %self.plugin_id,
+                error = %e,
+                "plugin stdin write failed (process may have crashed), clearing handle for respawn"
+            );
+            *guard = None;
+            anyhow::bail!("failed to write to plugin process stdin: {e}");
+        }
+        if let Err(e) = handle.stdin.flush().await {
+            *guard = None;
+            anyhow::bail!("failed to flush plugin process stdin: {e}");
+        }
 
         let mut response_line = String::new();
         let bytes_read = handle
             .stdout
             .read_line(&mut response_line)
             .await
-            .map_err(|e| anyhow::anyhow!("failed to read from plugin process stdout: {e}"))?;
+            .map_err(|e| {
+                tracing::warn!(
+                    plugin_id = %self.plugin_id,
+                    error = %e,
+                    "plugin stdout read failed, clearing handle for respawn"
+                );
+                anyhow::anyhow!("failed to read from plugin process stdout: {e}")
+            })?;
 
         if bytes_read == 0 {
+            *guard = None;
             anyhow::bail!("plugin process closed stdout (EOF) without responding");
         }
         tracing::debug!(
@@ -1170,12 +1203,19 @@ impl LlmProvider for ProcessLlmProvider {
             let handle = guard
                 .as_mut()
                 .ok_or_else(|| anyhow::anyhow!("plugin process not running"))?;
-            handle
-                .stdin
-                .write_all(req_line.as_bytes())
-                .await
-                .map_err(|e| anyhow::anyhow!("failed to write to plugin stdin: {e}"))?;
-            handle.stdin.flush().await?;
+            if let Err(e) = handle.stdin.write_all(req_line.as_bytes()).await {
+                tracing::warn!(
+                    plugin_id = %self.plugin_id,
+                    error = %e,
+                    "plugin stdin write failed during stream, clearing handle for respawn"
+                );
+                *guard = None;
+                anyhow::bail!("failed to write to plugin stdin: {e}");
+            }
+            if let Err(e) = handle.stdin.flush().await {
+                *guard = None;
+                anyhow::bail!("failed to flush plugin stdin: {e}");
+            }
 
             let mut first = String::new();
             let bytes_read = handle
