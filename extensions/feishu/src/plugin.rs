@@ -143,6 +143,76 @@ impl FeishuPlugin {
         &self.config.reply_mode
     }
 
+    /// IM core tools used internally by the channel plugin (send/reply/image).
+    /// These are NOT exposed to the LLM as the gateway handles messaging.
+    fn im_core_tools(&self) -> Vec<Arc<dyn Tool>> {
+        use crate::tools::{
+            FeishuSendImageTool, FeishuReplyImageTool,
+        };
+        vec![
+            Arc::new(FeishuSendMessageTool::new(self.client.clone())),
+            Arc::new(FeishuReplyMessageTool::new(self.client.clone())),
+            Arc::new(FeishuGetChatMessagesTool::new(self.client.clone())),
+            Arc::new(FeishuSendImageTool::new(self.client.clone())),
+            Arc::new(FeishuReplyImageTool::new(self.client.clone())),
+        ]
+    }
+
+    /// Extension tools to expose to the LLM. Matches OpenClaw's pattern:
+    /// doc, chat, wiki, drive, perm, bitable, scopes, calendar, task,
+    /// plus IM-enhanced tools (rich text, file, edit, forward, delete, reaction, pin).
+    pub fn llm_tools(&self) -> Vec<Arc<dyn Tool>> {
+        use crate::tools::{
+            FeishuBitableListRecordsTool, FeishuCalendarListEventsTool, FeishuDocCreateTool,
+            FeishuDocGetContentTool, FeishuDocTool,
+            FeishuTaskCreateTool, FeishuTaskListTool,
+            FeishuSendRichTextTool, FeishuSendFileTool, FeishuEditMessageTool,
+            FeishuGetMessageTool, FeishuForwardMessageTool, FeishuDeleteMessageTool,
+            FeishuReactionTool, FeishuPinTool,
+            FeishuBitableGetMetaTool, FeishuBitableListFieldsTool,
+            FeishuBitableGetRecordTool, FeishuBitableCreateRecordTool,
+            FeishuBitableUpdateRecordTool, FeishuBitableCreateAppTool,
+            FeishuBitableCreateFieldTool,
+            FeishuWikiTool, FeishuDriveTool, FeishuPermTool, FeishuChatTool,
+            FeishuAppScopesTool,
+        };
+        vec![
+            // IM enhanced (proactive operations the LLM can trigger)
+            Arc::new(FeishuSendRichTextTool::new(self.client.clone())),
+            Arc::new(FeishuSendFileTool::new(self.client.clone())),
+            Arc::new(FeishuEditMessageTool::new(self.client.clone())),
+            Arc::new(FeishuGetMessageTool::new(self.client.clone())),
+            Arc::new(FeishuForwardMessageTool::new(self.client.clone())),
+            Arc::new(FeishuDeleteMessageTool::new(self.client.clone())),
+            Arc::new(FeishuReactionTool::new(self.client.clone())),
+            Arc::new(FeishuPinTool::new(self.client.clone())),
+            // Productivity
+            Arc::new(FeishuTaskCreateTool::new(self.client.clone())),
+            Arc::new(FeishuTaskListTool::new(self.client.clone())),
+            // Bitable
+            Arc::new(FeishuBitableGetMetaTool::new(self.client.clone())),
+            Arc::new(FeishuBitableListFieldsTool::new(self.client.clone())),
+            Arc::new(FeishuBitableListRecordsTool::new(self.client.clone())),
+            Arc::new(FeishuBitableGetRecordTool::new(self.client.clone())),
+            Arc::new(FeishuBitableCreateRecordTool::new(self.client.clone())),
+            Arc::new(FeishuBitableUpdateRecordTool::new(self.client.clone())),
+            Arc::new(FeishuBitableCreateAppTool::new(self.client.clone())),
+            Arc::new(FeishuBitableCreateFieldTool::new(self.client.clone())),
+            // Document (legacy + unified)
+            Arc::new(FeishuDocGetContentTool::new(self.client.clone())),
+            Arc::new(FeishuDocCreateTool::new(self.client.clone())),
+            Arc::new(FeishuDocTool::new(self.client.clone())),
+            // Wiki / Drive / Perm / Chat / Scopes
+            Arc::new(FeishuWikiTool::new(self.client.clone())),
+            Arc::new(FeishuDriveTool::new(self.client.clone())),
+            Arc::new(FeishuPermTool::new(self.client.clone())),
+            Arc::new(FeishuChatTool::new(self.client.clone())),
+            Arc::new(FeishuAppScopesTool::new(self.client.clone())),
+            // Calendar
+            Arc::new(FeishuCalendarListEventsTool::new(self.client.clone())),
+        ]
+    }
+
     async fn get_bot_open_id(&self) -> Option<String> {
         match self.client.get_tenant_token().await {
             Ok(token) => {
@@ -321,6 +391,7 @@ impl ChannelPlugin for FeishuPlugin {
 
         Ok(WebhookResult::Messages(vec![InboundMessage {
             channel_id: "feishu".to_string(),
+            account_id: None,
             sender_id,
             chat_id,
             message_id,
@@ -364,24 +435,9 @@ impl ChannelPlugin for FeishuPlugin {
     }
 
     fn tools(&self) -> Vec<Arc<dyn Tool>> {
-        use crate::tools::{
-            FeishuBitableListRecordsTool, FeishuCalendarListEventsTool, FeishuDocCreateTool,
-            FeishuDocGetContentTool, FeishuSendImageTool, FeishuReplyImageTool,
-            FeishuTaskCreateTool, FeishuTaskListTool,
-        };
-        vec![
-            Arc::new(FeishuSendMessageTool::new(self.client.clone())),
-            Arc::new(FeishuReplyMessageTool::new(self.client.clone())),
-            Arc::new(FeishuGetChatMessagesTool::new(self.client.clone())),
-            Arc::new(FeishuSendImageTool::new(self.client.clone())),
-            Arc::new(FeishuReplyImageTool::new(self.client.clone())),
-            Arc::new(FeishuTaskCreateTool::new(self.client.clone())),
-            Arc::new(FeishuTaskListTool::new(self.client.clone())),
-            Arc::new(FeishuBitableListRecordsTool::new(self.client.clone())),
-            Arc::new(FeishuDocGetContentTool::new(self.client.clone())),
-            Arc::new(FeishuDocCreateTool::new(self.client.clone())),
-            Arc::new(FeishuCalendarListEventsTool::new(self.client.clone())),
-        ]
+        let mut tools = self.im_core_tools();
+        tools.extend(self.llm_tools());
+        tools
     }
 
     async fn probe(&self) -> anyhow::Result<bool> {
@@ -496,7 +552,7 @@ mod tests {
     #[test]
     fn plugin_tools_count() {
         let plugin = FeishuPlugin::new(test_config());
-        assert_eq!(plugin.tools().len(), 11);
+        assert_eq!(plugin.tools().len(), 32);
     }
 
     #[test]

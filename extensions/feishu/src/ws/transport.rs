@@ -149,6 +149,7 @@ fn parse_event_payload(evt: &WsEvent, bot_open_id: Option<&str>) -> Option<Inbou
 
     Some(InboundMessage {
         channel_id: "feishu".to_string(),
+        account_id: None,
         sender_id,
         chat_id,
         message_id,
