@@ -11,7 +11,9 @@ const DEFAULT_MAX_OUTPUT_BYTES: usize = 65536;
 const TERMINAL_FILE_THRESHOLD: usize = 800;
 
 /// Truncate output string at a char boundary, adding a note about total size.
-fn truncate_output(s: &str, max_bytes: usize) -> String {
+/// `terminal_file` is included in the hint when available so the LLM knows
+/// where to read_file for the full output.
+fn truncate_output(s: &str, max_bytes: usize, terminal_file: Option<&str>) -> String {
     if s.len() <= max_bytes {
         return s.to_string();
     }
@@ -21,7 +23,22 @@ fn truncate_output(s: &str, max_bytes: usize) -> String {
         .take_while(|&i| i <= max_bytes)
         .last()
         .unwrap_or(0);
-    format!("{}... [truncated, {} bytes total]", &s[..end], s.len())
+    match terminal_file {
+        Some(path) => format!(
+            "{}... [truncated at {} of {} bytes. \
+             Full output: read_file(file_path=\"{}\", offset=-100)]",
+            &s[..end],
+            end,
+            s.len(),
+            path,
+        ),
+        None => format!(
+            "{}... [truncated at {} of {} bytes]",
+            &s[..end],
+            end,
+            s.len(),
+        ),
+    }
 }
 
 /// Write shell output to a persistent terminal file and return a compact
@@ -121,8 +138,8 @@ fn process_shell_output(command: &str, stdout: &str, stderr: &str, exit_code: i3
             (summary, file_path)
         }
         None => {
-            let truncated_stdout = truncate_output(stdout, DEFAULT_MAX_OUTPUT_BYTES);
-            let truncated_stderr = truncate_output(stderr, DEFAULT_MAX_OUTPUT_BYTES);
+            let truncated_stdout = truncate_output(stdout, DEFAULT_MAX_OUTPUT_BYTES, None);
+            let truncated_stderr = truncate_output(stderr, DEFAULT_MAX_OUTPUT_BYTES, None);
             let inline = serde_json::json!({
                 "exit_code": exit_code,
                 "stdout": truncated_stdout,
@@ -632,10 +649,11 @@ impl ShellTool {
 
                     let (llm_out, terminal_file) = process_shell_output(command, &stdout, &stderr, code);
 
+                    let tf_ref = terminal_file.as_deref();
                     let full_display = serde_json::json!({
                         "exit_code": code,
-                        "stdout": truncate_output(&stdout, DEFAULT_MAX_OUTPUT_BYTES),
-                        "stderr": truncate_output(&stderr, DEFAULT_MAX_OUTPUT_BYTES),
+                        "stdout": truncate_output(&stdout, DEFAULT_MAX_OUTPUT_BYTES, tf_ref),
+                        "stderr": truncate_output(&stderr, DEFAULT_MAX_OUTPUT_BYTES, tf_ref),
                         "terminal_file": terminal_file,
                     }).to_string();
 
@@ -727,10 +745,11 @@ impl ShellTool {
 
                 let (llm_out, terminal_file) = process_shell_output(command, &stdout_out, &stderr_out, code);
 
+                let tf_ref = terminal_file.as_deref();
                 let full_display = serde_json::json!({
                     "exit_code": code,
-                    "stdout": truncate_output(&stdout_out, DEFAULT_MAX_OUTPUT_BYTES),
-                    "stderr": truncate_output(&stderr_out, DEFAULT_MAX_OUTPUT_BYTES),
+                    "stdout": truncate_output(&stdout_out, DEFAULT_MAX_OUTPUT_BYTES, tf_ref),
+                    "stderr": truncate_output(&stderr_out, DEFAULT_MAX_OUTPUT_BYTES, tf_ref),
                     "terminal_file": terminal_file,
                 }).to_string();
 
@@ -2204,10 +2223,11 @@ Sandbox restrictions:\n");
 
                     let (llm_out, terminal_file) = process_shell_output(command, &stdout, &stderr, code);
 
+                    let tf_ref = terminal_file.as_deref();
                     let full_display = serde_json::json!({
                         "exit_code": code,
-                        "stdout": truncate_output(&stdout, max_out),
-                        "stderr": truncate_output(&stderr, max_out),
+                        "stdout": truncate_output(&stdout, max_out, tf_ref),
+                        "stderr": truncate_output(&stderr, max_out, tf_ref),
                         "signal": signal,
                         "sandboxed": true,
                         "terminal_file": terminal_file,

@@ -117,6 +117,14 @@ This mirrors how experienced developers monitor builds — start the process, pe
 - `edit_file` `old_string` must be unique — include enough surrounding context. Prefer `edit_file` over `write_file` for targeted changes.
 - `edit_file` and `apply_patch` use multi-pass matching (exact → Unicode-normalized → fuzzy) — curly quotes, em-dashes, and similar Unicode variants are auto-normalized. If exact match fails, whitespace-flexible fuzzy match is attempted.
 
+### Large File Strategy (200+ lines)
+For files over 200 lines, follow this workflow to avoid redundant reads:
+1. **Structure first**: Call `file_outline(path)` or `code_sections(path)` to see all symbols with line ranges — this costs minimal tokens and tells you exactly where everything is.
+2. **Targeted reads**: Use `lines="start-end"` (e.g. `lines="100-200"`) to read only the section you need. Partial reads on large files auto-include a navigation header showing the enclosing symbol and nearby symbols.
+3. **Trust your reads**: Once you've read a section, trust the result. The dedup cache returns a stub if the file hasn't changed — don't re-read the same range expecting different content.
+4. **Use the footer hints**: When output shows `[Showing lines X-Y of Z total. To continue: lines="..."]`, follow the suggested range instead of guessing offsets.
+5. **Avoid full reads of huge files**: A full `read_file` on a 5000-line file wastes context. Get the outline first, then read the 50-100 lines you actually need.
+
 ### Shell
 - Use dedicated tools (`read_file`, `write_file`, `list_directory`) for file operations instead of `shell_exec` + cat/echo/ls.
 - Use `shell_exec` for builds (cargo, npm), git, and environment checks — it's the escape hatch.
