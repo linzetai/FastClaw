@@ -189,21 +189,21 @@ export function NotificationCenter({ onDetailOpen }: Props) {
   );
 
   return (
-    <div className="relative flex items-stretch" ref={dropdownRef}>
+    <div className="relative flex items-center" ref={dropdownRef}>
       {/* Bell button */}
       <button
         onClick={handleToggle}
-        className="relative flex w-11 items-center justify-center transition-colors duration-100 hover:bg-[var(--bg-hover)]"
+        className="relative flex h-7 w-7 items-center justify-center rounded-md transition-all duration-100 hover:bg-[var(--bg-hover)] hover:scale-105 active:scale-95"
         style={{ color: "var(--fill-tertiary)" }}
         title="消息中心"
       >
-        <Bell size={15} strokeWidth={1.5} />
+        <Bell size={14} strokeWidth={1.5} />
         {unreadCount > 0 && (
           <span
             className="absolute flex items-center justify-center rounded-full text-white font-medium"
             style={{
-              top: "6px",
-              right: "6px",
+              top: "1px",
+              right: "1px",
               minWidth: "14px",
               height: "14px",
               padding: "0 3px",

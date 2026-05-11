@@ -57,9 +57,9 @@ function SchedulePicker({ schedule, onChange }: { schedule: string; onChange: (s
     onChange(modeToSchedule(m, o));
   }, [onChange]);
 
-  const selectCls = "w-full rounded-[6px] px-3 py-2 text-[13px] outline-none cursor-pointer pr-8 transition-colors focus:ring-1 focus:ring-[var(--fill-quaternary)]";
+  const selectCls = "w-full rounded-[6px] px-3 py-2 text-[13px] outline-none cursor-pointer pr-8 transition-colors focus:outline-none";
   const selectStyle = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)", WebkitAppearance: "none" as const, appearance: "none" as const };
-  const inlineCls = "rounded-[6px] px-2.5 py-1.5 text-[13px] outline-none text-center transition-colors focus:ring-1 focus:ring-[var(--fill-quaternary)]";
+  const inlineCls = "rounded-[6px] px-2.5 py-1.5 text-[13px] outline-none text-center transition-colors focus:outline-none";
   const inlineStyle = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
   const labelStyle = { color: "var(--fill-tertiary)" };
 
@@ -111,7 +111,7 @@ function SchedulePicker({ schedule, onChange }: { schedule: string; onChange: (s
       )}
       {mode === "custom" && (
         <div>
-          <input value={custom} onChange={(e) => { setCustom(e.target.value); onChange(e.target.value); }} placeholder="0 */5 * * * *" className={"w-full rounded-[6px] px-3 py-2 font-mono text-[13px] outline-none transition-colors focus:ring-1 focus:ring-[var(--fill-quaternary)]"} style={inlineStyle} />
+          <input value={custom} onChange={(e) => { setCustom(e.target.value); onChange(e.target.value); }} placeholder="0 */5 * * * *" className={"w-full rounded-[6px] px-3 py-2 font-mono text-[13px] outline-none transition-colors focus:outline-none"} style={inlineStyle} />
           <p className="mt-1 text-[10px]" style={{ color: "var(--fill-quaternary)" }}>6 字段: 秒 分 时 日 月 周</p>
         </div>
       )}
@@ -209,7 +209,7 @@ function CronJobForm({
   const [newChannel, setNewChannel] = useState<NotifyChannel>({ channel_id: "", target_id: "", target_type: "p2p" });
   const [duplicateWarning, setDuplicateWarning] = useState(false);
 
-  const inputCls = "w-full rounded-[6px] px-3 py-2 text-[13px] outline-none transition-colors focus:ring-1 focus:ring-[var(--fill-quaternary)]";
+  const inputCls = "w-full rounded-[6px] px-3 py-2 text-[13px] outline-none transition-colors focus:outline-none";
   const inputStyle = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
   const labelCls = "mb-1 block text-[11px] font-medium";
   const labelStyle = { color: "var(--fill-tertiary)" };

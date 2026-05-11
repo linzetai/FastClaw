@@ -103,12 +103,13 @@ const UserBubble = memo(function UserBubble({ msg, copyable, selected, onToggleS
             </button>
           )}
           <div
-            className="user-bubble-content rounded-2xl px-4 py-2 text-[15px] leading-[1.6] break-words relative"
+            className="user-bubble-content px-3.5 py-2 text-[15px] leading-[1.6] break-words relative"
             style={{
               background: "var(--bubble-user)",
               color: "var(--bubble-user-text)",
-              borderTopRightRadius: 6,
+              borderRadius: "18px 18px 6px 18px",
               overflowWrap: "anywhere",
+              backgroundImage: "linear-gradient(135deg, var(--bubble-user) 0%, color-mix(in srgb, var(--bubble-user) 85%, black) 100%)",
             }}
           >
           {text}
@@ -237,7 +238,7 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
         {copyable && (
           <button
             onClick={handleCopy}
-            className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors duration-100 hover:bg-[var(--bg-hover)] opacity-0 group-hover/message:opacity-100"
+            className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-all duration-150 hover:bg-[var(--bg-hover)] opacity-0 translate-x-1 group-hover/message:opacity-100 group-hover/message:translate-x-0"
             style={{ color: "var(--fill-tertiary)" }}
             title="复制"
           >

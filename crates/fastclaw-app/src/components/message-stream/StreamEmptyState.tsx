@@ -1,6 +1,14 @@
 import { FileText, Sparkles, Search, Settings2 } from "lucide-react";
 import { ClawIcon } from "../layout/ClawIcon";
 
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 6) return "夜深了";
+  if (h < 12) return "早上好";
+  if (h < 18) return "下午好";
+  return "晚上好";
+}
+
 export function StreamEmptyState({ onPick }: { onPick: (t: string) => void }) {
   const suggestions = [
     { text: "帮我分析一段代码", icon: <FileText size={15} strokeWidth={1.5} />, color: "var(--tint, #2563EB)" },
@@ -15,7 +23,7 @@ export function StreamEmptyState({ onPick }: { onPick: (t: string) => void }) {
         <ClawIcon size={56} />
       </div>
       <h2 className="mb-2 text-[18px] font-semibold tracking-[-0.02em]" style={{ color: "var(--fill-primary)" }}>
-        开始新的对话
+        {getGreeting()}，开始新的对话
       </h2>
       <p className="mb-8 text-[13px]" style={{ color: "var(--fill-tertiary)" }}>
         描述你的任务，或选择一个话题快速开始
@@ -25,17 +33,18 @@ export function StreamEmptyState({ onPick }: { onPick: (t: string) => void }) {
           <button
             key={s.text}
             onClick={() => onPick(s.text)}
-            className="group flex cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] px-4 py-3.5 text-left text-[13px] transition-all duration-200 hover:shadow-[var(--shadow-sm)]"
+            className="group flex cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] px-4 py-3.5 text-left text-[13px] transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]"
             style={{
-              background: "var(--bg-secondary)",
-              border: "0.5px solid var(--separator)",
+              background: "var(--bg-surface)",
+              border: "0.5px solid var(--border-subtle)",
+              boxShadow: "var(--shadow-md), inset 0 1px 0 var(--highlight-top)",
               color: "var(--fill-secondary)",
-              animation: `slide-up var(--duration-slow) var(--ease-out) ${0.06 + i * 0.06}s backwards`,
+              animation: `fade-slide-up var(--duration-slow) var(--ease-out) ${0.06 + i * 0.06}s backwards`,
             }}
           >
             <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-transform duration-200 group-hover:scale-110"
-              style={{ background: "var(--tint-subtle)", color: s.color }}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-all duration-200 group-hover:scale-110"
+              style={{ background: `color-mix(in srgb, ${s.color} 10%, transparent)`, color: s.color }}
             >
               {s.icon}
             </span>

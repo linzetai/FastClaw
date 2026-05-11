@@ -57,12 +57,20 @@ export function Toggle({ checked, onChange, disabled }: { checked: boolean; onCh
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50"
-      style={{ background: checked ? "var(--fill-tertiary)" : "var(--bg-tertiary)" }}
+      className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full disabled:cursor-not-allowed disabled:opacity-50"
+      style={{
+        background: checked ? "var(--tint)" : "var(--separator-opaque)",
+        transition: "background 0.2s var(--ease-in-out)",
+      }}
     >
       <span
-        className="inline-block h-3.5 w-3.5 rounded-full shadow-sm transition-transform duration-200"
-        style={{ background: "white", transform: checked ? "translateX(17px)" : "translateX(3px)" }}
+        className="inline-block h-3.5 w-3.5 rounded-full"
+        style={{
+          background: "white",
+          transform: checked ? "translateX(17px)" : "translateX(3px)",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.15), 0 0 1px rgba(0,0,0,0.1)",
+          transition: "transform 0.2s var(--ease-spring-subtle)",
+        }}
       />
     </button>
   );

@@ -31,7 +31,7 @@ export function AgentBasicInfo({
           type="text"
           value={name}
           onChange={(e) => onNameChange(e.target.value)}
-          className="w-full rounded-[var(--radius-sm)] px-3 py-2 text-[13px] outline-none transition-colors duration-150 focus:ring-1 focus:ring-[var(--fill-quaternary)]"
+          className="w-full rounded-[var(--radius-sm)] px-3 py-2 text-[13px] outline-none transition-colors duration-150 focus:outline-none"
           style={{ background: "var(--bg-elevated)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" }}
         />
       </div>
@@ -42,7 +42,7 @@ export function AgentBasicInfo({
           <select
             value={selectedModelValue}
             onChange={(e) => onModelSelect(e.target.value)}
-            className="w-full cursor-pointer rounded-[var(--radius-sm)] px-3 py-2.5 pr-8 text-[13px] outline-none transition-colors duration-150 focus:ring-1 focus:ring-[var(--fill-quaternary)]"
+            className="w-full cursor-pointer rounded-[var(--radius-sm)] px-3 py-2.5 pr-8 text-[13px] outline-none transition-colors duration-150 focus:outline-none"
             style={{ background: "var(--bg-elevated)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)", WebkitAppearance: "none", MozAppearance: "none", appearance: "none" }}
           >
             {models.map((m) => (

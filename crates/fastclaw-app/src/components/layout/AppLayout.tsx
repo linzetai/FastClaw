@@ -19,26 +19,62 @@ const AgentDetail = lazy(() =>
   import("../agent-detail/AgentDetail").then((m) => ({ default: m.AgentDetail })),
 );
 
-function Loading({ error }: { error: string | null }) {
+function SkeletonPulse({ className = "", style = {} }: { className?: string; style?: React.CSSProperties }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center" style={{ background: "var(--bg-primary)" }}>
-      <div style={{ animation: "scale-in var(--duration-slow) var(--ease-out)" }} className="text-center">
-        <div className="mx-auto mb-5" style={{ animation: error ? "none" : "pulse-subtle 2s ease-in-out infinite" }}>
-          <ClawIcon size={64} />
-        </div>
-        <p className="text-[15px] font-semibold tracking-[-0.01em]" style={{ color: "var(--fill-primary)" }}>FastClaw</p>
-        <p className="mt-1.5 text-[13px]" style={{ color: error ? "var(--red)" : "var(--fill-tertiary)" }}>
-          {error ? `连接失败: ${error}` : "正在启动..."}
-        </p>
-        {error && (
+    <div
+      className={`rounded-md ${className}`}
+      style={{
+        background: "var(--bg-tertiary)",
+        animation: "pulse-subtle 1.5s ease-in-out infinite",
+        ...style,
+      }}
+    />
+  );
+}
+
+function Loading({ error }: { error: string | null }) {
+  if (error) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center" style={{ background: "var(--bg-primary)" }}>
+        <div style={{ animation: "scale-in var(--duration-slow) var(--ease-out)" }} className="text-center">
+          <div className="mx-auto mb-5"><ClawIcon size={64} /></div>
+          <p className="text-[15px] font-semibold tracking-[-0.01em]" style={{ color: "var(--fill-primary)" }}>FastClaw</p>
+          <p className="mt-1.5 text-[13px]" style={{ color: "var(--red)" }}>连接失败: {error}</p>
           <button
             onClick={() => window.location.reload()}
-            className="mt-4 cursor-pointer rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium transition-colors duration-150 hover:opacity-80"
+            className="mt-4 cursor-pointer rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium transition-colors duration-150 hover:opacity-80 active:scale-[0.97]"
             style={{ background: "var(--tint)", color: "#fff" }}
           >
             重试连接
           </button>
-        )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col" style={{ background: "var(--bg-primary)", animation: "fade-in var(--duration-slow) var(--ease-out)" }}>
+      <div className="flex h-[var(--titlebar-h)] shrink-0 items-center gap-2 px-4" style={{ background: "var(--bg-sidebar)", borderBottom: "0.5px solid var(--separator)" }}>
+        <SkeletonPulse className="h-5 w-5" style={{ borderRadius: "50%" }} />
+        <SkeletonPulse className="h-3 w-16" />
+      </div>
+      <div className="flex min-h-0 flex-1">
+        <div className="flex w-[260px] shrink-0 flex-col gap-3 p-4" style={{ borderRight: "0.5px solid var(--separator)" }}>
+          <SkeletonPulse className="h-9 w-full" />
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex items-center gap-3" style={{ animationDelay: `${i * 80}ms` }}>
+              <SkeletonPulse className="h-9 w-9 shrink-0" style={{ borderRadius: "50%" }} />
+              <div className="flex flex-1 flex-col gap-1.5">
+                <SkeletonPulse className="h-3 w-24" />
+                <SkeletonPulse className="h-2.5 w-36" />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-1 flex-col items-center justify-center gap-3">
+          <div style={{ animation: "pulse-subtle 2s ease-in-out infinite" }}><ClawIcon size={48} /></div>
+          <SkeletonPulse className="h-3 w-20" />
+        </div>
       </div>
     </div>
   );

@@ -155,17 +155,18 @@ function ContextRing({ used, limit }: { used: number; limit: number }) {
       </span>
       {hover && createPortal(
         <div
-          className="fixed rounded-xl px-3.5 py-3"
+          className="fixed rounded-xl px-4 py-3.5"
           style={{
             background: "var(--bg-elevated)",
-            border: "1px solid var(--separator)",
-            boxShadow: "var(--shadow-lg)",
+            border: "0.5px solid var(--border-subtle)",
+            boxShadow: "var(--shadow-lg), inset 0 1px 0 var(--highlight-top)",
             color: "var(--fill-primary)",
             zIndex: 9999,
             bottom: window.innerHeight - (ringRef.current?.getBoundingClientRect().top ?? 0) + 8,
             right: window.innerWidth - (ringRef.current?.getBoundingClientRect().right ?? 0) - 8,
-            minWidth: 220,
-            animation: "fade-in var(--duration-instant) var(--ease-out)",
+            minWidth: 240,
+            animation: "scale-spring var(--duration-fast) var(--ease-spring-subtle)",
+            transformOrigin: "bottom right",
           }}
         >
           <div className="mb-2 text-[11px] font-semibold" style={{ color: "var(--fill-secondary)" }}>
@@ -343,7 +344,7 @@ export function StreamFooter({
   }, [processFiles]);
 
   return (
-    <div className="relative shrink-0 px-4 pb-3 pt-2">
+    <div className="relative shrink-0 px-4 pb-3 pt-2" style={{ borderTop: "0.5px solid var(--separator)" }}>
       {dragOver && (
         <div
           className="fixed inset-0 z-[9998] flex items-center justify-center"
@@ -379,11 +380,11 @@ export function StreamFooter({
       )}
 
       <div
-        className="overflow-hidden rounded-2xl transition-shadow duration-200"
+        className="overflow-hidden rounded-2xl transition-shadow duration-200 focus-within:ring-[3px] focus-within:ring-[var(--tint-bg)]"
         style={{
           background: "var(--bg-elevated)",
           border: `1px solid var(--separator)`,
-          boxShadow: "var(--shadow-md)",
+          boxShadow: "var(--shadow-md), inset 0 1px 0 var(--highlight-top)",
         }}
       >
         {messageQueue.length > 0 && (
@@ -478,14 +479,6 @@ export function StreamFooter({
                 {workDir ? workDir.replace(/^\/home\/[^/]+\//, "~/") : "工作目录"}
               </span>
             </button>
-
-            <div
-              className="hidden items-center gap-3 text-[11px] sm:flex"
-              style={{ color: "var(--fill-quaternary)", opacity: 0.7 }}
-            >
-              <span><kbd className="font-mono text-[10px]">Enter</kbd> 发送</span>
-              <span><kbd className="font-mono text-[10px]">Shift+Enter</kbd> 换行</span>
-            </div>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">

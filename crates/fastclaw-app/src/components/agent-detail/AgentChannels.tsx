@@ -51,7 +51,7 @@ function ChannelForm({
   const patch = (k: keyof api.AgentChannelConfig, v: string | boolean | undefined) =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  const inputCls = "w-full rounded-[6px] px-3 py-2 text-[13px] outline-none transition-colors focus:ring-1 focus:ring-[var(--fill-quaternary)]";
+  const inputCls = "w-full rounded-[6px] px-3 py-2 text-[13px] outline-none transition-colors focus:outline-none";
   const inputStyle = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
   const labelCls = "mb-1 block text-[11px] font-medium";
   const labelStyle = { color: "var(--fill-tertiary)" };

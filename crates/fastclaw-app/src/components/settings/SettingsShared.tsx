@@ -31,13 +31,20 @@ export function Toggle({ enabled, onChange }: { enabled: boolean; onChange: () =
   return (
     <button
       onClick={onChange}
-      className="relative flex h-[22px] w-[40px] cursor-pointer shrink-0 items-center rounded-full px-0.5 transition-colors duration-200"
+      className="relative inline-flex h-[22px] w-[40px] cursor-pointer shrink-0 items-center rounded-full"
       style={{
-        background: enabled ? "var(--tint)" : "var(--fill-quaternary)",
-        justifyContent: enabled ? "flex-end" : "flex-start",
+        background: enabled ? "var(--tint)" : "var(--separator-opaque)",
+        transition: "background 0.2s var(--ease-in-out)",
       }}
     >
-      <div className="h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform duration-200" />
+      <div
+        className="h-[18px] w-[18px] rounded-full bg-white"
+        style={{
+          transform: enabled ? "translateX(20px)" : "translateX(2px)",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.15), 0 0 1px rgba(0,0,0,0.1)",
+          transition: "transform 0.2s var(--ease-spring-subtle)",
+        }}
+      />
     </button>
   );
 }

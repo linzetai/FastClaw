@@ -398,12 +398,13 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
       )}
 
       <div
-        className="vibrancy flex shrink-0 items-center justify-between px-6 py-2"
+        className="vibrancy flex h-10 shrink-0 items-center justify-between gap-2 px-4"
         style={{ background: "var(--bg-sidebar)", borderBottom: `0.5px solid var(--separator)` }}
       >
-        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        {/* Left: Agent avatar + name */}
+        <div className="flex min-w-0 items-center gap-2">
           <div
-            className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-[12px] font-semibold"
+            className="relative flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full text-[11px] font-semibold"
             style={{ background: agent.color, color: "white" }}
           >
             {agentAvatarUrl ? (
@@ -411,47 +412,45 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
             ) : (
               agent.initial
             )}
-            <span
-              className="absolute bottom-0 right-0 h-[8px] w-[8px] rounded-full"
-              style={{
-                background: agent.online ? "var(--green)" : "var(--fill-quaternary)",
-                border: "1.5px solid var(--bg-sidebar)",
-              }}
-            />
           </div>
-          <div className="truncate text-[14px] font-semibold" style={{ color: "var(--fill-primary)" }} title={agent.name}>{agent.name}</div>
+          <span className="truncate text-[13px] font-semibold tracking-[-0.02em]" style={{ color: "var(--fill-primary)" }} title={agent.name}>{agent.name}</span>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+
+        {/* Center: Conversation Switcher */}
+        <div className="flex min-w-0 flex-1 items-center justify-center">
+          {ac && <ChatTabsBar
+            agentId={activeAgentId}
+            chats={ac.chatList}
+            activeChatId={ac.activeChatId}
+            streamingChatIds={streamingChatIds}
+            onSelect={(id) => setActiveChat(activeAgentId, id)}
+            onClose={(id) => closeChat(activeAgentId, id)}
+            onNew={() => newChat(activeAgentId, workDir ?? undefined)}
+            onRename={(id, t) => renameChat(activeAgentId, id, t)}
+            onReorder={(from, to) => reorderChats(activeAgentId, from, to)}
+          />}
+        </div>
+
+        {/* Right: Search + Settings */}
+        <div className="flex shrink-0 items-center gap-0.5">
           <button
             onClick={openSearch}
-            className="flex h-8 w-8 items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]"
+            className="flex h-7 w-7 items-center justify-center rounded-md transition-all duration-100 hover:bg-[var(--bg-hover)] hover:scale-105 active:scale-95"
             style={{ color: searchOpen ? "var(--tint)" : "var(--fill-tertiary)" }}
             title={`搜索消息 (${MOD_KEY}F)`}
           >
-            <Search size={15} strokeWidth={1.5} />
+            <Search size={14} strokeWidth={1.5} />
           </button>
           <button
             onClick={onToggleDetail}
-            className="flex h-8 w-8 items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]"
+            className="flex h-7 w-7 items-center justify-center rounded-md transition-all duration-100 hover:bg-[var(--bg-hover)] hover:scale-105 active:scale-95"
             style={{ color: detailOpen ? "var(--fill-primary)" : "var(--fill-tertiary)" }}
             title={detailOpen ? "关闭详情" : "打开详情"}
           >
-            <Settings2 size={16} strokeWidth={1.5} />
+            <Settings2 size={14} strokeWidth={1.5} />
           </button>
         </div>
       </div>
-
-      {ac && <ChatTabsBar
-        agentId={activeAgentId}
-        chats={ac.chatList}
-        activeChatId={ac.activeChatId}
-        streamingChatIds={streamingChatIds}
-        onSelect={(id) => setActiveChat(activeAgentId, id)}
-        onClose={(id) => closeChat(activeAgentId, id)}
-        onNew={() => newChat(activeAgentId, workDir ?? undefined)}
-        onRename={(id, t) => renameChat(activeAgentId, id, t)}
-        onReorder={(from, to) => reorderChats(activeAgentId, from, to)}
-      />}
 
       {searchOpen && (
         <div

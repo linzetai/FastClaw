@@ -158,7 +158,7 @@ export function TodoCard({ result }: { result: string }) {
                   size={14}
                   strokeWidth={2}
                   className="mt-[1px] shrink-0"
-                  style={{ color: cfg.color }}
+                  style={{ color: cfg.color, animation: item.status === "completed" ? "scale-spring var(--duration-normal) var(--ease-spring)" : "none" }}
                 />
                 <div className="min-w-0 flex-1">
                   <span

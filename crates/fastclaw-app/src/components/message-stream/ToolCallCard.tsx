@@ -373,8 +373,10 @@ export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCal
     <div
       className="my-1.5 overflow-hidden rounded-lg"
       style={{
-        border: `0.5px solid ${isError ? "color-mix(in srgb, var(--red) 30%, transparent)" : "var(--separator)"}`,
-        background: isError ? "color-mix(in srgb, var(--red) 4%, transparent)" : "var(--bg-secondary)",
+        border: `0.5px solid ${isError ? "color-mix(in srgb, var(--red) 30%, transparent)" : "var(--border-subtle)"}`,
+        borderLeft: isError ? "3px solid var(--red)" : "3px solid var(--tint)",
+        background: isError ? "color-mix(in srgb, var(--red) 4%, transparent)" : "var(--bg-surface)",
+        boxShadow: isError ? "none" : "inset 0 1px 0 var(--highlight-top)",
         animation: "slide-up var(--duration-fast) var(--ease-out)",
         maxWidth: "min(100%, 600px)",
       }}
@@ -440,10 +442,9 @@ export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCal
         )}
       </button>
 
-      {/* Indeterminate progress bar for running state */}
       {isRunning && (
         <div className="h-[2px] w-full overflow-hidden" style={{ background: "var(--separator)" }}>
-          <div className="h-full w-1/3 rounded-full" style={{ background: "var(--tint)", animation: "indeterminate-bar 1.5s ease-in-out infinite" }} />
+          <div className="h-full w-1/4 rounded-full" style={{ background: "linear-gradient(90deg, transparent, var(--tint), transparent)", animation: "shimmer 1.5s ease-in-out infinite" }} />
         </div>
       )}
 

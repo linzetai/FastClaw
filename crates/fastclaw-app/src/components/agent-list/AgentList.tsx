@@ -12,7 +12,7 @@ const AgentAvatar = memo(function AgentAvatar({ agent }: { agent: Agent }) {
   const avatarUrl = useAvatarUrl(agent.avatar);
   return (
     <div
-      className="flex h-[42px] w-[42px] items-center justify-center overflow-hidden rounded-full text-[15px] font-semibold"
+      className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full text-[13px] font-semibold ring-2 ring-transparent"
       style={{ background: agent.color || "var(--bg-tertiary)", color: agent.color ? "#fff" : "var(--fill-secondary)" }}
     >
       {avatarUrl ? (
@@ -244,10 +244,10 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
         ) : (
           <>
             <div
-              className="flex flex-1 items-center gap-2.5 rounded-[10px] px-3 py-[7px] transition-shadow duration-200 focus-within:shadow-[0_0_0_2px_var(--tint)]"
-              style={{ background: "var(--bg-hover)" }}
+              className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 transition-all duration-200 focus-within:shadow-[0_0_0_3px_var(--tint-bg)] focus-within:border-[var(--tint)]"
+              style={{ background: "var(--bg-hover)", border: "0.5px solid transparent" }}
             >
-              <Search size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+              <Search size={13} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
               <input
                 ref={searchInputRef}
                 type="text"
@@ -367,31 +367,33 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
             <button
               key={agent.id}
               onClick={() => setActiveAgent(agent.id)}
-              className="mb-0.5 flex w-full cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] px-2.5 py-2.5 text-left hover:bg-[var(--bg-hover)]"
+              className="group/item relative mb-0.5 flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-all duration-150 hover:bg-[var(--bg-hover)]"
               style={{
-                background: active ? "var(--bg-active)" : focused ? "var(--bg-hover)" : "transparent",
+                background: active ? "var(--tint-bg)" : focused ? "var(--bg-hover)" : "transparent",
                 outline: focused ? "2px solid var(--tint)" : "none",
                 outlineOffset: -2,
-                animation: `slide-up var(--duration-slow) var(--ease-out) ${i * 0.04}s backwards`,
+                borderLeft: active ? "2.5px solid var(--tint)" : "2.5px solid transparent",
+                borderRadius: active ? "0 8px 8px 0" : "8px",
+                animation: `fade-slide-up var(--duration-slow) var(--ease-out) ${i * 30}ms backwards`,
               }}
             >
               <div className="relative shrink-0">
                 <AgentAvatar agent={agent} />
                 {agent.online && (
                   <div
-                    className="absolute bottom-0 right-0 h-[11px] w-[11px] rounded-full"
-                    style={{ background: "var(--fill-tertiary)", border: "2px solid var(--bg-secondary)" }}
+                    className="absolute -bottom-0.5 -right-0.5 h-[10px] w-[10px] rounded-full"
+                    style={{ background: "var(--green)", border: "2px solid var(--bg-secondary)" }}
                   />
                 )}
               </div>
 
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="truncate text-[13px] font-semibold" style={{ color: "var(--fill-primary)" }}>
+                  <span className="truncate text-[13px] font-semibold tracking-[-0.01em]" style={{ color: "var(--fill-primary)" }}>
                     {agent.name}
                   </span>
                   {lastTime && (
-                    <span className="shrink-0 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
+                    <span className="shrink-0 text-[11px] font-medium" style={{ color: "var(--fill-quaternary)", fontVariantNumeric: "tabular-nums" }}>
                       {lastTime}
                     </span>
                   )}
@@ -402,8 +404,8 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                   </span>
                   {unread > 0 && (
                     <span
-                      className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1 text-[11px] font-bold"
-                      style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
+                      className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-bold"
+                      style={{ background: "var(--tint)", color: "#fff" }}
                     >
                       {unread}
                     </span>
@@ -432,7 +434,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
             onClick={() => setShowNewForm(true)}
             disabled={creating}
             className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-sm)] py-2.5 text-[13px] font-medium transition-all duration-150 hover:bg-[var(--tint-bg)] disabled:opacity-50"
-            style={{ color: "var(--fill-secondary)" }}
+            style={{ color: "var(--fill-tertiary)", border: "1.5px dashed var(--border-emphasis)" }}
           >
             <Plus size={13} strokeWidth={2} />
             新建 Agent
@@ -493,7 +495,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                       if (e.key === "Escape") cancelNew();
                     }}
                     placeholder="输入 Agent 名称"
-                    className="w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-colors focus:ring-1 focus:ring-[var(--fill-quaternary)]"
+                    className="w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-colors focus:outline-none"
                     style={{ background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" }}
                     disabled={creating}
                   />
@@ -517,7 +519,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                     }
                   }}
                   placeholder="自动生成，或手动输入"
-                  className="w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-colors focus:ring-1 focus:ring-[var(--fill-quaternary)]"
+                  className="w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-colors focus:outline-none"
                   style={{ background: "var(--bg-base)", color: "var(--fill-secondary)", border: "0.5px solid var(--separator-opaque)", fontFamily: "var(--font-mono, monospace)" }}
                   disabled={creating}
                 />
@@ -533,7 +535,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                   <select
                     value={newModel}
                     onChange={(e) => setNewModel(e.target.value)}
-                    className="w-full cursor-pointer rounded-[var(--radius-xs)] px-3 py-2 pr-8 text-[13px] outline-none transition-colors focus:ring-1 focus:ring-[var(--fill-quaternary)]"
+                    className="w-full cursor-pointer rounded-[var(--radius-xs)] px-3 py-2 pr-8 text-[13px] outline-none transition-colors focus:outline-none"
                     style={{ background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)", WebkitAppearance: "none", appearance: "none" } as React.CSSProperties}
                     disabled={creating || modelsLoading || models.length === 0}
                   >

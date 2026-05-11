@@ -37,7 +37,7 @@ function ThemeToggle() {
   return (
     <button
       onClick={next}
-      className="flex h-full w-11 items-center justify-center transition-colors duration-100 hover:bg-[var(--bg-hover)]"
+      className="flex h-7 w-7 items-center justify-center rounded-md transition-all duration-100 hover:bg-[var(--bg-hover)] hover:scale-105 active:scale-95"
       style={{ color: "var(--fill-tertiary)" }}
       title={mode === "light" ? "浅色" : mode === "dark" ? "深色" : "自动"}
     >
@@ -90,10 +90,11 @@ function WindowControls() {
 
   if (!isTauri) return null;
 
-  const btn = "flex items-center justify-center transition-colors duration-100";
+  const btn = "flex items-center justify-center transition-all duration-100";
 
   return (
     <>
+      <div className="mx-1 my-auto h-4 w-px" style={{ background: "var(--separator)" }} />
       <button
         onClick={minimize}
         className={`${btn} w-11 h-full hover:bg-[var(--bg-hover)]`}
@@ -113,7 +114,7 @@ function WindowControls() {
       <button
         onClick={close}
         className={`${btn} w-11 h-full hover:bg-[#E81123] hover:text-white`}
-        style={{ color: "var(--fill-secondary)" }}
+        style={{ color: "var(--fill-secondary)", transition: "background 0.15s, transform 0.1s, color 0.15s" }}
         title="关闭"
       >
         <X size={12} strokeWidth={1.5} />
@@ -126,11 +127,11 @@ function ConnectionDot() {
   const connected = useGatewayStore((s) => s.connected);
   return (
     <div
-      className="flex items-center justify-center px-2"
+      className="flex h-7 w-7 items-center justify-center"
       title={connected ? "已连接" : "未连接"}
     >
       <span
-        className="inline-block h-[6px] w-[6px] rounded-full transition-colors duration-300"
+        className="inline-block h-[7px] w-[7px] rounded-full transition-colors duration-300"
         style={{ background: connected ? "var(--green)" : "var(--red)" }}
       />
     </div>
@@ -155,7 +156,7 @@ export function TitleBar() {
         />
       )}
       <header
-        className="relative z-30 flex shrink-0 select-none items-stretch"
+        className="relative z-30 flex shrink-0 select-none items-center"
         style={{
           height: "var(--titlebar-h)",
           background: "var(--bg-sidebar)",
@@ -167,27 +168,29 @@ export function TitleBar() {
           onMouseDown={onDragMouseDown}
           onDoubleClick={onDragDoubleClick}
         >
-          <ClawIcon size={22} />
+          <ClawIcon size={20} />
           <span
-            className="text-[13px] font-semibold tracking-[-0.01em]"
+            className="text-[13px] font-bold tracking-[-0.02em]"
             style={{ color: "var(--fill-primary)" }}
           >
             FastClaw
           </span>
         </div>
 
-        <ConnectionDot />
-        <NotificationCenter onDetailOpen={setDetailNotification} />
-        <button
-          onClick={() => setSettingsOpen(true)}
-          className="flex w-11 items-center justify-center transition-colors duration-100 hover:bg-[var(--bg-hover)]"
-          style={{ color: "var(--fill-tertiary)" }}
-          title="设置"
-        >
-          <Settings size={15} strokeWidth={1.5} />
-        </button>
-        <ThemeToggle />
-        <WindowControls />
+        <div className="flex items-center gap-0.5 pr-0.5">
+          <ConnectionDot />
+          <NotificationCenter onDetailOpen={setDetailNotification} />
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="flex h-7 w-7 items-center justify-center rounded-md transition-all duration-100 hover:bg-[var(--bg-hover)] hover:scale-105 active:scale-95"
+            style={{ color: "var(--fill-tertiary)" }}
+            title="设置"
+          >
+            <Settings size={15} strokeWidth={1.5} />
+          </button>
+          <ThemeToggle />
+          <WindowControls />
+        </div>
       </header>
     </>
   );

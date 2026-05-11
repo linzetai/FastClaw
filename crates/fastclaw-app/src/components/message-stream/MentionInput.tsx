@@ -184,10 +184,13 @@ function MentionPopup({
         maxHeight: 320,
         overflowY: "auto",
         background: "var(--bg-elevated)",
-        border: "0.5px solid var(--separator)",
-        boxShadow: "var(--shadow-lg)",
+        border: "0.5px solid var(--border-subtle)",
+        boxShadow: "var(--shadow-lg), inset 0 1px 0 var(--highlight-top)",
         borderRadius: "var(--radius-sm)",
-        animation: "slide-up var(--duration-fast) var(--ease-out)",
+        animation: "scale-spring var(--duration-fast) var(--ease-spring-subtle)",
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+        transformOrigin: "bottom left",
       }}
     >
       <div className="py-1">
