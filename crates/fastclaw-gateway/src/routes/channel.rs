@@ -452,6 +452,218 @@ fn inject_channel_context(messages: &mut Vec<ChatMessage>, channel_id: &str, cha
     );
 }
 
+// ---------------------------------------------------------------------------
+// Channel Segment types — ordered streaming output
+// ---------------------------------------------------------------------------
+
+/// A segment of channel streaming output, preserving the time-ordered sequence
+/// of text, thinking, and tool calls as they arrive from the agentic loop.
+#[derive(Debug, Clone)]
+enum ChannelSegment {
+    Text(String),
+    Thinking(String),
+    ToolCall {
+        tool_name: String,
+        call_id: String,
+        args: Option<String>,
+        result: Option<String>,
+        success: Option<bool>,
+        duration_ms: Option<u64>,
+        is_interactive: bool,
+        question_text: Option<String>,
+        user_answer: Option<String>,
+    },
+}
+
+/// Controls how segments are rendered into lark_md / markdown.
+#[derive(Debug, Clone)]
+struct ChannelStreamFormat {
+    show_thinking: bool,
+    thinking_max_chars: usize,
+    show_tool_results: bool,
+    tool_result_max_chars: usize,
+}
+
+impl Default for ChannelStreamFormat {
+    fn default() -> Self {
+        Self {
+            show_thinking: true,
+            thinking_max_chars: 200,
+            show_tool_results: true,
+            tool_result_max_chars: 300,
+        }
+    }
+}
+
+/// Render an ordered list of segments into a lark_md / markdown string.
+///
+/// When `streaming` is true, the output includes cursor indicators and
+/// "executing..." placeholders for in-flight tool calls.
+fn render_segments(segments: &[ChannelSegment], streaming: bool, fmt: &ChannelStreamFormat) -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    for (i, seg) in segments.iter().enumerate() {
+        let is_last = i == segments.len() - 1;
+        match seg {
+            ChannelSegment::Text(text) => {
+                if text.is_empty() {
+                    continue;
+                }
+                if streaming && is_last {
+                    parts.push(format!("{text}\u{258d}"));
+                } else {
+                    parts.push(text.clone());
+                }
+            }
+            ChannelSegment::Thinking(text) => {
+                if !fmt.show_thinking || text.is_empty() {
+                    continue;
+                }
+                let display = if streaming {
+                    text.clone()
+                } else if text.len() > fmt.thinking_max_chars {
+                    let truncated: String = text.chars().take(fmt.thinking_max_chars).collect();
+                    format!("{truncated}... (思考过程共 {} 字)", text.chars().count())
+                } else {
+                    text.clone()
+                };
+                let quoted = display
+                    .lines()
+                    .map(|l| format!("> {l}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                parts.push(format!("💭 **思考中**\n{quoted}"));
+            }
+            ChannelSegment::ToolCall {
+                tool_name,
+                result,
+                success,
+                duration_ms,
+                is_interactive,
+                question_text,
+                user_answer,
+                ..
+            } => {
+                if *is_interactive {
+                    parts.push(render_interactive_segment(
+                        tool_name,
+                        question_text.as_deref(),
+                        user_answer.as_deref(),
+                        *duration_ms,
+                        streaming && result.is_none(),
+                    ));
+                } else {
+                    parts.push(render_tool_segment(
+                        tool_name,
+                        result.as_deref(),
+                        *success,
+                        *duration_ms,
+                        streaming && result.is_none(),
+                        fmt,
+                    ));
+                }
+            }
+        }
+    }
+
+    parts.join("\n\n")
+}
+
+fn render_tool_segment(
+    tool_name: &str,
+    result: Option<&str>,
+    success: Option<bool>,
+    duration_ms: Option<u64>,
+    is_running: bool,
+    fmt: &ChannelStreamFormat,
+) -> String {
+    if is_running {
+        return format!("🔧 **{tool_name}**...");
+    }
+
+    let status_icon = match success {
+        Some(true) => "✅",
+        Some(false) => "❌",
+        None => "✅",
+    };
+
+    let duration_str = duration_ms
+        .map(|ms| {
+            if ms >= 1000 {
+                format!(" {:.1}s", ms as f64 / 1000.0)
+            } else {
+                format!(" {}ms", ms)
+            }
+        })
+        .unwrap_or_default();
+
+    let header = format!("🔧 **{tool_name}** {status_icon}{duration_str}");
+
+    if !fmt.show_tool_results {
+        return header;
+    }
+
+    match result {
+        Some(r) if !r.is_empty() => {
+            let display = if r.len() > fmt.tool_result_max_chars {
+                let truncated: String = r.chars().take(fmt.tool_result_max_chars).collect();
+                format!("{truncated}...")
+            } else {
+                r.to_string()
+            };
+            let first_line = display.lines().next().unwrap_or(&display);
+            format!("{header}\n> {first_line}")
+        }
+        _ => header,
+    }
+}
+
+fn render_interactive_segment(
+    _tool_name: &str,
+    question_text: Option<&str>,
+    user_answer: Option<&str>,
+    duration_ms: Option<u64>,
+    is_waiting: bool,
+) -> String {
+    let q = question_text.unwrap_or("等待确认");
+
+    if is_waiting {
+        return format!("❓ **等待确认**: {q}\n⏳ 请在下方卡片中选择...");
+    }
+
+    let duration_str = duration_ms
+        .map(|ms| {
+            if ms >= 1000 {
+                format!(" ({:.1}s)", ms as f64 / 1000.0)
+            } else {
+                format!(" ({}ms)", ms)
+            }
+        })
+        .unwrap_or_default();
+
+    match user_answer {
+        Some(ans) => format!("❓ **确认** → 用户选择: \"{ans}\"{duration_str}"),
+        None => format!("❓ **确认**: {q} → (未回答){duration_str}"),
+    }
+}
+
+/// Extract the plain text content from segments (for session history storage).
+fn segments_plain_text(segments: &[ChannelSegment]) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for seg in segments {
+        if let ChannelSegment::Text(t) = seg {
+            if !t.is_empty() {
+                parts.push(t.as_str());
+            }
+        }
+    }
+    parts.join("\n\n")
+}
+
+// ---------------------------------------------------------------------------
+// Streaming handler
+// ---------------------------------------------------------------------------
+
 /// Streaming handler for channels that support message editing (e.g. Feishu).
 /// Supports ask_question: when the agent emits an AskQuestion event, an interactive
 /// card is sent to the chat and the handler waits for the user's button click.
@@ -555,7 +767,8 @@ async fn handle_channel_streaming(
         }
     });
 
-    let mut accumulated = String::new();
+    let mut segments: Vec<ChannelSegment> = Vec::new();
+    let stream_fmt = ChannelStreamFormat::default();
     let mut last_update = std::time::Instant::now();
     let update_interval = std::time::Duration::from_millis(800);
     let channel_for_update = channel.clone();
@@ -565,37 +778,139 @@ async fn handle_channel_streaming(
         .clone()
         .unwrap_or_default();
 
+    // Track start times for in-flight tool calls so we can compute duration.
+    let mut tool_start_times: std::collections::HashMap<String, std::time::Instant> =
+        std::collections::HashMap::new();
+
+    let mut segments_dirty = false;
+
     while let Some(event) = rx.recv().await {
         match event {
             StreamEvent::Delta(delta) => {
                 for choice in &delta.choices {
+                    if let Some(ref reasoning) = choice.delta.reasoning_content {
+                        match segments.last_mut() {
+                            Some(ChannelSegment::Thinking(ref mut t)) => t.push_str(reasoning),
+                            _ => segments.push(ChannelSegment::Thinking(reasoning.clone())),
+                        }
+                        segments_dirty = true;
+                    }
                     if let Some(ref content) = choice.delta.content {
-                        accumulated.push_str(content);
+                        match segments.last_mut() {
+                            Some(ChannelSegment::Text(ref mut t)) => t.push_str(content),
+                            _ => segments.push(ChannelSegment::Text(content.clone())),
+                        }
+                        segments_dirty = true;
                     }
                 }
 
-                if last_update.elapsed() >= update_interval && !accumulated.is_empty() {
-                    let text = format!("{}▍", accumulated);
-                    if let Err(e) = channel_for_update
-                        .update_message(&reply_msg_id, &text)
-                        .await
-                    {
-                        tracing::debug!(error = %e, "streaming: update_message failed (will retry)");
+                if segments_dirty && last_update.elapsed() >= update_interval {
+                    let rendered = render_segments(&segments, true, &stream_fmt);
+                    if !rendered.is_empty() {
+                        if let Err(e) = channel_for_update
+                            .update_message(&reply_msg_id, &rendered)
+                            .await
+                        {
+                            tracing::debug!(error = %e, "streaming: update_message failed (will retry)");
+                        }
                     }
                     last_update = std::time::Instant::now();
+                    segments_dirty = false;
                 }
             }
-            StreamEvent::ToolExecuting { tool_name, .. } => {
-                let prefix = if accumulated.is_empty() {
-                    String::new()
-                } else {
-                    format!("{accumulated}\n\n")
-                };
-                let status = format!("{prefix}🔧 调用工具: {tool_name}...");
+            StreamEvent::ToolExecuting {
+                tool_name,
+                call_id,
+                args,
+            } => {
+                tool_start_times.insert(call_id.clone(), std::time::Instant::now());
+                segments.push(ChannelSegment::ToolCall {
+                    tool_name,
+                    call_id,
+                    args,
+                    result: None,
+                    success: None,
+                    duration_ms: None,
+                    is_interactive: false,
+                    question_text: None,
+                    user_answer: None,
+                });
+                let rendered = render_segments(&segments, true, &stream_fmt);
                 let _ = channel_for_update
-                    .update_message(&reply_msg_id, &status)
+                    .update_message(&reply_msg_id, &rendered)
                     .await;
                 last_update = std::time::Instant::now();
+                segments_dirty = false;
+            }
+            StreamEvent::ToolResult {
+                call_id,
+                output,
+                display_output,
+                success,
+                ..
+            } => {
+                let elapsed = tool_start_times
+                    .remove(&call_id)
+                    .map(|t| t.elapsed().as_millis() as u64);
+                let display = display_output.unwrap_or(output);
+                for seg in segments.iter_mut().rev() {
+                    if let ChannelSegment::ToolCall {
+                        call_id: ref cid,
+                        result: ref mut r,
+                        success: ref mut s,
+                        duration_ms: ref mut d,
+                        is_interactive,
+                        user_answer: ref mut ua,
+                        ..
+                    } = seg
+                    {
+                        if cid == &call_id {
+                            *r = Some(display.clone());
+                            *s = Some(success);
+                            *d = elapsed;
+                            if *is_interactive {
+                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&display) {
+                                    if let Some(ans) = parsed.get("answer").and_then(|v| v.as_str()) {
+                                        *ua = Some(ans.to_string());
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                let rendered = render_segments(&segments, true, &stream_fmt);
+                let _ = channel_for_update
+                    .update_message(&reply_msg_id, &rendered)
+                    .await;
+                last_update = std::time::Instant::now();
+                segments_dirty = false;
+            }
+            StreamEvent::ToolProgress {
+                call_id,
+                message,
+                ..
+            } => {
+                for seg in segments.iter_mut().rev() {
+                    if let ChannelSegment::ToolCall {
+                        call_id: ref cid,
+                        result: ref mut r,
+                        ..
+                    } = seg
+                    {
+                        if cid == &call_id && r.is_none() {
+                            *r = Some(message.clone());
+                            break;
+                        }
+                    }
+                }
+                if last_update.elapsed() >= update_interval {
+                    let rendered = render_segments(&segments, true, &stream_fmt);
+                    let _ = channel_for_update
+                        .update_message(&reply_msg_id, &rendered)
+                        .await;
+                    last_update = std::time::Instant::now();
+                }
             }
             StreamEvent::AskQuestion {
                 request_id,
@@ -604,6 +919,29 @@ async fn handle_channel_streaming(
                 timeout_secs,
                 allow_multiple,
             } => {
+                for seg in segments.iter_mut().rev() {
+                    if let ChannelSegment::ToolCall {
+                        tool_name: ref tn,
+                        is_interactive: ref mut ii,
+                        question_text: ref mut qt,
+                        ..
+                    } = seg
+                    {
+                        if tn == "ask_question" {
+                            *ii = true;
+                            *qt = Some(question.clone());
+                            break;
+                        }
+                    }
+                }
+
+                let rendered = render_segments(&segments, true, &stream_fmt);
+                let _ = channel_for_update
+                    .update_message(&reply_msg_id, &rendered)
+                    .await;
+                last_update = std::time::Instant::now();
+                segments_dirty = false;
+
                 if supports_cards {
                     let card_options: Vec<QuestionOption> = options
                         .iter()
@@ -649,18 +987,19 @@ async fn handle_channel_streaming(
                 }
             }
             StreamEvent::Done { .. } => {
+                let plain = segments_plain_text(&segments);
                 record_chat_budget_stream_estimate(
                     &state_budget,
                     model_for_budget.as_str(),
                     input_estimate,
-                    accumulated.len(),
+                    plain.len(),
                 );
                 break;
             }
             StreamEvent::Error(e) => {
                 tracing::error!(error = %e, "streaming: LLM error");
-                if accumulated.is_empty() {
-                    accumulated = format!("(错误: {e})");
+                if segments.is_empty() {
+                    segments.push(ChannelSegment::Text(format!("(错误: {e})")));
                 }
                 break;
             }
@@ -670,21 +1009,32 @@ async fn handle_channel_streaming(
 
     stream_event_tx_map.remove(&stream_context_key);
 
-    if accumulated.is_empty() {
-        accumulated = "(no response)".to_string();
-    }
+    let final_rendered = render_segments(&segments, false, &stream_fmt);
+    let final_text = if final_rendered.is_empty() {
+        "(no response)".to_string()
+    } else {
+        final_rendered
+    };
 
-    if let Err(e) = channel.update_message(&reply_msg_id, &accumulated).await {
+    if let Err(e) = channel.update_message(&reply_msg_id, &final_text).await {
         tracing::warn!(error = %e, "streaming: final update_message failed");
     }
 
+    let plain_text = segments_plain_text(&segments);
+    let reply = if plain_text.is_empty() {
+        final_text.clone()
+    } else {
+        plain_text
+    };
+
     tracing::info!(
         reply_msg_id = %reply_msg_id,
-        content_len = accumulated.len(),
+        segment_count = segments.len(),
+        content_len = final_text.len(),
         "streaming: completed"
     );
 
-    Ok(accumulated)
+    Ok(reply)
 }
 
 pub(super) async fn list_channels(State(state): State<AppState>) -> impl IntoResponse {
@@ -702,4 +1052,214 @@ pub(super) async fn list_channels(State(state): State<AppState>) -> impl IntoRes
         })
         .collect();
     Json(json!({ "channels": channels, "count": channels.len() }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_fmt() -> ChannelStreamFormat {
+        ChannelStreamFormat::default()
+    }
+
+    fn text(s: &str) -> ChannelSegment {
+        ChannelSegment::Text(s.to_string())
+    }
+
+    fn thinking(s: &str) -> ChannelSegment {
+        ChannelSegment::Thinking(s.to_string())
+    }
+
+    fn tool(name: &str, result: Option<&str>, success: Option<bool>, ms: Option<u64>) -> ChannelSegment {
+        ChannelSegment::ToolCall {
+            tool_name: name.to_string(),
+            call_id: "c1".to_string(),
+            args: None,
+            result: result.map(String::from),
+            success,
+            duration_ms: ms,
+            is_interactive: false,
+            question_text: None,
+            user_answer: None,
+        }
+    }
+
+    fn interactive(question: &str, answer: Option<&str>, ms: Option<u64>) -> ChannelSegment {
+        ChannelSegment::ToolCall {
+            tool_name: "ask_question".to_string(),
+            call_id: "c2".to_string(),
+            args: None,
+            result: answer.map(|a| format!("{{\"answer\":\"{a}\"}}")),
+            success: answer.map(|_| true),
+            duration_ms: ms,
+            is_interactive: true,
+            question_text: Some(question.to_string()),
+            user_answer: answer.map(String::from),
+        }
+    }
+
+    #[test]
+    fn render_text_only_streaming() {
+        let segs = vec![text("Hello world")];
+        let out = render_segments(&segs, true, &default_fmt());
+        assert!(out.contains("Hello world\u{258d}"), "streaming cursor missing: {out}");
+    }
+
+    #[test]
+    fn render_text_only_final() {
+        let segs = vec![text("Hello world")];
+        let out = render_segments(&segs, false, &default_fmt());
+        assert_eq!(out, "Hello world");
+    }
+
+    #[test]
+    fn render_thinking_truncated_in_final() {
+        let long = "a".repeat(400);
+        let segs = vec![thinking(&long)];
+        let fmt = default_fmt();
+        let out = render_segments(&segs, false, &fmt);
+        assert!(out.contains("思考过程共 400 字"), "truncation note missing: {out}");
+        assert!(out.contains("💭"), "thinking icon missing: {out}");
+    }
+
+    #[test]
+    fn render_thinking_full_in_streaming() {
+        let long = "a".repeat(400);
+        let segs = vec![thinking(&long)];
+        let out = render_segments(&segs, true, &default_fmt());
+        assert!(!out.contains("思考过程共"), "should not truncate in streaming: {out}");
+    }
+
+    #[test]
+    fn render_tool_running() {
+        let segs = vec![tool("read_file", None, None, None)];
+        let out = render_segments(&segs, true, &default_fmt());
+        assert_eq!(out, "🔧 **read_file**...");
+    }
+
+    #[test]
+    fn render_tool_completed() {
+        let segs = vec![tool("read_file", Some("found 3 files"), Some(true), Some(350))];
+        let out = render_segments(&segs, false, &default_fmt());
+        assert!(out.contains("✅"), "success icon: {out}");
+        assert!(out.contains("350ms"), "duration: {out}");
+        assert!(out.contains("found 3 files"), "result: {out}");
+    }
+
+    #[test]
+    fn render_tool_failed() {
+        let segs = vec![tool("shell", Some("exit code 1"), Some(false), Some(1200))];
+        let out = render_segments(&segs, false, &default_fmt());
+        assert!(out.contains("❌"), "failure icon: {out}");
+        assert!(out.contains("1.2s"), "duration: {out}");
+    }
+
+    #[test]
+    fn render_mixed_segments_ordered() {
+        let segs = vec![
+            text("Let me analyze the code..."),
+            tool("read_file", Some("src/main.rs (120 lines)"), Some(true), Some(200)),
+            text("I found two approaches."),
+            tool("shell", Some("npm install OK"), Some(true), Some(1500)),
+            text("Done!"),
+        ];
+        let out = render_segments(&segs, false, &default_fmt());
+        let lines: Vec<&str> = out.lines().collect();
+        let analyze_pos = lines.iter().position(|l| l.contains("analyze")).unwrap();
+        let read_pos = lines.iter().position(|l| l.contains("read_file")).unwrap();
+        let found_pos = lines.iter().position(|l| l.contains("two approaches")).unwrap();
+        let shell_pos = lines.iter().position(|l| l.contains("shell")).unwrap();
+        let done_pos = lines.iter().position(|l| l.contains("Done!")).unwrap();
+        assert!(analyze_pos < read_pos, "text before tool");
+        assert!(read_pos < found_pos, "tool before next text");
+        assert!(found_pos < shell_pos, "second text before second tool");
+        assert!(shell_pos < done_pos, "second tool before final text");
+    }
+
+    #[test]
+    fn render_interactive_waiting() {
+        let segs = vec![
+            text("Found two options."),
+            interactive("Which approach?", None, None),
+        ];
+        let out = render_segments(&segs, true, &default_fmt());
+        assert!(out.contains("❓ **等待确认**: Which approach?"), "question: {out}");
+        assert!(out.contains("请在下方卡片中选择"), "wait prompt: {out}");
+    }
+
+    #[test]
+    fn render_interactive_answered() {
+        let segs = vec![
+            text("Found two options."),
+            interactive("Which approach?", Some("Option A"), Some(5200)),
+        ];
+        let out = render_segments(&segs, false, &default_fmt());
+        assert!(out.contains("❓ **确认**"), "confirmed: {out}");
+        assert!(out.contains("Option A"), "answer: {out}");
+        assert!(out.contains("5.2s"), "duration: {out}");
+    }
+
+    #[test]
+    fn render_empty_segments() {
+        let segs: Vec<ChannelSegment> = vec![];
+        let out = render_segments(&segs, false, &default_fmt());
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn segments_plain_text_extracts_text_only() {
+        let segs = vec![
+            text("Hello"),
+            thinking("deep thought"),
+            tool("read_file", Some("ok"), Some(true), Some(100)),
+            text("World"),
+        ];
+        let plain = segments_plain_text(&segs);
+        assert_eq!(plain, "Hello\n\nWorld");
+    }
+
+    #[test]
+    fn render_thinking_hidden_when_disabled() {
+        let segs = vec![thinking("some thought"), text("answer")];
+        let mut fmt = default_fmt();
+        fmt.show_thinking = false;
+        let out = render_segments(&segs, false, &fmt);
+        assert!(!out.contains("思考"), "thinking should be hidden: {out}");
+        assert!(out.contains("answer"));
+    }
+
+    #[test]
+    fn render_tool_result_truncated() {
+        let long_result = "x".repeat(500);
+        let segs = vec![tool("search", Some(&long_result), Some(true), Some(100))];
+        let out = render_segments(&segs, false, &default_fmt());
+        assert!(out.contains("..."), "should truncate: {out}");
+        assert!(out.len() < 500, "output too long: {}", out.len());
+    }
+
+    #[test]
+    fn render_tool_results_hidden_when_disabled() {
+        let segs = vec![tool("read_file", Some("big output"), Some(true), Some(100))];
+        let mut fmt = default_fmt();
+        fmt.show_tool_results = false;
+        let out = render_segments(&segs, false, &fmt);
+        assert!(!out.contains("big output"), "result should be hidden: {out}");
+        assert!(out.contains("read_file"));
+    }
+
+    #[test]
+    fn render_thinking_then_tool_then_text() {
+        let segs = vec![
+            thinking("Let me think about this problem..."),
+            tool("read_file", Some("found it"), Some(true), Some(200)),
+            text("Here is the answer."),
+        ];
+        let out = render_segments(&segs, false, &default_fmt());
+        let lines: Vec<&str> = out.lines().collect();
+        let think_pos = lines.iter().position(|l| l.contains("💭")).unwrap();
+        let tool_pos = lines.iter().position(|l| l.contains("read_file")).unwrap();
+        let answer_pos = lines.iter().position(|l| l.contains("answer")).unwrap();
+        assert!(think_pos < tool_pos);
+        assert!(tool_pos < answer_pos);
+    }
 }
