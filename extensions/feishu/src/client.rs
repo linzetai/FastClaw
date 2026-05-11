@@ -770,6 +770,34 @@ impl FeishuClient {
         Ok(resp.data.unwrap_or(serde_json::Value::Null))
     }
 
+    /// Update an interactive card message by message_id.
+    /// Uses the Feishu PATCH /im/v1/messages/:message_id API.
+    pub async fn update_card_message(
+        &self,
+        message_id: &str,
+        card: &serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        let token = self.get_tenant_token().await?;
+        let url = format!("{}/im/v1/messages/{}", self.base_url, message_id);
+        let body = serde_json::json!({
+            "content": serde_json::to_string(card).unwrap_or_default(),
+            "msg_type": "interactive"
+        });
+        let resp: ApiResponse = self
+            .http
+            .patch(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .json(&body)
+            .send()
+            .await?
+            .json()
+            .await?;
+        if resp.code != 0 {
+            anyhow::bail!("Feishu update card error ({}): {}", resp.code, resp.msg);
+        }
+        Ok(resp.data.unwrap_or_default())
+    }
+
     /// Upload a file to Feishu and return the file_key.
     /// `file_type`: opus, mp4, pdf, doc, xls, ppt, stream.
     pub async fn upload_file(

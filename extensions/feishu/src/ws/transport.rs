@@ -21,6 +21,20 @@ pub async fn run_event_bridge(
     reply_mode: String,
 ) {
     while let Some(evt) = event_rx.recv().await {
+        // Try parsing as a card action first
+        if let Some(card_msg) = parse_card_action_payload(&evt) {
+            tracing::info!(
+                request_id = %card_msg.message_id,
+                option = %card_msg.text,
+                "feishu ws: dispatching card action callback"
+            );
+            if inbound_tx.send(card_msg).is_err() {
+                tracing::warn!("feishu ws: inbound channel closed");
+                break;
+            }
+            continue;
+        }
+
         match parse_event_payload(&evt, bot_open_id.as_deref()) {
             Some(msg) => {
                 if msg.chat_type == "group" && reply_mode == "mention_only" && !msg.bot_mentioned {
@@ -55,6 +69,66 @@ pub async fn run_event_bridge(
             }
         }
     }
+}
+
+/// Parse a WsEvent as a card action callback (card.action.trigger).
+/// Returns an InboundMessage with `msg_type = "card_action"` if this is a card callback,
+/// None otherwise.
+fn parse_card_action_payload(evt: &WsEvent) -> Option<InboundMessage> {
+    let payload: serde_json::Value = serde_json::from_slice(&evt.payload).ok()?;
+
+    let event_type = payload
+        .get("header")
+        .and_then(|h| h.get("event_type"))
+        .and_then(|v| v.as_str())
+        .or_else(|| payload.get("type").and_then(|v| v.as_str()))
+        .unwrap_or("");
+
+    if event_type != "card.action.trigger" {
+        return None;
+    }
+
+    let event = payload.get("event").unwrap_or(&payload);
+    let action = event.get("action")?;
+    let value = action.get("value")?;
+
+    let request_id = value.get("message_id").and_then(|v| v.as_str())?.to_string();
+    let option_id = value
+        .get("option_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let action_type = value
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let operator_id = event
+        .get("operator")
+        .and_then(|o| o.get("open_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let extra = serde_json::json!({
+        "_card_action": true,
+        "request_id": request_id,
+        "option_id": option_id,
+        "action_type": action_type,
+    });
+
+    Some(InboundMessage {
+        channel_id: "feishu".to_string(),
+        account_id: None,
+        sender_id: operator_id,
+        chat_id: String::new(),
+        message_id: request_id,
+        text: option_id,
+        msg_type: "card_action".to_string(),
+        chat_type: String::new(),
+        bot_mentioned: false,
+        extra,
+    })
 }
 
 /// Parse a WsEvent payload (JSON envelope from Feishu long-connection) into an

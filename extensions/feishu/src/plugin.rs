@@ -256,6 +256,70 @@ impl FeishuPlugin {
             _ => true,
         }
     }
+
+    /// Parse a `card.action.trigger` webhook event into a card_action InboundMessage.
+    fn handle_card_action(&self, payload: &serde_json::Value) -> anyhow::Result<WebhookResult> {
+        let event = payload.get("event").unwrap_or(payload);
+
+        let action = event.get("action").unwrap_or(&serde_json::Value::Null);
+        let value = action.get("value").unwrap_or(&serde_json::Value::Null);
+
+        let request_id = value
+            .get("message_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let option_id = value
+            .get("option_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let action_type = value
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if request_id.is_empty() {
+            tracing::debug!("card action without request_id (message_id), ignoring");
+            return Ok(WebhookResult::Ignored);
+        }
+
+        let operator_id = event
+            .get("operator")
+            .and_then(|o| o.get("open_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        tracing::info!(
+            request_id = %request_id,
+            option_id = %option_id,
+            action_type = %action_type,
+            operator = %operator_id,
+            "feishu: card action callback received"
+        );
+
+        let extra = serde_json::json!({
+            "_card_action": true,
+            "request_id": request_id,
+            "option_id": option_id,
+            "action_type": action_type,
+        });
+
+        Ok(WebhookResult::Messages(vec![InboundMessage {
+            channel_id: "feishu".to_string(),
+            account_id: None,
+            sender_id: operator_id,
+            chat_id: String::new(),
+            message_id: request_id,
+            text: option_id,
+            msg_type: "card_action".to_string(),
+            chat_type: String::new(),
+            bot_mentioned: false,
+            extra,
+        }]))
+    }
 }
 
 /// Infer Feishu `receive_id_type` from the target ID prefix and the generic target_type hint.
@@ -328,6 +392,11 @@ impl ChannelPlugin for FeishuPlugin {
             .and_then(|v| v.as_str())
             .or_else(|| payload.get("type").and_then(|v| v.as_str()))
             .unwrap_or("");
+
+        // Handle interactive card callbacks (ask_question button clicks)
+        if event_type == "card.action.trigger" {
+            return self.handle_card_action(&payload);
+        }
 
         if event_type != "im.message.receive_v1" {
             return Ok(WebhookResult::Ignored);
@@ -511,6 +580,44 @@ impl ChannelPlugin for FeishuPlugin {
 
     fn connection_mode(&self) -> &str {
         &self.config.connection_mode
+    }
+
+    async fn send_interactive_card(
+        &self,
+        target_id: &str,
+        target_type: &str,
+        card: &serde_json::Value,
+    ) -> anyhow::Result<String> {
+        let receive_id_type = infer_receive_id_type(target_id, target_type);
+        let result = self.client
+            .send_card(target_id, receive_id_type, card)
+            .await?;
+
+        let message_id = result
+            .get("message_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                tracing::warn!("No message_id in card response, using placeholder");
+                format!("card_{}", uuid::Uuid::new_v4())
+            });
+
+        Ok(message_id)
+    }
+
+    async fn update_interactive_card(
+        &self,
+        message_id: &str,
+        card: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        self.client
+            .update_card_message(message_id, card)
+            .await?;
+        Ok(())
+    }
+
+    fn supports_interactive_questions(&self) -> bool {
+        true
     }
 }
 
