@@ -1,4 +1,5 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X, Plus, ChevronDown, MessageSquare } from "lucide-react";
 import type { Chat } from "../../lib/agent-store";
 
@@ -97,6 +98,8 @@ export function ChatTabsBar({ chats, activeChatId, streamingChatIds, onSelect, o
   const [editValue, setEditValue] = useState("");
   const editRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const portalRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const openChats = useMemo(() => chats.filter((c) => c.open), [chats]);
   const activeChat = useMemo(() => openChats.find((c) => c.id === activeChatId), [openChats, activeChatId]);
@@ -109,7 +112,10 @@ export function ChatTabsBar({ chats, activeChatId, streamingChatIds, onSelect, o
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (dropdownRef.current?.contains(target)) return;
+      if (portalRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -147,9 +153,16 @@ export function ChatTabsBar({ chats, activeChatId, streamingChatIds, onSelect, o
     setOpen(false);
   }, [onNew]);
 
+  const dropdownPos = useMemo(() => {
+    if (!open || !triggerRef.current) return { top: 0, left: 0 };
+    const rect = triggerRef.current.getBoundingClientRect();
+    return { top: rect.bottom + 4, left: rect.left };
+  }, [open]);
+
   return (
     <div className="relative flex shrink-0 items-center" ref={dropdownRef}>
       <button
+        ref={triggerRef}
         onClick={() => hasMultiple && setOpen(!open)}
         className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] transition-all duration-150 hover:bg-[var(--bg-hover)]"
         style={{
@@ -180,10 +193,14 @@ export function ChatTabsBar({ chats, activeChatId, streamingChatIds, onSelect, o
         <span>新对话</span>
       </button>
 
-      {open && (
+      {open && createPortal(
         <div
-          className="absolute left-0 top-full z-50 mt-1 min-w-[240px] max-w-[320px] rounded-lg p-1"
+          ref={portalRef}
+          className="fixed min-w-[240px] max-w-[320px] rounded-lg p-1"
           style={{
+            top: dropdownPos.top,
+            left: dropdownPos.left,
+            zIndex: 9999,
             background: "var(--bg-elevated)",
             border: "0.5px solid var(--border-subtle)",
             boxShadow: "var(--shadow-lg), inset 0 1px 0 var(--highlight-top)",
@@ -218,7 +235,8 @@ export function ChatTabsBar({ chats, activeChatId, streamingChatIds, onSelect, o
               />
             ))}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
