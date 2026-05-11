@@ -24,6 +24,7 @@ pub mod shell_snapshot;
 pub mod coordinator;
 mod skill;
 mod todo;
+mod screenshot;
 mod snip;
 mod tool_search;
 mod utility;
@@ -80,6 +81,7 @@ pub use git::GitTool;
 pub use utility::{CurrentTimeTool, SleepTool};
 pub use workflow::{WorkflowStore, WorkflowTool, WorkflowDefinition, WorkflowRun, WorkflowStatus};
 pub use worktree::{EnterWorktreeTool, ExitWorktreeTool, WorktreeState};
+pub use screenshot::{register_screenshot_tool, ScreenshotTool};
 
 #[cfg(feature = "browser")]
 pub use browser::{register_browser_tool, BrowserTool};
@@ -110,6 +112,7 @@ pub fn register_builtin_tools_with_sandbox(registry: &ToolRegistry, sandboxed: b
     registry.register(Arc::new(GlobTool));
     registry.register(Arc::new(UnifiedLspTool));
     registry.register(Arc::new(ListDirectoryTool));
+    registry.register(Arc::new(ScreenshotTool::new()));
 
     // ── Deferred tools (available via tool_search) ──────────────────────────
     registry.register_deferred(Arc::new(CurrentTimeTool));
