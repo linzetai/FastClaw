@@ -90,14 +90,14 @@ function WindowControls() {
 
   if (!isTauri) return null;
 
-  const btn = "flex items-center justify-center transition-all duration-100";
+  const btn = "flex items-center justify-center transition-colors duration-100";
 
   return (
-    <>
-      <div className="mx-1 my-auto h-4 w-px" style={{ background: "var(--separator)" }} />
+    <div className="ml-1 flex h-full items-stretch">
+      <div className="my-auto h-4 w-px" style={{ background: "var(--separator)" }} />
       <button
         onClick={minimize}
-        className={`${btn} w-11 h-full hover:bg-[var(--bg-hover)]`}
+        className={`${btn} w-[46px] hover:bg-[var(--bg-hover)]`}
         style={{ color: "var(--fill-secondary)" }}
         title="最小化"
       >
@@ -105,7 +105,7 @@ function WindowControls() {
       </button>
       <button
         onClick={toggleMaximize}
-        className={`${btn} w-11 h-full hover:bg-[var(--bg-hover)]`}
+        className={`${btn} w-[46px] hover:bg-[var(--bg-hover)]`}
         style={{ color: "var(--fill-secondary)" }}
         title={isMaximized ? "还原" : "最大化"}
       >
@@ -113,13 +113,13 @@ function WindowControls() {
       </button>
       <button
         onClick={close}
-        className={`${btn} w-11 h-full hover:bg-[#E81123] hover:text-white`}
-        style={{ color: "var(--fill-secondary)", transition: "background 0.15s, transform 0.1s, color 0.15s" }}
+        className={`${btn} w-[46px] hover:bg-[#E81123] hover:text-white`}
+        style={{ color: "var(--fill-secondary)", transition: "background 0.15s, color 0.15s" }}
         title="关闭"
       >
         <X size={12} strokeWidth={1.5} />
       </button>
-    </>
+    </div>
   );
 }
 
@@ -177,7 +177,7 @@ export function TitleBar() {
           </span>
         </div>
 
-        <div className="flex items-center gap-0.5 pr-0.5">
+        <div className="flex h-full items-center gap-0.5">
           <ConnectionDot />
           <NotificationCenter onDetailOpen={setDetailNotification} />
           <button
