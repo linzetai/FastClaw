@@ -110,17 +110,21 @@ export interface AgentChats {
   messageQueue: QueuedMessage[];
 }
 
+import type { NavItem } from "./ui-store";
+
 export interface AgentState {
   agents: Agent[];
   activeAgentId: string;
   agentChats: Record<string, AgentChats>;
   detailOpen: boolean;
   sidebarCollapsed: boolean;
+  activeNav: NavItem;
 
   setActiveAgent: (id: string) => void;
   toggleDetail: () => void;
   closeDetail: () => void;
   toggleSidebar: () => void;
+  setActiveNav: (nav: NavItem) => void;
   addMessage: (agentId: string, msg: Omit<ChatMessage, "id" | "chatId">, targetChatId?: string) => void;
   newChat: (agentId: string, workDir?: string) => void;
   setActiveChat: (agentId: string, chatId: string) => void;

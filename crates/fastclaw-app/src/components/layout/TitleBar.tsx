@@ -1,15 +1,9 @@
-import { useState, useEffect, useCallback, lazy, Suspense, type MouseEvent as RME } from "react";
-import { useThemeStore, type ThemeMode } from "../../lib/theme";
+import { useState, useEffect, useCallback, type MouseEvent as RME } from "react";
 import { useGatewayStore } from "../../lib/store";
 import { NotificationCenter } from "../notification/NotificationCenter";
 import { NotificationDetailPanel } from "../notification/NotificationDetailPanel";
-import { Sun, Moon, Monitor, Settings, Minus, Square, Maximize2, X } from "lucide-react";
-import { ClawIcon } from "./ClawIcon";
+import { Minus, Square, Maximize2, X } from "lucide-react";
 import type { AppNotification } from "../../lib/transport";
-
-const SettingsPanel = lazy(() =>
-  import("../settings/SettingsPanel").then((m) => ({ default: m.SettingsPanel })),
-);
 
 const isTauri =
   typeof window !== "undefined" &&
@@ -25,31 +19,6 @@ async function onDragDoubleClick() {
   if (!isTauri) return;
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
   getCurrentWindow().toggleMaximize();
-}
-
-function ThemeToggle() {
-  const { mode, setMode } = useThemeStore();
-  const next = () => {
-    const o: ThemeMode[] = ["light", "dark", "system"];
-    setMode(o[(o.indexOf(mode) + 1) % o.length]);
-  };
-
-  return (
-    <button
-      onClick={next}
-      className="flex h-7 w-7 items-center justify-center rounded-md transition-all duration-100 hover:bg-[var(--bg-hover)] hover:scale-105 active:scale-95"
-      style={{ color: "var(--fill-tertiary)" }}
-      title={mode === "light" ? "浅色" : mode === "dark" ? "深色" : "自动"}
-    >
-      {mode === "light" ? (
-        <Sun size={14} strokeWidth={1.5} />
-      ) : mode === "dark" ? (
-        <Moon size={14} strokeWidth={1.5} />
-      ) : (
-        <Monitor size={14} strokeWidth={1.5} />
-      )}
-    </button>
-  );
 }
 
 function WindowControls() {
@@ -139,16 +108,10 @@ function ConnectionDot() {
 }
 
 export function TitleBar() {
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [detailNotification, setDetailNotification] = useState<AppNotification | null>(null);
 
   return (
     <>
-      {settingsOpen && (
-        <Suspense fallback={null}>
-          <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-        </Suspense>
-      )}
       {detailNotification && (
         <NotificationDetailPanel
           notification={detailNotification}
@@ -156,7 +119,7 @@ export function TitleBar() {
         />
       )}
       <header
-        className="relative z-30 flex shrink-0 select-none items-center"
+        className="relative z-30 flex shrink-0 select-none items-stretch"
         style={{
           height: "var(--titlebar-h)",
           background: "var(--bg-sidebar)",
@@ -164,31 +127,16 @@ export function TitleBar() {
         }}
       >
         <div
-          className="flex flex-1 items-center gap-2 pl-4"
+          className="h-full flex-1"
+          data-tauri-drag-region=""
           onMouseDown={onDragMouseDown}
           onDoubleClick={onDragDoubleClick}
-        >
-          <ClawIcon size={20} />
-          <span
-            className="text-[13px] font-bold tracking-[-0.02em]"
-            style={{ color: "var(--fill-primary)" }}
-          >
-            FastClaw
-          </span>
-        </div>
+          style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+        />
 
         <div className="flex h-full items-center gap-0.5">
           <ConnectionDot />
           <NotificationCenter onDetailOpen={setDetailNotification} />
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="flex h-7 w-7 items-center justify-center rounded-md transition-all duration-100 hover:bg-[var(--bg-hover)] hover:scale-105 active:scale-95"
-            style={{ color: "var(--fill-tertiary)" }}
-            title="设置"
-          >
-            <Settings size={15} strokeWidth={1.5} />
-          </button>
-          <ThemeToggle />
           <WindowControls />
         </div>
       </header>
