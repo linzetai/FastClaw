@@ -22,6 +22,8 @@ pub struct PromptContext {
     pub token_budget: Option<usize>,
     pub memory_prompt: Option<String>,
     pub session_start_date: String,
+    /// Summary of pending todo items from plan mode, injected when in agent mode.
+    pub pending_todo_summary: Option<String>,
 }
 
 /// Minimal info about a connected MCP server, used by prompt sections.
@@ -190,6 +192,7 @@ mod tests {
             token_budget: None,
             memory_prompt: None,
             session_start_date: "2026-04-29".into(),
+            pending_todo_summary: None,
         }
     }
 
@@ -489,6 +492,7 @@ mod integration_tests {
             token_budget: None,
             memory_prompt: None,
             session_start_date: "2026-04-29".into(),
+            pending_todo_summary: None,
         }
     }
 

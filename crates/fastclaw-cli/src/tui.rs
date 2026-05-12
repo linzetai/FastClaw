@@ -27,6 +27,7 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/models", "List all available models"),
     ("/stats", "Show session token/time stats"),
     ("/doctor", "Run env diagnostics"),
+    ("/plan", "Toggle Plan/Agent mode"),
     ("/cancel", "Cancel current streaming"),
     ("/ping", "Ping gateway for latency"),
     ("/mcp", "Show MCP server status"),
@@ -91,6 +92,9 @@ pub struct TuiApp {
 
     // Config mode for preflight checks
     config_mode: fastclaw_core::config::ConfigMode,
+
+    // Current execution mode (agent/plan)
+    execution_mode: String,
 }
 
 #[derive(Clone)]
@@ -140,6 +144,7 @@ impl TuiApp {
             work_dir: None,
             last_request_id: None,
             config_mode: fastclaw_core::config::ConfigMode::Production,
+            execution_mode: "agent".into(),
         }
     }
 
@@ -602,6 +607,20 @@ async fn handle_slash_command(app: &mut TuiApp, ws_tx: &mut WsTx, text: &str) {
             if app.messages.last().is_none_or(|m| m.role != "system") {
                 app.push_system("All checks passed.".into());
             }
+        }
+        "/plan" => {
+            let new_mode = if app.execution_mode == "plan" { "agent" } else { "plan" };
+            let id = app.next_id();
+            let req = json!({
+                "id": id,
+                "method": "chat.set_mode",
+                "params": {"mode": new_mode}
+            });
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
+            app.execution_mode = new_mode.to_string();
+            let label = if new_mode == "plan" { "Plan (read-only)" } else { "Agent (full access)" };
+            app.push_system(format!("Switched to {label} mode."));
+            app.status = format!("Mode: {}", new_mode);
         }
         "/cancel" => {
             if app.streaming {

@@ -1,6 +1,6 @@
 import {
   Image as ImageIcon, FileText, Paperclip, FolderOpen, ArrowUp,
-  Square, X, Loader2,
+  Square, X, Loader2, Compass, Code2,
 } from "lucide-react";
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
@@ -210,6 +210,40 @@ function ContextRing({ used, limit }: { used: number; limit: number }) {
   );
 }
 
+function ModeToggle({
+  mode,
+  onToggle,
+  disabled,
+}: {
+  mode: "agent" | "plan";
+  onToggle: () => void;
+  disabled: boolean;
+}) {
+  const isPlan = mode === "plan";
+  return (
+    <button
+      onClick={onToggle}
+      disabled={disabled}
+      className="flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition-all duration-150 hover:scale-[1.02] active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+      style={{
+        background: isPlan
+          ? "color-mix(in srgb, var(--tint, #4299E1) 12%, transparent)"
+          : "color-mix(in srgb, var(--green, #48BB78) 12%, transparent)",
+        color: isPlan ? "var(--tint, #4299E1)" : "var(--green, #48BB78)",
+        border: `0.5px solid ${isPlan ? "color-mix(in srgb, var(--tint, #4299E1) 25%, transparent)" : "color-mix(in srgb, var(--green, #48BB78) 25%, transparent)"}`,
+      }}
+      title={isPlan ? "Plan Mode -- 只读探索模式" : "Agent Mode -- 完整工具访问"}
+    >
+      {isPlan ? (
+        <Compass size={12} strokeWidth={2} />
+      ) : (
+        <Code2 size={12} strokeWidth={2} />
+      )}
+      <span>{isPlan ? "Plan" : "Agent"}</span>
+    </button>
+  );
+}
+
 export type PendingToolQuestion = {
   requestId: string;
   question: string;
@@ -273,18 +307,38 @@ export function StreamFooter({
     if (streaming) setSendPending(false);
   }, [streaming]);
 
+  const executionMode = activeChat?.executionMode ?? "agent";
+
   const handleCompact = useCallback(() => {
     if (streaming) return;
     handleMentionSend("/compact", []);
   }, [streaming, handleMentionSend]);
 
+  const handleToggleMode = useCallback(async () => {
+    if (streaming) return;
+    const newMode = executionMode === "plan" ? "agent" : "plan";
+    const resp = await transport.setExecutionModeIpc(newMode);
+    if (resp.ok) {
+      const state = useAgentStore.getState();
+      const agentId = state.activeAgentId;
+      const chatId = state.agentChats[agentId]?.activeChatId ?? "";
+      state.setChatExecutionMode(agentId, chatId, newMode);
+    }
+  }, [streaming, executionMode]);
+
+  const handlePlanSlash = useCallback(() => {
+    if (streaming) return;
+    handleToggleMode();
+  }, [streaming, handleToggleMode]);
+
   const slashCommands = useMemo((): SlashCommand[] => [
     { id: "new", label: "new", desc: "开始新话题", action: handleNewTopic },
     { id: "clear", label: "clear", desc: "新建对话（清空当前）", action: handleNewTopic },
     { id: "compact", label: "compact", desc: "压缩上下文以释放空间", action: handleCompact },
+    { id: "plan", label: "plan", desc: executionMode === "plan" ? "切换到 Agent 模式" : "切换到 Plan 模式（只读探索）", action: handlePlanSlash },
     { id: "model", label: "model", desc: "在消息中指定模型，如 /model gpt-4o" },
     { id: "tools", label: "tools", desc: "在消息中指定工具，如 /tools search" },
-  ], [handleNewTopic, handleCompact]);
+  ], [handleNewTopic, handleCompact, handlePlanSlash, executionMode]);
 
   const wrappedSend = useCallback((txt: string, mentions: InlineMention[]) => {
     setSendPending(true);
@@ -429,9 +483,23 @@ export function StreamFooter({
           </div>
         )}
 
+        {executionMode === "plan" && (
+          <div
+            className="flex items-center gap-2 px-4 py-2 text-[11px]"
+            style={{
+              background: "color-mix(in srgb, var(--tint, #4299E1) 6%, transparent)",
+              borderBottom: "0.5px solid color-mix(in srgb, var(--tint, #4299E1) 15%, transparent)",
+              color: "var(--tint, #4299E1)",
+            }}
+          >
+            <Compass size={12} strokeWidth={2} className="shrink-0" />
+            <span>Plan Mode — 只读探索模式，切换到 Agent 可进行修改</span>
+          </div>
+        )}
+
         <MentionInput
           ref={mentionInputRef}
-          placeholder="描述任务，或输入 @ 引用文件、/ 命令..."
+          placeholder={executionMode === "plan" ? "描述规划任务，或输入 /plan 切换到 Agent..." : "描述任务，或输入 @ 引用文件、/ 命令..."}
           options={mentionOptions}
           slashCommands={slashCommands}
           onSend={wrappedSend}
@@ -482,6 +550,11 @@ export function StreamFooter({
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            <ModeToggle
+              mode={executionMode}
+              onToggle={handleToggleMode}
+              disabled={streaming}
+            />
             {activeChat?.usage?.contextTokens != null && activeChat?.usage?.contextWindow != null && activeChat.usage.contextWindow > 0 && (
               <ContextRing
                 used={activeChat.usage.contextTokens}

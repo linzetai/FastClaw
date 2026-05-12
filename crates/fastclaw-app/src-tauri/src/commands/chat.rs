@@ -587,3 +587,28 @@ pub async fn submit_tool_answer(
         Ok(json!({ "ok": false, "reason": "request not found or already answered" }))
     }
 }
+
+// ─── Execution mode switch ───
+
+#[tauri::command]
+pub async fn set_execution_mode(
+    state: tauri::State<'_, AppData>,
+    mode: String,
+) -> Result<serde_json::Value, String> {
+    use fastclaw_core::types::ExecutionMode;
+
+    let target = match mode.as_str() {
+        "plan" => ExecutionMode::Plan,
+        "agent" => ExecutionMode::Agent,
+        _ => return Err(format!("Invalid mode: {mode}. Expected 'plan' or 'agent'.")),
+    };
+
+    let gw = state.gateway.lock().await;
+    let app = get_state(&gw)?;
+    let (from, to) = app.rt.mode_state.transition(target);
+    Ok(json!({
+        "ok": true,
+        "from": format!("{from}"),
+        "to": format!("{to}"),
+    }))
+}

@@ -660,6 +660,7 @@ impl StateBuilder {
                 },
                 mode_state: p5.phase2.phase4.mode_state,
                 todo_store: p5.phase2.phase4.phase3.todo_store,
+                plan_file_store: fastclaw_agent::builtin_tools::PlanFileStore::default(),
             },
             store: super::StorageState {
                 session_store: p5.phase2.phase4.phase3.phase1.session_store,

@@ -87,6 +87,25 @@ impl TodoStore {
             .unwrap_or(false)
     }
 
+    /// Non-async summary of pending/in_progress todos for prompt injection.
+    /// Returns `None` if there are no actionable items or the lock is contended.
+    pub fn pending_summary(&self) -> Option<String> {
+        let items = self.items.try_read().ok()?;
+        let actionable: Vec<_> = items
+            .iter()
+            .filter(|t| t.status == TodoStatus::Pending || t.status == TodoStatus::InProgress)
+            .collect();
+        if actionable.is_empty() {
+            return None;
+        }
+        let mut lines = Vec::with_capacity(actionable.len());
+        for t in &actionable {
+            let icon = if t.status == TodoStatus::InProgress { "🔄" } else { "⬜" };
+            lines.push(format!("- {icon} [{}] {}", t.id, t.content));
+        }
+        Some(lines.join("\n"))
+    }
+
     pub async fn replace_all(&self, mut items: Vec<TodoItem>) {
         let now = chrono::Utc::now().to_rfc3339();
         for item in &mut items {

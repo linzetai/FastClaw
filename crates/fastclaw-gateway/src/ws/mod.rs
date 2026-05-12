@@ -94,7 +94,8 @@ async fn handle_socket(socket: WebSocket, state: AppState, auth: ApiKeyAuth, pre
                 "methods": ["ping", "chat", "agents", "auth",
                             "sessions.list", "sessions.get", "sessions.messages", "sessions.delete",
                             "sessions.new", "sessions.claim", "sessions.update_title",
-                            "chat.cancel", "chat.answer", "models.list", "config.get", "config.set",
+                            "chat.cancel", "chat.answer", "chat.set_mode",
+                            "models.list", "config.get", "config.set",
                             "mcp.status", "mcp.reload", "mcp.add", "mcp.remove",
                             "subscribe", "unsubscribe"],
                 "authRequired": auth_required && !authenticated,
@@ -293,6 +294,7 @@ async fn dispatch(
             chat::handle_chat_cancel(sender, id, req.params, active_chat_cancels.clone()).await
         }
         "chat.answer" => chat::handle_chat_answer(sender, state, id, req.params).await,
+        "chat.set_mode" => chat::handle_chat_set_mode(sender, state, id, req.params).await,
         "sessions.list" => session::handle_sessions_list(sender, state, id, req.params).await,
         "sessions.get" => {
             session::handle_session_scoped(sender, state, owned_sessions, id, req.params, "get")

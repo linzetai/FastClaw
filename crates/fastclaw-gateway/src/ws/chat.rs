@@ -107,6 +107,60 @@ pub async fn handle_chat_answer(
     .await;
 }
 
+/// Switches execution mode between agent and plan.
+pub async fn handle_chat_set_mode(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    state: &AppState,
+    req_id: Option<String>,
+    params: serde_json::Value,
+) {
+    let Some(mode_str) = params.get("mode").and_then(|v| v.as_str()) else {
+        send_resp(
+            sender,
+            &WsResponse {
+                id: req_id,
+                msg_type: "error".into(),
+                data: None,
+                error: Some(json!({"code": -32602, "message": "mode required ('agent' or 'plan')"})),
+            },
+        )
+        .await;
+        return;
+    };
+
+    use fastclaw_core::types::ExecutionMode;
+    let target = match mode_str {
+        "plan" => ExecutionMode::Plan,
+        "agent" => ExecutionMode::Agent,
+        _ => {
+            send_resp(
+                sender,
+                &WsResponse {
+                    id: req_id,
+                    msg_type: "error".into(),
+                    data: None,
+                    error: Some(json!({"code": -32602, "message": "Invalid mode. Expected 'agent' or 'plan'."})),
+                },
+            )
+            .await;
+            return;
+        }
+    };
+
+    let (from, to) = state.rt.mode_state.transition(target);
+
+    send_resp(
+        sender,
+        &WsResponse {
+            id: req_id,
+            msg_type: "chat.set_mode".into(),
+            data: Some(json!({"ok": true, "from": format!("{from}"), "to": format!("{to}")})),
+            error: None,
+        },
+    )
+    .await;
+}
+
 /// Spawns streaming chat on a background task that sends WsResponse messages
 /// through `bg_tx`. Uses the same session/memory/compaction logic as the HTTP path.
 /// Cancelled when the client disconnects (cancel token fires).

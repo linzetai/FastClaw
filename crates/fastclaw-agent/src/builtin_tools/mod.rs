@@ -10,6 +10,7 @@ mod media;
 mod memory;
 mod network;
 mod notebook;
+pub mod plan_file;
 mod plan_mode;
 mod session;
 mod task;
@@ -73,6 +74,7 @@ pub use task::{
     NoopTaskWorkFactory, TaskCreateTool, TaskGetTool, TaskInfo, TaskListTool, TaskManager,
     TaskManagerError, TaskStatus, TaskStopTool, TaskUpdateTool, TaskWorkFactory,
 };
+pub use plan_file::PlanFileStore;
 pub use plan_mode::{EnterPlanModeTool, ExitPlanModeTool, ExecutionModeState};
 pub use snip::SnipTool;
 pub use terminal::TerminalCaptureTool;
