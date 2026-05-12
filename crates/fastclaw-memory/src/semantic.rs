@@ -447,20 +447,41 @@ impl SemanticMemory {
     }
 
     /// Full-text search across subject, predicate, and object.
+    ///
+    /// Multi-word queries use AND semantics: each whitespace-separated token
+    /// must appear (via LIKE) in at least one of the three text columns.
+    /// Single-word queries behave exactly as before.
     pub async fn search(&self, keyword: &str, limit: i64) -> Result<Vec<Fact>> {
-        let escaped = escape_like(keyword);
-        let pattern = format!("%{escaped}%");
-        let rows = sqlx::query_as::<_, Fact>(
-            r#"SELECT id, category, subject, predicate, object, confidence, source_session, created_at, updated_at
-               FROM facts
-               WHERE subject LIKE ?1 ESCAPE '\' OR predicate LIKE ?1 ESCAPE '\' OR object LIKE ?1 ESCAPE '\'
-               ORDER BY confidence DESC, updated_at DESC
-               LIMIT ?2"#,
-        )
-        .bind(&pattern)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?;
+        let tokens: Vec<&str> = keyword.split_whitespace().filter(|t| !t.is_empty()).collect();
+        if tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build a WHERE clause: for each token, (subject LIKE %tok% OR predicate LIKE %tok% OR object LIKE %tok%)
+        // All token groups joined with AND.
+        let mut where_parts = Vec::with_capacity(tokens.len());
+        let mut bind_values = Vec::with_capacity(tokens.len());
+        for (i, tok) in tokens.iter().enumerate() {
+            let pattern = format!("%{}%", escape_like(tok));
+            let p = i + 1; // SQLite bind params are 1-indexed
+            where_parts.push(format!(
+                "(subject LIKE ?{p} ESCAPE '\\' OR predicate LIKE ?{p} ESCAPE '\\' OR object LIKE ?{p} ESCAPE '\\')"
+            ));
+            bind_values.push(pattern);
+        }
+        let limit_param = tokens.len() + 1;
+        let sql = format!(
+            "SELECT id, category, subject, predicate, object, confidence, source_session, created_at, updated_at \
+             FROM facts WHERE {} ORDER BY confidence DESC, updated_at DESC LIMIT ?{limit_param}",
+            where_parts.join(" AND ")
+        );
+
+        let mut query = sqlx::query_as::<_, Fact>(&sql);
+        for val in &bind_values {
+            query = query.bind(val);
+        }
+        query = query.bind(limit);
+        let rows = query.fetch_all(&self.pool).await?;
         Ok(rows)
     }
 
@@ -874,6 +895,69 @@ mod tests {
 
         let hits = m.search("Lin", 10).await.unwrap();
         assert_eq!(hits.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn search_multiword_across_fields() {
+        let m = mem().await;
+        m.upsert(&fact(
+            "f1",
+            "project",
+            "FastClaw",
+            "current_version",
+            "0.0.6",
+        ))
+        .await
+        .unwrap();
+        m.upsert(&fact("f2", "user_fact", "editor", "is", "vim"))
+            .await
+            .unwrap();
+
+        // Multi-word: "FastClaw" in subject, "version" in predicate
+        let hits = m.search("FastClaw version", 10).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "f1");
+
+        // Single word still works
+        let hits = m.search("FastClaw", 10).await.unwrap();
+        assert_eq!(hits.len(), 1);
+
+        // Both words must match (AND semantics) — "vim" has no "FastClaw"
+        let hits = m.search("FastClaw vim", 10).await.unwrap();
+        assert_eq!(hits.len(), 0);
+
+        // Empty query returns nothing
+        let hits = m.search("   ", 10).await.unwrap();
+        assert_eq!(hits.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn search_multiword_upsert_then_find() {
+        let m = mem().await;
+        // Mimics the EVAL_SPEC D4.3 scenario
+        m.upsert(&fact(
+            "eval-fact-1",
+            "project",
+            "FastClaw",
+            "current_version",
+            "0.0.6",
+        ))
+        .await
+        .unwrap();
+        // Update the same fact
+        m.upsert(&fact(
+            "eval-fact-1",
+            "project",
+            "FastClaw",
+            "current_version",
+            "0.0.7",
+        ))
+        .await
+        .unwrap();
+
+        let hits = m.search("FastClaw version", 10).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].object, "0.0.7");
     }
 
     #[tokio::test]
