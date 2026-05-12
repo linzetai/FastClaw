@@ -1,6 +1,6 @@
 import {
   Image as ImageIcon, FileText, Paperclip, FolderOpen, ArrowUp,
-  Square, X, Loader2, Compass, Code2,
+  Square, X, Loader2, Compass, Code2, ChevronDown,
 } from "lucide-react";
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
@@ -9,6 +9,7 @@ import { useAgentStore } from "../../lib/agent-store";
 import { QuestionPanel } from "./MessageRenderer";
 import { QueueIndicator } from "./QueueIndicator";
 import { QueuePanel } from "./QueuePanel";
+import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
 import type { Chat } from "../../lib/agent-store";
 
@@ -210,6 +211,93 @@ function ContextRing({ used, limit }: { used: number; limit: number }) {
   );
 }
 
+const PROVIDER_COLORS: Record<string, string> = {
+  openai: "#10A37F",
+  anthropic: "#D97706",
+  google: "#4285F4",
+  deepseek: "#6366F1",
+  mistral: "#FF7000",
+  default: "var(--fill-tertiary)",
+};
+
+function ModelSelector() {
+  const [models, setModels] = useState<api.ModelInfo[]>([]);
+  const [open, setOpen] = useState(false);
+  const activeAgentId = useAgentStore((s) => s.activeAgentId);
+  const agents = useAgentStore((s) => s.agents);
+  const updateAgentProps = useAgentStore((s) => s.updateAgentProps);
+  const agent = agents.find((a) => a.id === activeAgentId);
+  const currentModel = agent?.model ?? "";
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    api.listModels().then(setModels).catch(() => {});
+  }, []);
+
+  const currentMeta = models.find((m) => m.model === currentModel);
+  const dotColor = PROVIDER_COLORS[currentMeta?.provider ?? ""] ?? PROVIDER_COLORS.default;
+  const displayName = currentModel.split("/").pop() || currentModel || "选择模型";
+
+  return (
+    <div className="relative">
+      <button
+        ref={btnRef}
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)]"
+        style={{ color: "var(--fill-tertiary)" }}
+      >
+        <span className="h-2 w-2 rounded-full" style={{ background: dotColor }} />
+        <span className="max-w-[100px] truncate">{displayName}</span>
+        <ChevronDown size={10} strokeWidth={2} />
+      </button>
+      {open && createPortal(
+        <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)}>
+          <div
+            className="fixed max-h-[200px] overflow-y-auto rounded-lg py-1"
+            style={{
+              left: btnRef.current?.getBoundingClientRect().left ?? 0,
+              bottom: window.innerHeight - (btnRef.current?.getBoundingClientRect().top ?? 0) + 4,
+              minWidth: 180,
+              background: "var(--bg-elevated)",
+              border: "0.5px solid var(--separator)",
+              boxShadow: "var(--shadow-lg)",
+              animation: "scale-in var(--duration-fast) var(--ease-out)",
+              transformOrigin: "bottom left",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {models.map((m) => {
+              const active = m.model === currentModel;
+              const mColor = PROVIDER_COLORS[m.provider ?? ""] ?? PROVIDER_COLORS.default;
+              return (
+                <button
+                  key={`${m.provider}/${m.model}`}
+                  onClick={() => {
+                    updateAgentProps(activeAgentId, { model: m.model });
+                    setOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors duration-100 hover:bg-[var(--bg-hover)]"
+                  style={{
+                    color: active ? "var(--tint)" : "var(--fill-secondary)",
+                    fontWeight: active ? 600 : 400,
+                  }}
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: mColor }} />
+                  <span className="min-w-0 truncate">{m.model}</span>
+                </button>
+              );
+            })}
+            {models.length === 0 && (
+              <div className="px-3 py-2 text-[11px]" style={{ color: "var(--fill-quaternary)" }}>暂无模型</div>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 function ModeToggle({
   mode,
   onToggle,
@@ -317,7 +405,7 @@ export function StreamFooter({
   const handleToggleMode = useCallback(async () => {
     if (streaming) return;
     const newMode = executionMode === "plan" ? "agent" : "plan";
-    const sessionId = activeChat?.backendId;
+    const sessionId = activeChat?.id;
     const resp = await transport.setExecutionModeIpc(newMode, sessionId ?? undefined);
     if (resp.ok) {
       const state = useAgentStore.getState();
@@ -325,7 +413,7 @@ export function StreamFooter({
       const chatId = state.agentChats[agentId]?.activeChatId ?? "";
       state.setChatExecutionMode(agentId, chatId, newMode);
     }
-  }, [streaming, executionMode, activeChat?.backendId]);
+  }, [streaming, executionMode, activeChat?.id]);
 
   const handlePlanSlash = useCallback(() => {
     if (streaming) return;
@@ -399,7 +487,7 @@ export function StreamFooter({
   }, [processFiles]);
 
   return (
-    <div className="relative shrink-0 px-4 pb-3 pt-2" style={{ borderTop: "0.5px solid var(--separator)" }}>
+    <div className="relative shrink-0 px-4 pb-3 pt-2">
       {dragOver && (
         <div
           className="fixed inset-0 z-[9998] flex items-center justify-center"
@@ -435,7 +523,7 @@ export function StreamFooter({
       )}
 
       <div
-        className="overflow-hidden rounded-2xl transition-shadow duration-200 focus-within:ring-[3px] focus-within:ring-[var(--tint-bg)]"
+        className="overflow-hidden rounded-2xl transition-shadow duration-200"
         style={{
           background: "var(--bg-elevated)",
           border: `1px solid var(--separator)`,
@@ -513,6 +601,7 @@ export function StreamFooter({
 
         <div className="flex items-center justify-between gap-2 px-3.5 pb-3">
           <div className="flex min-w-0 items-center gap-0.5">
+            <ModelSelector />
             <button
               onClick={() => fileInputRef.current?.click()}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-100 hover:bg-[var(--bg-hover)]"

@@ -126,7 +126,22 @@ export function useStreamScroll({
         }
         if (visibleIdx >= 0 && visibleIdx < displayDataLength) {
           runProgrammaticScroll(() => {
-            virtuosoRef.current?.scrollToIndex({ index: visibleIdx, align: "center", behavior: "smooth" });
+            virtuosoRef.current?.scrollToIndex({ index: visibleIdx, align: "center", behavior: "auto" });
+          });
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              const mark = document.querySelector('mark[data-search-highlight="current"]');
+              if (mark) {
+                mark.scrollIntoView({ behavior: "smooth", block: "center" });
+              } else {
+                setTimeout(() => {
+                  const markRetry = document.querySelector('mark[data-search-highlight="current"]');
+                  if (markRetry) {
+                    markRetry.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }
+                }, 200);
+              }
+            });
           });
         }
       }

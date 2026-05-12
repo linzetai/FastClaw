@@ -68,6 +68,7 @@
   --radius-xl: 20px;
 
   --sidebar-w: 320px;
+  --nav-rail-w: 56px;
   --titlebar-h: 44px;
   --statusbar-h: 30px;
 
@@ -683,8 +684,8 @@
   .btn-icon:hover { transform: scale(1.06); }
   .btn-icon:active { transform: scale(0.94); }
 
-  /* Input focus glow (global) */
-  input:focus, select:focus, textarea:focus {
+  /* Input focus glow — only for bordered form inputs, not search bars or textareas */
+  input.input-bordered:focus, select:focus {
     box-shadow: 0 0 0 3px var(--tint-bg);
     border-color: var(--tint);
   }
@@ -978,6 +979,21 @@
 @keyframes shimmer {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(200%); }
+}
+@keyframes sparkle-glow {
+  0%, 100% { opacity: 0.6; filter: brightness(1); }
+  50% { opacity: 1; filter: brightness(1.3); }
+}
+
+/* ━━━ Search Highlight ━━━ */
+mark[data-search-highlight] {
+  background: rgba(255, 200, 0, 0.4);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+mark[data-search-highlight="current"] {
+  background: rgba(255, 150, 0, 0.6);
 }
 
 /* ━━━ Accessibility ━━━ */

@@ -1,19 +1,28 @@
-import { useState, useCallback, useRef, useEffect, memo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, memo } from "react";
 import { createPortal } from "react-dom";
 import { useAgentStore } from "../../lib/agent-store";
 import { useGatewayStore } from "../../lib/store";
-import { Search, Plus, ChevronDown, Check, Camera, X, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import {
+  Search, Plus, ChevronDown, ChevronRight, Check, Camera, X,
+  PanelLeftClose, PanelLeftOpen, MoreHorizontal, Pin, User, Trash2, MessageCircle,
+} from "lucide-react";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
 import { useAvatarUrl, loadAvatarBlobUrl } from "../../lib/use-avatar-url";
-import type { Agent } from "../../lib/stores/types";
+import { fuzzyMatch } from "../../lib/fuzzy";
+import type { Agent, Chat } from "../../lib/stores/types";
 
-const AgentAvatar = memo(function AgentAvatar({ agent }: { agent: Agent }) {
+const AgentAvatar = memo(function AgentAvatar({ agent, size = 36 }: { agent: Agent; size?: number }) {
   const avatarUrl = useAvatarUrl(agent.avatar);
   return (
     <div
-      className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full text-[13px] font-semibold ring-2 ring-transparent"
-      style={{ background: agent.color || "var(--bg-tertiary)", color: agent.color ? "#fff" : "var(--fill-secondary)" }}
+      className="flex items-center justify-center overflow-hidden rounded-full text-[13px] font-semibold ring-2 ring-transparent"
+      style={{
+        width: size,
+        height: size,
+        background: agent.color || "var(--bg-tertiary)",
+        color: agent.color ? "#fff" : "var(--fill-secondary)",
+      }}
     >
       {avatarUrl ? (
         <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
@@ -23,6 +32,95 @@ const AgentAvatar = memo(function AgentAvatar({ agent }: { agent: Agent }) {
     </div>
   );
 });
+
+function AgentContextMenu({
+  x, y, onClose, onPin, onDetail, onDelete,
+}: {
+  x: number; y: number;
+  onClose: () => void;
+  onPin: () => void;
+  onDetail: () => void;
+  onDelete: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [onClose]);
+
+  const items = [
+    { icon: Pin, label: "置顶", action: onPin },
+    { icon: User, label: "Agent 详情", action: onDetail },
+    { icon: Trash2, label: "删除", action: onDelete, danger: true },
+  ];
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="fixed z-[60] min-w-[140px] overflow-hidden rounded-lg py-1"
+      style={{
+        left: x,
+        top: y,
+        background: "var(--bg-elevated)",
+        border: "0.5px solid var(--separator)",
+        boxShadow: "var(--shadow-lg)",
+        animation: "scale-in var(--duration-fast) var(--ease-out)",
+        transformOrigin: "top left",
+      }}
+    >
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <button
+            key={item.label}
+            onClick={() => { item.action(); onClose(); }}
+            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)]"
+            style={{ color: item.danger ? "var(--red)" : "var(--fill-secondary)" }}
+          >
+            <Icon size={14} strokeWidth={1.5} />
+            {item.label}
+          </button>
+        );
+      })}
+    </div>,
+    document.body,
+  );
+}
+
+function ChatItem({
+  chat, active, onClick,
+}: {
+  chat: Chat; active: boolean; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`group/chat flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left transition-colors duration-100 ${
+        active ? "" : "hover:bg-[var(--bg-hover)]"
+      }`}
+      style={active ? { background: "var(--tint-bg)" } : undefined}
+    >
+      <MessageCircle size={12} strokeWidth={1.5} style={{ color: active ? "var(--tint)" : "var(--fill-quaternary)", flexShrink: 0 }} />
+      <span
+        className="min-w-0 truncate text-[12px]"
+        style={{ color: active ? "var(--tint)" : "var(--fill-tertiary)" }}
+      >
+        {chat.title || "新会话"}
+      </span>
+    </button>
+  );
+}
 
 interface AgentListProps {
   collapsed?: boolean;
@@ -34,9 +132,13 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
   const activeAgentId = useAgentStore((s) => s.activeAgentId);
   const agentChats = useAgentStore((s) => s.agentChats);
   const setActiveAgent = useAgentStore((s) => s.setActiveAgent);
+  const setActiveChat = useAgentStore((s) => s.setActiveChat);
   const syncAgents = useAgentStore((s) => s.syncAgentsFromBackend);
+  const newChat = useAgentStore((s) => s.newChat);
   const toggleDetail = useAgentStore((s) => s.toggleDetail);
+  const removeAgent = useAgentStore((s) => s.removeAgent);
   const gatewayReady = useGatewayStore((s) => s.connected);
+
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
   const [showNewForm, setShowNewForm] = useState(false);
@@ -50,6 +152,31 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
   const [modelsLoading, setModelsLoading] = useState(false);
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const newInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const [expandedAgents, setExpandedAgents] = useState<Set<string>>(() => new Set([activeAgentId]));
+  const [contextMenu, setContextMenu] = useState<{ agentId: string; x: number; y: number } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeAgentId) {
+      setExpandedAgents((prev) => {
+        if (prev.has(activeAgentId)) return prev;
+        const next = new Set(prev);
+        next.add(activeAgentId);
+        return next;
+      });
+    }
+  }, [activeAgentId]);
+
+  const toggleExpand = useCallback((agentId: string) => {
+    setExpandedAgents((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentId)) next.delete(agentId);
+      else next.add(agentId);
+      return next;
+    });
+  }, []);
 
   const refreshModels = useCallback(async () => {
     if (!gatewayReady) return;
@@ -72,17 +199,13 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
       newInputRef.current?.focus();
       if (gatewayReady) {
         setModelsLoading(true);
-        refreshModels().finally(() => {
-          setModelsLoading(false);
-        });
+        refreshModels().finally(() => setModelsLoading(false));
       }
     }
   }, [showNewForm, gatewayReady, refreshModels]);
 
   useEffect(() => {
-    const onModelsUpdated = () => {
-      void refreshModels();
-    };
+    const onModelsUpdated = () => void refreshModels();
     window.addEventListener("fastclaw:models-updated", onModelsUpdated);
     return () => window.removeEventListener("fastclaw:models-updated", onModelsUpdated);
   }, [refreshModels]);
@@ -135,7 +258,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
     setNewModel("");
     setNewAvatarPath(null);
     setNewAvatarPreview(null);
-  }, [agents, syncAgents, newName, newModel, newAvatarPath, setActiveAgent, models]);
+  }, [agents, syncAgents, newName, newModel, newAvatarPath, setActiveAgent, models, newAgentId]);
 
   const handleQuickCreateDefault = useCallback(async () => {
     setOnboardingError(null);
@@ -153,7 +276,6 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
       toggleDetail();
       return;
     }
-
     const defaultName = "Main Agent";
     const created = await api.createAgent({
       name: defaultName,
@@ -164,11 +286,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
       setOnboardingError("创建默认 Agent 失败，请稍后重试。");
       return;
     }
-
-    const newModelStr =
-      typeof created.model === "string"
-        ? created.model
-        : created.model?.model ?? "";
+    const newModelStr = typeof created.model === "string" ? created.model : created.model?.model ?? "";
     syncAgents([
       ...agents.map((a) => ({ agentId: a.id, name: a.name, model: a.model, avatar: a.avatar })),
       { agentId: created.agentId, name: created.name ?? defaultName, model: newModelStr },
@@ -186,52 +304,87 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
     setNewAvatarPreview(null);
   }, []);
 
-  const list = agents.filter(
-    (a) => !query || a.name.toLowerCase().includes(query.toLowerCase()),
-  );
+  const handleDelete = useCallback(async (agentId: string) => {
+    try { await api.deleteAgent(agentId); } catch { /* best-effort */ }
+    removeAgent(agentId);
+    setDeleteConfirm(null);
+  }, [removeAgent]);
 
-  const [focusIdx, setFocusIdx] = useState(-1);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [searchSelectedIdx, setSearchSelectedIdx] = useState(0);
+  const searchDropdownRef = useRef<HTMLDivElement>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setFocusIdx(-1); }, [query]);
+  const searchResults = useMemo(() => {
+    if (!query.trim()) return [];
+    return agents
+      .map((a) => {
+        const nameResult = fuzzyMatch(query, a.name);
+        const taglineResult = fuzzyMatch(query, a.tagline || "");
+        const best = nameResult && taglineResult
+          ? (nameResult.score >= taglineResult.score ? nameResult : taglineResult)
+          : nameResult ?? taglineResult;
+        return best ? { agent: a, score: best.score } : null;
+      })
+      .filter((r): r is { agent: Agent; score: number } => r !== null)
+      .sort((a, b) => b.score - a.score);
+  }, [agents, query]);
 
-  const handleSidebarKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "/" && !query && document.activeElement !== searchInputRef.current) {
-      e.preventDefault();
-      searchInputRef.current?.focus();
-      return;
-    }
+  const showSearchDropdown = searchFocused && query.trim().length > 0;
+
+  useEffect(() => {
+    setSearchSelectedIdx(0);
+  }, [query]);
+
+  useEffect(() => {
+    if (!showSearchDropdown) return;
+    const handleClick = (e: MouseEvent) => {
+      if (searchContainerRef.current?.contains(e.target as Node)) return;
+      if (searchDropdownRef.current?.contains(e.target as Node)) return;
+      setSearchFocused(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showSearchDropdown]);
+
+  const handleSearchSelect = useCallback((agent: Agent) => {
+    setActiveAgent(agent.id);
+    newChat(agent.id);
+    setQuery("");
+    setSearchFocused(false);
+  }, [setActiveAgent, newChat]);
+
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (!showSearchDropdown || searchResults.length === 0) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setFocusIdx((i) => Math.min(i + 1, list.length - 1));
+      setSearchSelectedIdx((i) => (i + 1) % searchResults.length);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setFocusIdx((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter" && focusIdx >= 0 && focusIdx < list.length) {
+      setSearchSelectedIdx((i) => (i - 1 + searchResults.length) % searchResults.length);
+    } else if (e.key === "Enter") {
       e.preventDefault();
-      setActiveAgent(list[focusIdx].id);
+      handleSearchSelect(searchResults[searchSelectedIdx].agent);
     } else if (e.key === "Escape") {
-      setQuery("");
-      setFocusIdx(-1);
-      searchInputRef.current?.blur();
+      setSearchFocused(false);
     }
-  }, [query, list, focusIdx, setActiveAgent]);
+  }, [showSearchDropdown, searchResults, searchSelectedIdx, handleSearchSelect]);
+
 
   return (
     <aside
-      className="vibrancy flex shrink-0 flex-col"
+      className="flex shrink-0 flex-col"
       style={{
-        width: collapsed ? "72px" : "var(--sidebar-w)",
+        width: collapsed ? "72px" : "240px",
         background: "var(--bg-sidebar)",
         borderRight: "0.5px solid var(--separator)",
         transition: "width var(--duration-slow) var(--ease-in-out)",
         overflow: "hidden",
       }}
-      onKeyDown={handleSidebarKeyDown}
       tabIndex={0}
     >
-      {/* Header: Search / Collapse toggle */}
-      <div className="flex items-center gap-1 px-3 pb-2 pt-4" style={{ minHeight: 48 }}>
+      {/* Header: Search + New Agent */}
+      <div className="flex flex-col gap-2 px-3 pb-2 pt-4">
         {collapsed ? (
           <button
             onClick={onToggleCollapse}
@@ -243,45 +396,109 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
           </button>
         ) : (
           <>
-            <div
-              className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 transition-all duration-200 focus-within:shadow-[0_0_0_3px_var(--tint-bg)] focus-within:border-[var(--tint)]"
-              style={{ background: "var(--bg-hover)", border: "0.5px solid transparent" }}
-            >
-              <Search size={13} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索"
-                className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-[var(--fill-quaternary)]"
-                style={{ color: "var(--fill-primary)" }}
-              />
-              {query && (
-                <button
-                  onClick={() => setQuery("")}
-                  className="flex h-4 w-4 cursor-pointer items-center justify-center rounded-full transition-colors duration-150 hover:bg-[var(--bg-active)]"
-                  style={{ color: "var(--fill-tertiary)" }}
+            <div className="relative flex items-center gap-1.5" ref={searchContainerRef}>
+              <div
+                className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg px-3 transition-all duration-200"
+                style={{ background: "var(--bg-hover)" }}
+              >
+                <Search size={13} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)", flexShrink: 0 }} />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onFocus={() => setSearchFocused(true)}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="搜索"
+                  className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-[var(--fill-quaternary)]"
+                  style={{ color: "var(--fill-primary)" }}
+                />
+                {query && (
+                  <button
+                    onClick={() => { setQuery(""); setSearchFocused(false); }}
+                    className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-150 hover:bg-[var(--bg-active)]"
+                    style={{ color: "var(--fill-tertiary)" }}
+                  >
+                    <X size={10} strokeWidth={2} />
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={onToggleCollapse}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-xs)] transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+                style={{ color: "var(--fill-tertiary)" }}
+                title="折叠侧边栏"
+              >
+                <PanelLeftClose size={16} strokeWidth={1.5} />
+              </button>
+
+              {showSearchDropdown && (
+                <div
+                  ref={searchDropdownRef}
+                  className="absolute left-0 right-9 top-[calc(100%+4px)] z-50 overflow-hidden rounded-lg py-1"
+                  style={{
+                    background: "var(--bg-elevated)",
+                    border: "0.5px solid var(--separator)",
+                    boxShadow: "var(--shadow-lg)",
+                    animation: "scale-in var(--duration-fast) var(--ease-out)",
+                    transformOrigin: "top left",
+                    maxHeight: 280,
+                    overflowY: "auto",
+                  }}
                 >
-                  <X size={10} strokeWidth={2} />
-                </button>
+                  {searchResults.length === 0 ? (
+                    <div className="flex items-center gap-2 px-3 py-3">
+                      <Search size={13} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />
+                      <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
+                        未找到「{query}」相关 Agent
+                      </span>
+                    </div>
+                  ) : (
+                    searchResults.map((r, i) => (
+                      <button
+                        key={r.agent.id}
+                        onClick={() => handleSearchSelect(r.agent)}
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors duration-75 hover:bg-[var(--bg-hover)]"
+                        style={{
+                          background: i === searchSelectedIdx ? "var(--tint-bg)" : "transparent",
+                        }}
+                      >
+                        <AgentAvatar agent={r.agent} size={24} />
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-medium" style={{ color: "var(--fill-primary)" }}>
+                            {r.agent.name}
+                          </span>
+                          {r.agent.tagline && (
+                            <span className="block truncate text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
+                              {r.agent.tagline}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
               )}
             </div>
             <button
-              onClick={onToggleCollapse}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-xs)] transition-colors duration-150 hover:bg-[var(--bg-hover)]"
-              style={{ color: "var(--fill-tertiary)" }}
-              title="折叠侧边栏"
+              onClick={() => setShowNewForm(true)}
+              disabled={creating}
+              className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg py-2 text-[13px] font-medium transition-all duration-150 hover:bg-[var(--tint-bg)] disabled:opacity-50"
+              style={{
+                color: "var(--fill-secondary)",
+                border: "1px dashed var(--separator-opaque)",
+              }}
             >
-              <PanelLeftClose size={16} strokeWidth={1.5} />
+              <Plus size={14} strokeWidth={2} />
+              新建 Agent
             </button>
           </>
         )}
       </div>
 
-      {/* List */}
-      <div className="flex-1 overflow-y-auto px-2 py-1.5">
-        {!collapsed && list.length === 0 && !query && (
+      {/* Agent Tree List */}
+      <div className="flex-1 overflow-y-auto px-3 py-1.5">
+        {!collapsed && agents.length === 0 && (
           <div
             className="mx-2 mt-3 rounded-[var(--radius-sm)] p-4"
             style={{ background: "var(--bg-hover)", border: "0.5px solid var(--separator)" }}
@@ -290,7 +507,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
               欢迎使用 FastClaw
             </div>
             <p className="mt-1 text-[12px] leading-5" style={{ color: "var(--fill-tertiary)" }}>
-              先录入模型，再创建第一个 Agent。你也可以一键创建默认 Agent 快速开始。
+              先录入模型，再创建第一个 Agent。
             </p>
             <div className="mt-3 flex gap-2">
               <button
@@ -309,39 +526,21 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
               </button>
             </div>
             {onboardingError && (
-              <div className="mt-2 text-[11px]" style={{ color: "#ff453a" }}>
-                {onboardingError}
-              </div>
+              <div className="mt-2 text-[11px]" style={{ color: "#ff453a" }}>{onboardingError}</div>
             )}
           </div>
         )}
-        {!collapsed && query && list.length === 0 && (
-          <div className="flex flex-col items-center gap-2 py-8 text-center">
-            <Search size={20} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />
-            <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
-              未找到「{query}」相关 Agent
-            </span>
-            <button
-              onClick={() => setQuery("")}
-              className="cursor-pointer text-[12px] font-medium"
-              style={{ color: "var(--tint)" }}
-            >
-              清除搜索
-            </button>
-          </div>
-        )}
-        {list.map((agent, i) => {
+        {agents.map((agent, i) => {
           const active = activeAgentId === agent.id;
+          const expanded = expandedAgents.has(agent.id);
           const ac = agentChats[agent.id];
-          const lastMsg = ac?.lastMsg ?? agent.tagline;
-          const lastTime = ac?.lastTime;
-          const unread = ac?.unread ?? 0;
+          const chatList = ac?.chatList ?? [];
 
           if (collapsed) {
             return (
               <button
                 key={agent.id}
-                onClick={() => setActiveAgent(agent.id)}
+                onClick={() => { setActiveAgent(agent.id); newChat(agent.id); }}
                 className="group relative mx-auto mb-1 flex h-[52px] w-[52px] items-center justify-center rounded-[var(--radius-sm)] hover:bg-[var(--bg-hover)]"
                 style={{
                   background: active ? "var(--bg-active)" : "transparent",
@@ -350,99 +549,143 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                 title={agent.name}
               >
                 <AgentAvatar agent={agent} />
-                {unread > 0 && (
-                  <span
-                    className="absolute -top-0.5 -right-0.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full px-0.5 text-[10px] font-bold"
-                    style={{ background: "var(--red)", color: "#fff" }}
-                  >
-                    {unread}
-                  </span>
-                )}
               </button>
             );
           }
 
-          const focused = focusIdx === i;
           return (
-            <button
+            <div
               key={agent.id}
-              onClick={() => setActiveAgent(agent.id)}
-              className="group/item relative mb-0.5 flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-all duration-150 hover:bg-[var(--bg-hover)]"
-              style={{
-                background: active ? "var(--tint-bg)" : focused ? "var(--bg-hover)" : "transparent",
-                outline: focused ? "2px solid var(--tint)" : "none",
-                outlineOffset: -2,
-                borderLeft: active ? "2.5px solid var(--tint)" : "2.5px solid transparent",
-                borderRadius: active ? "0 8px 8px 0" : "8px",
-                animation: `fade-slide-up var(--duration-slow) var(--ease-out) ${i * 30}ms backwards`,
-              }}
+              className="mb-0.5"
+              style={{ animation: `fade-slide-up var(--duration-slow) var(--ease-out) ${i * 30}ms backwards` }}
             >
-              <div className="relative shrink-0">
-                <AgentAvatar agent={agent} />
-                {agent.online && (
-                  <div
-                    className="absolute -bottom-0.5 -right-0.5 h-[10px] w-[10px] rounded-full"
-                    style={{ background: "var(--green)", border: "2px solid var(--bg-secondary)" }}
-                  />
-                )}
+              {/* Agent Row */}
+              <div
+                className="group/item relative flex w-full items-center gap-2 rounded-lg px-2 py-1.5 transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+                style={{
+                  background: active ? "var(--tint-bg)" : "transparent",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                }}
+              >
+                <div
+                  className="flex min-w-0 flex-1 items-center gap-2"
+                  onClick={() => {
+                    setActiveAgent(agent.id);
+                    newChat(agent.id);
+                  }}
+                >
+                  <AgentAvatar agent={agent} size={28} />
+                  <div className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-semibold tracking-[-0.01em]" style={{ color: "var(--fill-primary)" }}>
+                      {agent.name}
+                    </span>
+                    <span className="block truncate text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
+                      {agent.tagline}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-all duration-100 group-hover/item:opacity-100">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const rect = (e.target as HTMLElement).getBoundingClientRect();
+                      setContextMenu({ agentId: agent.id, x: rect.right, y: rect.bottom });
+                    }}
+                    className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-[var(--bg-active)]"
+                    style={{ color: "var(--fill-tertiary)" }}
+                  >
+                    <MoreHorizontal size={14} strokeWidth={1.5} />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleExpand(agent.id); }}
+                    className="flex h-5 w-5 items-center justify-center rounded transition-colors duration-100 hover:bg-[var(--bg-active)]"
+                    style={{ color: "var(--fill-quaternary)" }}
+                    title={expanded ? "收起会话" : "展开会话"}
+                  >
+                    {expanded ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
+                  </button>
+                </div>
               </div>
 
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="truncate text-[13px] font-semibold tracking-[-0.01em]" style={{ color: "var(--fill-primary)" }}>
-                    {agent.name}
-                  </span>
-                  {lastTime && (
-                    <span className="shrink-0 text-[11px] font-medium" style={{ color: "var(--fill-quaternary)", fontVariantNumeric: "tabular-nums" }}>
-                      {lastTime}
-                    </span>
-                  )}
+              {/* Chat Sub-items */}
+              {expanded && chatList.length > 0 && (
+                <div className="mt-0.5 overflow-y-auto" style={{ maxHeight: 180 }}>
+                  {chatList.map((chat) => {
+                    const chatActive = active && ac?.activeChatId === chat.id;
+                    return (
+                      <ChatItem
+                        key={chat.id}
+                        chat={chat}
+                        active={chatActive}
+                        onClick={() => {
+                          if (activeAgentId !== agent.id) setActiveAgent(agent.id);
+                          setActiveChat(agent.id, chat.id);
+                        }}
+                      />
+                    );
+                  })}
                 </div>
-                <div className="mt-0.5 flex items-center justify-between gap-2">
-                  <span className="truncate text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
-                    {lastMsg}
-                  </span>
-                  {unread > 0 && (
-                    <span
-                      className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-bold"
-                      style={{ background: "var(--tint)", color: "#fff" }}
-                    >
-                      {unread}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </button>
+              )}
+            </div>
           );
         })}
       </div>
 
-      {/* New Agent Button */}
-      <div className="px-3 pb-3 pt-1">
-        {collapsed ? (
-          <button
-            onClick={() => setShowNewForm(true)}
-            disabled={creating}
-            className="mx-auto flex h-9 w-9 items-center justify-center rounded-[var(--radius-xs)] transition-all duration-150 hover:bg-[var(--tint-bg)] disabled:opacity-50"
-            style={{ color: "var(--fill-secondary)" }}
-            title="新建 Agent"
-          >
-            <Plus size={16} strokeWidth={2} />
-          </button>
-        ) : (
-          <button
-            onClick={() => setShowNewForm(true)}
-            disabled={creating}
-            className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-sm)] py-2.5 text-[13px] font-medium transition-all duration-150 hover:bg-[var(--tint-bg)] disabled:opacity-50"
-            style={{ color: "var(--fill-tertiary)", border: "1.5px dashed var(--border-emphasis)" }}
-          >
-            <Plus size={13} strokeWidth={2} />
-            新建 Agent
-          </button>
-        )}
-      </div>
+      {/* Collapse button moved to search bar area */}
 
-      {/* New Agent Modal — portaled to body to escape vibrancy containing block */}
+      {/* Context Menu */}
+      {contextMenu && (
+        <AgentContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          onPin={() => { /* placeholder */ }}
+          onDetail={() => { setActiveAgent(contextMenu.agentId); toggleDetail(); }}
+          onDelete={() => setDeleteConfirm(contextMenu.agentId)}
+        />
+      )}
+
+      {/* Delete Confirmation */}
+      {deleteConfirm && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ animation: "fade-in var(--duration-fast) var(--ease-out)" }}>
+          <div className="absolute inset-0" style={{ background: "rgba(0, 0, 0, 0.3)" }} onClick={() => setDeleteConfirm(null)} />
+          <div
+            className="relative w-full max-w-[340px] overflow-hidden rounded-[var(--radius-md)] px-6 py-5"
+            style={{
+              background: "var(--bg-elevated)",
+              boxShadow: "var(--shadow-lg)",
+              animation: "scale-in var(--duration-normal) var(--ease-out)",
+              border: "0.5px solid var(--separator)",
+            }}
+          >
+            <h3 className="mb-2 text-[14px] font-semibold" style={{ color: "var(--fill-primary)" }}>确认删除</h3>
+            <p className="mb-4 text-[13px]" style={{ color: "var(--fill-tertiary)" }}>
+              删除后所有会话数据将丢失，此操作不可撤销。
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="cursor-pointer rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium"
+                style={{ color: "var(--fill-secondary)" }}
+              >
+                取消
+              </button>
+              <button
+                onClick={() => handleDelete(deleteConfirm)}
+                className="cursor-pointer rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium"
+                style={{ background: "var(--red)", color: "#fff" }}
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {/* New Agent Modal */}
       {showNewForm && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ animation: "fade-in var(--duration-fast) var(--ease-out)" }}>
           <div className="absolute inset-0" style={{ background: "rgba(0, 0, 0, 0.3)" }} onClick={cancelNew} />
@@ -461,16 +704,12 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                 <X size={12} strokeWidth={2} />
               </button>
             </div>
-
             <div className="space-y-4 px-5 py-4">
-              {/* Avatar + Name */}
               <div className="flex items-center gap-3">
                 <button
-                  type="button"
-                  onClick={pickAvatar}
+                  type="button" onClick={pickAvatar}
                   className="group relative flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full"
-                  style={{ background: "var(--bg-tertiary)" }}
-                  title="选择头像"
+                  style={{ background: "var(--bg-tertiary)" }} title="选择头像"
                 >
                   {newAvatarPreview ? (
                     <img src={newAvatarPreview} alt="" className="h-full w-full object-cover" />
@@ -486,40 +725,25 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                 <div className="min-w-0 flex-1">
                   <label className="mb-1 block text-[11px] font-medium" style={{ color: "var(--fill-tertiary)" }}>名称</label>
                   <input
-                    ref={newInputRef}
-                    type="text"
-                    value={newName}
+                    ref={newInputRef} type="text" value={newName}
                     onChange={(e) => setNewName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && newName.trim()) handleNewAgent();
-                      if (e.key === "Escape") cancelNew();
-                    }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && newName.trim()) handleNewAgent(); if (e.key === "Escape") cancelNew(); }}
                     placeholder="输入 Agent 名称"
-                    className="w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-colors focus:outline-none"
+                    className="input-bordered w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-colors focus:outline-none"
                     style={{ background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" }}
                     disabled={creating}
                   />
                 </div>
               </div>
-
-              {/* Agent ID */}
               <div>
                 <label className="mb-1 block text-[11px] font-medium" style={{ color: "var(--fill-tertiary)" }}>Agent ID</label>
                 <input
                   type="text"
                   value={agentIdTouched ? newAgentId : (newName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""))}
-                  onChange={(e) => {
-                    setAgentIdTouched(true);
-                    setNewAgentId(e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, ""));
-                  }}
-                  onFocus={() => {
-                    if (!agentIdTouched) {
-                      setNewAgentId(newName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""));
-                      setAgentIdTouched(true);
-                    }
-                  }}
+                  onChange={(e) => { setAgentIdTouched(true); setNewAgentId(e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, "")); }}
+                  onFocus={() => { if (!agentIdTouched) { setNewAgentId(newName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")); setAgentIdTouched(true); } }}
                   placeholder="自动生成，或手动输入"
-                  className="w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-colors focus:outline-none"
+                  className="input-bordered w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-colors focus:outline-none"
                   style={{ background: "var(--bg-base)", color: "var(--fill-secondary)", border: "0.5px solid var(--separator-opaque)", fontFamily: "var(--font-mono, monospace)" }}
                   disabled={creating}
                 />
@@ -527,40 +751,22 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                   用于工作目录和文件标识，仅限小写字母、数字、连字符
                 </span>
               </div>
-
-              {/* Model */}
               <div>
                 <label className="mb-1 block text-[11px] font-medium" style={{ color: "var(--fill-tertiary)" }}>模型</label>
                 <div className="relative">
-                  <select
-                    value={newModel}
-                    onChange={(e) => setNewModel(e.target.value)}
-                    className="select-premium select-mono"
-                    disabled={creating || modelsLoading || models.length === 0}
-                  >
+                  <select value={newModel} onChange={(e) => setNewModel(e.target.value)} className="select-premium select-mono" disabled={creating || modelsLoading || models.length === 0}>
                     {modelsLoading && <option value="">加载中...</option>}
                     {!modelsLoading && models.length === 0 && <option value="">暂无可用模型</option>}
-                    {models.map((m) => (
-                      <option key={`${m.provider}/${m.model}`} value={m.model}>{m.model}</option>
-                    ))}
+                    {models.map((m) => <option key={`${m.provider}/${m.model}`} value={m.model}>{m.model}</option>)}
                   </select>
                   <ChevronDown size={10} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
                 </div>
               </div>
             </div>
-
-            {/* Actions */}
             <div className="flex items-center justify-end gap-2 px-5 py-3.5" style={{ borderTop: "0.5px solid var(--separator)" }}>
+              <button onClick={cancelNew} className="cursor-pointer rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium transition-colors duration-100" style={{ color: "var(--fill-secondary)" }}>取消</button>
               <button
-                onClick={cancelNew}
-                className="cursor-pointer rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium transition-colors duration-100"
-                style={{ color: "var(--fill-secondary)" }}
-              >
-                取消
-              </button>
-              <button
-                onClick={handleNewAgent}
-                disabled={creating || !newName.trim()}
+                onClick={handleNewAgent} disabled={creating || !newName.trim()}
                 className="flex cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium transition-opacity duration-100 hover:opacity-90 disabled:opacity-40"
                 style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
               >

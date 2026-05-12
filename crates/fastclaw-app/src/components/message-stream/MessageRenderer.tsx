@@ -55,7 +55,7 @@ class MessageErrorBoundary extends Component<
   }
 }
 import {
-  Clock, Copy, Check,
+  Clock, Copy, Check, ThumbsUp, ThumbsDown, RotateCw,
 } from "lucide-react";
 import type { StreamSegment } from "./types";
 import { useConfigStore } from "../../lib/stores/config-store";
@@ -171,15 +171,52 @@ const UserBubble = memo(function UserBubble({ msg, copyable, selected, onToggleS
   );
 });
 
-const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onToggleSelect, animate = true }: { msg: ChatMessage; usage?: ChatUsage; copyable?: boolean; selected?: boolean; onToggleSelect?: () => void; animate?: boolean }) {
-  const toolCalls = msg.toolCalls;
+const AiReactionBar = memo(function AiReactionBar({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
+  const [liked, setLiked] = useState(false);
+  const [disliked, setDisliked] = useState(false);
+
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(msg.content).then(() => {
+    navigator.clipboard.writeText(content).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
-  }, [msg.content]);
+  }, [content]);
+
+  const btnCls = "flex h-7 w-7 items-center justify-center rounded-md transition-all duration-150 hover:bg-[var(--bg-hover)]";
+
+  return (
+    <div
+      className="mt-1.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100"
+    >
+      <button onClick={handleCopy} className={btnCls} style={{ color: copied ? "var(--green)" : "var(--fill-quaternary)" }} title="复制">
+        {copied ? <Check size={13} strokeWidth={2} /> : <Copy size={13} strokeWidth={1.5} />}
+      </button>
+      <button
+        onClick={() => { setLiked(!liked); if (disliked) setDisliked(false); }}
+        className={btnCls}
+        style={{ color: liked ? "var(--tint)" : "var(--fill-quaternary)" }}
+        title="点赞"
+      >
+        <ThumbsUp size={13} strokeWidth={liked ? 2 : 1.5} />
+      </button>
+      <button
+        onClick={() => { setDisliked(!disliked); if (liked) setLiked(false); }}
+        className={btnCls}
+        style={{ color: disliked ? "var(--red)" : "var(--fill-quaternary)" }}
+        title="点踩"
+      >
+        <ThumbsDown size={13} strokeWidth={disliked ? 2 : 1.5} />
+      </button>
+      <button className={btnCls} style={{ color: "var(--fill-quaternary)" }} title="重试">
+        <RotateCw size={13} strokeWidth={1.5} />
+      </button>
+    </div>
+  );
+});
+
+const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onToggleSelect, animate = true }: { msg: ChatMessage; usage?: ChatUsage; copyable?: boolean; selected?: boolean; onToggleSelect?: () => void; animate?: boolean }) {
+  const toolCalls = msg.toolCalls;
   const aiThreshold = useConfigStore((s) => s.display.toolCallGroupThreshold);
   const groupedToolCalls = useMemo(() => {
     if (!toolCalls || toolCalls.length === 0) return null;
@@ -234,17 +271,8 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
           )}
         </span>
       </div>
+      {copyable && <AiReactionBar content={msg.content} />}
         </div>
-        {copyable && (
-          <button
-            onClick={handleCopy}
-            className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-all duration-150 hover:bg-[var(--bg-hover)] opacity-0 translate-x-1 group-hover/message:opacity-100 group-hover/message:translate-x-0"
-            style={{ color: "var(--fill-tertiary)" }}
-            title="复制"
-          >
-            {copied ? <Check size={12} strokeWidth={2} /> : <Copy size={12} strokeWidth={1.5} />}
-          </button>
-        )}
       </div>
     </div>
   );
@@ -589,13 +617,67 @@ export function MessageRendererRow({
   const fullIdx = idx + paginationOffset;
   const isMatch = searchQuery && cm.content.toLowerCase().includes(searchQuery.toLowerCase());
   const isCurrent = isMatch && searchResults[searchIdx]?.idx === fullIdx;
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = rowRef.current;
+    if (!el) return;
+    const existing = el.querySelectorAll("mark[data-search-highlight]");
+    existing.forEach((mark) => {
+      const parent = mark.parentNode;
+      if (parent) {
+        parent.replaceChild(document.createTextNode(mark.textContent ?? ""), mark);
+        parent.normalize();
+      }
+    });
+
+    if (!searchQuery || !isMatch) return;
+
+    const q = searchQuery.toLowerCase();
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
+    let node: Text | null;
+    while ((node = walker.nextNode() as Text | null)) {
+      if (node.textContent && node.textContent.toLowerCase().includes(q)) {
+        textNodes.push(node);
+      }
+    }
+
+    for (const textNode of textNodes) {
+      const text = textNode.textContent ?? "";
+      const lower = text.toLowerCase();
+      const parts: (string | { match: string })[] = [];
+      let lastIdx = 0;
+      let pos = lower.indexOf(q);
+      while (pos !== -1) {
+        if (pos > lastIdx) parts.push(text.slice(lastIdx, pos));
+        parts.push({ match: text.slice(pos, pos + q.length) });
+        lastIdx = pos + q.length;
+        pos = lower.indexOf(q, lastIdx);
+      }
+      if (lastIdx < text.length) parts.push(text.slice(lastIdx));
+      if (parts.length <= 1) continue;
+
+      const frag = document.createDocumentFragment();
+      for (const part of parts) {
+        if (typeof part === "string") {
+          frag.appendChild(document.createTextNode(part));
+        } else {
+          const mark = document.createElement("mark");
+          mark.setAttribute("data-search-highlight", isCurrent ? "current" : "");
+          mark.textContent = part.match;
+          frag.appendChild(mark);
+        }
+      }
+      textNode.parentNode?.replaceChild(frag, textNode);
+    }
+  }, [searchQuery, isMatch, isCurrent]);
+
   return (
     <MessageErrorBoundary>
     <div
-      className="px-6 transition-colors duration-200"
-      style={{
-        background: isCurrent ? "var(--tint-bg)" : isMatch ? "var(--tint-subtle)" : "transparent",
-      }}
+      ref={rowRef}
+      className="px-6"
     >
       {cm.role === "user" ? (
         <UserBubble

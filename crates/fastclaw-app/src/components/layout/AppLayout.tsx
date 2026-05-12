@@ -1,12 +1,16 @@
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
+import { PanelRightOpen, PanelRightClose, Search } from "lucide-react";
 import { useGatewayStore } from "../../lib/store";
 import { useAgentStore } from "../../lib/agent-store";
 import { AgentList } from "../agent-list/AgentList";
 import { MessageStream } from "../message-stream/MessageStream";
 import { TitleBar } from "./TitleBar";
+import { NavRail } from "./NavRail";
 import { ClawIcon } from "./ClawIcon";
 import { UpdateBanner } from "./UpdateBanner";
+import { ComingSoon } from "../placeholder/ComingSoon";
 import * as api from "../../lib/api";
+import type { NavItem } from "../../lib/stores/ui-store";
 
 const isTauri =
   typeof window !== "undefined" &&
@@ -18,6 +22,14 @@ const OnboardingWizard = lazy(() =>
 const AgentDetail = lazy(() =>
   import("../agent-detail/AgentDetail").then((m) => ({ default: m.AgentDetail })),
 );
+
+const COMING_SOON_TITLES: Partial<Record<NavItem, string>> = {
+  experts: "专家",
+  workspace: "工作室",
+  tasks: "任务",
+  files: "文件",
+  connections: "连接",
+};
 
 function SkeletonPulse({ className = "", style = {} }: { className?: string; style?: React.CSSProperties }) {
   return (
@@ -80,6 +92,61 @@ function Loading({ error }: { error: string | null }) {
   );
 }
 
+function ContentHeader({
+  detailOpen,
+  onToggleDetail,
+}: {
+  detailOpen: boolean;
+  onToggleDetail: () => void;
+}) {
+  const handleSearchClick = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("fastclaw:toggle-search"));
+  }, []);
+
+  return (
+    <div
+      className="flex shrink-0 items-center justify-between px-4"
+      style={{
+        height: 44,
+        borderBottom: "0.5px solid var(--separator)",
+        background: "var(--bg-primary)",
+      }}
+    >
+      <div className="flex items-center">
+        <span
+          className="relative px-3 py-2 text-[13px] font-semibold"
+          style={{ color: "var(--fill-primary)" }}
+        >
+          对话
+          <span
+            className="absolute inset-x-3 bottom-0 h-[2px] rounded-full"
+            style={{ background: "var(--tint)" }}
+          />
+        </span>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleSearchClick}
+          className="flex h-7 w-7 items-center justify-center rounded-md transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+          style={{ color: "var(--fill-quaternary)" }}
+          title="搜索"
+        >
+          <Search size={14} strokeWidth={1.5} />
+        </button>
+        <button
+          onClick={onToggleDetail}
+          className="flex h-7 w-7 items-center justify-center rounded-md transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+          style={{ color: "var(--fill-tertiary)" }}
+          title={detailOpen ? "收起 Agent 信息" : "展开 Agent 信息"}
+        >
+          {detailOpen ? <PanelRightClose size={15} strokeWidth={1.5} /> : <PanelRightOpen size={15} strokeWidth={1.5} />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AppLayout() {
   const mode = useGatewayStore((s) => s.mode);
   const error = useGatewayStore((s) => s.error);
@@ -92,6 +159,7 @@ export function AppLayout() {
   const closeDetail = useAgentStore((s) => s.closeDetail);
   const sidebarCollapsed = useAgentStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useAgentStore((s) => s.toggleSidebar);
+  const activeNav = useAgentStore((s) => s.activeNav);
 
   const activeAgent = useMemo(
     () => agents.find((a) => a.id === activeAgentId) ?? agents[0],
@@ -150,6 +218,9 @@ export function AppLayout() {
     setShowOnboarding(false);
   }, []);
 
+  const showAgentPane = activeNav === "chat";
+  const comingSoonTitle = COMING_SOON_TITLES[activeNav];
+
   let content: React.ReactNode;
 
   if (mode === "connecting" || !activeAgent || !onboardingChecked) {
@@ -169,33 +240,47 @@ export function AppLayout() {
         <TitleBar />
         <UpdateBanner />
         <div className="flex min-h-0 flex-1">
-          <AgentList collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} />
-          <main className="relative flex min-w-0 flex-1 flex-col">
-            <MessageStream onToggleDetail={toggleDetail} detailOpen={detailOpen} />
-            {!connected && mode !== "browser" && (
-              <div
-                className="absolute inset-x-0 top-0 z-20 flex items-center justify-center py-1.5"
-                style={{
-                  background: "rgba(var(--bg-primary-rgb, 0, 0, 0), 0.85)",
-                  backdropFilter: "blur(8px)",
-                  animation: "fade-in var(--duration-slow)",
-                }}
-              >
-                <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
-                  连接已断开，正在重连...
-                </span>
-              </div>
-            )}
-          </main>
-          <Suspense fallback={null}>
-            <AgentDetail
-              open={detailOpen}
-              onClose={closeDetail}
-              agentName={activeAgent.name}
-              agentInitial={activeAgent.initial}
-              agentColor={activeAgent.color}
-            />
-          </Suspense>
+          <NavRail />
+          {showAgentPane ? (
+            <>
+              <AgentList collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} />
+              <main className="relative flex min-w-0 flex-1 flex-col">
+                {/* Content Header: tabs + agent indicator + detail toggle */}
+                <ContentHeader
+                  detailOpen={detailOpen}
+                  onToggleDetail={toggleDetail}
+                />
+                <MessageStream onToggleDetail={toggleDetail} detailOpen={detailOpen} />
+                {!connected && mode !== "browser" && (
+                  <div
+                    className="absolute inset-x-0 top-0 z-20 flex items-center justify-center py-1.5"
+                    style={{
+                      background: "rgba(var(--bg-primary-rgb, 0, 0, 0), 0.85)",
+                      backdropFilter: "blur(8px)",
+                      animation: "fade-in var(--duration-slow)",
+                    }}
+                  >
+                    <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
+                      连接已断开，正在重连...
+                    </span>
+                  </div>
+                )}
+              </main>
+              <Suspense fallback={null}>
+                <AgentDetail
+                  open={detailOpen}
+                  onClose={closeDetail}
+                  agentName={activeAgent.name}
+                  agentInitial={activeAgent.initial}
+                  agentColor={activeAgent.color}
+                />
+              </Suspense>
+            </>
+          ) : (
+            <main className="flex min-w-0 flex-1 flex-col">
+              <ComingSoon title={comingSoonTitle} />
+            </main>
+          )}
         </div>
       </>
     );

@@ -5,14 +5,12 @@ import { useActiveAgentChats } from "../../lib/stores/selectors";
 import type { MentionInputHandle, MentionOption } from "./MentionInput";
 import { MessageRendererRow } from "./MessageRenderer";
 
-import { StreamFooter, type AttachedFile, MOD_KEY } from "./StreamFooter";
+import { StreamFooter, type AttachedFile } from "./StreamFooter";
 import { useStreamScroll, STREAM_PAGE_SIZE } from "./useStreamScroll";
 import { useMessageStreamChat } from "./useMessageStreamChat";
-import { X, ChevronUp, ChevronDown, Settings2, Upload, Search, ArrowDown } from "lucide-react";
+import { X, ChevronUp, ChevronDown, Upload, Search, ArrowDown } from "lucide-react";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
-import { useAvatarUrl } from "../../lib/use-avatar-url";
-import { ChatTabsBar } from "./ChatTabsBar";
 import { StreamEmptyState } from "./StreamEmptyState";
 
 const VIEWPORT_INCREASE = { top: 200, bottom: 200 };
@@ -36,20 +34,12 @@ interface MessageStreamProps {
   detailOpen?: boolean;
 }
 
-export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps) {
+export function MessageStream(_props: MessageStreamProps) {
   const activeAgentId = useAgentStore((s) => s.activeAgentId);
-  const agents = useAgentStore((s) => s.agents);
   const ac = useActiveAgentChats();
-  const newChat = useAgentStore((s) => s.newChat);
   const setWorkDir = useAgentStore((s) => s.setWorkDir);
-  const setActiveChat = useAgentStore((s) => s.setActiveChat);
-  const closeChat = useAgentStore((s) => s.closeChat);
-  const renameChat = useAgentStore((s) => s.renameChat);
-  const reorderChats = useAgentStore((s) => s.reorderChats);
   const loadChatStream = useAgentStore((s) => s.loadChatStream);
 
-  const agent = agents.find((a) => a.id === activeAgentId) ?? agents[0];
-  const agentAvatarUrl = useAvatarUrl(agent?.avatar);
   const activeChat = ac?.chatList.find((c) => c.id === ac.activeChatId);
   const stream = activeChat?.stream ?? [];
   const workDir = activeChat?.workDir ?? null;
@@ -124,7 +114,7 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
     stopStream,
     handleMentionSend,
     handleNewTopic,
-    streamingChatIds,
+    streamingChatIds: _streamingChatIds,
     atBottomRef,
     suppressScrollTrackingUntilRef,
     pendingBottomScrollBehaviorRef,
@@ -144,9 +134,10 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase();
-    return stream
+    const results = stream
       .map((item, idx) => ({ item, idx }))
       .filter(({ item }) => item.data.content.toLowerCase().includes(q));
+    return results;
   }, [stream, searchQuery]);
 
   const openSearch = useCallback(() => {
@@ -171,8 +162,16 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
         else openSearch();
       }
     };
+    const handleToggleSearch = () => {
+      if (searchOpen) closeSearch();
+      else openSearch();
+    };
     window.addEventListener("keydown", handleGlobalKey);
-    return () => window.removeEventListener("keydown", handleGlobalKey);
+    window.addEventListener("fastclaw:toggle-search", handleToggleSearch);
+    return () => {
+      window.removeEventListener("keydown", handleGlobalKey);
+      window.removeEventListener("fastclaw:toggle-search", handleToggleSearch);
+    };
   }, [searchOpen, openSearch, closeSearch]);
 
   const [fsEntries, setFsEntries] = useState<{ files: string[]; dirs: string[] }>({ files: [], dirs: [] });
@@ -397,61 +396,6 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
         </div>
       )}
 
-      <div
-        className="vibrancy flex h-10 shrink-0 items-center justify-between gap-2 px-4"
-        style={{ background: "var(--bg-sidebar)", borderBottom: `0.5px solid var(--separator)` }}
-      >
-        {/* Left: Agent avatar + name */}
-        <div className="flex min-w-0 items-center gap-2">
-          <div
-            className="relative flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full text-[11px] font-semibold"
-            style={{ background: agent.color, color: "white" }}
-          >
-            {agentAvatarUrl ? (
-              <img src={agentAvatarUrl} alt="" className="h-full w-full object-cover" />
-            ) : (
-              agent.initial
-            )}
-          </div>
-          <span className="truncate text-[13px] font-semibold tracking-[-0.02em]" style={{ color: "var(--fill-primary)" }} title={agent.name}>{agent.name}</span>
-        </div>
-
-        {/* Center: Conversation Switcher */}
-        <div className="flex min-w-0 flex-1 items-center justify-center">
-          {ac && <ChatTabsBar
-            agentId={activeAgentId}
-            chats={ac.chatList}
-            activeChatId={ac.activeChatId}
-            streamingChatIds={streamingChatIds}
-            onSelect={(id) => setActiveChat(activeAgentId, id)}
-            onClose={(id) => closeChat(activeAgentId, id)}
-            onNew={() => newChat(activeAgentId, workDir ?? undefined)}
-            onRename={(id, t) => renameChat(activeAgentId, id, t)}
-            onReorder={(from, to) => reorderChats(activeAgentId, from, to)}
-          />}
-        </div>
-
-        {/* Right: Search + Settings */}
-        <div className="flex shrink-0 items-center gap-0.5">
-          <button
-            onClick={openSearch}
-            className="flex h-7 w-7 items-center justify-center rounded-md transition-all duration-100 hover:bg-[var(--bg-hover)] hover:scale-105 active:scale-95"
-            style={{ color: searchOpen ? "var(--tint)" : "var(--fill-tertiary)" }}
-            title={`搜索消息 (${MOD_KEY}F)`}
-          >
-            <Search size={14} strokeWidth={1.5} />
-          </button>
-          <button
-            onClick={onToggleDetail}
-            className="flex h-7 w-7 items-center justify-center rounded-md transition-all duration-100 hover:bg-[var(--bg-hover)] hover:scale-105 active:scale-95"
-            style={{ color: detailOpen ? "var(--fill-primary)" : "var(--fill-tertiary)" }}
-            title={detailOpen ? "关闭详情" : "打开详情"}
-          >
-            <Settings2 size={14} strokeWidth={1.5} />
-          </button>
-        </div>
-      </div>
-
       {searchOpen && (
         <div
           className="flex shrink-0 items-center gap-2 px-4 py-2"
@@ -508,8 +452,8 @@ export function MessageStream({ onToggleDetail, detailOpen }: MessageStreamProps
         <div className="flex-1 overflow-y-auto px-6 py-6">
           <StreamEmptyState onPick={(t) => {
             if (mentionInputRef.current) {
-              mentionInputRef.current.clear();
-              handleMentionSend(t, []);
+              mentionInputRef.current.setText(t);
+              mentionInputRef.current.focus();
             }
           }} />
         </div>
