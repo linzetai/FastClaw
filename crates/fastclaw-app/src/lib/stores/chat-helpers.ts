@@ -23,6 +23,7 @@ export function createChat(workDir?: string): Chat {
     messageCount: 0,
     open: true,
     subAgentRuns: {},
+    executionMode: "agent",
   };
 }
 

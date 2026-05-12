@@ -84,6 +84,8 @@ export interface ChatUsage {
   contextWindow?: number;
 }
 
+export type ExecutionMode = "agent" | "plan";
+
 export interface Chat {
   id: string;
   localKey: string;
@@ -96,6 +98,7 @@ export interface Chat {
   open: boolean;
   usage?: ChatUsage;
   subAgentRuns: Record<string, SubAgentRunUI>;
+  executionMode: ExecutionMode;
 }
 
 export interface AgentChats {
@@ -142,6 +145,8 @@ export interface AgentState {
   removeQueuedMessage: (agentId: string, chatId: string, messageId: string) => void;
   clearQueue: (agentId: string, chatId: string) => void;
   reorderQueue: (agentId: string, chatId: string, fromIndex: number, toIndex: number) => void;
+
+  setChatExecutionMode: (agentId: string, chatId: string, mode: ExecutionMode) => void;
 
   subAgentStart: (agentId: string, chatId: string, run: SubAgentRunUI) => void;
   subAgentDelta: (agentId: string, chatId: string, runId: string, content: string) => void;

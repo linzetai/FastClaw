@@ -30,6 +30,7 @@ export function useMessageStreamChat({
   const newChat = useAgentStore((s) => s.newChat);
   const updateChatBackendId = useAgentStore((s) => s.updateChatBackendId);
   const updateChatUsage = useAgentStore((s) => s.updateChatUsage);
+  const setChatExecutionMode = useAgentStore((s) => s.setChatExecutionMode);
   const subAgentStart = useAgentStore((s) => s.subAgentStart);
   const subAgentDelta = useAgentStore((s) => s.subAgentDelta);
   const subAgentToolStart = useAgentStore((s) => s.subAgentToolStart);
@@ -398,6 +399,14 @@ export function useMessageStreamChat({
                 expiresAt: timeoutSecs > 0 ? Date.now() + timeoutSecs * 1000 : 0,
                 allowMultiple: d.allowMultiple as boolean | undefined,
               });
+            }
+            break;
+          }
+          case "chat.mode_change": {
+            const d = event.data;
+            const newMode = d?.to as string | undefined;
+            if (newMode && (newMode === "agent" || newMode === "plan")) {
+              setChatExecutionMode(capturedAgentId, capturedChatId, newMode);
             }
             break;
           }

@@ -2201,6 +2201,12 @@ impl AgentRuntime {
             .unwrap_or_else(|_| "sh".to_string());
         let date = chrono::Local::now().format("%Y-%m-%d").to_string();
 
+        let pending_todo_summary = if mode == ExecutionMode::Agent {
+            params.todo_store.as_ref().and_then(|ts| ts.pending_summary())
+        } else {
+            None
+        };
+
         PromptContext {
             agent_config: Arc::new(params.config.clone()),
             enabled_tools: tool_names,
@@ -2216,6 +2222,7 @@ impl AgentRuntime {
             token_budget: None,
             memory_prompt: None,
             session_start_date: date,
+            pending_todo_summary,
         }
     }
 

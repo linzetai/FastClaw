@@ -45,8 +45,19 @@ You are currently in **Plan Mode**. In this mode:
 - You can ONLY use read-only tools (read files, search, list directories, browse)
 - You CANNOT write files, edit files, execute commands, or make any changes
 - Focus on understanding, analyzing, and planning
-- Create a detailed plan that can be executed when switching back to Agent mode
-- Use `exit_plan_mode` when planning is complete and you're ready to implement"
+
+### Plan Output Requirements
+
+When you have finished exploring and are ready to present your plan:
+
+1. **Create a todo list** using `todo_write` that breaks your plan into actionable steps
+   - Each todo should map to a concrete implementation step
+   - Use descriptive IDs that reference plan sections (e.g. \"add-auth-middleware\")
+   - Mark all todos as `pending` (you are still in plan mode)
+2. **Call `exit_plan_mode`** to present the plan for user approval
+
+The todo list will persist when you switch to Agent mode, giving you a structured \
+checklist to follow during implementation."
                 .to_string(),
         );
     }
@@ -90,16 +101,33 @@ with concrete options rather than open-ended ones."
     }
 
     if has(ctx, "todo_write") {
-        parts.push(
-            "\
+        if let Some(ref summary) = ctx.pending_todo_summary {
+            parts.push(format!(
+                "\
+## Implementation Checklist (from Plan Mode)
+
+You have pending tasks from a previous planning phase. Follow this checklist:
+
+{summary}
+
+Work through these items systematically:
+1. Mark the current task as `in_progress` using `todo_write`
+2. Implement it fully
+3. Mark it `completed` and move to the next `pending` task
+4. Continue until all tasks are done"
+            ));
+        } else {
+            parts.push(
+                "\
 ## Task Management
 
 Use todo_write for complex multi-step tasks (3+ steps). \
 Skip it for simple tasks that need only 1-2 actions. \
 Keep exactly one task in_progress at a time. \
 Mark tasks complete immediately upon finishing."
-                .to_string(),
-        );
+                    .to_string(),
+            );
+        }
     }
 
     if has(ctx, "memory_store") || has(ctx, "memory_search") {
@@ -133,8 +161,18 @@ fn session_guidance_zh(ctx: &PromptContext) -> String {
 - 只能使用只读工具（读取文件、搜索、列出目录、浏览）
 - 不能写入文件、编辑文件、执行命令或做任何修改
 - 专注于理解、分析和规划
-- 创建详细的计划，以便切换回 Agent 模式后执行
-- 规划完成且准备实施时使用 `exit_plan_mode`"
+
+### 计划输出要求
+
+当你完成探索并准备呈现计划时：
+
+1. **创建待办列表** — 使用 `todo_write` 将计划拆分为可执行的步骤
+   - 每个 todo 应对应计划中一个具体的实施步骤
+   - 使用描述性的 ID（如 \"add-auth-middleware\"）
+   - 所有 todo 标记为 `pending`（你仍在计划模式中）
+2. **调用 `exit_plan_mode`** — 将计划提交给用户审批
+
+待办列表会在切换到 Agent 模式后保留，为你提供结构化的实施清单。"
                 .to_string(),
         );
     }
@@ -177,16 +215,33 @@ fn session_guidance_zh(ctx: &PromptContext) -> String {
     }
 
     if has(ctx, "todo_write") {
-        parts.push(
-            "\
+        if let Some(ref summary) = ctx.pending_todo_summary {
+            parts.push(format!(
+                "\
+## 实施清单（来自计划模式）
+
+你有来自之前计划阶段的待办任务，请按照此清单执行：
+
+{summary}
+
+系统化地完成这些任务：
+1. 使用 `todo_write` 将当前任务标记为 `in_progress`
+2. 完整实施该任务
+3. 标记为 `completed`，然后处理下一个 `pending` 任务
+4. 持续直到所有任务完成"
+            ));
+        } else {
+            parts.push(
+                "\
 ## 任务管理
 
 复杂的多步骤任务（3+ 步）使用 todo_write。\
 简单的 1-2 步任务跳过它。\
 同时只保持一个任务为 in_progress。\
 完成后立即标记为 complete。"
-                .to_string(),
-        );
+                    .to_string(),
+            );
+        }
     }
 
     if has(ctx, "memory_store") || has(ctx, "memory_search") {
@@ -492,6 +547,7 @@ mod tests {
             token_budget: None,
             memory_prompt: None,
             session_start_date: "2026-04-29".into(),
+            pending_todo_summary: None,
         }
     }
 

@@ -17,6 +17,7 @@ function makeChat(overrides: Partial<Chat> = {}): Chat {
     messageCount: 0,
     open: true,
     subAgentRuns: {},
+    executionMode: "agent" as const,
     ...overrides,
   };
 }

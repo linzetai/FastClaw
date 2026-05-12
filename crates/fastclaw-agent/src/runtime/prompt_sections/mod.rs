@@ -993,6 +993,7 @@ mod tests {
             token_budget: None,
             memory_prompt: None,
             session_start_date: "2026-04-29".into(),
+            pending_todo_summary: None,
         }
     }
 

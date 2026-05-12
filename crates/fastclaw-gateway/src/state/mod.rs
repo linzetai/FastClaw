@@ -83,6 +83,7 @@ pub struct RuntimeState {
     pub prompt_guard: Arc<fastclaw_security::PromptGuard>,
     pub mode_state: fastclaw_agent::builtin_tools::ExecutionModeState,
     pub todo_store: fastclaw_agent::builtin_tools::TodoStore,
+    pub plan_file_store: fastclaw_agent::builtin_tools::PlanFileStore,
 }
 
 /// Persistent stores.
@@ -1497,6 +1498,7 @@ impl AppState {
                 prompt_guard: Arc::new(fastclaw_security::PromptGuard::new()),
                 mode_state: fastclaw_agent::builtin_tools::ExecutionModeState::new(),
                 todo_store,
+                plan_file_store: fastclaw_agent::builtin_tools::PlanFileStore::default(),
             },
             store: StorageState {
                 session_store,

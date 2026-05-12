@@ -12,6 +12,7 @@ import type {
   ChatMessageImage,
   ChatMessageToolCall,
   ChatUsage,
+  ExecutionMode,
   QueuedMessage,
   StreamItem,
   SubAgentRunUI,
@@ -253,6 +254,7 @@ export function buildSessionSlice({ set, get }: SetGet) {
             messageCount: s.messageCount,
             open: persistedOpen.has(s.id) && s.messageCount > 0,
             subAgentRuns: {},
+            executionMode: "agent",
             usage: (s.totalPromptTokens || s.totalCompletionTokens || s.totalElapsedMs) ? {
               promptTokens: s.totalPromptTokens ?? 0,
               completionTokens: s.totalCompletionTokens ?? 0,
@@ -419,6 +421,24 @@ export function buildSessionSlice({ set, get }: SetGet) {
                   },
                 };
               }),
+            },
+          },
+        };
+      });
+    },
+
+    setChatExecutionMode: (agentId: string, chatId: string, mode: ExecutionMode) => {
+      set((state) => {
+        const ac = state.agentChats[agentId];
+        if (!ac) return state;
+        return {
+          agentChats: {
+            ...state.agentChats,
+            [agentId]: {
+              ...ac,
+              chatList: ac.chatList.map((c) =>
+                c.id === chatId ? { ...c, executionMode: mode } : c,
+              ),
             },
           },
         };
