@@ -182,6 +182,7 @@ export function useMessageStreamChat({
 
     const currentState = useAgentStore.getState();
     const capturedAgentId = currentState.activeAgentId;
+    const currentAgent = currentState.agents.find((a) => a.id === capturedAgentId);
     const currentAc = currentState.agentChats[capturedAgentId];
     const currentActiveChat = currentAc?.chatList.find((c) => c.id === currentAc.activeChatId);
     const capturedChatId = currentActiveChat?.id ?? "temp";
@@ -240,6 +241,7 @@ export function useMessageStreamChat({
         messages: [{ role: "user", content: messageContent }],
         agentId: capturedAgentId,
         sessionId: capturedChatId,
+        model: currentAgent?.model || undefined,
         workDir: currentActiveChat?.workDir ?? undefined,
       },
       (event) => {
