@@ -348,7 +348,16 @@ pub(crate) async fn handle_channel_message(
 
     // Inject channel context so the agent knows it is operating from IM
     let mut enriched_request = setup.enriched_request.clone();
-    inject_channel_context(&mut enriched_request.messages, channel_id, chat_id);
+    let resolved_model = enriched_request
+        .model
+        .clone()
+        .unwrap_or_else(|| setup.agent_config.model.model.clone());
+    inject_channel_context(
+        &mut enriched_request.messages,
+        channel_id,
+        chat_id,
+        &resolved_model,
+    );
 
     // Inject channel-scoped tool definitions so the LLM can see them
     let ch_tools = state.rt.tool_registry.channel_scoped_definitions();
@@ -439,13 +448,20 @@ pub(crate) async fn handle_channel_message(
 /// Inject a `[Channel Context]` system message so the agent knows it is operating
 /// from an IM channel and can tailor its response format (concise, no code fences
 /// for simple answers, etc.).
-fn inject_channel_context(messages: &mut Vec<ChatMessage>, channel_id: &str, chat_id: &str) {
+fn inject_channel_context(
+    messages: &mut Vec<ChatMessage>,
+    channel_id: &str,
+    chat_id: &str,
+    model_name: &str,
+) {
     let prompt = format!(
         "[Channel Context]\n\
          This conversation is happening through an IM channel (not a terminal/IDE).\n\
          Channel: {channel_id}\n\
-         Chat: {chat_id}\n\n\
+         Chat: {chat_id}\n\
+         Model: {model_name}\n\n\
          Guidance:\n\
+         - You are powered by the model: {model_name}. When asked about your model, report this name.\n\
          - You have FULL access to the coding toolchain (read/write files, shell, grep, etc.).\n\
          - The user may ask you to fix code, run builds, check tests, etc. — use your tools.\n\
          - Keep responses concise and IM-friendly. Use short summaries instead of full file dumps.\n\
@@ -493,8 +509,6 @@ enum ChannelSegment {
 struct ChannelStreamFormat {
     show_thinking: bool,
     thinking_max_chars: usize,
-    show_tool_results: bool,
-    tool_result_max_chars: usize,
 }
 
 impl Default for ChannelStreamFormat {
@@ -502,8 +516,6 @@ impl Default for ChannelStreamFormat {
         Self {
             show_thinking: true,
             thinking_max_chars: 200,
-            show_tool_results: true,
-            tool_result_max_chars: 300,
         }
     }
 }
@@ -718,7 +730,7 @@ fn short_path(p: &str) -> String {
 fn render_tool_segment(
     tool_name: &str,
     args: Option<&str>,
-    result: Option<&str>,
+    _result: Option<&str>,
     success: Option<bool>,
     duration_ms: Option<u64>,
     is_running: bool,
