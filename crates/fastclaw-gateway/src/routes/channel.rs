@@ -478,7 +478,6 @@ enum ChannelSegment {
     ToolCall {
         tool_name: String,
         call_id: String,
-        #[allow(dead_code)]
         args: Option<String>,
         result: Option<String>,
         success: Option<bool>,
@@ -554,6 +553,7 @@ fn render_segments(
             }
             ChannelSegment::ToolCall {
                 tool_name,
+                args,
                 result,
                 success,
                 duration_ms,
@@ -573,6 +573,7 @@ fn render_segments(
                 } else {
                     parts.push(render_tool_segment(
                         tool_name,
+                        args.as_deref(),
                         result.as_deref(),
                         *success,
                         *duration_ms,
@@ -587,16 +588,157 @@ fn render_segments(
     parts.join("\n\n")
 }
 
+fn friendly_tool_name(tool_name: &str) -> &'static str {
+    match tool_name {
+        "web_search" => "网络搜索",
+        "web_fetch" => "网页获取",
+        "http_fetch" => "HTTP 请求",
+        "read_file" => "读取文件",
+        "write_file" => "写入文件",
+        "edit_file" => "编辑文件",
+        "multi_edit" => "批量编辑",
+        "apply_patch" => "应用补丁",
+        "search_in_files" => "文件搜索",
+        "list_directory" => "列出目录",
+        "glob" => "文件匹配",
+        "shell_exec" => "执行命令",
+        "git" => "Git 操作",
+        "browser" => "浏览器",
+        "screenshot" => "截图",
+        "memory_search" => "记忆搜索",
+        "memory_store" | "memory" => "记忆存储",
+        "image_generate" => "生成图片",
+        "text_to_speech" => "语音合成",
+        "calculator" => "计算器",
+        "get_current_time" => "获取时间",
+        "todo_write" | "todo_read" => "待办事项",
+        "task_create" | "task_list" | "task_get" | "task_stop" | "task_update" => "任务管理",
+        "confirm" => "确认操作",
+        "workspace_symbols" => "符号搜索",
+        "go_to_definition" => "跳转定义",
+        "find_references" => "查找引用",
+        "file_outline" => "文件大纲",
+        "code_sections" => "代码分段",
+        "lsp" => "语言服务",
+        "notebook_edit" => "笔记本编辑",
+        "snip" => "代码片段",
+        "workflow" => "工作流",
+        "skill" | "list_skills" | "read_skill" | "search_skills" => "技能",
+        "tool_search" => "工具搜索",
+        "terminal_capture" => "终端截取",
+        "identity" | "get_identity" | "set_identity" => "身份设置",
+        "enter_plan_mode" | "exit_plan_mode" => "规划模式",
+        "send_user_message" => "消息发送",
+        _ => "",
+    }
+}
+
+/// Extract a concise argument summary from tool args JSON for display.
+fn tool_args_summary(tool_name: &str, args: Option<&str>) -> String {
+    let args_str = match args {
+        Some(a) if !a.is_empty() => a,
+        _ => return String::new(),
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(args_str) {
+        Ok(v) => v,
+        Err(_) => return String::new(),
+    };
+
+    let summary = match tool_name {
+        "web_search" => parsed
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        "web_fetch" | "http_fetch" => parsed
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|u| {
+                if u.len() > 50 {
+                    format!("{}...", &u[..47])
+                } else {
+                    u.to_string()
+                }
+            }),
+        "read_file" => parsed
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|p| short_path(p)),
+        "write_file" | "edit_file" | "multi_edit" | "apply_patch" => parsed
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|p| short_path(p)),
+        "search_in_files" | "glob" => parsed
+            .get("pattern")
+            .or_else(|| parsed.get("query"))
+            .or_else(|| parsed.get("glob"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        "list_directory" => parsed
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|p| short_path(p)),
+        "shell_exec" => parsed
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(|c| {
+                if c.len() > 60 {
+                    format!("{}...", &c[..57])
+                } else {
+                    c.to_string()
+                }
+            }),
+        "git" => parsed
+            .get("command")
+            .or_else(|| parsed.get("action"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        "memory_search" => parsed
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        "browser" => parsed
+            .get("action")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        _ => None,
+    };
+
+    summary.unwrap_or_default()
+}
+
+fn short_path(p: &str) -> String {
+    let parts: Vec<&str> = p.split('/').collect();
+    if parts.len() <= 3 {
+        p.to_string()
+    } else {
+        format!(".../{}", parts[parts.len() - 2..].join("/"))
+    }
+}
+
 fn render_tool_segment(
     tool_name: &str,
+    args: Option<&str>,
     result: Option<&str>,
     success: Option<bool>,
     duration_ms: Option<u64>,
     is_running: bool,
-    fmt: &ChannelStreamFormat,
+    _fmt: &ChannelStreamFormat,
 ) -> String {
+    let friendly = friendly_tool_name(tool_name);
+    let display_name = if friendly.is_empty() {
+        tool_name.to_string()
+    } else {
+        friendly.to_string()
+    };
+
+    let args_hint = tool_args_summary(tool_name, args);
+
     if is_running {
-        return format!("🔧 **{tool_name}**...");
+        if args_hint.is_empty() {
+            return format!("🔧 **{display_name}**...");
+        } else {
+            return format!("🔧 **{display_name}** {args_hint}...");
+        }
     }
 
     let status_icon = match success {
@@ -615,24 +757,10 @@ fn render_tool_segment(
         })
         .unwrap_or_default();
 
-    let header = format!("🔧 **{tool_name}** {status_icon}{duration_str}");
-
-    if !fmt.show_tool_results {
-        return header;
-    }
-
-    match result {
-        Some(r) if !r.is_empty() => {
-            let display = if r.len() > fmt.tool_result_max_chars {
-                let truncated: String = r.chars().take(fmt.tool_result_max_chars).collect();
-                format!("{truncated}...")
-            } else {
-                r.to_string()
-            };
-            let first_line = display.lines().next().unwrap_or(&display);
-            format!("{header}\n> {first_line}")
-        }
-        _ => header,
+    if args_hint.is_empty() {
+        format!("{status_icon} **{display_name}**{duration_str}")
+    } else {
+        format!("{status_icon} **{display_name}** {args_hint}{duration_str}")
     }
 }
 
@@ -804,18 +932,22 @@ async fn handle_channel_streaming(
             StreamEvent::Delta(delta) => {
                 for choice in &delta.choices {
                     if let Some(ref reasoning) = choice.delta.reasoning_content {
-                        match segments.last_mut() {
-                            Some(ChannelSegment::Thinking(ref mut t)) => t.push_str(reasoning),
-                            _ => segments.push(ChannelSegment::Thinking(reasoning.clone())),
+                        if !reasoning.is_empty() {
+                            match segments.last_mut() {
+                                Some(ChannelSegment::Thinking(ref mut t)) => t.push_str(reasoning),
+                                _ => segments.push(ChannelSegment::Thinking(reasoning.clone())),
+                            }
+                            segments_dirty = true;
                         }
-                        segments_dirty = true;
                     }
                     if let Some(ref content) = choice.delta.content {
-                        match segments.last_mut() {
-                            Some(ChannelSegment::Text(ref mut t)) => t.push_str(content),
-                            _ => segments.push(ChannelSegment::Text(content.clone())),
+                        if !content.is_empty() {
+                            match segments.last_mut() {
+                                Some(ChannelSegment::Text(ref mut t)) => t.push_str(content),
+                                _ => segments.push(ChannelSegment::Text(content.clone())),
+                            }
+                            segments_dirty = true;
                         }
-                        segments_dirty = true;
                     }
                 }
 
@@ -1094,10 +1226,20 @@ mod tests {
         success: Option<bool>,
         ms: Option<u64>,
     ) -> ChannelSegment {
+        tool_with_args(name, None, result, success, ms)
+    }
+
+    fn tool_with_args(
+        name: &str,
+        args: Option<&str>,
+        result: Option<&str>,
+        success: Option<bool>,
+        ms: Option<u64>,
+    ) -> ChannelSegment {
         ChannelSegment::ToolCall {
             tool_name: name.to_string(),
             call_id: "c1".to_string(),
-            args: None,
+            args: args.map(String::from),
             result: result.map(String::from),
             success,
             duration_ms: ms,
@@ -1166,7 +1308,23 @@ mod tests {
     fn render_tool_running() {
         let segs = vec![tool("read_file", None, None, None)];
         let out = render_segments(&segs, true, &default_fmt());
-        assert_eq!(out, "🔧 **read_file**...");
+        assert_eq!(out, "🔧 **读取文件**...");
+    }
+
+    #[test]
+    fn render_tool_running_with_args() {
+        let segs = vec![tool_with_args(
+            "web_search",
+            Some(r#"{"query":"珠海天气"}"#),
+            None,
+            None,
+            None,
+        )];
+        let out = render_segments(&segs, true, &default_fmt());
+        assert!(
+            out.contains("网络搜索") && out.contains("珠海天气"),
+            "should show friendly name + query: {out}"
+        );
     }
 
     #[test]
@@ -1180,15 +1338,21 @@ mod tests {
         let out = render_segments(&segs, false, &default_fmt());
         assert!(out.contains("✅"), "success icon: {out}");
         assert!(out.contains("350ms"), "duration: {out}");
-        assert!(out.contains("found 3 files"), "result: {out}");
+        assert!(out.contains("读取文件"), "friendly name: {out}");
     }
 
     #[test]
     fn render_tool_failed() {
-        let segs = vec![tool("shell", Some("exit code 1"), Some(false), Some(1200))];
+        let segs = vec![tool(
+            "shell_exec",
+            Some("exit code 1"),
+            Some(false),
+            Some(1200),
+        )];
         let out = render_segments(&segs, false, &default_fmt());
         assert!(out.contains("❌"), "failure icon: {out}");
         assert!(out.contains("1.2s"), "duration: {out}");
+        assert!(out.contains("执行命令"), "friendly name: {out}");
     }
 
     #[test]
@@ -1202,18 +1366,23 @@ mod tests {
                 Some(200),
             ),
             text("I found two approaches."),
-            tool("shell", Some("npm install OK"), Some(true), Some(1500)),
+            tool(
+                "shell_exec",
+                Some("npm install OK"),
+                Some(true),
+                Some(1500),
+            ),
             text("Done!"),
         ];
         let out = render_segments(&segs, false, &default_fmt());
         let lines: Vec<&str> = out.lines().collect();
         let analyze_pos = lines.iter().position(|l| l.contains("analyze")).unwrap();
-        let read_pos = lines.iter().position(|l| l.contains("read_file")).unwrap();
+        let read_pos = lines.iter().position(|l| l.contains("读取文件")).unwrap();
         let found_pos = lines
             .iter()
             .position(|l| l.contains("two approaches"))
             .unwrap();
-        let shell_pos = lines.iter().position(|l| l.contains("shell")).unwrap();
+        let shell_pos = lines.iter().position(|l| l.contains("执行命令")).unwrap();
         let done_pos = lines.iter().position(|l| l.contains("Done!")).unwrap();
         assert!(analyze_pos < read_pos, "text before tool");
         assert!(read_pos < found_pos, "tool before next text");
@@ -1277,25 +1446,49 @@ mod tests {
     }
 
     #[test]
-    fn render_tool_result_truncated() {
-        let long_result = "x".repeat(500);
-        let segs = vec![tool("search", Some(&long_result), Some(true), Some(100))];
+    fn render_tool_compact_no_result() {
+        let segs = vec![tool(
+            "search_in_files",
+            Some("found 10 matches"),
+            Some(true),
+            Some(100),
+        )];
         let out = render_segments(&segs, false, &default_fmt());
-        assert!(out.contains("..."), "should truncate: {out}");
-        assert!(out.len() < 500, "output too long: {}", out.len());
+        assert!(
+            !out.contains("found 10 matches"),
+            "result should not be shown in compact format: {out}"
+        );
+        assert!(out.contains("文件搜索"), "friendly name: {out}");
     }
 
     #[test]
-    fn render_tool_results_hidden_when_disabled() {
-        let segs = vec![tool("read_file", Some("big output"), Some(true), Some(100))];
-        let mut fmt = default_fmt();
-        fmt.show_tool_results = false;
-        let out = render_segments(&segs, false, &fmt);
+    fn render_tool_with_args_summary() {
+        let segs = vec![tool_with_args(
+            "web_search",
+            Some(r#"{"query":"rust async"}"#),
+            Some("results..."),
+            Some(true),
+            Some(800),
+        )];
+        let out = render_segments(&segs, false, &default_fmt());
+        assert!(out.contains("网络搜索"), "friendly name: {out}");
+        assert!(out.contains("rust async"), "args summary: {out}");
+        assert!(out.contains("800ms"), "duration: {out}");
+    }
+
+    #[test]
+    fn render_unknown_tool_uses_raw_name() {
+        let segs = vec![tool(
+            "custom_tool_xyz",
+            Some("ok"),
+            Some(true),
+            Some(50),
+        )];
+        let out = render_segments(&segs, false, &default_fmt());
         assert!(
-            !out.contains("big output"),
-            "result should be hidden: {out}"
+            out.contains("custom_tool_xyz"),
+            "unknown tool should use raw name: {out}"
         );
-        assert!(out.contains("read_file"));
     }
 
     #[test]
@@ -1308,7 +1501,7 @@ mod tests {
         let out = render_segments(&segs, false, &default_fmt());
         let lines: Vec<&str> = out.lines().collect();
         let think_pos = lines.iter().position(|l| l.contains("💭")).unwrap();
-        let tool_pos = lines.iter().position(|l| l.contains("read_file")).unwrap();
+        let tool_pos = lines.iter().position(|l| l.contains("读取文件")).unwrap();
         let answer_pos = lines.iter().position(|l| l.contains("answer")).unwrap();
         assert!(think_pos < tool_pos);
         assert!(tool_pos < answer_pos);

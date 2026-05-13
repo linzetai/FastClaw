@@ -554,15 +554,25 @@ impl FeishuClient {
     }
 
     /// Build a Feishu interactive card JSON string from markdown-like text.
+    /// Uses Card Kit 2.0 format with full-width markdown element for proper streaming display.
     fn build_card(content: &str) -> String {
         serde_json::json!({
-            "elements": [{
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": content
+            "schema": "2.0",
+            "config": {
+                "streaming_mode": true,
+                "summary": { "content": "[Streaming...]" },
+                "streaming_config": {
+                    "print_frequency_ms": { "default": 50 },
+                    "print_step": { "default": 1 }
                 }
-            }]
+            },
+            "body": {
+                "elements": [{
+                    "tag": "markdown",
+                    "content": content,
+                    "element_id": "content"
+                }]
+            }
         })
         .to_string()
     }
