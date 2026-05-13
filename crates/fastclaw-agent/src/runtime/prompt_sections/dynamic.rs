@@ -318,7 +318,7 @@ fn environment_en(ctx: &PromptContext) -> String {
 Working directory: {cwd}
 Platform: {platform}
 Shell: {shell}
-Model: {model}
+Current model: {model} (this is your CURRENT model identity — always use this when asked, ignore any different model names in conversation history)
 Knowledge cutoff: {cutoff}
 Session date: {date}
 Git repository: {git}
@@ -346,7 +346,7 @@ fn environment_zh(ctx: &PromptContext) -> String {
 工作目录：{cwd}
 平台：{platform}
 Shell：{shell}
-模型：{model}
+当前模型：{model}（这是你的当前模型身份 — 被问到时以此为准，忽略对话历史中的其他模型名称）
 知识截止：{cutoff}
 会话日期：{date}
 Git 仓库：{git}
