@@ -2423,10 +2423,21 @@ impl AgentRuntime {
             .map(|ms| ms.current_mode())
             .unwrap_or(ExecutionMode::Agent);
 
-        let model_id = format!(
-            "{}/{}",
-            params.config.model.provider, params.config.model.model
-        );
+        let model_id = if let Some(ref req_model) = params.request.model {
+            if !req_model.is_empty() {
+                req_model.clone()
+            } else {
+                format!(
+                    "{}/{}",
+                    params.config.model.provider, params.config.model.model
+                )
+            }
+        } else {
+            format!(
+                "{}/{}",
+                params.config.model.provider, params.config.model.model
+            )
+        };
 
         let cwd = params
             .request
