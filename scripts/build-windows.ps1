@@ -1,10 +1,24 @@
 param(
     [switch]$Release,
     [switch]$SkipLint,
-    [switch]$StrictLint
+    [switch]$StrictLint,
+    [int]$Jobs = 0,
+    [switch]$NoFrozenLockfile,
+    [switch]$FrozenLockfile
 )
 
 $ErrorActionPreference = "Stop"
+if ($Jobs -le 0) {
+    $Jobs = [Environment]::ProcessorCount
+}
+if ($Jobs -lt 1) {
+    $Jobs = 1
+}
+if ($NoFrozenLockfile -and $FrozenLockfile) {
+    Write-Host "[ERR ] Cannot use -NoFrozenLockfile and -FrozenLockfile together" -ForegroundColor Red
+    exit 1
+}
+$UseFrozenLockfile = $FrozenLockfile
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
@@ -32,7 +46,15 @@ if (-not (Test-Path $KeyPath)) {
     exit 1
 }
 
-$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content $KeyPath -Raw
+$RawSigningKey = Get-Content $KeyPath -Raw
+$SigningKeyLines = $RawSigningKey -split "`r?`n" |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -and ($_ -notmatch "^untrusted comment:") }
+if (-not $SigningKeyLines -or $SigningKeyLines.Count -eq 0) {
+    Err "Signing key is empty or invalid: $KeyPath"
+    exit 1
+}
+$env:TAURI_SIGNING_PRIVATE_KEY = ($SigningKeyLines[-1] -replace "\s+", "")
 if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
     $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
 }
@@ -43,6 +65,7 @@ Ok "Version: v$Version"
 Ok "Cargo: $(cargo --version)"
 Ok "Node: $(node --version)"
 Ok "pnpm: $(corepack pnpm --version)"
+Ok "Build jobs: $Jobs"
 
 if (-not $SkipLint) {
     if ($StrictLint) {
@@ -52,9 +75,9 @@ if (-not $SkipLint) {
     }
     Push-Location $ProjectRoot
     if ($StrictLint) {
-        cargo clippy --workspace --all-targets -j 1 -- -D warnings
+        cargo clippy --workspace --all-targets -j $Jobs -- -D warnings
     } else {
-        cargo clippy --workspace --all-targets -j 1
+        cargo clippy --workspace --all-targets -j $Jobs
     }
     if ($LASTEXITCODE -ne 0) {
         Pop-Location
@@ -65,11 +88,23 @@ if (-not $SkipLint) {
     Ok "Clippy passed"
 }
 
-Log "Installing frontend dependencies..."
+if ($UseFrozenLockfile) {
+    Log "Installing frontend dependencies (frozen-lockfile)..."
+} else {
+    Log "Installing frontend dependencies (no-frozen-lockfile)..."
+}
 Push-Location $AppDir
-corepack pnpm install --frozen-lockfile
+if ($UseFrozenLockfile) {
+    corepack pnpm install --frozen-lockfile
+} else {
+    corepack pnpm install --no-frozen-lockfile
+}
 if ($LASTEXITCODE -ne 0) {
     Pop-Location
+    if ($UseFrozenLockfile) {
+        Write-Host "  Hint: lockfile may be out of sync with pnpm config (for example patchedDependencies)."
+        Write-Host "  Retry without -FrozenLockfile"
+    }
     Err "pnpm install failed"
     exit 1
 }
@@ -86,8 +121,11 @@ Ok "Frontend build complete"
 
 Log "Building Tauri app (Windows)..."
 Push-Location $AppDir
+$env:CARGO_BUILD_JOBS = "$Jobs"
 corepack pnpm exec tauri build
-if ($LASTEXITCODE -ne 0) {
+$TauriExitCode = $LASTEXITCODE
+Remove-Item Env:CARGO_BUILD_JOBS -ErrorAction SilentlyContinue
+if ($TauriExitCode -ne 0) {
     Pop-Location
     Err "Tauri build failed"
     exit 1
