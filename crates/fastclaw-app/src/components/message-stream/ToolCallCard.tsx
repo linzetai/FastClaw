@@ -58,7 +58,7 @@ function getMcpMeta(name: string): { icon: ReactNode; label: string } | null {
   const idx = rest.indexOf("_");
   const serverId = idx >= 0 ? rest.slice(0, idx) : rest;
   const toolName = idx >= 0 ? rest.slice(idx + 1) : "";
-  return { icon: <Plug size={13} strokeWidth={1.5} />, label: `${serverId}/${toolName}` };
+  return { icon: <Plug size={16} strokeWidth={1.5} />, label: `${serverId}/${toolName}` };
 }
 
 
@@ -399,9 +399,9 @@ export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCal
               }}
             />
           ) : isError ? (
-            <XIcon size={12} strokeWidth={2} style={{ color: "var(--red)" }} />
+            <XIcon size={14} strokeWidth={2} style={{ color: "var(--red)" }} />
           ) : (
-            <Check size={12} strokeWidth={2} style={{ color: "var(--fill-tertiary)" }} />
+            <Check size={14} strokeWidth={2} style={{ color: "var(--fill-tertiary)" }} />
           )}
         </span>
 
@@ -431,11 +431,11 @@ export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCal
         {/* Expand chevron */}
         {hasDetails && (
           <ChevronRight
-            size={10}
+            size={12}
             strokeWidth={2}
             className="shrink-0 transition-transform duration-150"
             style={{
-              color: "var(--fill-quaternary)",
+              color: "var(--fill-tertiary)",
               transform: expanded ? "rotate(90deg)" : "rotate(0)",
             }}
           />

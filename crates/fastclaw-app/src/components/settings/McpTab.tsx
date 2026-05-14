@@ -310,11 +310,11 @@ export function McpTab() {
             style={{ color: "var(--fill-secondary)" }}
             title="刷新 MCP 连接"
           >
-            <RefreshCw size={13} strokeWidth={1.5} className={reloading ? "animate-spin" : ""} /> 刷新
+            <RefreshCw size={16} strokeWidth={1.5} className={reloading ? "animate-spin" : ""} /> 刷新
           </button>
           {!adding && !editingId && (
             <button onClick={startAdd} className="flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-xs)] px-2.5 py-1 text-[12px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)]" style={{ color: "var(--accent)" }}>
-              <Plus size={13} strokeWidth={2} /> 添加
+              <Plus size={16} strokeWidth={2} /> 添加
             </button>
           )}
         </div>
@@ -352,17 +352,17 @@ export function McpTab() {
               <div className="flex items-center gap-1">
                 {st?.status === "failed" && (
                   <button onClick={handleReload} className="flex h-7 cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-1.5 text-[11px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)]" style={{ color: "var(--red)" }} title="重试连接">
-                    <RefreshCw size={12} strokeWidth={1.5} /> 重试
+                    <RefreshCw size={16} strokeWidth={1.5} /> 重试
                   </button>
                 )}
                 <button onClick={() => handleToggle(srv.id)} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" title={srv.enabled ? "禁用" : "启用"}>
                   {srv.enabled ? <ToggleRight size={16} strokeWidth={1.5} style={{ color: "var(--green)" }} /> : <ToggleLeft size={16} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />}
                 </button>
                 <button onClick={() => startEdit(srv)} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" title="编辑">
-                  <Pencil size={13} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                  <Pencil size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
                 </button>
                 <button onClick={() => handleDelete(srv.id)} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" title="删除">
-                  <Trash2 size={13} strokeWidth={1.5} style={{ color: "var(--red)" }} />
+                  <Trash2 size={16} strokeWidth={1.5} style={{ color: "var(--red)" }} />
                 </button>
               </div>
             </div>

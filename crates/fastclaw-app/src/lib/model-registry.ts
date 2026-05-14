@@ -90,6 +90,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     apiKeyPrefix: "sk-",
     docsUrl: "https://platform.deepseek.com/api_keys",
     models: [
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", description: "旗舰推理模型，1M 上下文", contextWindow: 1048576, capabilities: TEXT_TOOL_REASON },
+      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", description: "极速推理模型，1M 上下文", contextWindow: 1048576, capabilities: TEXT_TOOL_REASON },
       { id: "deepseek-chat", name: "DeepSeek Chat", description: "通用对话模型", contextWindow: 65536, capabilities: TEXT_TOOL },
       { id: "deepseek-coder", name: "DeepSeek Coder", description: "专业编程模型", contextWindow: 65536, capabilities: TEXT_TOOL },
     ],
@@ -125,6 +127,7 @@ const TOKEN_LIMIT_PATTERNS: Array<[RegExp, number]> = [
   [/^qwen-max/, 32768],
   [/^qwen-(plus|turbo|long)/, 131072],
   [/^qwen3-/, 131072],
+  [/^deepseek-v4/, 1048576],
   [/^deepseek-(chat|coder|reasoner)/, 65536],
   [/^deepseek-v3/, 65536],
   [/^llama-3\.3/, 131072],

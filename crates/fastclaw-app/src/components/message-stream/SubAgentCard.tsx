@@ -32,11 +32,11 @@ function StatusIndicator({ status }: { status: SubAgentRunUI["status"] }) {
         />
       );
     case "completed":
-      return <Check size={12} strokeWidth={2} style={{ color: "var(--green, #34c759)" }} />;
+      return <Check size={14} strokeWidth={2} style={{ color: "var(--green, #34c759)" }} />;
     case "failed":
-      return <XIcon size={12} strokeWidth={2} style={{ color: "var(--red)" }} />;
+      return <XIcon size={14} strokeWidth={2} style={{ color: "var(--red)" }} />;
     case "cancelled":
-      return <Square size={10} strokeWidth={2} style={{ color: "var(--fill-quaternary)" }} />;
+      return <Square size={12} strokeWidth={2} style={{ color: "var(--fill-quaternary)" }} />;
   }
 }
 
@@ -54,11 +54,11 @@ function MiniToolCall({ tc }: { tc: SubAgentToolCall }) {
     >
       <span className="flex h-3 w-3 items-center justify-center">
         {isRunning ? (
-          <Loader size={9} className="animate-spin" style={{ color: "var(--fill-tertiary)" }} />
+          <Loader size={12} className="animate-spin" style={{ color: "var(--fill-tertiary)" }} />
         ) : isError ? (
-          <XIcon size={9} strokeWidth={2} style={{ color: "var(--red)" }} />
+          <XIcon size={12} strokeWidth={2} style={{ color: "var(--red)" }} />
         ) : (
-          <Check size={9} strokeWidth={2} style={{ color: "var(--fill-tertiary)" }} />
+          <Check size={12} strokeWidth={2} style={{ color: "var(--fill-tertiary)" }} />
         )}
       </span>
       <span className="truncate font-mono">{tc.name}</span>
@@ -123,20 +123,20 @@ export function SubAgentCard({ run, onCancel }: SubAgentCardProps) {
         {isActive && onCancel && (
           <button
             onClick={(e) => { e.stopPropagation(); onCancel(run.runId); }}
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--fill-quaternary)]"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
             title="取消"
             aria-label="取消子智能体"
           >
-            <Square size={9} strokeWidth={2} style={{ color: "var(--fill-tertiary)" }} />
+            <Square size={12} strokeWidth={2} style={{ color: "var(--fill-tertiary)" }} />
           </button>
         )}
 
         <ChevronRight
-          size={10}
+          size={12}
           strokeWidth={2}
           className="shrink-0 transition-transform duration-150"
           style={{
-            color: "var(--fill-quaternary)",
+            color: "var(--fill-tertiary)",
             transform: expanded ? "rotate(90deg)" : "rotate(0)",
           }}
         />
@@ -225,11 +225,11 @@ export function SubAgentCard({ run, onCancel }: SubAgentCardProps) {
                   >
                     <span className="flex h-3.5 w-3.5 items-center justify-center">
                       {tc.status === "running" ? (
-                        <Loader size={10} className="animate-spin" style={{ color: "var(--fill-tertiary)" }} />
+                        <Loader size={12} className="animate-spin" style={{ color: "var(--fill-tertiary)" }} />
                       ) : tc.status === "error" ? (
-                        <XIcon size={10} strokeWidth={2} />
+                        <XIcon size={12} strokeWidth={2} />
                       ) : (
-                        <Check size={10} strokeWidth={2} style={{ color: "var(--fill-tertiary)" }} />
+                        <Check size={12} strokeWidth={2} style={{ color: "var(--fill-tertiary)" }} />
                       )}
                     </span>
                     <span className="font-mono font-medium">{tc.name}</span>

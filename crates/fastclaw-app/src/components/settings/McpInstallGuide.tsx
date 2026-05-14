@@ -53,7 +53,7 @@ export function McpInstallGuide() {
           <div className="rounded-[var(--radius-sm)] p-4" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-selected)]">
-                <Terminal size={14} style={{ color: "var(--accent)" }} />
+                <Terminal size={16} style={{ color: "var(--accent)" }} />
               </div>
               <div className="flex-1">
                 <h3 className="font-medium text-[14px]" style={{ color: "var(--fill-primary)" }}>使用 npm 安装 MCP 服务器</h3>
@@ -77,7 +77,7 @@ export function McpInstallGuide() {
           <div className="rounded-[var(--radius-sm)] p-4" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-selected)]">
-                <Package size={14} style={{ color: "var(--accent)" }} />
+                <Package size={16} style={{ color: "var(--accent)" }} />
               </div>
               <div className="flex-1">
                 <h3 className="font-medium text-[14px]" style={{ color: "var(--fill-primary)" }}>通过包管理器安装</h3>
@@ -98,7 +98,7 @@ export function McpInstallGuide() {
           <div className="rounded-[var(--radius-sm)] p-4" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-selected)]">
-                <Download size={14} style={{ color: "var(--accent)" }} />
+                <Download size={16} style={{ color: "var(--accent)" }} />
               </div>
               <div className="flex-1">
                 <h3 className="font-medium text-[14px]" style={{ color: "var(--fill-primary)" }}>从源码安装</h3>
@@ -128,7 +128,7 @@ export function McpInstallGuide() {
           <div className="rounded-[var(--radius-sm)] p-4" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-selected)]">
-                <Settings size={14} style={{ color: "var(--accent)" }} />
+                <Settings size={16} style={{ color: "var(--accent)" }} />
               </div>
               <div className="flex-1">
                 <h3 className="font-medium text-[14px]" style={{ color: "var(--fill-primary)" }}>配置 FastClaw 中的 MCP 服务器</h3>
@@ -156,7 +156,7 @@ export function McpInstallGuide() {
           <div className="rounded-[var(--radius-sm)] p-4" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-selected)]">
-                <Terminal size={14} style={{ color: "var(--accent)" }} />
+                <Terminal size={16} style={{ color: "var(--accent)" }} />
               </div>
               <div className="flex-1">
                 <h3 className="font-medium text-[14px]" style={{ color: "var(--fill-primary)" }}>示例配置</h3>
@@ -179,7 +179,7 @@ export function McpInstallGuide() {
           <div className="rounded-[var(--radius-sm)] p-4" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-selected)]">
-                <BookOpen size={14} style={{ color: "var(--accent)" }} />
+                <BookOpen size={16} style={{ color: "var(--accent)" }} />
               </div>
               <div className="flex-1">
                 <h3 className="font-medium text-[14px]" style={{ color: "var(--fill-primary)" }}>Chrome DevTools MCP</h3>
@@ -198,7 +198,7 @@ export function McpInstallGuide() {
           <div className="rounded-[var(--radius-sm)] p-4" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-selected)]">
-                <BookOpen size={14} style={{ color: "var(--accent)" }} />
+                <BookOpen size={16} style={{ color: "var(--accent)" }} />
               </div>
               <div className="flex-1">
                 <h3 className="font-medium text-[14px]" style={{ color: "var(--fill-primary)" }}>GitHub MCP</h3>
@@ -217,7 +217,7 @@ export function McpInstallGuide() {
           <div className="rounded-[var(--radius-sm)] p-4" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-selected)]">
-                <BookOpen size={14} style={{ color: "var(--accent)" }} />
+                <BookOpen size={16} style={{ color: "var(--accent)" }} />
               </div>
               <div className="flex-1">
                 <h3 className="font-medium text-[14px]" style={{ color: "var(--fill-primary)" }}>文件系统 MCP</h3>
@@ -238,7 +238,7 @@ export function McpInstallGuide() {
       <div className="rounded-[var(--radius-sm)] p-4" style={{ background: "color-mix(in srgb, var(--blue) 10%, transparent)", border: "0.5px solid var(--separator-opaque)" }}>
         <div className="flex items-start gap-3">
           <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full" style={{ background: "color-mix(in srgb, var(--blue) 20%, transparent)" }}>
-            <AlertTriangle size={14} style={{ color: "var(--blue)" }} />
+            <AlertTriangle size={16} style={{ color: "var(--blue)" }} />
           </div>
           <div>
             <h3 className="font-medium text-[14px]" style={{ color: "var(--blue)" }}>安全提示</h3>

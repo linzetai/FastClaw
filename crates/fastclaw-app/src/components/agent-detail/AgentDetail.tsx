@@ -93,13 +93,13 @@ export function AgentDetail({ open, onClose, agentName, agentInitial, agentColor
               agentInitial
             )}
             <div className="absolute inset-0 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100" style={{ background: "rgba(0,0,0,0.3)", transition: `opacity var(--duration-instant) var(--ease-in-out)` }}>
-              <Camera size={12} strokeWidth={1.5} color="white" />
+              <Camera size={14} strokeWidth={1.5} color="white" />
             </div>
           </button>
           <span className="min-w-0 truncate text-[14px] font-semibold" style={{ color: "var(--fill-primary)" }} title={agentName}>{agentName}</span>
         </div>
         <button onClick={onClose} className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full hover:bg-[var(--bg-hover)]" style={{ color: "var(--fill-tertiary)", transition: `background var(--duration-instant) var(--ease-in-out)` }} title="关闭面板">
-          <X size={14} strokeWidth={1.5} />
+          <X size={16} strokeWidth={1.5} />
         </button>
       </div>
 

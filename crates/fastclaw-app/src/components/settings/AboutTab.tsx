@@ -53,7 +53,7 @@ export function AboutTab() {
                   className="ml-3 flex shrink-0 cursor-pointer items-center gap-1.5 rounded-[var(--radius-xs)] px-3 py-1.5 text-[12px] font-medium text-white transition-opacity duration-150 hover:opacity-80"
                   style={{ background: "var(--tint)" }}
                 >
-                  <Download size={13} />
+                  <Download size={16} />
                   下载更新
                 </button>
               </div>
@@ -76,7 +76,7 @@ export function AboutTab() {
           ) : status === "ready" ? (
             <div className="flex items-center justify-between px-4 py-3">
               <div className="flex items-center gap-2">
-                <CheckCircle size={14} style={{ color: "var(--green)" }} />
+                <CheckCircle size={16} style={{ color: "var(--green)" }} />
                 <span className="text-[13px]" style={{ color: "var(--fill-primary)" }}>更新已下载，重启后生效</span>
               </div>
               <button
@@ -84,14 +84,14 @@ export function AboutTab() {
                 className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-[var(--radius-xs)] px-3 py-1.5 text-[12px] font-medium text-white transition-opacity duration-150 hover:opacity-80"
                 style={{ background: "var(--green, #34C759)" }}
               >
-                <RotateCcw size={13} />
+                <RotateCcw size={16} />
                 立即重启
               </button>
             </div>
           ) : status === "error" ? (
             <div className="flex items-center justify-between px-4 py-3">
               <div className="flex min-w-0 items-center gap-2">
-                <AlertCircle size={14} className="shrink-0" style={{ color: "var(--red)" }} />
+                <AlertCircle size={16} className="shrink-0" style={{ color: "var(--red)" }} />
                 <span className="truncate text-[13px]" style={{ color: "var(--fill-secondary)" }}>
                   {error ?? "检查更新失败"}
                 </span>
@@ -107,7 +107,7 @@ export function AboutTab() {
           ) : status === "up-to-date" ? (
             <div className="flex items-center justify-between px-4 py-3">
               <div className="flex items-center gap-2">
-                <CheckCircle size={14} style={{ color: "var(--green)" }} />
+                <CheckCircle size={16} style={{ color: "var(--green)" }} />
                 <span className="text-[13px]" style={{ color: "var(--fill-primary)" }}>已是最新版本</span>
               </div>
               <button
@@ -115,7 +115,7 @@ export function AboutTab() {
                 className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-[var(--radius-xs)] px-3 py-1.5 text-[12px] font-medium transition-colors duration-150 hover:opacity-80"
                 style={{ background: "var(--fill-quaternary)", color: "var(--fill-primary)" }}
               >
-                <RefreshCw size={12} />
+                <RefreshCw size={16} />
                 再次检查
               </button>
             </div>
@@ -130,7 +130,7 @@ export function AboutTab() {
                 className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-[var(--radius-xs)] px-3 py-1.5 text-[12px] font-medium transition-colors duration-150 hover:opacity-80 disabled:cursor-default disabled:opacity-50"
                 style={{ background: "var(--fill-quaternary)", color: "var(--fill-primary)" }}
               >
-                <RefreshCw size={12} className={status === "checking" ? "animate-spin" : ""} />
+                <RefreshCw size={16} className={status === "checking" ? "animate-spin" : ""} />
                 检查更新
               </button>
             </div>

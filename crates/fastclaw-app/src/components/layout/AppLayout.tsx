@@ -132,7 +132,7 @@ function ContentHeader({
           style={{ color: "var(--fill-quaternary)" }}
           title="搜索"
         >
-          <Search size={14} strokeWidth={1.5} />
+          <Search size={16} strokeWidth={1.5} />
         </button>
         <button
           onClick={onToggleDetail}
@@ -140,7 +140,7 @@ function ContentHeader({
           style={{ color: "var(--fill-tertiary)" }}
           title={detailOpen ? "收起 Agent 信息" : "展开 Agent 信息"}
         >
-          {detailOpen ? <PanelRightClose size={15} strokeWidth={1.5} /> : <PanelRightOpen size={15} strokeWidth={1.5} />}
+          {detailOpen ? <PanelRightClose size={16} strokeWidth={1.5} /> : <PanelRightOpen size={16} strokeWidth={1.5} />}
         </button>
       </div>
     </div>

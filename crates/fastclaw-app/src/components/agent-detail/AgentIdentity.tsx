@@ -4,10 +4,10 @@ import * as api from "../../lib/api";
 import { ListContainer, SectionHeader } from "./common";
 
 const IDENTITY_FILES = [
-  { key: "soul" as const, name: "SOUL.md", desc: "人格与语气", icon: <User size={13} strokeWidth={1.5} /> },
-  { key: "user" as const, name: "USER.md", desc: "用户画像", icon: <FileText size={13} strokeWidth={1.5} /> },
-  { key: "agents" as const, name: "AGENTS.md", desc: "规则与约束", icon: <Shield size={13} strokeWidth={1.5} /> },
-  { key: "tools" as const, name: "TOOLS.md", desc: "工具使用指南", icon: <Wrench size={13} strokeWidth={1.5} /> },
+  { key: "soul" as const, name: "SOUL.md", desc: "人格与语气", icon: <User size={16} strokeWidth={1.5} /> },
+  { key: "user" as const, name: "USER.md", desc: "用户画像", icon: <FileText size={16} strokeWidth={1.5} /> },
+  { key: "agents" as const, name: "AGENTS.md", desc: "规则与约束", icon: <Shield size={16} strokeWidth={1.5} /> },
+  { key: "tools" as const, name: "TOOLS.md", desc: "工具使用指南", icon: <Wrench size={16} strokeWidth={1.5} /> },
 ] as const;
 
 export function AgentIdentity({ agentId, ready }: { agentId: string; ready: boolean }) {
@@ -40,7 +40,7 @@ export function AgentIdentity({ agentId, ready }: { agentId: string; ready: bool
                 </div>
                 {hasContent ? (
                   <ChevronRight
-                    size={10} strokeWidth={2}
+                    size={14} strokeWidth={2}
                     className="shrink-0 transition-transform duration-150"
                     style={{ color: "var(--fill-quaternary)", transform: isExpanded ? "rotate(90deg)" : "rotate(0)" }}
                   />

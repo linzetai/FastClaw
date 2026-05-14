@@ -33,13 +33,13 @@ function relativeTime(iso: string): string {
 function categoryIcon(category: string): ReactNode {
   switch (category) {
     case "cron":
-      return <Clock size={14} strokeWidth={1.5} />;
+      return <Clock size={16} strokeWidth={1.5} />;
     case "agent":
-      return <Zap size={14} strokeWidth={1.5} />;
+      return <Zap size={16} strokeWidth={1.5} />;
     case "error":
-      return <AlertTriangle size={14} strokeWidth={1.5} />;
+      return <AlertTriangle size={16} strokeWidth={1.5} />;
     default:
-      return <Info size={14} strokeWidth={1.5} />;
+      return <Info size={16} strokeWidth={1.5} />;
   }
 }
 
@@ -194,10 +194,10 @@ export function NotificationCenter({ onDetailOpen }: Props) {
       <button
         onClick={handleToggle}
         className="relative flex h-7 w-7 items-center justify-center rounded-md transition-all duration-100 hover:bg-[var(--bg-hover)] hover:scale-105 active:scale-95"
-        style={{ color: "var(--fill-tertiary)" }}
+        style={{ color: "var(--fill-secondary)" }}
         title="消息中心"
       >
-        <Bell size={14} strokeWidth={1.5} />
+        <Bell size={16} strokeWidth={1.5} />
         {unreadCount > 0 && (
           <span
             className="absolute flex items-center justify-center rounded-full text-white font-medium"
@@ -248,7 +248,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                 style={{ color: "var(--blue)" }}
                 title="全部标为已读"
               >
-                <CheckCheck size={12} />
+                <CheckCheck size={14} />
                 全部已读
               </button>
             )}
@@ -355,7 +355,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                         style={{ color: "var(--fill-tertiary)" }}
                         title="标为已读"
                       >
-                        <Check size={12} />
+                        <Check size={14} />
                       </button>
                     )}
                     <button
@@ -364,7 +364,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                       style={{ color: "var(--fill-tertiary)" }}
                       title="删除"
                     >
-                      <Trash2 size={12} />
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>

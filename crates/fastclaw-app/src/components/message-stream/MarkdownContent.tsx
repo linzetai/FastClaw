@@ -80,7 +80,7 @@ function CopyButton({ text }: { text: string }) {
       title={copied ? "已复制" : "复制代码"}
       aria-label={copied ? "已复制" : "复制代码"}
     >
-      {copied ? <Check size={12} strokeWidth={2} /> : <Copy size={12} strokeWidth={1.5} />}
+      {copied ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={1.5} />}
       <span>{copied ? "已复制" : "复制"}</span>
     </button>
   );

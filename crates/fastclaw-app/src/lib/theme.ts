@@ -90,9 +90,16 @@ function resolveTheme(mode: ThemeMode): ResolvedTheme {
     : "light";
 }
 
+const isMac = typeof navigator !== "undefined"
+  && /Mac|iPhone|iPad/.test(
+    (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform
+      ?? navigator.platform ?? "",
+  );
+
 function applyTheme(theme: ResolvedTheme, accent: AccentTheme) {
   const el = document.documentElement;
   el.setAttribute("data-theme", theme);
+  if (!isMac) el.setAttribute("data-opaque-chrome", "");
   if (accent === "default") {
     el.removeAttribute("data-accent");
   } else {

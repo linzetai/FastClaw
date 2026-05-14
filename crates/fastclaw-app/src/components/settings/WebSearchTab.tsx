@@ -164,7 +164,7 @@ export function WebSearchTab() {
             animation: "fade-in var(--duration-fast) var(--ease-out)",
           }}
         >
-          {toast.type === "ok" ? <CheckCircle size={13} strokeWidth={1.5} /> : <XCircle size={13} strokeWidth={1.5} />}
+          {toast.type === "ok" ? <CheckCircle size={16} strokeWidth={1.5} /> : <XCircle size={16} strokeWidth={1.5} />}
           {toast.msg}
         </div>
       )}
@@ -232,16 +232,16 @@ export function WebSearchTab() {
                   }}
                 >
                   <div
-                    className="flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-[3px]"
+                    className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[3px]"
                     style={{
-                      border: `1.5px solid ${checked ? "var(--tint)" : "var(--fill-quaternary)"}`,
+                      border: `2px solid ${checked ? "var(--tint)" : "var(--fill-quaternary)"}`,
                       background: checked ? "var(--tint)" : "transparent",
                       transition: "all var(--duration-fast)",
                     }}
                   >
                     {checked && (
-                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M2 5L4.2 7.5L8 2.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      <svg width="12" height="12" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 5L4.2 7.5L8 2.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     )}
                   </div>
@@ -278,8 +278,8 @@ export function WebSearchTab() {
                     className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[4px] transition-colors hover:bg-[var(--bg-hover)]"
                   >
                     {showKey
-                      ? <EyeOff size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
-                      : <Eye size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                      ? <EyeOff size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                      : <Eye size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
                     }
                   </button>
                   <button
@@ -289,10 +289,10 @@ export function WebSearchTab() {
                     className="flex h-7 cursor-pointer items-center gap-1 rounded-[4px] px-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
                     style={{ color: testStatus === "success" ? "var(--green)" : testStatus === "error" ? "var(--red)" : "var(--tint)" }}
                   >
-                    {testStatus === "testing" ? <Loader2 size={13} strokeWidth={1.5} className="animate-spin" />
-                      : testStatus === "success" ? <CheckCircle size={13} strokeWidth={1.5} />
-                      : testStatus === "error" ? <XCircle size={13} strokeWidth={1.5} />
-                      : <Zap size={13} strokeWidth={1.5} />
+                    {testStatus === "testing" ? <Loader2 size={16} strokeWidth={1.5} className="animate-spin" />
+                      : testStatus === "success" ? <CheckCircle size={16} strokeWidth={1.5} />
+                      : testStatus === "error" ? <XCircle size={16} strokeWidth={1.5} />
+                      : <Zap size={16} strokeWidth={1.5} />
                     }
                     {testStatus === "idle" && "测试"}
                   </button>
@@ -332,10 +332,10 @@ export function WebSearchTab() {
                   className="absolute top-1/2 right-2 flex h-7 -translate-y-1/2 cursor-pointer items-center gap-1 rounded-[4px] px-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
                   style={{ color: testStatus === "success" ? "var(--green)" : testStatus === "error" ? "var(--red)" : "var(--tint)" }}
                 >
-                  {testStatus === "testing" ? <Loader2 size={13} strokeWidth={1.5} className="animate-spin" />
-                    : testStatus === "success" ? <CheckCircle size={13} strokeWidth={1.5} />
-                    : testStatus === "error" ? <XCircle size={13} strokeWidth={1.5} />
-                    : <Zap size={13} strokeWidth={1.5} />
+                  {testStatus === "testing" ? <Loader2 size={16} strokeWidth={1.5} className="animate-spin" />
+                    : testStatus === "success" ? <CheckCircle size={16} strokeWidth={1.5} />
+                    : testStatus === "error" ? <XCircle size={16} strokeWidth={1.5} />
+                    : <Zap size={16} strokeWidth={1.5} />
                   }
                   {testStatus === "idle" && "测试"}
                 </button>

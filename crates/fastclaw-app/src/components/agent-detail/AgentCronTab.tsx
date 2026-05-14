@@ -74,7 +74,7 @@ function SchedulePicker({ schedule, onChange }: { schedule: string; onChange: (s
           <option value="weekly">每周定时</option>
           <option value="custom">自定义 Cron</option>
         </select>
-        <ChevronDown size={10} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={labelStyle} />
+        <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={labelStyle} />
       </div>
 
       {mode === "every_n_min" && (
@@ -247,7 +247,7 @@ function CronJobForm({
             <option value="agent_chat">Agent 对话</option>
             <option value="webhook">Webhook</option>
           </select>
-          <ChevronDown size={10} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={labelStyle} />
+          <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={labelStyle} />
         </div>
       </div>
 
@@ -294,7 +294,7 @@ function CronJobForm({
                 <option value="PUT">PUT</option>
                 <option value="DELETE">DELETE</option>
               </select>
-              <ChevronDown size={10} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={labelStyle} />
+              <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={labelStyle} />
             </div>
           </div>
         </>
@@ -316,7 +316,7 @@ function CronJobForm({
           className="flex w-full cursor-pointer items-center gap-1 text-[11px] font-medium transition-colors"
           style={{ color: "var(--fill-tertiary)" }}
         >
-          {showNotifyChannels ? <ChevronDown size={10} strokeWidth={2} /> : <ChevronRight size={10} strokeWidth={2} />}
+          {showNotifyChannels ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
           通知渠道 {notifyChannels.length > 0 && <span className="rounded-full px-1.5 text-[10px]" style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}>{notifyChannels.length}</span>}
         </button>
       </div>
@@ -378,7 +378,7 @@ function CronJobForm({
                   <option value="whatsapp">WhatsApp</option>
                   <option value="telegram">Telegram</option>
                 </select>
-                <ChevronDown size={9} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2" style={labelStyle} />
+                <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2" style={labelStyle} />
               </div>
               <div className="relative" style={{ width: "80px" }}>
                 <select
@@ -389,7 +389,7 @@ function CronJobForm({
                   <option value="p2p">私聊</option>
                   <option value="group">群组</option>
                 </select>
-                <ChevronDown size={9} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2" style={labelStyle} />
+                <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2" style={labelStyle} />
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -423,7 +423,7 @@ function CronJobForm({
                 className="shrink-0 cursor-pointer rounded-[6px] px-3 py-2 text-[11px] font-medium transition-colors hover:opacity-90 disabled:opacity-40"
                 style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
               >
-                <Plus size={11} strokeWidth={2} />
+                <Plus size={14} strokeWidth={2} />
               </button>
             </div>
             {duplicateWarning && (
@@ -443,7 +443,7 @@ function CronJobForm({
             className="flex w-full cursor-pointer items-center gap-1 text-[11px] font-medium transition-colors"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            {showLogs ? <ChevronDown size={10} strokeWidth={2} /> : <ChevronRight size={10} strokeWidth={2} />}
+            {showLogs ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
             执行记录 {(job as CronJob).run_count > 0 && `(${(job as CronJob).run_count})`}
           </button>
           {showLogs && <div className="mt-2"><RunLogList jobId={job.id!} /></div>}
@@ -606,7 +606,7 @@ export function CronTab() {
             className="cursor-pointer rounded-[var(--radius-xs)] p-1.5 transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-40"
             title="刷新"
           >
-            <RefreshCw size={13} strokeWidth={1.5} className={loading ? "animate-spin" : ""} style={{ color: "var(--fill-tertiary)" }} />
+            <RefreshCw size={16} strokeWidth={1.5} className={loading ? "animate-spin" : ""} style={{ color: "var(--fill-tertiary)" }} />
           </button>
           {!adding && (
             <button
@@ -614,7 +614,7 @@ export function CronTab() {
               className="flex cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] p-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
               style={{ color: "var(--fill-tertiary)" }}
             >
-              <Plus size={11} strokeWidth={2} /> 新增
+              <Plus size={14} strokeWidth={2} /> 新增
             </button>
           )}
         </div>
@@ -668,7 +668,7 @@ export function CronTab() {
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <Clock size={13} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                  <Clock size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
                   <span className="truncate text-[13px] font-medium" style={{ color: "var(--fill-primary)" }}>
                     {job.name}
                   </span>
@@ -683,7 +683,7 @@ export function CronTab() {
                     checked={job.enabled}
                     onChange={(v) => { handleToggle(job.id, v); }}
                   />
-                  <Pencil size={12} strokeWidth={1.5} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ color: "var(--fill-quaternary)" }} />
+                  <Pencil size={14} strokeWidth={1.5} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ color: "var(--fill-quaternary)" }} />
                 </div>
               </div>
               <div className="mt-1 flex items-center gap-3 text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
@@ -699,7 +699,7 @@ export function CronTab() {
               </div>
               {job.last_error && (
                 <div className="mt-1 flex items-center gap-1 text-[10px]" style={{ color: "var(--red, #e53e3e)" }}>
-                  <AlertTriangle size={10} strokeWidth={1.5} />
+                  <AlertTriangle size={12} strokeWidth={1.5} />
                   <span className="truncate">{job.last_error}</span>
                 </div>
               )}

@@ -20,7 +20,7 @@ function SourceBadge({ source }: { source: string }) {
       className="inline-flex shrink-0 items-center gap-[3px] rounded-[4px] px-[5px] py-[1px] text-[10px] font-medium leading-tight"
       style={{ background: `${meta.color}18`, color: meta.color }}
     >
-      <Icon size={9} strokeWidth={2} />
+      <Icon size={14} strokeWidth={2} />
       {meta.label}
     </span>
   );
@@ -46,10 +46,10 @@ function ChatRow({ chat, isActive, onClick, onClose, isLast }: {
         <button
           onClick={(e) => { e.stopPropagation(); onClose(); }}
           className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-md opacity-0 transition-opacity duration-100 group-hover:opacity-100"
-          style={{ color: "var(--fill-quaternary)" }}
+          style={{ color: "var(--fill-tertiary)" }}
           title="关闭会话"
         >
-          <X size={8} strokeWidth={2.5} />
+          <X size={14} strokeWidth={2} />
         </button>
       )}
       <div className="flex items-start justify-between gap-2">
@@ -65,7 +65,7 @@ function ChatRow({ chat, isActive, onClick, onClose, isLast }: {
       </div>
       {chat.workDir && (
         <div className="flex items-center gap-1.5 text-[10px] font-mono" style={{ color: "var(--fill-quaternary)" }}>
-          <FolderOpen size={10} strokeWidth={1.5} />
+          <FolderOpen size={14} strokeWidth={1.5} />
           <span className="truncate">{chat.workDir.replace(/^\/home\/[^/]+\//, "~/")}</span>
         </div>
       )}
@@ -117,7 +117,7 @@ export function ChatsTab() {
         className="mb-4 flex items-center gap-2.5 rounded-[10px] px-3 py-[7px]"
         style={{ background: "var(--bg-hover)" }}
       >
-        <Search size={12} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+        <Search size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
         <input
           type="text"
           value={chatQuery}
@@ -127,8 +127,8 @@ export function ChatsTab() {
           style={{ color: "var(--fill-primary)" }}
         />
         {chatQuery && (
-          <button onClick={() => setChatQuery("")} className="cursor-pointer" style={{ color: "var(--fill-quaternary)" }}>
-            <X size={10} strokeWidth={2} />
+          <button onClick={() => setChatQuery("")} className="cursor-pointer" style={{ color: "var(--fill-tertiary)" }}>
+            <X size={14} strokeWidth={2} />
           </button>
         )}
       </div>

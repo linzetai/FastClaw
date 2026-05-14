@@ -34,10 +34,10 @@ export interface AttachedFile {
 function FilePill({ file, onRemove }: { file: AttachedFile; onRemove: () => void }) {
   const isImage = file.type.startsWith("image/");
   const icon = isImage
-    ? <ImageIcon size={12} strokeWidth={1.5} />
+    ? <ImageIcon size={14} strokeWidth={1.5} />
     : file.type.includes("pdf")
-      ? <FileText size={12} strokeWidth={1.5} />
-      : <Paperclip size={12} strokeWidth={1.5} />;
+      ? <FileText size={14} strokeWidth={1.5} />
+      : <Paperclip size={14} strokeWidth={1.5} />;
 
   if (isImage && file.previewUrl) {
     return (
@@ -248,7 +248,7 @@ function ModelSelector() {
       >
         <span className="h-2 w-2 rounded-full" style={{ background: dotColor }} />
         <span className="max-w-[100px] truncate">{displayName}</span>
-        <ChevronDown size={10} strokeWidth={2} />
+        <ChevronDown size={14} strokeWidth={2} />
       </button>
       {open && createPortal(
         <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)}>
@@ -323,9 +323,9 @@ function ModeToggle({
       title={isPlan ? "Plan Mode -- 只读探索模式" : "Agent Mode -- 完整工具访问"}
     >
       {isPlan ? (
-        <Compass size={12} strokeWidth={2} />
+        <Compass size={16} strokeWidth={2} />
       ) : (
-        <Code2 size={12} strokeWidth={2} />
+        <Code2 size={16} strokeWidth={2} />
       )}
       <span>{isPlan ? "Plan" : "Agent"}</span>
     </button>
@@ -581,7 +581,7 @@ export function StreamFooter({
               color: "var(--tint, #4299E1)",
             }}
           >
-            <Compass size={12} strokeWidth={2} className="shrink-0" />
+            <Compass size={16} strokeWidth={2} className="shrink-0" />
             <span>Plan Mode — 只读探索模式，切换到 Agent 可进行修改</span>
           </div>
         )}
@@ -608,7 +608,7 @@ export function StreamFooter({
               style={{ color: "var(--fill-tertiary)" }}
               title={`附件 (${MOD_KEY}${isMacPlatform ? "⇧" : "Shift+"}A)`}
             >
-              <Paperclip size={16} strokeWidth={1.5} />
+              <Paperclip size={16} strokeWidth={2} />
             </button>
             <button
               onClick={async () => {
@@ -629,10 +629,10 @@ export function StreamFooter({
                 }
               }}
               className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] transition-colors duration-100 hover:bg-[var(--bg-hover)]"
-              style={{ color: workDir ? "var(--fill-secondary)" : "var(--fill-quaternary)" }}
+              style={{ color: workDir ? "var(--fill-secondary)" : "var(--fill-tertiary)" }}
               title={workDir ? `工作目录: ${workDir}` : "设置工作目录"}
             >
-              <FolderOpen className="shrink-0" size={13} strokeWidth={1.5} />
+              <FolderOpen className="shrink-0" size={16} strokeWidth={1.5} />
               <span className="max-w-[120px] truncate font-mono text-[11px]">
                 {workDir ? workDir.replace(/^\/home\/[^/]+\//, "~/") : "工作目录"}
               </span>
@@ -662,7 +662,7 @@ export function StreamFooter({
                 }}
                 title="停止生成"
               >
-                <Square size={12} strokeWidth={2.5} fill="currentColor" />
+                <Square size={14} strokeWidth={2.5} fill="currentColor" />
               </button>
             ) : sendPending ? (
               <button

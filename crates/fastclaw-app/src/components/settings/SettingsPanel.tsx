@@ -82,7 +82,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
               {TABS.find((t) => t.id === tab)?.label}
             </h2>
             <button onClick={onClose} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" style={{ color: "var(--fill-tertiary)" }}>
-              <X size={14} strokeWidth={1.5} />
+              <X size={16} strokeWidth={1.5} />
             </button>
           </div>
           <div className="flex-1 overflow-y-auto px-6 py-5">

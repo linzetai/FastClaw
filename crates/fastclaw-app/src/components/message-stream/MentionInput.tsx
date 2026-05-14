@@ -70,9 +70,9 @@ interface MentionInputProps {
 }
 
 const MENTION_TYPE_META: Record<MentionType, { text: string; icon: React.ReactNode; color: string }> = {
-  file: { text: "文件", icon: <File size={12} strokeWidth={1.5} />, color: "var(--tint)" },
-  dir: { text: "目录", icon: <Folder size={12} strokeWidth={1.5} />, color: "var(--orange)" },
-  skill: { text: "Skill", icon: <Sparkles size={12} strokeWidth={1.5} />, color: "var(--green)" },
+  file: { text: "文件", icon: <File size={14} strokeWidth={1.5} />, color: "var(--tint)" },
+  dir: { text: "目录", icon: <Folder size={14} strokeWidth={1.5} />, color: "var(--orange)" },
+  skill: { text: "Skill", icon: <Sparkles size={14} strokeWidth={1.5} />, color: "var(--green)" },
 };
 
 /* ─── Fuzzy Highlight ─── */
@@ -161,7 +161,7 @@ function MentionPopup({
         }}
       >
         <div className="flex items-center gap-2 px-3 py-3">
-          <Search size={13} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />
+          <Search size={14} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />
           <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
             {query
               ? `未找到「${query}」相关${triggerType === "/" ? "命令" : "项目"}`
@@ -258,7 +258,7 @@ function getItemGroup(item: PopupItem): string {
 
 function getItemMeta(item: PopupItem): { icon: React.ReactNode; color: string } {
   if (item.kind === "mention") return MENTION_TYPE_META[item.option.type];
-  return { icon: <Terminal size={12} strokeWidth={1.5} />, color: "var(--purple)" };
+  return { icon: <Terminal size={14} strokeWidth={1.5} />, color: "var(--purple)" };
 }
 
 function getItemKey(item: PopupItem): string {

@@ -140,7 +140,7 @@ export function SkillsTab() {
                 className="cursor-pointer rounded-[var(--radius-xs)] p-1.5 transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-40"
                 title="刷新 Skills"
               >
-                <RefreshCw size={13} strokeWidth={1.5} className={refreshing ? "animate-spin" : ""} style={{ color: "var(--fill-tertiary)" }} />
+                <RefreshCw size={14} strokeWidth={1.5} className={refreshing ? "animate-spin" : ""} style={{ color: "var(--fill-tertiary)" }} />
               </button>
               <div className="relative">
                 <button
@@ -149,7 +149,7 @@ export function SkillsTab() {
                   className="cursor-pointer rounded-[var(--radius-xs)] p-1.5 transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-40"
                   title="上传 Skill"
                 >
-                  <Upload size={13} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                  <Upload size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
                 </button>
                 {skillMenuOpen && (
                   <div
@@ -162,14 +162,14 @@ export function SkillsTab() {
                       className="w-full cursor-pointer px-3 py-2 text-left text-[12px] transition-colors hover:bg-[var(--bg-hover)]"
                       style={{ color: "var(--fill-primary)" }}
                     >
-                      <FolderOpen size={12} className="mr-2 inline" strokeWidth={1.5} />选择文件夹
+                      <FolderOpen size={14} className="mr-2 inline" strokeWidth={1.5} />选择文件夹
                     </button>
                     <button
                       onClick={() => { setSkillMenuOpen(false); handleUploadZip(); }}
                       className="w-full cursor-pointer px-3 py-2 text-left text-[12px] transition-colors hover:bg-[var(--bg-hover)]"
                       style={{ color: "var(--fill-primary)" }}
                     >
-                      <FileText size={12} className="mr-2 inline" strokeWidth={1.5} />选择 ZIP 文件
+                      <FileText size={14} className="mr-2 inline" strokeWidth={1.5} />选择 ZIP 文件
                     </button>
                   </div>
                 )}
@@ -201,7 +201,7 @@ export function SkillsTab() {
             {/* Public / Global skills */}
             <div>
               <div className="mb-2 flex items-center gap-2 text-[11px] font-medium" style={{ color: "var(--fill-tertiary)" }}>
-                <Globe size={12} strokeWidth={1.5} />
+                <Globe size={14} strokeWidth={1.5} />
                 公共 Skills ({publicSkills.length})
               </div>
               {publicSkills.length === 0 ? (
@@ -219,7 +219,7 @@ export function SkillsTab() {
               skills.length > 0 && (
                 <div key={agentId}>
                   <div className="mb-2 flex items-center gap-2 text-[11px] font-medium" style={{ color: "var(--fill-tertiary)" }}>
-                    <User size={12} strokeWidth={1.5} />
+                    <User size={14} strokeWidth={1.5} />
                     Agent: {agentId} ({skills.length})
                   </div>
                   <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>

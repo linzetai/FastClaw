@@ -74,7 +74,7 @@ function ChannelForm({
                   <option key={t.id} value={t.id}>{t.label}</option>
                 ))}
               </select>
-              <ChevronDown size={10} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
+              <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
             </div>
           ) : (
             <div className={inputCls} style={{ ...inputStyle, opacity: 0.7 }}>
@@ -103,7 +103,7 @@ function ChannelForm({
               <option value="websocket">WebSocket</option>
               <option value="webhook">Webhook</option>
             </select>
-            <ChevronDown size={10} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
+            <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
           </div>
         </div>
         <div>
@@ -117,7 +117,7 @@ function ChannelForm({
               <option value="all">全部消息</option>
               <option value="mention_only">仅 @提及</option>
             </select>
-            <ChevronDown size={10} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
+            <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
           </div>
         </div>
       </div>
@@ -348,7 +348,7 @@ export function ChannelManager({ agentId, backendAgent, ready, onRefresh }: {
             className="flex cursor-pointer items-center gap-1 text-[11px] font-medium transition-colors hover:opacity-70"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            <Plus size={11} strokeWidth={2} />
+            <Plus size={14} strokeWidth={2} />
             添加
           </button>
         )}
@@ -401,7 +401,7 @@ export function ChannelManager({ agentId, backendAgent, ready, onRefresh }: {
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
-                    <Link2 size={13} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                    <Link2 size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
                     <span className="text-[13px] font-medium" style={{ color: "var(--fill-primary)" }}>
                       {CHANNEL_LABEL_MAP[chId] ?? chId}
                     </span>
@@ -410,7 +410,7 @@ export function ChannelManager({ agentId, backendAgent, ready, onRefresh }: {
                       style={{ background: cfg.enabled !== false ? "var(--green, #48bb78)" : "var(--fill-quaternary)" }}
                     />
                   </div>
-                  <Pencil size={12} strokeWidth={1.5} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ color: "var(--fill-quaternary)" }} />
+                  <Pencil size={14} strokeWidth={1.5} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ color: "var(--fill-quaternary)" }} />
                 </div>
                 {cfg.domain && (
                   <div className="mt-0.5 truncate text-[11px]" style={{ color: "var(--fill-quaternary)" }}>

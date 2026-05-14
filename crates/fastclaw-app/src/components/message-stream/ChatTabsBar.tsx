@@ -50,7 +50,7 @@ function SwitcherItem({
           style={{ background: "var(--tint)", animation: "pulse-subtle 1.5s ease-in-out infinite" }}
         />
       )}
-      {!isStreaming && <MessageSquare size={12} style={{ color: "var(--fill-quaternary)", flexShrink: 0 }} />}
+      {!isStreaming && <MessageSquare size={14} style={{ color: "var(--fill-quaternary)", flexShrink: 0 }} />}
 
       {isEditing ? (
         <input
@@ -84,9 +84,9 @@ function SwitcherItem({
       <button
         onClick={(e) => { e.stopPropagation(); onClose(chat.id); }}
         className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm transition-opacity"
-        style={{ color: "var(--fill-quaternary)", opacity: hovered || isActive ? 1 : 0 }}
+        style={{ color: "var(--fill-tertiary)", opacity: hovered || isActive ? 1 : 0 }}
       >
-        <X size={10} strokeWidth={2} />
+        <X size={14} strokeWidth={2} />
       </button>
     </div>
   );
@@ -180,7 +180,7 @@ export function ChatTabsBar({ chats, activeChatId, streamingChatIds, onSelect, o
             style={{ background: "var(--tint)", animation: "pulse-subtle 1.5s ease-in-out infinite" }}
           />
         )}
-        {hasMultiple && <ChevronDown size={12} style={{ color: "var(--fill-tertiary)", transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />}
+        {hasMultiple && <ChevronDown size={14} style={{ color: "var(--fill-tertiary)", transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />}
       </button>
 
       <button
@@ -189,7 +189,7 @@ export function ChatTabsBar({ chats, activeChatId, streamingChatIds, onSelect, o
         style={{ color: "var(--tint)", border: "0.5px solid var(--border-subtle)" }}
         title="新建会话"
       >
-        <Plus size={12} strokeWidth={2} />
+        <Plus size={14} strokeWidth={2} />
         <span>新对话</span>
       </button>
 
@@ -213,7 +213,7 @@ export function ChatTabsBar({ chats, activeChatId, streamingChatIds, onSelect, o
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
             style={{ color: "var(--tint)" }}
           >
-            <Plus size={12} /> 新建会话
+            <Plus size={14} /> 新建会话
           </button>
           <div className="my-1 h-px" style={{ background: "var(--separator)" }} />
           <div className="max-h-[240px] overflow-y-auto">

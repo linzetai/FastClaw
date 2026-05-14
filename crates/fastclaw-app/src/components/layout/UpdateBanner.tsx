@@ -57,7 +57,7 @@ export const UpdateBanner = memo(function UpdateBanner() {
             className="flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium transition-opacity duration-150 hover:opacity-80 disabled:cursor-default disabled:opacity-50"
             style={{ background: "rgba(255,255,255,0.2)" }}
           >
-            <ActionIcon size={11} />
+            <ActionIcon size={14} />
             {actionLabel}
           </button>
         )}
@@ -68,7 +68,7 @@ export const UpdateBanner = memo(function UpdateBanner() {
             style={{ background: "transparent" }}
             aria-label="关闭"
           >
-            <X size={13} />
+            <X size={16} />
           </button>
         )}
       </div>

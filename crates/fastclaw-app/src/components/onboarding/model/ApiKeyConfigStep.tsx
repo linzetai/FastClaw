@@ -127,7 +127,7 @@ export function ApiKeyConfigStep({
                 className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-[var(--bg-hover)]"
                 style={{ color: "var(--fill-tertiary)" }}
               >
-                {showApiKey ? <EyeOff size={13} /> : <Eye size={13} />}
+                {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
               <button
                 onClick={onTest}
@@ -143,13 +143,13 @@ export function ApiKeyConfigStep({
                 }}
               >
                 {testStatus === "testing" ? (
-                  <Zap size={11} className="animate-pulse" />
+                  <Zap size={14} className="animate-pulse" />
                 ) : testStatus === "success" ? (
-                  <CheckCircle size={11} />
+                  <CheckCircle size={14} />
                 ) : testStatus === "error" ? (
-                  <XCircle size={11} />
+                  <XCircle size={14} />
                 ) : (
-                  <Zap size={11} />
+                  <Zap size={14} />
                 )}
                 测试
               </button>
@@ -212,7 +212,7 @@ export function ApiKeyConfigStep({
           style={{ color: "var(--fill-tertiary)" }}
         >
           <ChevronRight
-            size={12}
+            size={14}
             className={`transition-transform ${showAdvanced ? "rotate-90" : ""}`}
           />
           高级选项

@@ -104,7 +104,7 @@ export function ThemeCard({ preset, selected, resolved, onClick }: {
               animation: "pop var(--duration-normal) var(--ease-spring)",
             }}
           >
-            <Check size={9} strokeWidth={3} color="#fff" />
+            <Check size={12} strokeWidth={3} color="#fff" />
           </div>
         )}
       </div>

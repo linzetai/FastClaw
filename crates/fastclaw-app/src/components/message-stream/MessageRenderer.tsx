@@ -99,7 +99,7 @@ const UserBubble = memo(function UserBubble({ msg, copyable, selected, onToggleS
                 background: selected ? "var(--tint)" : "transparent",
               }}
             >
-              {selected && <Check size={10} strokeWidth={2.5} style={{ color: "white" }} />}
+              {selected && <Check size={14} strokeWidth={2.5} style={{ color: "white" }} />}
             </button>
           )}
           <div
@@ -159,7 +159,7 @@ const UserBubble = memo(function UserBubble({ msg, copyable, selected, onToggleS
               style={{ color: "var(--fill-tertiary)" }}
               title="复制"
             >
-              {copied ? <Check size={12} strokeWidth={2} /> : <Copy size={12} strokeWidth={1.5} />}
+              {copied ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={1.5} />}
             </button>
           )}
         </div>
@@ -189,27 +189,27 @@ const AiReactionBar = memo(function AiReactionBar({ content }: { content: string
     <div
       className="mt-1.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100"
     >
-      <button onClick={handleCopy} className={btnCls} style={{ color: copied ? "var(--green)" : "var(--fill-quaternary)" }} title="复制">
-        {copied ? <Check size={13} strokeWidth={2} /> : <Copy size={13} strokeWidth={1.5} />}
+      <button onClick={handleCopy} className={btnCls} style={{ color: copied ? "var(--green)" : "var(--fill-tertiary)" }} title="复制">
+        {copied ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={1.5} />}
       </button>
       <button
         onClick={() => { setLiked(!liked); if (disliked) setDisliked(false); }}
         className={btnCls}
-        style={{ color: liked ? "var(--tint)" : "var(--fill-quaternary)" }}
+        style={{ color: liked ? "var(--tint)" : "var(--fill-tertiary)" }}
         title="点赞"
       >
-        <ThumbsUp size={13} strokeWidth={liked ? 2 : 1.5} />
+        <ThumbsUp size={14} strokeWidth={liked ? 2 : 1.5} />
       </button>
       <button
         onClick={() => { setDisliked(!disliked); if (liked) setLiked(false); }}
         className={btnCls}
-        style={{ color: disliked ? "var(--red)" : "var(--fill-quaternary)" }}
+        style={{ color: disliked ? "var(--red)" : "var(--fill-tertiary)" }}
         title="点踩"
       >
-        <ThumbsDown size={13} strokeWidth={disliked ? 2 : 1.5} />
+        <ThumbsDown size={14} strokeWidth={disliked ? 2 : 1.5} />
       </button>
-      <button className={btnCls} style={{ color: "var(--fill-quaternary)" }} title="重试">
-        <RotateCw size={13} strokeWidth={1.5} />
+      <button className={btnCls} style={{ color: "var(--fill-tertiary)" }} title="重试">
+        <RotateCw size={14} strokeWidth={1.5} />
       </button>
     </div>
   );
@@ -235,7 +235,7 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
               background: selected ? "var(--tint)" : "transparent",
             }}
           >
-            {selected && <Check size={10} strokeWidth={2.5} style={{ color: "white" }} />}
+            {selected && <Check size={14} strokeWidth={2.5} style={{ color: "white" }} />}
           </button>
         )}
         <div className="flex-1 min-w-0">
@@ -265,7 +265,7 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
           {ts(msg.timestamp)}
           {usage && (
             <span className="ml-1.5 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100">
-              <Clock size={9} strokeWidth={1.5} className="mr-0.5 inline-block translate-y-[-0.5px]" />
+              <Clock size={12} strokeWidth={1.5} className="mr-0.5 inline-block translate-y-[-0.5px]" />
               {formatElapsed(usage.elapsedMs)}
             </span>
           )}

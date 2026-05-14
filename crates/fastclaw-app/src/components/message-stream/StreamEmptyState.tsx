@@ -114,7 +114,7 @@ export function StreamEmptyState({ onPick }: { onPick: (t: string) => void }) {
             className="flex items-center gap-1.5 text-[12px] font-medium transition-colors duration-150 hover:opacity-70"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            <RefreshCw size={12} strokeWidth={1.5} />
+            <RefreshCw size={16} strokeWidth={1.5} />
             换一换
           </button>
         </div>

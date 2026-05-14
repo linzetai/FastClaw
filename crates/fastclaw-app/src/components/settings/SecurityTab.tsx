@@ -204,7 +204,7 @@ export function SecurityTab() {
             animation: "fade-in var(--duration-fast) var(--ease-out)",
           }}
         >
-          {toast.type === "ok" ? <CheckCircle size={13} strokeWidth={1.5} /> : <XCircle size={13} strokeWidth={1.5} />}
+          {toast.type === "ok" ? <CheckCircle size={14} strokeWidth={1.5} /> : <XCircle size={14} strokeWidth={1.5} />}
           {toast.msg}
         </div>
       )}
@@ -224,14 +224,14 @@ export function SecurityTab() {
               style={idx < EXECUTION_MODE_OPTIONS.length - 1 ? { borderBottom: "0.5px solid var(--separator)" } : undefined}
             >
               <span
-                className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full transition-all duration-150"
+                className="flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full transition-all duration-150"
                 style={{
-                  border: executionMode === opt.value ? "none" : "1.5px solid var(--fill-quaternary)",
+                  border: executionMode === opt.value ? "none" : "2px solid var(--fill-quaternary)",
                   background: executionMode === opt.value ? "var(--tint)" : "transparent",
                 }}
               >
                 {executionMode === opt.value && (
-                  <CheckCircle size={14} strokeWidth={2.5} style={{ color: "#fff" }} />
+                  <CheckCircle size={16} strokeWidth={2.5} style={{ color: "#fff" }} />
                 )}
               </span>
               <div>
@@ -258,14 +258,14 @@ export function SecurityTab() {
               style={idx < POLICY_OPTIONS.length - 1 ? { borderBottom: "0.5px solid var(--separator)" } : undefined}
             >
               <span
-                className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full transition-all duration-150"
+                className="flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full transition-all duration-150"
                 style={{
-                  border: opsPolicy === opt.value ? "none" : "1.5px solid var(--fill-quaternary)",
+                  border: opsPolicy === opt.value ? "none" : "2px solid var(--fill-quaternary)",
                   background: opsPolicy === opt.value ? "var(--tint)" : "transparent",
                 }}
               >
                 {opsPolicy === opt.value && (
-                  <CheckCircle size={14} strokeWidth={2.5} style={{ color: "#fff" }} />
+                  <CheckCircle size={16} strokeWidth={2.5} style={{ color: "#fff" }} />
                 )}
               </span>
               <div>
@@ -303,7 +303,7 @@ export function SecurityTab() {
                   className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full opacity-0 transition-all duration-100 hover:bg-[var(--bg-hover)] group-hover:opacity-100"
                   title="移除"
                 >
-                  <X size={12} strokeWidth={2} style={{ color: "var(--red)" }} />
+                  <X size={14} strokeWidth={2} style={{ color: "var(--red)" }} />
                 </button>
               </div>
             ))
@@ -326,7 +326,7 @@ export function SecurityTab() {
             className="flex shrink-0 cursor-pointer items-center gap-1 rounded-[6px] px-3 py-2 text-[12px] font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             style={{ background: "var(--tint)" }}
           >
-            <Plus size={12} strokeWidth={2} />
+            <Plus size={14} strokeWidth={2} />
             添加
           </button>
         </div>

@@ -31,7 +31,7 @@
   --fill-primary: #1d1d1f;
   --fill-secondary: #374151;
   --fill-tertiary: #4B5563;
-  --fill-quaternary: #c7c7cc;
+  --fill-quaternary: #aeaeb2;
   --fill-inverse: #ffffff;
 
   --tint: #2563EB;
@@ -98,6 +98,47 @@
 
   /* Stagger animation */
   --stagger: 30ms;
+}
+
+/* Non-macOS: use opaque chrome to avoid transparency-induced contrast loss.
+   WebView2 (Windows) and WebKitGTK (Linux) lack native vibrancy/blur,
+   so semi-transparent backgrounds render against a transparent window,
+   making icons nearly invisible. */
+[data-opaque-chrome] {
+  --bg-sidebar: #F4F4F5;
+}
+[data-opaque-chrome][data-theme="dark"] {
+  --bg-sidebar: #101012;
+}
+[data-opaque-chrome][data-accent="ocean"] {
+  --bg-sidebar: #E1EFFE;
+}
+[data-opaque-chrome][data-accent="ocean"][data-theme="dark"] {
+  --bg-sidebar: #0F1F35;
+}
+[data-opaque-chrome][data-accent="sunset"] {
+  --bg-sidebar: #FFF3E5;
+}
+[data-opaque-chrome][data-accent="sunset"][data-theme="dark"] {
+  --bg-sidebar: #261A0E;
+}
+[data-opaque-chrome][data-accent="midnight"] {
+  --bg-sidebar: #F1F5F9;
+}
+[data-opaque-chrome][data-accent="midnight"][data-theme="dark"] {
+  --bg-sidebar: #0F172A;
+}
+[data-opaque-chrome][data-accent="sage"] {
+  --bg-sidebar: #EDF5F0;
+}
+[data-opaque-chrome][data-accent="sage"][data-theme="dark"] {
+  --bg-sidebar: #0F261A;
+}
+[data-opaque-chrome][data-accent="rose"] {
+  --bg-sidebar: #FEEEF2;
+}
+[data-opaque-chrome][data-accent="rose"][data-theme="dark"] {
+  --bg-sidebar: #2D1220;
 }
 
 [data-theme="dark"] {

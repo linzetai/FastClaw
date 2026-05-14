@@ -20,11 +20,11 @@ export function QueueIndicator({ count, expanded, onToggle }: QueueIndicatorProp
         cursor: "pointer",
       }}
     >
-      <Clock size={12} strokeWidth={2} />
+      <Clock size={14} strokeWidth={2} />
       <span className="flex-1 text-left font-medium">
         {count} 条消息待发送
       </span>
-      {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+      {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
     </button>
   );
 }

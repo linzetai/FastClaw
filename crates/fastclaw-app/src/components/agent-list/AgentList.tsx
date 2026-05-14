@@ -88,7 +88,7 @@ function AgentContextMenu({
             className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)]"
             style={{ color: item.danger ? "var(--red)" : "var(--fill-secondary)" }}
           >
-            <Icon size={14} strokeWidth={1.5} />
+            <Icon size={16} strokeWidth={1.5} />
             {item.label}
           </button>
         );
@@ -111,7 +111,7 @@ function ChatItem({
       }`}
       style={active ? { background: "var(--tint-bg)" } : undefined}
     >
-      <MessageCircle size={12} strokeWidth={1.5} style={{ color: active ? "var(--tint)" : "var(--fill-quaternary)", flexShrink: 0 }} />
+      <MessageCircle size={14} strokeWidth={1.5} style={{ color: active ? "var(--tint)" : "var(--fill-quaternary)", flexShrink: 0 }} />
       <span
         className="min-w-0 truncate text-[12px]"
         style={{ color: active ? "var(--tint)" : "var(--fill-tertiary)" }}
@@ -401,7 +401,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                 className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg px-3 transition-all duration-200"
                 style={{ background: "var(--bg-hover)" }}
               >
-                <Search size={13} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)", flexShrink: 0 }} />
+                <Search size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)", flexShrink: 0 }} />
                 <input
                   ref={searchInputRef}
                   type="text"
@@ -419,7 +419,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                     className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-150 hover:bg-[var(--bg-active)]"
                     style={{ color: "var(--fill-tertiary)" }}
                   >
-                    <X size={10} strokeWidth={2} />
+                    <X size={14} strokeWidth={2} />
                   </button>
                 )}
               </div>
@@ -448,7 +448,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                 >
                   {searchResults.length === 0 ? (
                     <div className="flex items-center gap-2 px-3 py-3">
-                      <Search size={13} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />
+                      <Search size={14} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />
                       <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
                         未找到「{query}」相关 Agent
                       </span>
@@ -489,7 +489,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                 border: "1px dashed var(--separator-opaque)",
               }}
             >
-              <Plus size={14} strokeWidth={2} />
+              <Plus size={16} strokeWidth={2} />
               新建 Agent
             </button>
           </>
@@ -596,7 +596,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                     className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-[var(--bg-active)]"
                     style={{ color: "var(--fill-tertiary)" }}
                   >
-                    <MoreHorizontal size={14} strokeWidth={1.5} />
+                    <MoreHorizontal size={16} strokeWidth={1.5} />
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleExpand(agent.id); }}
@@ -604,7 +604,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                     style={{ color: "var(--fill-quaternary)" }}
                     title={expanded ? "收起会话" : "展开会话"}
                   >
-                    {expanded ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
+                    {expanded ? <ChevronDown size={14} strokeWidth={2} /> : <ChevronRight size={14} strokeWidth={2} />}
                   </button>
                 </div>
               </div>
@@ -701,7 +701,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
             <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: "0.5px solid var(--separator)" }}>
               <h3 className="text-[14px] font-semibold" style={{ color: "var(--fill-primary)" }}>新建 Agent</h3>
               <button onClick={cancelNew} className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" style={{ color: "var(--fill-tertiary)" }}>
-                <X size={12} strokeWidth={2} />
+                <X size={14} strokeWidth={2} />
               </button>
             </div>
             <div className="space-y-4 px-5 py-4">
@@ -759,7 +759,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                     {!modelsLoading && models.length === 0 && <option value="">暂无可用模型</option>}
                     {models.map((m) => <option key={`${m.provider}/${m.model}`} value={m.model}>{m.model}</option>)}
                   </select>
-                  <ChevronDown size={10} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
+                  <ChevronDown size={14} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
                 </div>
               </div>
             </div>
@@ -770,7 +770,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                 className="flex cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium transition-opacity duration-100 hover:opacity-90 disabled:opacity-40"
                 style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
               >
-                <Check size={12} strokeWidth={2} />
+                <Check size={14} strokeWidth={2} />
                 {creating ? "创建中..." : "创建"}
               </button>
             </div>

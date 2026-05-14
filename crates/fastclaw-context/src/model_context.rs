@@ -262,13 +262,13 @@ static MODEL_LIMITS: &[PatternEntry] = &[
     // DeepSeek
     PatternEntry {
         prefix: "deepseek-v4-pro",
-        input: 128_000,
-        output: 64_000,
+        input: 1_000_000,
+        output: 393_216,
     },
     PatternEntry {
         prefix: "deepseek-v4-flash",
-        input: 128_000,
-        output: 64_000,
+        input: 1_000_000,
+        output: 393_216,
     },
     PatternEntry {
         prefix: "deepseek-reasoner",

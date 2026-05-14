@@ -177,7 +177,7 @@ export const ToolCallGroupCard = memo(function ToolCallGroupCard({
         aria-label={`${tools.length} 个工具调用${expanded ? "，已展开" : "，已折叠"}`}
       >
         <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-          <Layers size={13} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+          <Layers size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
         </span>
 
         <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-[12px]">
@@ -197,13 +197,13 @@ export const ToolCallGroupCard = memo(function ToolCallGroupCard({
         <span className="flex shrink-0 items-center gap-2">
           {hasErrors && (
             <span className="flex items-center gap-0.5 text-[10px]" style={{ color: "var(--red)" }}>
-              <AlertTriangle size={10} strokeWidth={2} />
+              <AlertTriangle size={12} strokeWidth={2} />
               {summary.errorCount}
             </span>
           )}
           {!hasErrors && allDone && (
             <span className="flex items-center gap-0.5 text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
-              <Check size={10} strokeWidth={2} />
+              <Check size={12} strokeWidth={2} />
               {summary.successCount}
             </span>
           )}
@@ -218,12 +218,12 @@ export const ToolCallGroupCard = memo(function ToolCallGroupCard({
           )}
           {summary.totalDuration > 0 && (
             <span className="flex items-center gap-0.5 text-[10px] tabular-nums" style={{ color: "var(--fill-quaternary)" }}>
-              <Clock size={9} strokeWidth={1.5} />
+              <Clock size={12} strokeWidth={1.5} />
               {formatDuration(summary.totalDuration)}
             </span>
           )}
           <ChevronRight
-            size={10}
+            size={12}
             strokeWidth={2}
             className="shrink-0 transition-transform duration-150"
             style={{
@@ -305,18 +305,18 @@ export const ToolCallGroupTimeline = memo(function ToolCallGroupTimeline({
           style={{ cursor: "pointer", borderBottom: "0.5px solid var(--separator)" }}
           aria-expanded={expanded}
         >
-          <Layers size={11} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />
+          <Layers size={14} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />
           <span className="text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
             {expanded ? "收起" : `+${hiddenCount} 个已完成`}
           </span>
           {summary.errorCount > 0 && (
             <span className="flex items-center gap-0.5 text-[10px]" style={{ color: "var(--red)" }}>
-              <XIcon size={9} strokeWidth={2} />
+              <XIcon size={12} strokeWidth={2} />
               {summary.errorCount}
             </span>
           )}
           <ChevronRight
-            size={9}
+            size={12}
             strokeWidth={2}
             className="ml-auto shrink-0 transition-transform duration-150"
             style={{
@@ -399,7 +399,7 @@ const TimelineRow = memo(function TimelineRow({ tool }: { tool: ToolCall }) {
         </span>
         {hasDetails && (
           <ChevronRight
-            size={9}
+            size={12}
             strokeWidth={2}
             className="shrink-0 transition-transform duration-150"
             style={{

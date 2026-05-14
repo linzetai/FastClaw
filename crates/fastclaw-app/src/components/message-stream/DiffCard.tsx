@@ -37,13 +37,13 @@ function DiffStatBadge({ added, removed }: { added: number; removed: number }) {
     <div className="flex items-center gap-1.5">
       {added > 0 && (
         <span className="flex items-center gap-0.5 text-[10px] font-medium tabular-nums" style={{ color: "var(--green, #48BB78)" }}>
-          <Plus size={9} strokeWidth={2.5} />
+          <Plus size={14} strokeWidth={2.5} />
           {added}
         </span>
       )}
       {removed > 0 && (
         <span className="flex items-center gap-0.5 text-[10px] font-medium tabular-nums" style={{ color: "var(--red, #FC8181)" }}>
-          <Minus size={9} strokeWidth={2.5} />
+          <Minus size={14} strokeWidth={2.5} />
           {removed}
         </span>
       )}
@@ -175,7 +175,7 @@ export function DiffCard({ result, args }: { result: string; args?: string }) {
     >
       <div className="flex items-center justify-between px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <FileCode size={13} strokeWidth={1.5} style={{ color: "var(--tint, #4299E1)" }} />
+          <FileCode size={16} strokeWidth={1.5} style={{ color: "var(--tint, #4299E1)" }} />
           <div className="min-w-0">
             <span className="text-[12px] font-medium" style={{ color: "var(--fill-primary)" }}>
               {fileName}

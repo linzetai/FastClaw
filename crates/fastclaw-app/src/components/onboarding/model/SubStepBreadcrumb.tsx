@@ -22,7 +22,7 @@ export function SubStepBreadcrumb({ current, isCustom }: { current: 1 | 2 | 3; i
                 color: isDone || isActive ? (isDone ? "#fff" : "var(--fill-inverse)") : "var(--fill-inverse)",
               }}
             >
-              {isDone ? <CheckCircle size={10} strokeWidth={3} /> : displayNum}
+              {isDone ? <CheckCircle size={12} strokeWidth={3} /> : displayNum}
             </div>
             <span
               className={`text-[11px] ${isDone || isActive ? "" : "opacity-30"}`}

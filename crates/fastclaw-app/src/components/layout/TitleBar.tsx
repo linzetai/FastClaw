@@ -67,26 +67,26 @@ function WindowControls() {
       <button
         onClick={minimize}
         className={`${btn} w-[46px] hover:bg-[var(--bg-hover)]`}
-        style={{ color: "var(--fill-secondary)" }}
+        style={{ color: "var(--fill-primary)" }}
         title="最小化"
       >
-        <Minus size={12} strokeWidth={1.5} />
+        <Minus size={16} strokeWidth={1.5} />
       </button>
       <button
         onClick={toggleMaximize}
         className={`${btn} w-[46px] hover:bg-[var(--bg-hover)]`}
-        style={{ color: "var(--fill-secondary)" }}
+        style={{ color: "var(--fill-primary)" }}
         title={isMaximized ? "还原" : "最大化"}
       >
-        {isMaximized ? <Maximize2 size={10} strokeWidth={1.5} /> : <Square size={10} strokeWidth={1.5} />}
+        {isMaximized ? <Maximize2 size={16} strokeWidth={1.5} /> : <Square size={16} strokeWidth={1.5} />}
       </button>
       <button
         onClick={close}
         className={`${btn} w-[46px] hover:bg-[#E81123] hover:text-white`}
-        style={{ color: "var(--fill-secondary)", transition: "background 0.15s, color 0.15s" }}
+        style={{ color: "var(--fill-primary)", transition: "background 0.15s, color 0.15s" }}
         title="关闭"
       >
-        <X size={12} strokeWidth={1.5} />
+        <X size={16} strokeWidth={1.5} />
       </button>
     </div>
   );

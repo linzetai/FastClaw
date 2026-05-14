@@ -53,7 +53,7 @@ export function ModelSelectStep({
           className="flex items-center gap-2 px-4 py-2.5"
           style={{ borderTop: "0.5px solid var(--separator)" }}
         >
-          <Sparkles size={12} style={{ color: "var(--tint)" }} />
+              <Sparkles size={14} style={{ color: "var(--tint)" }} />
           <span className="text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
             还没有 API Key？
           </span>

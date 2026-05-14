@@ -401,7 +401,7 @@ export function MessageStream(_props: MessageStreamProps) {
           className="flex shrink-0 items-center gap-2 px-4 py-2"
           style={{ background: "var(--bg-secondary)", borderBottom: `0.5px solid var(--separator)`, animation: "slide-down var(--duration-fast) var(--ease-out)" }}
         >
-          <Search size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+          <Search size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
           <input
             ref={searchInputRef}
             value={searchQuery}
@@ -427,7 +427,7 @@ export function MessageStream(_props: MessageStreamProps) {
               className="flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-30"
               style={{ color: "var(--fill-tertiary)" }}
             >
-              <ChevronUp size={10} strokeWidth={2} />
+              <ChevronUp size={14} strokeWidth={2} />
             </button>
             <button
               onClick={() => setSearchIdx((i) => (i + 1) % Math.max(searchResults.length, 1))}
@@ -435,7 +435,7 @@ export function MessageStream(_props: MessageStreamProps) {
               className="flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-30"
               style={{ color: "var(--fill-tertiary)" }}
             >
-              <ChevronDown size={10} strokeWidth={2} />
+              <ChevronDown size={14} strokeWidth={2} />
             </button>
           </div>
           <button
@@ -443,7 +443,7 @@ export function MessageStream(_props: MessageStreamProps) {
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-100 hover:bg-[var(--bg-hover)]"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            <X size={10} strokeWidth={2} />
+            <X size={14} strokeWidth={2} />
           </button>
         </div>
       )}
