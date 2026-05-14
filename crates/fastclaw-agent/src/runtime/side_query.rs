@@ -76,6 +76,85 @@ pub struct SideQueryResult {
     pub duration: Duration,
 }
 
+/// Handle that tools can use to invoke side queries during execution.
+///
+/// Stored in a task-local so tools don't need direct access to the LLM provider.
+/// Usage from a tool's `execute()`:
+/// ```ignore
+/// if let Some(handle) = SideQueryHandle::current() {
+///     let answer = handle.query("Summarize this error", &messages).await?;
+/// }
+/// ```
+#[derive(Clone)]
+pub struct SideQueryHandle {
+    provider: Arc<dyn LlmProvider>,
+    model: String,
+    abort: CancellationToken,
+}
+
+tokio::task_local! {
+    static SIDE_QUERY_HANDLE: SideQueryHandle;
+}
+
+impl SideQueryHandle {
+    pub fn new(provider: Arc<dyn LlmProvider>, model: String, abort: CancellationToken) -> Self {
+        Self {
+            provider,
+            model,
+            abort,
+        }
+    }
+
+    /// Execute a closure with this handle available as the task-local.
+    pub async fn scope<F, R>(self, f: F) -> R
+    where
+        F: std::future::Future<Output = R>,
+    {
+        SIDE_QUERY_HANDLE.scope(self, f).await
+    }
+
+    /// Get the current handle from the task-local, if set.
+    pub fn current() -> Option<Self> {
+        SIDE_QUERY_HANDLE.try_with(|h| h.clone()).ok()
+    }
+
+    /// Run a quick side-query with a system prompt and user messages.
+    pub async fn query(
+        &self,
+        system: &str,
+        messages: Vec<ChatMessage>,
+    ) -> anyhow::Result<Option<SideQueryResult>> {
+        let opts = SideQueryOptions {
+            model: self.model.clone(),
+            system: Some(system.to_string()),
+            messages,
+            max_tokens: Some(1024),
+            temperature: 0.0,
+            max_retries: 1,
+            query_source: SideQuerySource::Foreground,
+            optional: true,
+            abort: Some(self.abort.clone()),
+        };
+        side_query(&self.provider, opts).await
+    }
+
+    /// Quick one-shot: pass a single user message and get a text response.
+    pub async fn ask(&self, system: &str, question: &str) -> Option<String> {
+        let msgs = vec![ChatMessage {
+            role: fastclaw_core::types::Role::User,
+            content: Some(serde_json::Value::String(question.to_string())),
+            reasoning_content: None,
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }];
+        match self.query(system, msgs).await {
+            Ok(Some(r)) => Some(r.content),
+            _ => None,
+        }
+    }
+}
+
 /// Execute a side-query against the given LLM provider.
 ///
 /// Returns `Ok(Some(result))` on success, `Ok(None)` if optional and failed,

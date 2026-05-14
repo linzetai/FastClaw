@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolResult};
+use fastclaw_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolResult};
 
 // ---------- Memory Tools ----------
 
@@ -29,6 +29,10 @@ impl MemorySearchTool {
 
 #[async_trait]
 impl Tool for MemorySearchTool {
+    fn kind(&self) -> ToolKind {
+        ToolKind::Search
+    }
+
     fn name(&self) -> &str {
         "memory_search"
     }

@@ -1,5 +1,6 @@
 use fastclaw_core::types::{ChatMessage, Role};
 
+use crate::cached_microcompact::{CachedMicrocompactConfig, CachedMicrocompactor};
 use crate::compressor::{
     estimate_messages_tokens, CompactionStrategy, ContextCompactor,
     DEFAULT_IMPORTANCE_MAX_MESSAGES, DEFAULT_IMPORTANCE_RECENT_WINDOW,
@@ -129,6 +130,7 @@ impl AutoCompactCircuitBreaker {
 ///
 /// ```text
 /// pre_query_compact():
+///   0. CachedMC   — skip re-compressing unchanged tool results (cache hit)
 ///   1. Snip       — remove entire old API rounds
 ///   2. MicroCompact — importance-based message eviction
 ///   3. Collapse   — (reserved, currently None/no-op)
@@ -139,17 +141,19 @@ impl AutoCompactCircuitBreaker {
 /// ```
 ///
 /// Create once outside the agent loop to retain cross-iteration state
-/// (tracking, circuit breaker, collapse store).
+/// (tracking, circuit breaker, collapse store, cached microcompact).
 pub struct ContextPipeline {
     config: PipelineConfig,
     pub tracking: CompactTracking,
     pub circuit_breaker: AutoCompactCircuitBreaker,
     pub collapse_store: crate::collapse::CollapseStore,
+    cached_mc: CachedMicrocompactor,
 }
 
 impl ContextPipeline {
     pub fn new(config: PipelineConfig) -> Self {
         Self {
+            cached_mc: CachedMicrocompactor::new(CachedMicrocompactConfig::default()),
             config,
             tracking: CompactTracking::default(),
             circuit_breaker: AutoCompactCircuitBreaker::default(),
@@ -174,7 +178,7 @@ impl ContextPipeline {
         self.circuit_breaker.record_failure();
     }
 
-    /// Run the pre-query compaction pipeline (layers 1-3, synchronous).
+    /// Run the pre-query compaction pipeline (layers 0-3, synchronous).
     ///
     /// Layer 4 (AutoCompact) is not executed here because it requires an
     /// async LLM call. Callers should check `should_attempt_autocompact()`
@@ -195,6 +199,13 @@ impl ContextPipeline {
             .filter(|m| m.role == Role::System)
             .cloned()
             .collect();
+
+        // Layer 0: Cached microcompact — reuse previously computed summaries
+        let cached_result = self.cached_mc.compact(&mut current);
+        if cached_result.tokens_freed > 0 {
+            meta.micro_applied = true;
+            meta.micro_tokens_freed += cached_result.tokens_freed;
+        }
 
         // Layer 1: Snip
         if self.config.enable_snip {

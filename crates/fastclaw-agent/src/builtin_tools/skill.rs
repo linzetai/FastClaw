@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolResult};
+use fastclaw_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolResult};
 use fastclaw_core::workspace::AgentWorkspace;
 
 // --- Skill tools for lazy/compact modes ---
@@ -20,6 +20,10 @@ impl ListSkillsTool {
 
 #[async_trait]
 impl Tool for ListSkillsTool {
+    fn kind(&self) -> ToolKind {
+        ToolKind::Read
+    }
+
     fn name(&self) -> &str {
         "list_skills"
     }
@@ -80,6 +84,10 @@ impl ReadSkillTool {
 
 #[async_trait]
 impl Tool for ReadSkillTool {
+    fn kind(&self) -> ToolKind {
+        ToolKind::Read
+    }
+
     fn name(&self) -> &str {
         "read_skill"
     }
@@ -163,6 +171,10 @@ impl WriteSkillTool {
 
 #[async_trait]
 impl Tool for WriteSkillTool {
+    fn kind(&self) -> ToolKind {
+        ToolKind::Edit
+    }
+
     fn name(&self) -> &str {
         "write_skill"
     }
@@ -592,6 +604,10 @@ fn compute_relevance(keywords: &[&str], skill: &fastclaw_core::skill::SkillEntry
 
 #[async_trait]
 impl Tool for SearchSkillTool {
+    fn kind(&self) -> ToolKind {
+        ToolKind::Search
+    }
+
     fn name(&self) -> &str {
         "search_skills"
     }

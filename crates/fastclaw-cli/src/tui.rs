@@ -23,9 +23,14 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/sessions", "List recent sessions"),
     ("/resume", "Resume session: /resume <id>"),
     ("/clear", "Clear message view"),
+    ("/compact", "Force context compression now"),
     ("/model", "Show current model info"),
     ("/models", "List all available models"),
     ("/stats", "Show session token/time stats"),
+    ("/todo", "Show current todo list"),
+    ("/memory", "Search agent memory: /memory <query>"),
+    ("/undo", "Undo last edit (revert file)"),
+    ("/diff", "Show recent file changes"),
     ("/doctor", "Run env diagnostics"),
     ("/plan", "Toggle Plan/Agent mode"),
     ("/cancel", "Cancel current streaming"),
@@ -727,6 +732,39 @@ async fn handle_slash_command(app: &mut TuiApp, ws_tx: &mut WsTx, text: &str) {
         "/resume" => {
             app.push_system("Usage: /resume <session-id>".into());
         }
+        "/compact" => {
+            let id = app.next_id();
+            let req = json!({"id": id, "method": "chat.compact"});
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
+            app.push_system("Compacting context...".into());
+        }
+        "/todo" => {
+            let id = app.next_id();
+            let req = json!({"id": id, "method": "todo.list"});
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
+            app.status = "Loading todos...".into();
+        }
+        "/memory" if !arg.is_empty() => {
+            let id = app.next_id();
+            let req = json!({"id": id, "method": "memory.search", "params": {"query": arg}});
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
+            app.push_system(format!("Searching memory: {arg}"));
+        }
+        "/memory" => {
+            app.push_system("Usage: /memory <search query>".into());
+        }
+        "/undo" => {
+            let id = app.next_id();
+            let req = json!({"id": id, "method": "chat.undo"});
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
+            app.push_system("Reverting last file change...".into());
+        }
+        "/diff" => {
+            let id = app.next_id();
+            let req = json!({"id": id, "method": "chat.diff"});
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
+            app.push_system("Fetching recent changes...".into());
+        }
         _ => {
             app.push_system(format!(
                 "Unknown command: {cmd}. Type /help for available commands."
@@ -1243,12 +1281,25 @@ fn render_markdown_lines(content: &str, lines: &mut Vec<Line<'static>>, streamin
         }
 
         if in_code_block {
+            let is_diff = code_lang == "diff"
+                || code_lang == "patch"
+                || code_lang.starts_with("diff");
+            let (fg, bg) = if is_diff {
+                if line.starts_with('+') && !line.starts_with("+++") {
+                    (Color::Green, Color::Rgb(20, 40, 20))
+                } else if line.starts_with('-') && !line.starts_with("---") {
+                    (Color::Red, Color::Rgb(50, 20, 20))
+                } else if line.starts_with("@@") {
+                    (Color::Cyan, Color::Rgb(20, 30, 40))
+                } else {
+                    (Color::White, Color::Rgb(30, 30, 46))
+                }
+            } else {
+                (Color::White, Color::Rgb(30, 30, 46))
+            };
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled(
-                    format!("│ {line}"),
-                    Style::default().fg(Color::White).bg(Color::Rgb(30, 30, 46)),
-                ),
+                Span::styled(format!("│ {line}"), Style::default().fg(fg).bg(bg)),
             ]));
             continue;
         }

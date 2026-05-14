@@ -54,10 +54,18 @@ const DYNAMIC_BOUNDARY: &str = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__";
 /// Sections are split into static (cross-session cacheable) and dynamic
 /// (per-turn / per-session). A boundary marker separates them for API prompt
 /// cache alignment.
+///
+/// Cache invalidation strategy:
+/// - Static sections are cached indefinitely until explicit `clear_cache()`
+/// - Dynamic sections with `cache_break=true` are recomputed every call
+/// - Selective invalidation via `invalidate_sections()` targets specific names
+/// - `invalidate_if_changed()` recomputes and only updates if output differs
 pub struct PromptEngine {
     static_sections: Vec<PromptSection>,
     dynamic_sections: Vec<PromptSection>,
     section_cache: DashMap<String, Option<String>>,
+    /// Tracks which sections were invalidated, for diagnostics.
+    invalidation_count: std::sync::atomic::AtomicU64,
 }
 
 impl PromptEngine {
@@ -66,6 +74,7 @@ impl PromptEngine {
             static_sections,
             dynamic_sections,
             section_cache: DashMap::new(),
+            invalidation_count: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -142,6 +151,74 @@ impl PromptEngine {
     /// Called on `/clear`, `/compact`, mode switch, or session reset.
     pub fn clear_cache(&self) {
         self.section_cache.clear();
+    }
+
+    /// Selectively invalidate specific sections by name.
+    ///
+    /// Use this instead of `clear_cache()` when only a subset of inputs have
+    /// changed (e.g. tool list changed but git state didn't).
+    pub fn invalidate_sections(&self, names: &[&str]) {
+        for name in names {
+            if self.section_cache.remove(*name).is_some() {
+                self.invalidation_count
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Recompute a section and only update the cache if the output changed.
+    ///
+    /// Returns `true` if the section value actually changed (cache was stale).
+    /// This is useful for detecting whether a full prompt rebuild is needed.
+    pub fn invalidate_if_changed(&self, section_name: &str, ctx: &PromptContext) -> bool {
+        let section = self
+            .static_sections
+            .iter()
+            .chain(self.dynamic_sections.iter())
+            .find(|s| s.name == section_name);
+
+        let section = match section {
+            Some(s) => s,
+            None => return false,
+        };
+
+        let new_value = (section.compute)(ctx);
+        let changed = match self.section_cache.get(section_name) {
+            Some(cached) => *cached != new_value,
+            None => true,
+        };
+
+        if changed {
+            self.section_cache
+                .insert(section_name.to_string(), new_value);
+            self.invalidation_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        changed
+    }
+
+    /// Check if the assembled prompt would differ from the cached version
+    /// without actually rebuilding it. Useful for prompt-cache alignment
+    /// decisions (e.g. whether to use a cached API prefix).
+    pub fn has_cached_sections_changed(&self, ctx: &PromptContext) -> bool {
+        for section in &self.static_sections {
+            let new_value = (section.compute)(ctx);
+            if let Some(cached) = self.section_cache.get(section.name) {
+                if *cached != new_value {
+                    return true;
+                }
+            } else {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Total number of invalidations since engine creation (diagnostics).
+    pub fn total_invalidations(&self) -> u64 {
+        self.invalidation_count
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn resolve_section(&self, section: &PromptSection, ctx: &PromptContext) -> Option<String> {

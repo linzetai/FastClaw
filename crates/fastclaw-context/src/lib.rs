@@ -1,4 +1,5 @@
 pub mod budget;
+pub mod cached_microcompact;
 pub mod collapse;
 pub mod compressor;
 pub mod engine;
@@ -35,6 +36,9 @@ pub use model_context::{
 };
 pub use pipeline::{
     AutoCompactCircuitBreaker, CompactTracking, CompactionMetadata, ContextPipeline, PipelineConfig,
+};
+pub use cached_microcompact::{
+    CachedMicrocompactConfig, CachedMicrocompactResult, CachedMicrocompactor,
 };
 pub use reactive::{ReactiveCompactResult, ReactiveCompactor, ReactiveCompactorConfig};
 pub use snip::{group_by_api_round, ApiRound, SnipCompactor, SnipCompactorConfig, SnipResult};

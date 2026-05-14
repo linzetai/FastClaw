@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use dashmap::DashMap;
-use fastclaw_core::tool::{Tool, ToolParameterSchema, ToolResult};
+use fastclaw_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolResult};
 use fastclaw_core::types::StreamEvent;
 
 use super::ask_question::ASK_QUESTION_STREAM_KEY;
@@ -27,6 +27,10 @@ impl BriefTool {
 
 #[async_trait]
 impl Tool for BriefTool {
+    fn kind(&self) -> ToolKind {
+        ToolKind::Think
+    }
+
     fn name(&self) -> &str {
         "send_user_message"
     }
