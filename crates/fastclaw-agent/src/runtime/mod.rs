@@ -2498,6 +2498,15 @@ impl AgentRuntime {
             None
         };
 
+        let (plan_file_path, plan_file_exists) =
+            crate::builtin_tools::plan_mode::current_plan_context()
+                .map(|pc| {
+                    let path = pc.store.plan_path(&pc.session_id);
+                    let exists = pc.store.plan_exists(&pc.session_id);
+                    (Some(path.display().to_string()), exists)
+                })
+                .unwrap_or((None, false));
+
         PromptContext {
             agent_config: Arc::new(params.config.clone()),
             enabled_tools: tool_names,
@@ -2514,6 +2523,8 @@ impl AgentRuntime {
             memory_prompt: None,
             session_start_date: date,
             pending_todo_summary,
+            plan_file_path,
+            plan_file_exists,
         }
     }
 

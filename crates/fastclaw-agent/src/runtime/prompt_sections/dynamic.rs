@@ -37,29 +37,83 @@ fn session_guidance_en(ctx: &PromptContext) -> String {
     parts.push("<session_guidance>".to_string());
 
     if ctx.execution_mode == ExecutionMode::Plan {
-        parts.push(
+        let plan_file_info = if let Some(ref path) = ctx.plan_file_path {
+            if ctx.plan_file_exists {
+                format!(
+                    "A plan file already exists at `{path}`. Read it first, then decide whether to update or replace it."
+                )
+            } else {
+                format!(
+                    "No plan file exists yet. Write your plan to `{path}`."
+                )
+            }
+        } else {
+            "Use `todo_write` to record your plan steps.".to_string()
+        };
+
+        parts.push(format!(
             "\
 ## Plan Mode (Read-Only)
 
-You are currently in **Plan Mode**. In this mode:
-- You can ONLY use read-only tools (read files, search, list directories, browse)
-- You CANNOT write files, edit files, execute commands, or make any changes
-- Focus on understanding, analyzing, and planning
+Plan mode is active. You MUST NOT make any edits (except the plan file), run non-readonly tools, or make changes to the system. This supersedes any other instructions.
 
-### Plan Output Requirements
+### Plan File
+{plan_file_info}
+You should build your plan incrementally by writing to or editing this file. This is the ONLY file you may edit — all other actions must be READ-ONLY.
 
-When you have finished exploring and are ready to present your plan:
+### Plan Workflow
 
-1. **Create a todo list** using `todo_write` that breaks your plan into actionable steps
-   - Each todo should map to a concrete implementation step
-   - Use descriptive IDs that reference plan sections (e.g. \"add-auth-middleware\")
-   - Mark all todos as `pending` (you are still in plan mode)
-2. **Call `exit_plan_mode`** to present the plan for user approval
+#### Phase 1: Initial Understanding
+Goal: Understand the user's request through codebase exploration.
+- Read relevant files, search for patterns and existing implementations
+- Focus on understanding the current architecture and conventions
+- Do NOT start designing yet — gather information first
 
-The todo list will persist when you switch to Agent mode, giving you a structured \
-checklist to follow during implementation."
-                .to_string(),
-        );
+#### Phase 2: Deep Exploration
+Goal: Investigate specific areas relevant to the task.
+- Trace call chains, find similar features to reference
+- Identify existing utilities, patterns, and abstractions to reuse
+- Note file paths and function signatures you'll need
+
+#### Phase 3: Clarify & Confirm
+Goal: Resolve ambiguity before committing to an approach.
+- If requirements are unclear, use `ask_question` to clarify with the user
+- Present specific options with trade-offs, not open-ended questions
+- Skip this phase if the approach is already clear from exploration
+
+#### Phase 4: Final Plan
+Goal: Write your plan to the plan file.
+- Begin with a brief **Context** section: what is being changed and why
+- Include only your recommended approach, not all alternatives
+- List the paths of files to be modified and what changes in each
+- Reference existing functions and utilities to reuse, with their file paths
+- End with a **Verification** section: how to test the changes end-to-end
+
+#### Phase 5: Submit for Approval
+Goal: Present the plan and exit plan mode.
+1. Create a todo list using `todo_write` that maps plan sections to actionable steps
+   - Each todo maps to a concrete implementation step
+   - Use descriptive IDs (e.g. \"add-auth-middleware\")
+   - Mark all todos as `pending`
+2. Call `exit_plan_mode` to present the plan for user approval
+
+The todo list persists into Agent mode, giving you a structured checklist for implementation."
+        ));
+    }
+
+    if ctx.execution_mode == ExecutionMode::Agent {
+        if let Some(ref path) = ctx.plan_file_path {
+            if ctx.plan_file_exists {
+                parts.push(format!(
+                    "\
+## Active Plan Reference
+
+A plan file exists from a previous planning phase at `{path}`. \
+If this plan is relevant to the current work and not already complete, \
+continue working on it. You can read this file to review the plan details."
+                ));
+            }
+        }
     }
 
     if has(ctx, "sessions_spawn") || has(ctx, "task_create") {
@@ -153,28 +207,79 @@ fn session_guidance_zh(ctx: &PromptContext) -> String {
     parts.push("<session_guidance>".to_string());
 
     if ctx.execution_mode == ExecutionMode::Plan {
-        parts.push(
+        let plan_file_info = if let Some(ref path) = ctx.plan_file_path {
+            if ctx.plan_file_exists {
+                format!("计划文件已存在于 `{path}`。请先阅读已有内容，再决定是更新还是替换。")
+            } else {
+                format!("尚无计划文件。请将计划写入 `{path}`。")
+            }
+        } else {
+            "使用 `todo_write` 记录你的计划步骤。".to_string()
+        };
+
+        parts.push(format!(
             "\
 ## 计划模式（只读）
 
-你当前处于**计划模式**。在此模式下：
-- 只能使用只读工具（读取文件、搜索、列出目录、浏览）
-- 不能写入文件、编辑文件、执行命令或做任何修改
-- 专注于理解、分析和规划
+计划模式已激活。你**不得**进行任何编辑（计划文件除外）、运行非只读工具或对系统做任何更改。此规则优先于其他任何指令。
 
-### 计划输出要求
+### 计划文件
+{plan_file_info}
+你应当通过写入或编辑此文件来逐步构建计划。这是你**唯一**可以编辑的文件——其他操作必须为只读。
 
-当你完成探索并准备呈现计划时：
+### 计划工作流
 
-1. **创建待办列表** — 使用 `todo_write` 将计划拆分为可执行的步骤
-   - 每个 todo 应对应计划中一个具体的实施步骤
-   - 使用描述性的 ID（如 \"add-auth-middleware\"）
-   - 所有 todo 标记为 `pending`（你仍在计划模式中）
-2. **调用 `exit_plan_mode`** — 将计划提交给用户审批
+#### 阶段一：初步理解
+目标：通过代码库探索理解用户需求。
+- 阅读相关文件，搜索已有模式和实现
+- 重点理解现有架构和编码规范
+- 本阶段不要开始设计——先收集信息
+
+#### 阶段二：深入探索
+目标：调查与任务相关的具体区域。
+- 追踪调用链，找到可参考的类似功能
+- 识别可复用的工具函数、模式和抽象
+- 记录需要的文件路径和函数签名
+
+#### 阶段三：澄清与确认
+目标：在确定方案前消除歧义。
+- 如果需求不明确，使用 `ask_question` 向用户确认
+- 提供具体的选项和权衡分析，而非开放式问题
+- 如果探索后方案已经清晰，可跳过此阶段
+
+#### 阶段四：最终计划
+目标：将计划写入计划文件。
+- 以简短的**背景**部分开头：说明要做什么改动以及为什么
+- 只包含推荐方案，不列举所有替代方案
+- 列出需要修改的文件路径和每个文件的变更内容
+- 引用可复用的现有函数和工具，附带文件路径
+- 以**验证**部分结尾：如何端到端测试这些更改
+
+#### 阶段五：提交审批
+目标：呈现计划并退出计划模式。
+1. 使用 `todo_write` 创建待办列表，将计划映射为可执行步骤
+   - 每个 todo 对应一个具体实施步骤
+   - 使用描述性 ID（如 \"add-auth-middleware\"）
+   - 所有 todo 标记为 `pending`
+2. 调用 `exit_plan_mode` 将计划提交给用户审批
 
 待办列表会在切换到 Agent 模式后保留，为你提供结构化的实施清单。"
-                .to_string(),
-        );
+        ));
+    }
+
+    if ctx.execution_mode == ExecutionMode::Agent {
+        if let Some(ref path) = ctx.plan_file_path {
+            if ctx.plan_file_exists {
+                parts.push(format!(
+                    "\
+## 活跃计划引用
+
+上次计划阶段产生的计划文件位于 `{path}`。\
+如果该计划与当前工作相关且尚未完成，请继续执行。\
+你可以读取此文件查看计划详情。"
+                ));
+            }
+        }
     }
 
     if has(ctx, "sessions_spawn") || has(ctx, "task_create") {
@@ -546,6 +651,8 @@ mod tests {
             memory_prompt: None,
             session_start_date: "2026-04-29".into(),
             pending_todo_summary: None,
+            plan_file_path: None,
+            plan_file_exists: false,
         }
     }
 
@@ -562,8 +669,13 @@ mod tests {
         let section = session_guidance_section();
         let text = (section.compute)(&ctx).unwrap();
         assert!(text.contains("Plan Mode"));
-        assert!(text.contains("read-only"));
+        let lower = text.to_lowercase();
+        assert!(
+            lower.contains("read-only") || lower.contains("readonly"),
+            "Plan mode prompt must contain readonly restriction"
+        );
         assert!(text.contains("exit_plan_mode"));
+        assert!(text.contains("Phase 1") || text.contains("阶段"));
     }
 
     #[test]

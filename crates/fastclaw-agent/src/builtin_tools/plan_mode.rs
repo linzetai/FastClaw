@@ -7,6 +7,8 @@ use dashmap::DashMap;
 use fastclaw_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolResult};
 use fastclaw_core::types::ExecutionMode;
 
+use super::plan_file::PlanFileStore;
+
 const MODE_AGENT: u8 = 0;
 const MODE_PLAN: u8 = 1;
 
@@ -14,14 +16,39 @@ tokio::task_local! {
     /// Per-session mode state set by the runtime before tool execution.
     /// Plan mode tools read this to mutate the correct session's state.
     static CURRENT_SESSION_MODE: ExecutionModeState;
+    /// Per-session plan context (session_id + PlanFileStore) for plan file I/O.
+    static PLAN_CONTEXT: PlanContext;
 }
 
-/// Wrap a future so plan mode tools can access the session-specific mode state.
-pub async fn with_session_mode<F, T>(mode_state: ExecutionModeState, fut: F) -> T
+/// Plan file context available to plan mode tools via task-local.
+#[derive(Clone)]
+pub struct PlanContext {
+    pub session_id: String,
+    pub store: PlanFileStore,
+}
+
+/// Wrap a future so plan mode tools can access the session-specific mode state
+/// and plan file context.
+pub async fn with_session_mode<F, T>(
+    mode_state: ExecutionModeState,
+    plan_ctx: Option<PlanContext>,
+    fut: F,
+) -> T
 where
     F: std::future::Future<Output = T>,
 {
-    CURRENT_SESSION_MODE.scope(mode_state, fut).await
+    let with_mode = CURRENT_SESSION_MODE.scope(mode_state, async {
+        if let Some(pc) = plan_ctx {
+            PLAN_CONTEXT.scope(pc, fut).await
+        } else {
+            fut.await
+        }
+    });
+    with_mode.await
+}
+
+pub fn current_plan_context() -> Option<PlanContext> {
+    PLAN_CONTEXT.try_with(|c| c.clone()).ok()
 }
 
 fn mode_from_u8(v: u8) -> ExecutionMode {
@@ -249,14 +276,37 @@ impl Tool for EnterPlanModeTool {
             return ToolResult::ok("Already in plan mode.");
         }
 
+        let plan_info = if let Some(pc) = current_plan_context() {
+            let path = pc.store.plan_path(&pc.session_id);
+            if pc.store.plan_exists(&pc.session_id) {
+                format!(
+                    "\n\n## Re-entering Plan Mode\n\
+                     A plan file already exists at: {}\n\
+                     Read it first to understand what was previously planned. Then decide:\n\
+                     - **Different task**: Overwrite with a fresh plan\n\
+                     - **Same task, continuing**: Update the existing plan incrementally",
+                    path.display()
+                )
+            } else {
+                format!(
+                    "\n\nPlan file will be saved to: {}",
+                    path.display()
+                )
+            }
+        } else {
+            String::new()
+        };
+
         ToolResult::ok(format!(
             "Entered plan mode (was: {from}).\n\n\
              In plan mode:\n\
              1. Explore the codebase with read/search tools\n\
              2. Identify patterns and approaches\n\
              3. Design an implementation strategy\n\
-             4. Use exit_plan_mode when ready to start coding\n\n\
-             DO NOT write or edit any files. This is a read-only phase."
+             4. Write your plan to the plan file\n\
+             5. Use exit_plan_mode when ready to start coding\n\n\
+             DO NOT write or edit any files except the plan file. This is a read-only phase.\
+             {plan_info}"
         ))
     }
 }
@@ -403,9 +453,37 @@ impl Tool for ExitPlanModeTool {
             String::new()
         };
 
+        let plan_ref = if let Some(pc) = current_plan_context() {
+            let path = pc.store.plan_path(&pc.session_id);
+            if pc.store.plan_exists(&pc.session_id) {
+                let plan_content = pc
+                    .store
+                    .read_plan(&pc.session_id)
+                    .unwrap_or_default();
+                let preview = if plan_content.len() > 500 {
+                    format!("{}...\n(truncated, read full file for details)", &plan_content[..500])
+                } else {
+                    plan_content
+                };
+                format!(
+                    "\n\n## Plan File\nSaved at: {}\n\n{}\n\n\
+                     You can refer back to this file during implementation.",
+                    path.display(),
+                    preview,
+                )
+            } else {
+                format!(
+                    "\n\nNo plan file was written. Plan file path: {}",
+                    path.display()
+                )
+            }
+        } else {
+            String::new()
+        };
+
         ToolResult::ok(format!(
             "Exited plan mode → agent mode. All tools are now available.\
-             {verify_msg}\nYou can proceed with implementation."
+             {verify_msg}{plan_ref}\n\nYou can now proceed with implementation."
         ))
     }
 }

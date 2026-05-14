@@ -13,7 +13,7 @@ mod memory;
 mod network;
 mod notebook;
 pub mod plan_file;
-mod plan_mode;
+pub mod plan_mode;
 mod screenshot;
 mod session;
 mod shell;
@@ -70,7 +70,7 @@ pub use network::{
 pub use notebook::NotebookEditTool;
 pub use plan_file::PlanFileStore;
 pub use plan_mode::{
-    with_session_mode, EnterPlanModeTool, ExecutionModeState, ExitPlanModeTool,
+    with_session_mode, EnterPlanModeTool, ExecutionModeState, ExitPlanModeTool, PlanContext,
     SessionModeRegistry,
 };
 pub use screenshot::{register_screenshot_tool, ScreenshotTool};

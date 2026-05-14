@@ -409,6 +409,10 @@ pub async fn spawn_chat(
         let mode_state_for_task = state.rt.session_modes.get_or_create(&session_id);
         let session_store_for_task = Some(state.store.session_store.clone());
         let todo_store_for_task = Some(state.rt.todo_store.clone());
+        let plan_ctx_for_task = Some(fastclaw_agent::builtin_tools::PlanContext {
+            session_id: session_id.clone(),
+            store: state.rt.plan_file_store.clone(),
+        });
         let task = tokio::spawn(async move {
             let ms_clone = mode_state_for_task.clone();
             tokio::select! {
@@ -416,6 +420,7 @@ pub async fn spawn_chat(
                     stream_context_key_for_task.clone(),
                     fastclaw_agent::builtin_tools::with_session_mode(
                         ms_clone,
+                        plan_ctx_for_task,
                         runtime.execute_stream_with_confirm(&cfg, &enriched, &tool_reg, tx, llm_for_task, confirm_pending_for_task, subagent_prompt, Some(mode_state_for_task), session_store_for_task, todo_store_for_task),
                     ),
                 ) => result,

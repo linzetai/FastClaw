@@ -24,6 +24,10 @@ pub struct PromptContext {
     pub session_start_date: String,
     /// Summary of pending todo items from plan mode, injected when in agent mode.
     pub pending_todo_summary: Option<String>,
+    /// Path to the plan file for the current session (set when in plan mode).
+    pub plan_file_path: Option<String>,
+    /// Whether a plan file already exists (reentry detection).
+    pub plan_file_exists: bool,
 }
 
 /// Minimal info about a connected MCP server, used by prompt sections.
@@ -267,6 +271,8 @@ mod tests {
             memory_prompt: None,
             session_start_date: "2026-04-29".into(),
             pending_todo_summary: None,
+            plan_file_path: None,
+            plan_file_exists: false,
         }
     }
 
@@ -564,6 +570,8 @@ mod integration_tests {
             memory_prompt: None,
             session_start_date: "2026-04-29".into(),
             pending_todo_summary: None,
+            plan_file_path: None,
+            plan_file_exists: false,
         }
     }
 
@@ -596,7 +604,10 @@ mod integration_tests {
             "Plan mode prompt must contain readonly restriction"
         );
         assert!(
-            joined.contains("CANNOT write files") || joined.contains("read-only tools"),
+            joined.contains("CANNOT write files")
+                || joined.contains("read-only tools")
+                || joined.contains("MUST NOT make any edits")
+                || joined.contains("READ-ONLY"),
             "Plan mode prompt must explicitly restrict writes"
         );
     }

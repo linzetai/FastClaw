@@ -102,6 +102,8 @@ fn make_ctx(mode: ExecutionMode, tools: &[&str], deferred: usize) -> PromptConte
         memory_prompt: None,
         session_start_date: "2026-04-29".into(),
         pending_todo_summary: None,
+        plan_file_path: None,
+        plan_file_exists: false,
     }
 }
 
