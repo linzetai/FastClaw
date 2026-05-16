@@ -344,6 +344,7 @@ FACT: user | prefers_theme | dark mode";
                 name: None,
                 tool_calls: None,
                 tool_call_id: Some("tc1".into()),
+                compact_metadata: None,
             },
         ];
         let ctx = build_compact_context(&msgs);

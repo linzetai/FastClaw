@@ -1,57 +1,33 @@
-use super::helpers::{copy_dir_recursive, get_state};
-use crate::AppData;
 use serde_json::json;
+use std::path::Path;
 
-// ─── Skills & Tools ───
-
-#[tauri::command]
-pub async fn list_skills(
-    state: tauri::State<'_, AppData>,
-    agent_id: Option<String>,
-) -> Result<serde_json::Value, String> {
-    let gw = state.gateway.lock().await;
-    let app = get_state(&gw)?;
-    let aid = agent_id.clone().unwrap_or_else(|| "main".to_string());
-    tracing::info!(agent_id = %aid, "IPC list_skills called");
-    let registry = app.skill_registry_for(&aid);
-    let skills: Vec<serde_json::Value> = registry
-        .list()
-        .into_iter()
-        .filter(|s| s.frontmatter.enabled.unwrap_or(true))
-        .map(|s| {
-            json!({
-                "id": s.id,
-                "name": s.name,
-                "description": s.description,
-                "tags": s.frontmatter.tags,
-            })
-        })
-        .collect();
-    tracing::info!(count = skills.len(), "IPC list_skills returning");
-    Ok(json!({ "skills": skills, "count": skills.len() }))
+/// Get the config mode based on compile flags.
+fn config_mode() -> fastclaw_core::config::ConfigMode {
+    if cfg!(debug_assertions) {
+        fastclaw_core::config::ConfigMode::Development
+    } else {
+        fastclaw_core::config::ConfigMode::Production
+    }
 }
 
-#[tauri::command]
-pub async fn refresh_skills(state: tauri::State<'_, AppData>) -> Result<serde_json::Value, String> {
-    let gw = state.gateway.lock().await;
-    let app = get_state(&gw)?;
-    let count = app.reload_skills().map_err(|e| e.to_string())?;
-    Ok(json!({ "refreshed": true, "count": count }))
+/// Get the state directory for the current config mode.
+fn state_dir() -> std::path::PathBuf {
+    fastclaw_core::config::state_dir(&config_mode())
 }
 
+/// Upload/install a skill from a local folder or .zip file.
+///
+/// This is a local file operation - extracts the skill to the skills directory.
+/// The skill registry refresh is handled by the Gateway via WebSocket.
 #[tauri::command]
-pub async fn upload_skill(
-    state: tauri::State<'_, AppData>,
-    source_path: String,
-) -> Result<serde_json::Value, String> {
-    let src = std::path::Path::new(&source_path);
+pub async fn upload_skill(source_path: String) -> Result<serde_json::Value, String> {
+    let src = Path::new(&source_path);
     if !src.exists() {
         return Err(format!("path does not exist: {source_path}"));
     }
 
-    let gw = state.gateway.lock().await;
-    let app = get_state(&gw)?;
-    let skills_dir = fastclaw_core::paths::resolve_skills_dir_from(Some(&app.cfg.config.paths));
+    let sd = state_dir();
+    let skills_dir = sd.join("config/skills");
 
     if src.is_dir() {
         let skill_md = src.join("SKILL.md");
@@ -67,15 +43,17 @@ pub async fn upload_skill(
             std::fs::remove_dir_all(&dest)
                 .map_err(|e| format!("failed to clean existing skill dir: {e}"))?;
         }
-        copy_dir_recursive(src, &dest).map_err(|e| format!("failed to copy skill dir: {e}"))?;
-        let count = app.reload_skills().map_err(|e| e.to_string())?;
-        return Ok(json!({ "installed": dir_name, "count": count }));
+        copy_dir_recursive(src, &dest)
+            .map_err(|e| format!("failed to copy skill dir: {e}"))?;
+        return Ok(json!({ "installed": dir_name }));
     }
 
     let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("");
     if ext == "zip" {
-        let file = std::fs::File::open(src).map_err(|e| format!("failed to open zip: {e}"))?;
-        let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("invalid zip: {e}"))?;
+        let file =
+            std::fs::File::open(src).map_err(|e| format!("failed to open zip: {e}"))?;
+        let mut archive =
+            zip::ZipArchive::new(file).map_err(|e| format!("invalid zip: {e}"))?;
         let mut top_dirs: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut has_skill_md = false;
         for i in 0..archive.len() {
@@ -147,11 +125,27 @@ pub async fn upload_skill(
                 .unwrap_or("skill")
                 .to_string()
         };
-        let count = app.reload_skills().map_err(|e| e.to_string())?;
-        return Ok(json!({ "installed": skill_name, "count": count }));
+        return Ok(json!({ "installed": skill_name }));
     }
 
     Err(format!(
         "unsupported file type: .{ext} (expected a folder or .zip)"
     ))
+}
+
+/// Recursively copy a directory.
+fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dest)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let src_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?;
+        } else {
+            std::fs::copy(&src_path, &dest_path)?;
+        }
+    }
+    Ok(())
 }

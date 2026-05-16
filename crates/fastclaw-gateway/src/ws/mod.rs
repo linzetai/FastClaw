@@ -1,8 +1,10 @@
 mod agents;
 mod chat;
 mod config;
+mod execution;
 mod mcp;
 mod session;
+mod skills;
 mod types;
 
 pub use types::WsQueryParams;
@@ -97,6 +99,10 @@ async fn handle_socket(socket: WebSocket, state: AppState, auth: ApiKeyAuth, pre
                             "chat.cancel", "chat.answer", "chat.set_mode",
                             "models.list", "config.get", "config.set",
                             "mcp.status", "mcp.reload", "mcp.add", "mcp.remove",
+                            "agents.get", "agents.create", "agents.update", "agents.delete",
+                            "tools.list", "tools.update", "tools.submit_answer",
+                            "skills.list", "skills.refresh",
+                            "execution.set_mode", "execution.get_plan",
                             "subscribe", "unsubscribe"],
                 "authRequired": auth_required && !authenticated,
             })),
@@ -277,15 +283,6 @@ async fn dispatch(
         }
         "agents" => agents::handle_agents(sender, state, id).await,
         "chat" => {
-            // #region agent log
-            {
-                use std::io::Write;
-                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/home/linzetai/workspace/my_tools/FastClaw/.cursor/debug-a57040.log") {
-                    let _ = writeln!(f, r#"{{"sessionId":"a57040","hypothesisId":"D","location":"ws/mod.rs:dispatch:chat","message":"Gateway received chat method","data":{{"req_id":"{}"}},"timestamp":{}}}"#,
-                        id.as_deref().unwrap_or("none"), chrono::Utc::now().timestamp_millis());
-                }
-            }
-            // #endregion
             chat::spawn_chat(
                 state,
                 owned_sessions,
@@ -361,6 +358,21 @@ async fn dispatch(
         "mcp.reload" => mcp::handle_mcp_reload(sender, state, id).await,
         "mcp.add" => mcp::handle_mcp_add(sender, state, id, req.params).await,
         "mcp.remove" => mcp::handle_mcp_remove(sender, state, id, req.params).await,
+        // Agent CRUD
+        "agents.get" => agents::handle_agents_get(sender, state, id, req.params).await,
+        "agents.create" => agents::handle_agents_create(sender, state, id, req.params).await,
+        "agents.update" => agents::handle_agents_update(sender, state, id, req.params).await,
+        "agents.delete" => agents::handle_agents_delete(sender, state, id, req.params).await,
+        // Tools
+        "tools.list" => agents::handle_tools_list(sender, state, id, req.params).await,
+        "tools.update" => agents::handle_tools_update(sender, state, id, req.params).await,
+        "tools.submit_answer" => chat::handle_chat_answer(sender, state, id, req.params).await,
+        // Skills
+        "skills.list" => skills::handle_skills_list(sender, state, id, req.params).await,
+        "skills.refresh" => skills::handle_skills_refresh(sender, state, id).await,
+        // Execution mode
+        "execution.set_mode" => execution::handle_execution_set_mode(sender, state, id, req.params).await,
+        "execution.get_plan" => execution::handle_execution_get_plan(sender, state, id, req.params).await,
         "subscribe" => {
             let events: Vec<String> = req
                 .params

@@ -103,7 +103,7 @@ pub fn rebuild_behavior_tool_lists(
     }
 }
 
-async fn write_agent_config_file(state: &AppState, config: &AgentConfig) -> Result<(), AppError> {
+pub async fn write_agent_config_file(state: &AppState, config: &AgentConfig) -> Result<(), AppError> {
     let dir = agents_dir(state);
     tokio::fs::create_dir_all(&dir)
         .await

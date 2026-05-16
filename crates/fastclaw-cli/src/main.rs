@@ -310,7 +310,7 @@ fn cmd_daemon_start(mode: &fastclaw_core::config::ConfigMode) -> anyhow::Result<
         let exe = std::env::current_exe()
             .map_err(|e| anyhow::anyhow!("cannot resolve current executable: {e}"))?;
         let mut cmd = std::process::Command::new(exe);
-        cmd.arg("serve");
+        // --dev and --profile are top-level flags, must come before subcommand
         if mode.is_dev() {
             cmd.arg("--dev");
         }
@@ -318,6 +318,7 @@ fn cmd_daemon_start(mode: &fastclaw_core::config::ConfigMode) -> anyhow::Result<
             cmd.arg("--profile");
             cmd.arg(p);
         }
+        cmd.arg("serve");
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -431,6 +432,7 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("  ➜  Network: http://0.0.0.0:{port}/");
             eprintln!();
 
+            fastclaw_gateway::set_config_mode(mode.clone());
             fastclaw_gateway::run(config).await?;
         }
         Commands::Health => {
@@ -464,7 +466,6 @@ async fn main() -> anyhow::Result<()> {
             no_server,
         } => {
             let config = fastclaw_core::config::load_config(&mode).unwrap_or_default();
-            let port = config.gateway.port;
             let user_specified_url = url != "ws://127.0.0.1:18789/ws";
 
             let sd = state_dir(&mode);
@@ -483,31 +484,12 @@ async fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            // Probe existing gateway
-            let gateway_alive = probe_gateway(port).await;
+            // Auto-discover and auto-start gateway
+            let gateway_state = ensure_gateway(&mode, no_server).await?;
+            let ws = gateway_state.ws_url;
 
-            if gateway_alive {
-                let ws = format!("ws://127.0.0.1:{port}/ws");
-                tui::run_tui(&ws, token.as_deref(), session.as_deref(), work_dir, &mode)
-                    .await?;
-            } else if no_server {
-                anyhow::bail!(
-                    "Gateway not running on port {port}. \
-                     Start it with `fastclaw serve`, or remove --no-server to auto-start."
-                );
-            } else {
-                eprintln!("  Gateway not running — starting embedded server...");
-                let (actual_port, shutdown_tx) =
-                    start_embedded_gateway(config).await?;
-                eprintln!("  ✓ Gateway ready on port {actual_port}");
-
-                let ws = format!("ws://127.0.0.1:{actual_port}/ws");
-                let result =
-                    tui::run_tui(&ws, token.as_deref(), session.as_deref(), work_dir, &mode)
-                        .await;
-                let _ = shutdown_tx.send(());
-                result?;
-            }
+            tui::run_tui(&ws, token.as_deref(), session.as_deref(), work_dir, &mode)
+                .await?;
         }
         Commands::McpServer => {
             cmd_mcp_server().await?;
@@ -525,6 +507,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Gateway { action } => match action {
             GatewayAction::Run => {
                 let config = fastclaw_core::config::load_config(&mode)?;
+                fastclaw_gateway::set_config_mode(mode.clone());
                 fastclaw_gateway::run(config).await?;
             }
             GatewayAction::Start => {
@@ -549,8 +532,9 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// --- Embedded Gateway ---
+// --- Gateway Auto-Discovery ---
 
+/// Probe whether a gateway is alive on the given port via HTTP health check.
 async fn probe_gateway(port: u16) -> bool {
     let Ok(client) = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(500))
@@ -565,11 +549,77 @@ async fn probe_gateway(port: u16) -> bool {
         .is_ok_and(|r| r.status().is_success())
 }
 
-async fn start_embedded_gateway(
-    config: fastclaw_core::config::FastClawConfig,
-) -> anyhow::Result<(u16, tokio::sync::oneshot::Sender<()>)> {
+/// Ensure a gateway is running and return its state.
+///
+/// Flow:
+/// 1. Read gateway.json → if exists and gateway is alive, return immediately
+/// 2. If stale (file exists but process dead), clean up
+/// 3. Try starting gateway as daemon (detached background process)
+/// 4. If daemon start fails, fall back to embedded gateway (in-process)
+/// 5. Wait for gateway to become ready, return state
+async fn ensure_gateway(
+    mode: &fastclaw_core::config::ConfigMode,
+    no_server: bool,
+) -> anyhow::Result<fastclaw_core::config::GatewayState> {
+    use fastclaw_core::config::GatewayState;
+
+    // 1. Check if gateway already running via state file
+    if let Ok(state) = GatewayState::read(mode) {
+        // First do a quick PID check
+        if state.is_alive() {
+            // Then verify with HTTP health check
+            if probe_gateway(state.port).await {
+                eprintln!("  ✓ Found running gateway on port {}", state.port);
+                return Ok(state);
+            }
+        }
+        // Stale state file — clean it up
+        eprintln!("  Stale gateway state file found, cleaning up...");
+        let _ = GatewayState::remove(mode);
+    }
+
+    if no_server {
+        anyhow::bail!(
+            "Gateway not running. Start it with `fastclaw serve` or `fastclaw gateway start`, \
+             or remove --no-server to auto-start."
+        );
+    }
+
+    // 2. Try starting as daemon (detached process)
+    let daemon_started = match cmd_daemon_start(mode) {
+        Ok(()) => true,
+        Err(e) => {
+            // Daemon start might fail if already running (race) or not supported
+            tracing::debug!(error = %e, "daemon start failed, trying embedded gateway");
+            eprintln!("  Could not start gateway daemon: {e}");
+            eprintln!("  Falling back to embedded gateway...");
+            false
+        }
+    };
+
+    if daemon_started {
+        // Wait for the daemon to become ready
+        match wait_for_gateway(mode, std::time::Duration::from_secs(15)).await {
+            Ok(state) => {
+                eprintln!("  ✓ Gateway daemon started on port {}", state.port);
+                return Ok(state);
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "daemon didn't become ready in time, trying embedded");
+                eprintln!("  Gateway daemon didn't respond in time, falling back to embedded...");
+            }
+        }
+    }
+
+    // 3. Fall back to embedded gateway (in-process)
+    eprintln!("  Starting embedded gateway...");
+    let config = fastclaw_core::config::load_config(mode).unwrap_or_default();
+    fastclaw_gateway::set_config_mode(mode.clone());
+
     let port = config.gateway.port;
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    // Note: shutdown_tx is intentionally not held — the embedded gateway runs
+    // for the lifetime of this process so subsequent sessions can reconnect.
+    let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
     let listener = match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
         Ok(l) => l,
@@ -583,17 +633,48 @@ async fn start_embedded_gateway(
         }
     });
 
+    // Wait for embedded gateway to become ready
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(200))
         .build()?;
     let health = format!("http://127.0.0.1:{actual_port}/health");
     for _ in 0..50 {
         if client.get(&health).send().await.is_ok() {
-            return Ok((actual_port, shutdown_tx));
+            eprintln!("  ✓ Embedded gateway ready on port {actual_port}");
+            // Read the state file written by the gateway
+            if let Ok(state) = GatewayState::read(mode) {
+                return Ok(state);
+            }
+            // Fallback: construct state manually if file not written yet
+            return Ok(GatewayState::new(actual_port));
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     anyhow::bail!("embedded gateway failed to start within 5s");
+}
+
+/// Wait for a gateway to become ready by polling the state file and health endpoint.
+async fn wait_for_gateway(
+    mode: &fastclaw_core::config::ConfigMode,
+    timeout: std::time::Duration,
+) -> anyhow::Result<fastclaw_core::config::GatewayState> {
+    use fastclaw_core::config::GatewayState;
+
+    let start = std::time::Instant::now();
+    let check_interval = std::time::Duration::from_millis(200);
+
+    while start.elapsed() < timeout {
+        // Try reading the state file first
+        if let Ok(state) = GatewayState::read(mode) {
+            if state.is_alive() && probe_gateway(state.port).await {
+                return Ok(state);
+            }
+        }
+
+        tokio::time::sleep(check_interval).await;
+    }
+
+    anyhow::bail!("gateway did not become ready within {}s", timeout.as_secs())
 }
 
 // --- Config ---
@@ -957,14 +1038,39 @@ async fn cmd_health(mode: &fastclaw_core::config::ConfigMode) -> anyhow::Result<
 /// This prevents false-positives when another process happens to be listening
 /// on the same address (e.g. an openclaw-gateway on the default port 18789).
 async fn cmd_daemon_status(mode: &fastclaw_core::config::ConfigMode) -> anyhow::Result<()> {
+    use fastclaw_core::config::GatewayState;
+
     let pid_path = daemon_pid_path(mode);
     let log_path = daemon_log_path(mode);
     let config = fastclaw_core::config::load_config(mode).unwrap_or_default();
-    let port = config.gateway.port;
+    let configured_port = config.gateway.port;
+
+    // First check gateway.json state file
+    let gateway_state = GatewayState::read(mode).ok();
+
+    // If we have gateway state, use it for port info
+    let port = gateway_state.as_ref().map(|s| s.port).unwrap_or(configured_port);
 
     let pid = match read_daemon_pid(&pid_path)? {
         Some(p) => p,
         None => {
+            // Check if gateway.json exists (might be running without daemon.pid)
+            if let Some(ref state) = gateway_state {
+                if state.is_alive() && probe_gateway(state.port).await {
+                    println!(
+                        "FastClaw gateway is running (pid {}, port {}). State file: {}",
+                        state.pid,
+                        state.port,
+                        GatewayState::path(mode).display()
+                    );
+                    println!("  WebSocket: {}", state.ws_url);
+                    println!("  HTTP API:  {}", state.http_url);
+                    if let Ok(elapsed) = state.started_at.elapsed() {
+                        println!("  Uptime:    {:?}", elapsed);
+                    }
+                    return Ok(());
+                }
+            }
             eprintln!(
                 "FastClaw gateway daemon is not running (no PID file). Logs: {}",
                 log_path.display()
@@ -975,6 +1081,8 @@ async fn cmd_daemon_status(mode: &fastclaw_core::config::ConfigMode) -> anyhow::
 
     if !process_alive(pid) {
         let _ = std::fs::remove_file(&pid_path);
+        // Also clean up stale gateway.json
+        let _ = GatewayState::remove(mode);
         eprintln!(
             "FastClaw gateway daemon is not running (stale PID {pid} removed). Logs: {}",
             log_path.display()
@@ -995,6 +1103,13 @@ async fn cmd_daemon_status(mode: &fastclaw_core::config::ConfigMode) -> anyhow::
                 resp.status(),
                 log_path.display()
             );
+            if let Some(state) = gateway_state {
+                println!("  WebSocket: {}", state.ws_url);
+                println!("  HTTP API:  {}", state.http_url);
+                if let Ok(elapsed) = state.started_at.elapsed() {
+                    println!("  Uptime:    {:?}", elapsed);
+                }
+            }
         }
         Ok(resp) => {
             eprintln!(

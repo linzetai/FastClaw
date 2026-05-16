@@ -1,9 +1,8 @@
 pub mod commands;
 pub mod embedded;
 
-use embedded::{EmbeddedGateway, GatewayInfo};
+use embedded::{GatewayInfo, GatewayProcess};
 use serde_json::json;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
@@ -23,9 +22,12 @@ pub enum GatewayStartupState {
     Failed { error: String },
 }
 
+/// App state for Tauri.
+///
+/// Only holds the gateway process manager. All business logic
+/// (chat, sessions, agents, etc.) goes through WebSocket to the Gateway.
 pub struct AppData {
-    pub gateway: Mutex<Option<EmbeddedGateway>>,
-    pub stream_cancels: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>>,
+    pub gateway: Mutex<Option<GatewayProcess>>,
     /// Gateway 启动状态，用于前端轮询或通知
     pub gateway_startup_state: Arc<Mutex<GatewayStartupState>>,
 }
@@ -104,7 +106,6 @@ pub fn run() {
     builder
         .manage(AppData {
             gateway: Mutex::new(None),
-            stream_cancels: Arc::new(Mutex::new(HashMap::new())),
             gateway_startup_state: Arc::new(Mutex::new(GatewayStartupState::Starting)),
         })
         .setup(|app| {
@@ -155,99 +156,8 @@ pub fn run() {
                     fastclaw_core::config::ConfigMode::Production
                 };
 
-                match EmbeddedGateway::start(&config_mode).await {
+                match GatewayProcess::start(&config_mode).await {
                     Ok(gw) => {
-                        // Subscribe to gateway broadcast events and re-emit as Tauri events.
-                        // This bridges cron notifications (and other push events) to the
-                        // frontend in embedded (non-WS) mode.
-                        let mut broadcast_rx = gw.app_state().strm.ws_broadcast.subscribe();
-                        let handle_for_broadcast = handle.clone();
-                        tauri::async_runtime::spawn(async move {
-                            loop {
-                                match broadcast_rx.recv().await {
-                                    Ok(event_json) => {
-                                        if let Ok(val) =
-                                            serde_json::from_str::<serde_json::Value>(&event_json)
-                                        {
-                                            let event_name = val
-                                                .get("event")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("");
-                                            if event_name.is_empty() {
-                                                continue;
-                                            }
-
-                                            let data = val
-                                                .get("data")
-                                                .cloned()
-                                                .unwrap_or(serde_json::Value::Null);
-                                            let tauri_name = event_name.replace('.', "-");
-                                            let _ = handle_for_broadcast
-                                                .emit(tauri_name.as_str(), data.clone());
-
-                                            // For new notifications: fire OS notification + update tray
-                                            if event_name == "notification.new" {
-                                                let title = data
-                                                    .get("title")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("FastClaw");
-                                                let body = data
-                                                    .get("body")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("");
-                                                {
-                                                    use tauri_plugin_notification::NotificationExt;
-                                                    let _ = handle_for_broadcast
-                                                        .notification()
-                                                        .builder()
-                                                        .title(title)
-                                                        .body(body)
-                                                        .show();
-                                                }
-                                                // Update tray tooltip with unread count
-                                                if let Some(uc) =
-                                                    data.get("unreadCount").and_then(|v| v.as_i64())
-                                                {
-                                                    if let Some(tray) =
-                                                        handle_for_broadcast.tray_by_id("main-tray")
-                                                    {
-                                                        let tooltip = if uc > 0 {
-                                                            format!("FastClaw ({uc} 条未读)")
-                                                        } else {
-                                                            "FastClaw".to_string()
-                                                        };
-                                                        let _ = tray.set_tooltip(Some(&tooltip));
-                                                    }
-                                                }
-                                            }
-
-                                            // On read events, update tray tooltip too
-                                            if event_name == "notification.read" {
-                                                if let Some(uc) =
-                                                    data.get("unreadCount").and_then(|v| v.as_i64())
-                                                {
-                                                    if let Some(tray) =
-                                                        handle_for_broadcast.tray_by_id("main-tray")
-                                                    {
-                                                        let tooltip = if uc > 0 {
-                                                            format!("FastClaw ({uc} 条未读)")
-                                                        } else {
-                                                            "FastClaw".to_string()
-                                                        };
-                                                        let _ = tray.set_tooltip(Some(&tooltip));
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                                        continue
-                                    }
-                                }
-                            }
-                        });
-
                         let state = handle.state::<AppData>();
                         let mut lock = state.gateway.lock().await;
                         let info = gw.info().clone();
@@ -257,7 +167,7 @@ pub fn run() {
                         let mut startup_state = startup_state.lock().await;
                         *startup_state = GatewayStartupState::Running { info };
 
-                        tracing::info!("embedded gateway started successfully");
+                        tracing::info!("gateway process ready");
 
                         // 发送通知到前端
                         let _ = handle.emit(
@@ -269,7 +179,7 @@ pub fn run() {
                         );
                     }
                     Err(e) => {
-                        let error_msg = format!("failed to start embedded gateway: {e}");
+                        let error_msg = format!("failed to start gateway: {e}");
                         tracing::error!("{}", error_msg);
 
                         // 更新状态为 Failed
@@ -305,59 +215,14 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
+        // Only register IPC commands for local file operations
+        // All business logic goes through WebSocket
         .invoke_handler(tauri::generate_handler![
-            commands::config::test_model_connection,
             commands::config::get_gateway_info,
-            commands::config::health_check,
-            commands::agent::list_agents,
-            commands::session::list_sessions,
-            commands::session::get_session,
-            commands::session::set_session_work_dir,
-            commands::session::get_session_messages,
-            commands::session::create_session,
-            commands::session::update_session_title,
-            commands::session::delete_session,
             commands::session::export_session_content,
-            commands::config::list_models,
-            commands::config::get_config,
-            commands::config::set_config,
-            commands::skill::list_skills,
-            commands::skill::refresh_skills,
-            commands::skill::upload_skill,
-            commands::agent::list_tools,
-            commands::agent::list_agent_tools,
-            commands::agent::get_agent,
-            commands::agent::update_agent,
-            commands::agent::create_agent,
-            commands::agent::delete_agent,
-            commands::agent::read_identity_files,
             commands::agent::upload_agent_avatar,
-            commands::channel::list_channels,
-            commands::channel::bind_agent_channel,
-            commands::channel::unbind_agent_channel,
-            commands::channel::reload_channel,
-            commands::agent::update_agent_tools,
-            commands::chat::chat_stream,
-            commands::chat::cancel_chat_stream,
-            commands::chat::submit_tool_answer,
-            commands::chat::set_execution_mode,
-            commands::chat::get_plan_file,
-            commands::mcp::get_mcp_status,
-            commands::mcp::reload_mcp_servers,
-            commands::mcp::add_mcp_server,
-            commands::mcp::remove_mcp_server,
-            commands::cron::cron_list_jobs,
-            commands::cron::cron_get_job,
-            commands::cron::cron_upsert_job,
-            commands::cron::cron_delete_job,
-            commands::cron::cron_list_runs,
-            commands::notification::notification_list,
-            commands::notification::notification_get,
-            commands::notification::notification_mark_read,
-            commands::notification::notification_mark_all_read,
-            commands::notification::notification_unread_count,
-            commands::notification::notification_delete,
-            commands::notification::notification_clear_read,
+            commands::agent::read_identity_files,
+            commands::skill::upload_skill,
             commands::migration::import_data,
             commands::migration::export_data,
         ])

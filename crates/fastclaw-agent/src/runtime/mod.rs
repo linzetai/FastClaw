@@ -1173,7 +1173,10 @@ impl AgentRuntime {
         // QueryDeps: unified dependency injection for LLM calls + compression
         let provider_for_deps: Arc<dyn LlmProvider> = match &llm_override {
             Some(p) => p.clone(),
-            None => self.resolve_provider(&config.agent_id)?,
+            None => {
+                let r = self.resolve_provider(&config.agent_id);
+                r?
+            }
         };
         let pipeline_config = fastclaw_context::PipelineConfig {
             snip_max_tokens: context_window as usize,
@@ -1412,10 +1415,28 @@ impl AgentRuntime {
                 };
 
                 let llm_call_t0 = std::time::Instant::now();
+                tracing::info!(
+                    model = %model,
+                    msg_count = messages.len(),
+                    provider = %deps.provider_name(),
+                    "LLM call starting"
+                );
                 let stream_result = deps.call_model_stream(&params).await;
                 let mut stream = match stream_result {
-                    Ok(s) => s,
+                    Ok(s) => {
+                        tracing::info!(
+                            elapsed_ms = llm_call_t0.elapsed().as_millis() as u64,
+                            "perf: stream_connect_success"
+                        );
+                        s
+                    },
                     Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            model = %model,
+                            provider = %deps.provider_name(),
+                            "LLM stream call failed"
+                        );
                         if query_state::is_prompt_too_long_error(&e.to_string()) {
                             tracing::warn!(
                                 error = %e,

@@ -33,15 +33,6 @@ pub(crate) async fn send_chat(app: &mut TuiApp, ws_tx: &mut WsTx) {
     }
 
     let req = json!({"id": id, "method": "chat", "params": params});
-    // #region agent log
-    {
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/home/linzetai/workspace/my_tools/FastClaw/.cursor/debug-a57040.log") {
-            let _ = writeln!(f, r#"{{"sessionId":"a57040","hypothesisId":"D","location":"tui/ws.rs:send_chat","message":"TUI sending chat WS message","data":{{"req_id":"{}","agent_id":"{}","ws_url":"{}","text_len":{}}},"timestamp":{}}}"#,
-                id, app.agent_id, app.ws_url, text.len(), chrono::Utc::now().timestamp_millis());
-        }
-    }
-    // #endregion
     let _ = ws_tx.send(Message::Text(req.to_string())).await;
 
     app.last_request_id = Some(id);

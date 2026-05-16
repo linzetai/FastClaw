@@ -1,6 +1,10 @@
 /**
- * Transport abstraction layer — routes communication through Tauri IPC Commands
- * in desktop mode and falls back to WebSocket/HTTP in browser mode.
+ * Transport abstraction layer — unified WebSocket-only architecture.
+ *
+ * In the new architecture:
+ * - All business logic (chat, sessions, agents, etc.) goes through WebSocket
+ * - Only local file operations use Tauri IPC (upload, export, etc.)
+ * - Tauri app connects to a Gateway daemon process via WebSocket
  */
 
 import * as wsClient from "./ws-client";
@@ -10,21 +14,11 @@ export const isTauri =
   ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 
 let _invoke: typeof import("@tauri-apps/api/core").invoke | null = null;
-let _Channel: typeof import("@tauri-apps/api/core").Channel | null = null;
-let _listen: typeof import("@tauri-apps/api/event").listen | null = null;
 
 async function ensureTauriApi() {
   if (!_invoke) {
     const core = await import("@tauri-apps/api/core");
     _invoke = core.invoke;
-    _Channel = core.Channel;
-  }
-}
-
-async function ensureTauriEvents() {
-  if (!_listen) {
-    const events = await import("@tauri-apps/api/event");
-    _listen = events.listen;
   }
 }
 
@@ -33,36 +27,116 @@ async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
   return _invoke!<T>(cmd, args);
 }
 
-export async function invokeWithRetry<T>(
-  cmd: string,
-  maxRetries = 40,
-  baseMs = 300,
-): Promise<T> {
-  await ensureTauriApi();
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await _invoke!<T>(cmd);
-    } catch {
-      if (i < maxRetries - 1) {
-        const delay = Math.min(baseMs * Math.pow(1.3, i), 3000);
-        await new Promise((r) => setTimeout(r, delay));
-      }
-    }
-  }
-  throw new Error(`IPC ${cmd} failed after ${maxRetries} retries`);
+// ─── Gateway Info (IPC) ───
+
+export interface GatewayInfo {
+  port: number;
+  wsUrl: string;
+  httpUrl: string;
+  version: string;
 }
 
-// ─── Model connection test ───
+export async function getGatewayInfo(): Promise<GatewayInfo | null> {
+  if (!isTauri) return null;
+  try {
+    return await tauriInvoke<GatewayInfo>("get_gateway_info");
+  } catch {
+    return null;
+  }
+}
 
-export async function testModelConnection(baseUrl: string, apiKey: string, model?: string): Promise<void> {
-  await tauriInvoke<{ ok: boolean }>("test_model_connection", {
-    baseUrl,
-    apiKey,
-    model: model || null,
+// ─── Local File Operations (IPC only) ───
+
+export async function uploadAgentAvatar(
+  agentId: string,
+  sourcePath: string,
+): Promise<{ ok: boolean; path?: string }> {
+  if (!isTauri) return { ok: false };
+  return tauriInvoke("upload_agent_avatar", { agentId, sourcePath });
+}
+
+export async function readIdentityFiles(
+  agentId: string,
+): Promise<{ soul: string | null; user: string | null; agents: string | null; tools: string | null }> {
+  if (!isTauri) return { soul: null, user: null, agents: null, tools: null };
+  return tauriInvoke("read_identity_files", { agentId });
+}
+
+export async function uploadSkill(
+  sourcePath: string,
+): Promise<{ installed?: string }> {
+  if (!isTauri) return {};
+  return tauriInvoke("upload_skill", { sourcePath });
+}
+
+export interface ExportOptions {
+  includeSessions: boolean;
+  includeSkills: boolean;
+  includeAgentWorkspaces: boolean;
+}
+
+export interface ImportOptions {
+  merge: boolean;
+  overwriteConfig: boolean;
+  overwriteAgents: boolean;
+  overwriteSessions: boolean;
+  overwriteSkills: boolean;
+}
+
+export async function exportData(options: ExportOptions): Promise<Uint8Array> {
+  if (!isTauri) throw new Error("export only available in desktop mode");
+  const result = await tauriInvoke<number[]>("export_data", { options });
+  return new Uint8Array(result);
+}
+
+export async function importData(data: Uint8Array, options: ImportOptions): Promise<void> {
+  if (!isTauri) throw new Error("import only available in desktop mode");
+  await tauriInvoke("import_data", {
+    data: Array.from(data),
+    options,
   });
 }
 
-// ─── Agents ───
+// ─── Session Export (IPC only) ───
+// Frontend fetches session content via WebSocket, then passes to IPC for local file save.
+
+export type ExportFormat = "markdown" | "json";
+
+export async function exportSessionContent(
+  content: string,
+  filename: string,
+  mimeType: string,
+): Promise<{ success: boolean; path?: string }> {
+  if (!isTauri) throw new Error("export only available in desktop mode");
+  return tauriInvoke("export_session_content", { content, filename, mimeType });
+}
+
+// ─── WebSocket Connection ───
+
+export function connectWs(url: string, token?: string): Promise<void> {
+  return wsClient.connect(url, token).then(() => {
+    wsClient.send("subscribe", {
+      events: [
+        "sessions.changed",
+        "channels.changed",
+        "cron.job.complete",
+        "cron.job.failed",
+        "notification.new",
+        "notification.read",
+      ],
+    }).catch(() => {});
+  });
+}
+
+export function disconnectWs(): void {
+  wsClient.disconnect();
+}
+
+export function isWsConnected(): boolean {
+  return wsClient.isConnected();
+}
+
+// ─── WebSocket Operations (all business logic) ───
 
 export interface AgentSummary {
   agentId: string;
@@ -72,17 +146,11 @@ export interface AgentSummary {
 }
 
 export async function listAgents(): Promise<AgentSummary[]> {
-  if (isTauri) {
-    const resp = await tauriInvoke<{ agents: AgentSummary[] }>("list_agents");
-    return resp.agents;
-  }
   const resp = (await wsClient.send("agents")) as {
     data?: { agents?: AgentSummary[] };
   };
   return resp?.data?.agents ?? [];
 }
-
-// ─── Sessions ───
 
 export interface SessionSummary {
   id: string;
@@ -98,33 +166,14 @@ export interface SessionSummary {
   totalElapsedMs?: number;
 }
 
-export async function listSessions(
-  limit = 50,
-  offset = 0,
-): Promise<SessionSummary[]> {
-  if (isTauri) {
-    const resp = await tauriInvoke<{
-      sessions: SessionSummary[];
-      count: number;
-    }>("list_sessions", { limit, offset });
-    return resp.sessions;
-  }
+export async function listSessions(limit = 50, offset = 0): Promise<SessionSummary[]> {
   const resp = (await wsClient.send("sessions.list", { limit, offset })) as {
     data?: { sessions?: SessionSummary[] };
   };
   return resp?.data?.sessions ?? [];
 }
 
-export async function getSession(
-  sessionId: string,
-): Promise<SessionSummary | null> {
-  if (isTauri) {
-    try {
-      return await tauriInvoke<SessionSummary>("get_session", { sessionId });
-    } catch {
-      return null;
-    }
-  }
+export async function getSession(sessionId: string): Promise<SessionSummary | null> {
   const resp = (await wsClient.send("sessions.get", { sessionId })) as {
     data?: SessionSummary;
   };
@@ -140,16 +189,7 @@ export interface SessionMessage {
   createdAt: string;
 }
 
-export async function getSessionMessages(
-  sessionId: string,
-): Promise<SessionMessage[]> {
-  if (isTauri) {
-    const resp = await tauriInvoke<{ messages: SessionMessage[] }>(
-      "get_session_messages",
-      { sessionId },
-    );
-    return resp.messages;
-  }
+export async function getSessionMessages(sessionId: string): Promise<SessionMessage[]> {
   const resp = (await wsClient.send("sessions.messages", { sessionId })) as {
     data?: { messages?: SessionMessage[] };
   };
@@ -157,75 +197,23 @@ export async function getSessionMessages(
 }
 
 export async function createSession(agentId?: string): Promise<string> {
-  if (isTauri) {
-    const resp = await tauriInvoke<{ sessionId: string }>("create_session", {
-      agentId: agentId ?? null,
-    });
-    return resp.sessionId;
-  }
-  const resp = (await wsClient.send(
-    "sessions.new",
-    agentId ? { agentId } : {},
-  )) as {
+  const resp = (await wsClient.send("sessions.new", agentId ? { agentId } : {})) as {
     data?: { sessionId?: string };
   };
   return resp?.data?.sessionId ?? "";
 }
 
-export async function updateSessionTitle(
-  sessionId: string,
-  title: string,
-): Promise<void> {
-  if (isTauri) {
-    await tauriInvoke("update_session_title", { sessionId, title });
-    return;
-  }
+export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
   await wsClient.send("sessions.update_title", { sessionId, title });
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  if (isTauri) {
-    await tauriInvoke("delete_session", { sessionId });
-    return;
-  }
   await wsClient.send("sessions.delete", { sessionId });
 }
 
-export async function setSessionWorkDir(
-  sessionId: string,
-  workDir: string | null,
-): Promise<void> {
-  if (isTauri) {
-    await tauriInvoke("set_session_work_dir", { sessionId, workDir });
-    return;
-  }
+export async function setSessionWorkDir(sessionId: string, workDir: string | null): Promise<void> {
   await wsClient.send("sessions.set_work_dir", { sessionId, workDir });
 }
-
-// ─── Session Export ───
-
-export type ExportFormat = "markdown" | "json";
-
-export interface ExportResult {
-  content: string;
-  filename: string;
-  mimeType: string;
-}
-
-export async function exportSessionContent(
-  sessionId: string,
-  format: ExportFormat,
-): Promise<ExportResult> {
-  if (isTauri) {
-    return await tauriInvoke<ExportResult>("export_session_content", {
-      sessionId,
-      format,
-    });
-  }
-  throw new Error("Export is only supported in desktop mode");
-}
-
-// ─── Models ───
 
 export interface ModelInfo {
   agentId: string;
@@ -239,17 +227,11 @@ export interface ModelInfo {
 }
 
 export async function listModels(): Promise<ModelInfo[]> {
-  if (isTauri) {
-    const resp = await tauriInvoke<{ models: ModelInfo[] }>("list_models");
-    return resp.models;
-  }
   const resp = (await wsClient.send("models.list")) as {
     data?: { models?: ModelInfo[] };
   };
   return resp?.data?.models ?? [];
 }
-
-// ─── Skills & Tools (Tauri IPC commands) ───
 
 export interface SkillInfo {
   id: string;
@@ -258,178 +240,50 @@ export interface SkillInfo {
   tags?: string[];
 }
 
-export interface AgentToolInfo {
-  id: string;
-  enabled: boolean;
-  description?: string;
+export async function listSkills(agentId?: string): Promise<SkillInfo[]> {
+  const resp = (await wsClient.send("skills.list", agentId ? { agentId } : {})) as {
+    data?: { skills?: SkillInfo[] };
+  };
+  return resp?.data?.skills ?? [];
 }
 
-export async function listSkillsIpc(agentId?: string): Promise<SkillInfo[]> {
-  if (isTauri) {
-    const resp = await tauriInvoke<{ skills: SkillInfo[] }>("list_skills", {
-      agentId: agentId ?? null,
-    });
-    return resp.skills;
-  }
-  return [];
+export async function refreshSkills(): Promise<{ refreshed: boolean; count: number }> {
+  const resp = (await wsClient.send("skills.refresh")) as {
+    data?: { refreshed?: boolean; count?: number };
+  };
+  return { refreshed: resp?.data?.refreshed ?? false, count: resp?.data?.count ?? 0 };
 }
 
-export async function listAgentToolsIpc(agentId: string): Promise<AgentToolInfo[]> {
-  if (isTauri) {
-    const resp = await tauriInvoke<{ tools: AgentToolInfo[] }>("list_agent_tools", {
-      agentId,
-    });
-    return resp.tools;
-  }
-  return [];
+export async function getAgent(agentId: string): Promise<unknown> {
+  const resp = (await wsClient.send("agents.get", { agentId })) as {
+    data?: unknown;
+  };
+  return resp?.data ?? null;
 }
 
-export async function refreshSkillsIpc(): Promise<{ refreshed: boolean; count: number }> {
-  if (isTauri) {
-    return tauriInvoke("refresh_skills");
-  }
-  return { refreshed: false, count: 0 };
+export async function createAgent(config: Record<string, unknown>): Promise<{ ok: boolean; agentId?: string }> {
+  const resp = (await wsClient.send("agents.create", { config })) as {
+    data?: { ok?: boolean; agentId?: string };
+  };
+  return { ok: resp?.data?.ok ?? false, agentId: resp?.data?.agentId };
 }
 
-export async function uploadSkillIpc(sourcePath: string): Promise<{ installed?: string; count?: number }> {
-  if (isTauri) {
-    return tauriInvoke("upload_skill", { sourcePath });
-  }
-  return {};
+export async function updateAgent(agentId: string, config: Record<string, unknown>): Promise<boolean> {
+  const resp = (await wsClient.send("agents.update", { agentId, config })) as {
+    data?: { ok?: boolean };
+  };
+  return resp?.data?.ok ?? false;
 }
 
-export async function submitToolAnswerIpc(
-  requestId: string,
-  answer: string,
-): Promise<{ ok: boolean }> {
-  if (isTauri) {
-    return tauriInvoke("submit_tool_answer", { requestId, answer });
-  }
-  return { ok: false };
+export async function deleteAgent(agentId: string): Promise<boolean> {
+  const resp = (await wsClient.send("agents.delete", { agentId })) as {
+    data?: { ok?: boolean };
+  };
+  return resp?.data?.ok ?? false;
 }
-
-export async function setExecutionModeIpc(
-  mode: "agent" | "plan",
-  sessionId?: string,
-): Promise<{ ok: boolean; from: string; to: string }> {
-  if (isTauri) {
-    return tauriInvoke("set_execution_mode", { mode, sessionId });
-  }
-  return { ok: false, from: "", to: "" };
-}
-
-export async function getPlanFileIpc(
-  sessionId?: string,
-): Promise<{ path: string; content: string | null; exists: boolean }> {
-  if (isTauri) {
-    return tauriInvoke("get_plan_file", { sessionId });
-  }
-  return { path: "", content: null, exists: false };
-}
-
-export async function getAgentIpc(agentId: string): Promise<unknown> {
-  if (isTauri) {
-    return tauriInvoke("get_agent", { agentId });
-  }
-  return null;
-}
-
-export async function updateAgentToolsIpc(
-  agentId: string,
-  tools: Array<{ id: string; enabled: boolean }>,
-): Promise<boolean> {
-  if (isTauri) {
-    const resp = await tauriInvoke<{ ok: boolean }>("update_agent_tools", {
-      agentId,
-      tools,
-    });
-    return resp.ok;
-  }
-  return false;
-}
-
-export async function listToolsIpc(): Promise<Array<{ type?: string; function?: { name?: string; description?: string } }>> {
-  if (isTauri) {
-    const resp = await tauriInvoke<{ tools: Array<{ type?: string; function?: { name?: string; description?: string } }> }>("list_tools");
-    return resp.tools;
-  }
-  return [];
-}
-
-export async function updateAgentIpc(
-  agentId: string,
-  config: Record<string, unknown>,
-): Promise<boolean> {
-  if (isTauri) {
-    const resp = await tauriInvoke<{ ok: boolean }>("update_agent", {
-      agentId,
-      config,
-    });
-    return resp.ok;
-  }
-  return false;
-}
-
-export async function createAgentIpc(
-  config: Record<string, unknown>,
-): Promise<{ ok: boolean; agentId?: string }> {
-  if (isTauri) {
-    return tauriInvoke<{ ok: boolean; agentId?: string }>("create_agent", { config });
-  }
-  return { ok: false };
-}
-
-export async function deleteAgentIpc(agentId: string): Promise<boolean> {
-  if (isTauri) {
-    const resp = await tauriInvoke<{ ok: boolean }>("delete_agent", { agentId });
-    return resp.ok;
-  }
-  return false;
-}
-
-// ─── Channel reload ───
-
-export async function reloadChannelIpc(channelId: string): Promise<boolean> {
-  if (isTauri) {
-    const resp = await tauriInvoke<{ ok: boolean }>("reload_channel", { channelId });
-    return resp.ok;
-  }
-  return false;
-}
-
-// ─── Avatar upload ───
-
-export async function uploadAgentAvatarIpc(
-  agentId: string,
-  sourcePath: string,
-): Promise<{ ok: boolean; path?: string }> {
-  if (isTauri) {
-    return tauriInvoke("upload_agent_avatar", { agentId, sourcePath });
-  }
-  return { ok: false };
-}
-
-// ─── Identity files ───
-
-export async function readIdentityFilesIpc(
-  agentId: string,
-): Promise<{ soul: string | null; user: string | null; agents: string | null; tools: string | null }> {
-  if (isTauri) {
-    return tauriInvoke("read_identity_files", { agentId });
-  }
-  return { soul: null, user: null, agents: null, tools: null };
-}
-
-// ─── Config ───
 
 export async function getConfig(key?: string): Promise<unknown> {
-  if (isTauri) {
-    return tauriInvoke("get_config", { key: key ?? null });
-  }
-  const resp = (await wsClient.send(
-    "config.get",
-    key ? { key } : {},
-  )) as {
+  const resp = (await wsClient.send("config.get", key ? { key } : {})) as {
     data?: unknown;
   };
   return resp?.data;
@@ -439,9 +293,6 @@ export async function setConfig(
   key: string,
   value: unknown,
 ): Promise<{ persisted: boolean; pendingRestart: boolean }> {
-  if (isTauri) {
-    return tauriInvoke("set_config", { key, value });
-  }
   const resp = (await wsClient.send("config.set", { key, value })) as {
     data?: { persisted?: boolean; pendingRestart?: boolean };
   };
@@ -451,7 +302,7 @@ export async function setConfig(
   };
 }
 
-// ─── Chat streaming ───
+// ─── Chat Streaming (WebSocket) ───
 
 export interface ChatStreamEvent {
   type: string;
@@ -471,73 +322,7 @@ export interface ChatStreamParams {
   workDir?: string;
 }
 
-/**
- * Start a streaming chat. In Tauri mode uses Channel (in-process),
- * in browser mode uses the existing WebSocket path.
- *
- * Returns an unsubscribe/cleanup function.
- */
 export function chatStream(
-  params: ChatStreamParams,
-  onEvent: ChatEventHandler,
-): { promise: Promise<void>; cleanup: () => void } {
-  if (isTauri) {
-    return chatStreamTauri(params, onEvent);
-  }
-  return chatStreamWs(params, onEvent);
-}
-
-function chatStreamTauri(
-  params: ChatStreamParams,
-  onEvent: ChatEventHandler,
-): { promise: Promise<void>; cleanup: () => void } {
-  let cancelled = false;
-  const requestId = `stream-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  const cleanup = () => {
-    if (cancelled) return;
-    cancelled = true;
-    void tauriInvoke("cancel_chat_stream", { requestId }).catch(() => {});
-  };
-
-  const promise = (async () => {
-    await ensureTauriApi();
-    const channel = new _Channel!<ChatStreamEvent>();
-    channel.onmessage = (event) => {
-      if (!cancelled) onEvent(event);
-    };
-    try {
-      await _invoke!("chat_stream", {
-        requestId,
-        channel,
-        messages: params.messages,
-        agentId: params.agentId ?? null,
-        sessionId: params.sessionId ?? null,
-        model: params.model ?? null,
-        temperature: params.temperature ?? null,
-        maxTokens: params.maxTokens ?? null,
-        workDir: params.workDir ?? null,
-      });
-    } catch (err) {
-      const message =
-        typeof err === "string"
-          ? err
-          : err instanceof Error
-            ? err.message
-            : "chat stream failed to start";
-      if (!cancelled) {
-        onEvent({
-          type: "chat.error",
-          error: { message },
-        });
-      }
-      throw err;
-    }
-  })();
-
-  return { promise, cleanup };
-}
-
-function chatStreamWs(
   params: ChatStreamParams,
   onEvent: ChatEventHandler,
 ): { promise: Promise<void>; cleanup: () => void } {
@@ -582,53 +367,29 @@ function chatStreamWs(
   return { promise, cleanup };
 }
 
-// ─── Event subscriptions (Tauri Events vs WS subscribe) ───
+// ─── Event Subscriptions ───
 
 export type UnsubscribeFn = () => void;
 
-export async function onSessionChanged(
-  handler: (sessionId: string) => void,
-): Promise<UnsubscribeFn> {
-  if (isTauri) {
-    await ensureTauriEvents();
-    const unlisten = await _listen!<{ sessionId: string }>(
-      "sessions-changed",
-      (event) => {
-        handler(event.payload.sessionId);
-      },
-    );
-    return unlisten;
-  }
-  wsClient.send("subscribe", { events: ["sessions.changed"] }).catch(() => {});
+export function onSessionChanged(handler: (sessionId: string) => void): UnsubscribeFn {
   return wsClient.on("sessions.changed", (msg: unknown) => {
     const sid = (msg as { data?: { sessionId?: string } })?.data?.sessionId;
     if (sid) handler(sid);
   });
 }
 
-export function onChannelsChanged(
-  handler: (channelId: string, action: string) => void,
-): UnsubscribeFn {
-  if (isTauri) {
-    let unlisten: (() => void) | null = null;
-    ensureTauriEvents().then(() => {
-      _listen!<{ channelId?: string; action?: string }>(
-        "channels-changed",
-        (event) => {
-          const { channelId, action } = event.payload ?? {};
-          if (channelId) handler(channelId, action ?? "updated");
-        },
-      ).then((fn) => { unlisten = fn; });
-    });
-    return () => { unlisten?.(); };
-  }
+export function onChannelsChanged(handler: (channelId: string, action: string) => void): UnsubscribeFn {
   return wsClient.on("channels.changed", (msg: unknown) => {
     const data = (msg as { data?: { channelId?: string; action?: string } })?.data;
     if (data?.channelId) handler(data.channelId, data.action ?? "updated");
   });
 }
 
-// ─── MCP server management ───
+export function onWsEvent(event: string, handler: (data: unknown) => void): UnsubscribeFn {
+  return wsClient.on(event, handler);
+}
+
+// ─── MCP Server Management ───
 
 export interface McpServerStatus {
   id: string;
@@ -639,17 +400,11 @@ export interface McpServerStatus {
 }
 
 export async function getMcpStatus(): Promise<McpServerStatus[]> {
-  if (isTauri) {
-    return tauriInvoke<McpServerStatus[]>("get_mcp_status");
-  }
   const resp = await wsClient.send("mcp.status");
   return (resp as { servers?: McpServerStatus[] }).servers ?? [];
 }
 
 export async function reloadMcpServers(): Promise<McpServerStatus[]> {
-  if (isTauri) {
-    return tauriInvoke<McpServerStatus[]>("reload_mcp_servers");
-  }
   const resp = await wsClient.send("mcp.reload");
   return (resp as { servers?: McpServerStatus[] }).servers ?? [];
 }
@@ -659,9 +414,6 @@ export async function addMcpServer(
   command: string,
   args?: string[],
 ): Promise<{ ok: boolean; id: string; status?: McpServerStatus }> {
-  if (isTauri) {
-    return tauriInvoke("add_mcp_server", { id, command, args: args ?? [] });
-  }
   return wsClient.send("mcp.add", { id, command, args: args ?? [] }) as Promise<{
     ok: boolean;
     id: string;
@@ -669,244 +421,87 @@ export async function addMcpServer(
   }>;
 }
 
-export async function removeMcpServer(
-  id: string,
-): Promise<{ ok: boolean; id: string }> {
-  if (isTauri) {
-    return tauriInvoke("remove_mcp_server", { id });
-  }
+export async function removeMcpServer(id: string): Promise<{ ok: boolean; id: string }> {
   return wsClient.send("mcp.remove", { id }) as Promise<{
     ok: boolean;
     id: string;
   }>;
 }
 
-// ─── Cron jobs ───
+// ─── Tools ───
 
-export interface CronJobAction {
-  type: "agent_chat" | "webhook";
-  agent_id?: string;
-  message?: string;
-  session_id?: string;
-  url?: string;
-  method?: string;
-  body?: unknown;
-  input?: unknown;
-}
-
-export interface NotifyChannel {
-  channel_id: string;
-  target_id: string;
-  target_type: "p2p" | "group";
-}
-
-export interface CronJob {
-  id: string;
-  name: string;
-  schedule: string;
-  action: CronJobAction;
+export interface AgentToolInfo {
+id: string;
   enabled: boolean;
-  last_run: string | null;
-  next_run: string | null;
-  status: "idle" | "running" | "failed" | "disabled";
-  created_at: string;
-  run_count: number;
-  error_count: number;
-  last_error: string | null;
-  notify_channels: NotifyChannel[];
+  description?: string;
 }
 
-export async function cronListJobs(
-  agentId?: string,
-): Promise<{ jobs: CronJob[]; count: number }> {
-  if (isTauri) {
-    return tauriInvoke("cron_list_jobs", { agentId: agentId ?? null });
-  }
-  throw new Error("cron IPC only available in Tauri mode");
+export async function listAgentTools(agentId: string): Promise<AgentToolInfo[]> {
+  const resp = (await wsClient.send("tools.list", { agentId })) as {
+    data?: { tools?: AgentToolInfo[] };
+  };
+  return resp?.data?.tools ?? [];
 }
 
-export async function cronGetJob(jobId: string): Promise<CronJob> {
-  if (isTauri) {
-    return tauriInvoke("cron_get_job", { jobId });
-  }
-  throw new Error("cron IPC only available in Tauri mode");
+export async function updateAgentTools(
+  agentId: string,
+  tools: Array<{ id: string; enabled: boolean }>,
+): Promise<boolean> {
+  const resp = (await wsClient.send("tools.update", { agentId, tools })) as {
+    data?: { ok?: boolean };
+  };
+  return resp?.data?.ok ?? false;
 }
 
-export async function cronUpsertJob(
-  job: Partial<CronJob> & { schedule: string; action: CronJobAction },
-): Promise<{ id: string; ok: boolean }> {
-  if (isTauri) {
-    return tauriInvoke("cron_upsert_job", { job });
-  }
-  throw new Error("cron IPC only available in Tauri mode");
+// ─── Execution Mode ───
+
+export async function setExecutionMode(
+  mode: "agent" | "plan",
+  sessionId?: string,
+): Promise<{ ok: boolean; from: string; to: string }> {
+  const resp = (await wsClient.send("execution.set_mode", { mode, sessionId })) as {
+    data?: { ok?: boolean; from?: string; to?: string };
+  };
+  return {
+    ok: resp?.data?.ok ?? false,
+    from: resp?.data?.from ?? "",
+    to: resp?.data?.to ?? "",
+  };
 }
 
-export async function cronDeleteJob(
-  jobId: string,
-): Promise<{ deleted: boolean }> {
-  if (isTauri) {
-    return tauriInvoke("cron_delete_job", { jobId });
-  }
-  throw new Error("cron IPC only available in Tauri mode");
+export async function getPlanFile(sessionId?: string): Promise<{ path: string; content: string | null; exists: boolean }> {
+  const resp = (await wsClient.send("execution.get_plan", { sessionId })) as {
+    data?: { path?: string; content?: string | null; exists?: boolean };
+  };
+  return {
+    path: resp?.data?.path ?? "",
+    content: resp?.data?.content ?? null,
+    exists: resp?.data?.exists ?? false,
+  };
 }
 
-export interface CronJobRun {
-  id: number;
-  job_id: string;
-  started_at: string;
-  ended_at: string | null;
-  status: string;
-  output: string | null;
-  error: string | null;
+export async function submitToolAnswer(requestId: string, answer: string): Promise<{ ok: boolean }> {
+  const resp = (await wsClient.send("tools.submit_answer", { requestId, answer })) as {
+    data?: { ok?: boolean };
+  };
+  return { ok: resp?.data?.ok ?? false };
 }
 
-export async function cronListRuns(
-  jobId: string,
-  limit?: number,
-): Promise<{ runs: CronJobRun[]; count: number }> {
-  if (isTauri) {
-    return tauriInvoke("cron_list_runs", { jobId, limit: limit ?? null });
-  }
-  throw new Error("cron IPC only available in Tauri mode");
-}
+// ─── Backward Compatibility Aliases ───
+// These are kept for gradual migration of the frontend code.
 
-// ─── Notification center ───
-
-export interface AppNotification {
-  id: string;
-  category: string;
-  title: string;
-  body: string;
-  detail?: string | null;
-  isRead: boolean;
-  createdAt: string;
-  readAt?: string | null;
-}
-
-export async function notificationList(
-  limit?: number,
-  offset?: number,
-  unreadOnly?: boolean,
-): Promise<{ notifications: AppNotification[]; count: number; unreadCount: number }> {
-  if (isTauri) {
-    return tauriInvoke("notification_list", {
-      limit: limit ?? null,
-      offset: offset ?? null,
-      unreadOnly: unreadOnly ?? null,
-    });
-  }
-  throw new Error("notification IPC only available in Tauri mode");
-}
-
-export async function notificationGet(id: string): Promise<AppNotification> {
-  if (isTauri) {
-    return tauriInvoke("notification_get", { id });
-  }
-  throw new Error("notification IPC only available in Tauri mode");
-}
-
-export async function notificationMarkRead(
-  id: string,
-): Promise<{ ok: boolean; unreadCount: number }> {
-  if (isTauri) {
-    return tauriInvoke("notification_mark_read", { id });
-  }
-  throw new Error("notification IPC only available in Tauri mode");
-}
-
-export async function notificationMarkAllRead(): Promise<{ ok: boolean; unreadCount: number }> {
-  if (isTauri) {
-    return tauriInvoke("notification_mark_all_read", {});
-  }
-  throw new Error("notification IPC only available in Tauri mode");
-}
-
-export async function notificationUnreadCount(): Promise<{ count: number }> {
-  if (isTauri) {
-    return tauriInvoke("notification_unread_count", {});
-  }
-  throw new Error("notification IPC only available in Tauri mode");
-}
-
-export async function notificationDelete(id: string): Promise<{ ok: boolean }> {
-  if (isTauri) {
-    return tauriInvoke("notification_delete", { id });
-  }
-  throw new Error("notification IPC only available in Tauri mode");
-}
-
-export async function notificationClearRead(): Promise<{ ok: boolean; cleared: number }> {
-  if (isTauri) {
-    return tauriInvoke("notification_clear_read", {});
-  }
-  throw new Error("notification IPC only available in Tauri mode");
-}
-
-// ─── Migration ───
-
-export interface ExportOptions {
-  includeSessions: boolean;
-  includeSkills: boolean;
-  includeAgentWorkspaces: boolean;
-}
-
-export interface ImportOptions {
-  merge: boolean;
-  overwriteConfig: boolean;
-  overwriteAgents: boolean;
-  overwriteSessions: boolean;
-  overwriteSkills: boolean;
-}
-
-export async function exportData(options: ExportOptions): Promise<Uint8Array> {
-  if (isTauri) {
-    // 将选项转换为 IPC 命令参数
-    const result = await tauriInvoke<number[]>("export_data", {
-      options: {
-        includeSessions: options.includeSessions,
-        includeSkills: options.includeSkills,
-        includeAgentWorkspaces: options.includeAgentWorkspaces,
-      }
-    });
-    // 将数字数组转换回 Uint8Array
-    return new Uint8Array(result);
-  }
-  throw new Error("migration IPC only available in Tauri mode");
-}
-
-export async function importData(data: Uint8Array, options: ImportOptions): Promise<void> {
-  if (isTauri) {
-    await tauriInvoke("import_data", {
-      data: Array.from(data), // 转换为数字数组以进行 JSON 序列化
-      options: {
-        merge: options.merge,
-        overwriteConfig: options.overwriteConfig,
-        overwriteAgents: options.overwriteAgents,
-        overwriteSessions: options.overwriteSessions,
-        overwriteSkills: options.overwriteSkills,
-      }
-    });
-  }
-  throw new Error("migration IPC only available in Tauri mode");
-}
-
-// ─── WebSocket passthrough (browser mode only) ───
-
-export function connectWs(url: string, token?: string): Promise<void> {
-  return wsClient.connect(url, token).then(() => {
-    // Subscribe to push events that should be delivered to this client.
-    wsClient.send("subscribe", { events: ["cron.job.complete", "cron.job.failed", "notification.new", "notification.read", "channels.changed"] }).catch(() => {});
-  });
-}
-
-export function disconnectWs(): void {
-  wsClient.disconnect();
-}
-
-export function onWsEvent(event: string, handler: (data: unknown) => void): UnsubscribeFn {
-  return wsClient.on(event, handler);
-}
-
-export function isWsConnected(): boolean {
-  return wsClient.isConnected();
-}
+export const listSkillsIpc = listSkills;
+export const uploadSkillIpc = uploadSkill;
+export const listAgentToolsIpc = listAgentTools;
+export const updateAgentToolsIpc = updateAgentTools;
+export const refreshSkillsIpc = refreshSkills;
+export const submitToolAnswerIpc = submitToolAnswer;
+export const setExecutionModeIpc = setExecutionMode;
+export const getPlanFileIpc = getPlanFile;
+export const getAgentIpc = getAgent;
+export const updateAgentIpc = async (agentId: string, config: Record<string, unknown>) => updateAgent(agentId, config);
+export const createAgentIpc = createAgent;
+export const deleteAgentIpc = async (agentId: string) => deleteAgent(agentId);
+export const uploadAgentAvatarIpc = uploadAgentAvatar;
+export const readIdentityFilesIpc = readIdentityFiles;
+export const reloadChannelIpc = async (_channelId: string) => false; // deprecated

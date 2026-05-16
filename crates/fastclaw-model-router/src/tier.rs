@@ -225,6 +225,7 @@ mod tests {
                 name: None,
                 tool_calls: None,
                 tool_call_id: Some("1".into()),
+                compact_metadata: None,
             },
             user_msg("fix the error"),
         ];

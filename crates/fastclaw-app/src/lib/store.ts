@@ -10,7 +10,7 @@ export interface GatewayInfo {
 }
 
 interface GatewayState {
-  mode: "embedded" | "remote" | "browser" | "connecting";
+  mode: "ready" | "connecting" | "browser";
   info: GatewayInfo | null;
   connected: boolean;
   error: string | null;
@@ -62,14 +62,66 @@ export const useGatewayStore = create<GatewayState>((set) => ({
       set({ mode: "connecting", error: null });
 
       if (transport.isTauri) {
-        // Tauri mode: use IPC commands directly, no WebSocket needed
-        const info = await transport.invokeWithRetry<GatewayInfo>(
-          "get_gateway_info",
-        );
-        set({ mode: "embedded", info, connected: true, error: null });
+        // Tauri mode: get gateway info from IPC, then connect via WebSocket
+        const info = await transport.getGatewayInfo();
+        if (!info) {
+          throw new Error("Gateway not started");
+        }
 
-        sessionChangedUnsub = await transport.onSessionChanged(
-          async (sid) => {
+        // Always use WebSocket for communication
+        disconnectUnsub = transport.onWsEvent("disconnected", () => {
+          set({ connected: false });
+        });
+        reconnectedUnsub = transport.onWsEvent("reconnected", () => {
+          set({ connected: true });
+          syncBackendData();
+        });
+
+        try {
+          await transport.connectWs(info.wsUrl);
+          set({ mode: "ready", info, connected: true, error: null });
+        } catch (e) {
+          console.warn("WS connect failed:", e);
+          set({ mode: "ready", info, connected: false, error: String(e) });
+          return;
+        }
+
+        sessionChangedUnsub = transport.onSessionChanged(async (sid) => {
+          try {
+            const session = await transport.getSession(sid);
+            if (session?.title) {
+              const store = useAgentStore.getState();
+              const agentId = session.agentId || store.activeAgentId;
+              store.renameChat(agentId, sid, session.title);
+            }
+          } catch {
+            /* ignore */
+          }
+        });
+
+        await syncBackendData();
+      } else {
+        // Browser mode: check for gateway health endpoint
+        const info = await fetchBrowserGatewayInfo();
+        if (!info.wsUrl) {
+          set({ mode: "browser", info: null, connected: false });
+          return;
+        }
+
+        disconnectUnsub = transport.onWsEvent("disconnected", () => {
+          set({ connected: false });
+        });
+
+        reconnectedUnsub = transport.onWsEvent("reconnected", () => {
+          set({ connected: true });
+          syncBackendData();
+        });
+
+        try {
+          await transport.connectWs(info.wsUrl);
+          set({ mode: "ready", info, connected: true });
+
+          sessionChangedUnsub = transport.onSessionChanged(async (sid) => {
             try {
               const session = await transport.getSession(sid);
               if (session?.title) {
@@ -80,50 +132,12 @@ export const useGatewayStore = create<GatewayState>((set) => ({
             } catch {
               /* ignore */
             }
-          },
-        );
-
-        await syncBackendData();
-      } else {
-        // Browser mode: use WebSocket + HTTP
-        const info = await fetchBrowserGatewayInfo();
-        const mode = info.wsUrl ? "remote" : "browser";
-        set({ mode, info, error: null });
-
-        if (info.wsUrl) {
-          disconnectUnsub = transport.onWsEvent("disconnected", () => {
-            set({ connected: false });
           });
 
-          reconnectedUnsub = transport.onWsEvent("reconnected", () => {
-            set({ connected: true });
-            syncBackendData();
-          });
-
-          try {
-            await transport.connectWs(info.wsUrl);
-            set({ connected: true });
-
-            sessionChangedUnsub = await transport.onSessionChanged(
-              async (sid) => {
-                try {
-                  const session = await transport.getSession(sid);
-                  if (session?.title) {
-                    const store = useAgentStore.getState();
-                    const agentId = session.agentId || store.activeAgentId;
-                    store.renameChat(agentId, sid, session.title);
-                  }
-                } catch {
-                  /* ignore */
-                }
-              },
-            );
-
-            await syncBackendData();
-          } catch (e) {
-            console.warn("WS connect failed:", e);
-            set({ connected: false });
-          }
+          await syncBackendData();
+        } catch (e) {
+          console.warn("WS connect failed:", e);
+          set({ mode: "browser", info, connected: false });
         }
       }
     } catch (e) {

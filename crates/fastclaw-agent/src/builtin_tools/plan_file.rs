@@ -77,9 +77,13 @@ impl PlanFileStore {
     }
 
     pub fn get_or_create_slug(&self, session_id: &str) -> String {
+        if let Some(existing) = self.slugs.get(session_id) {
+            return existing.clone();
+        }
+        let slug = self.generate_unique_slug();
         self.slugs
             .entry(session_id.to_string())
-            .or_insert_with(|| self.generate_unique_slug())
+            .or_insert(slug)
             .clone()
     }
 

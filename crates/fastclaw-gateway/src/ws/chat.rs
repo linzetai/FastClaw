@@ -203,19 +203,32 @@ pub async fn spawn_chat(
     params: serde_json::Value,
 ) {
     let chat_start = Instant::now();
+    // Auto-claim session if provided and not yet owned.
+    // This allows the frontend to chat directly without an explicit claim step.
     if let Some(sid) = params.get("sessionId").and_then(|v| v.as_str()) {
         if !owned_sessions.contains(sid) {
-            let _ = bg_tx
-                .send(WsResponse {
-                    id: req_id,
-                    msg_type: "chat.error".into(),
-                    data: None,
-                    error: Some(
-                        json!({"code": 403, "message": "session not owned by this connection"}),
-                    ),
-                })
-                .await;
-            return;
+            // Verify session exists before claiming
+            match state.store.session_store.get_session(sid).await {
+                Ok(Some(_)) => {
+                    owned_sessions.insert(sid.to_string());
+                    tracing::debug!(session_id = %sid, "auto-claimed session on first chat");
+                }
+                Ok(None) => {
+                    // Session doesn't exist - will be created by setup_chat
+                    tracing::debug!(session_id = %sid, "session not found, will be created");
+                }
+                Err(e) => {
+                    let _ = bg_tx
+                        .send(WsResponse {
+                            id: req_id,
+                            msg_type: "chat.error".into(),
+                            data: None,
+                            error: Some(json!({"code": 500, "message": format!("failed to verify session: {e}")})),
+                        })
+                        .await;
+                    return;
+                }
+            }
         }
     }
     let state = state.clone();
@@ -289,18 +302,6 @@ pub async fn spawn_chat(
                 .map(String::from),
         };
 
-        // #region agent log
-        {
-            use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/home/linzetai/workspace/my_tools/FastClaw/.cursor/debug-a57040.log") {
-                let _ = writeln!(f, r#"{{"sessionId":"a57040","hypothesisId":"E","location":"ws/chat.rs:spawn_chat:before_setup","message":"About to call setup_chat","data":{{"req_id":"{}","agent_id":"{}","model":"{}"}},"timestamp":{}}}"#,
-                    rid.as_deref().unwrap_or("none"),
-                    request.agent_id.as_ref().map(|a| a.as_str()).unwrap_or("none"),
-                    request.model.as_deref().unwrap_or("none"),
-                    chrono::Utc::now().timestamp_millis());
-            }
-        }
-        // #endregion
         let setup = match setup_chat(
             &state,
             &request,
@@ -313,28 +314,8 @@ pub async fn spawn_chat(
         )
         .await
         {
-            Ok(s) => {
-                // #region agent log
-                {
-                    use std::io::Write;
-                    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/home/linzetai/workspace/my_tools/FastClaw/.cursor/debug-a57040.log") {
-                        let _ = writeln!(f, r#"{{"sessionId":"a57040","hypothesisId":"E","location":"ws/chat.rs:spawn_chat:setup_ok","message":"setup_chat succeeded","data":{{"agent_id":"{}","session_id":"{}","model_for_budget":"{}"}},"timestamp":{}}}"#,
-                            s.agent_id, s.session_id, s.model_for_budget, chrono::Utc::now().timestamp_millis());
-                    }
-                }
-                // #endregion
-                s
-            }
+            Ok(s) => s,
             Err(e) => {
-                // #region agent log
-                {
-                    use std::io::Write;
-                    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/home/linzetai/workspace/my_tools/FastClaw/.cursor/debug-a57040.log") {
-                        let _ = writeln!(f, r#"{{"sessionId":"a57040","hypothesisId":"B","location":"ws/chat.rs:spawn_chat:setup_err","message":"setup_chat FAILED","data":{{"error":"{}"}},"timestamp":{}}}"#,
-                            e, chrono::Utc::now().timestamp_millis());
-                    }
-                }
-                // #endregion
                 let _ = bg_tx
                     .send(WsResponse {
                         id: rid,
@@ -445,15 +426,6 @@ pub async fn spawn_chat(
             session_id: session_id.clone(),
             store: state.rt.plan_file_store.clone(),
         });
-        // #region agent log
-        {
-            use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/home/linzetai/workspace/my_tools/FastClaw/.cursor/debug-a57040.log") {
-                let _ = writeln!(f, r#"{{"sessionId":"a57040","hypothesisId":"C","location":"ws/chat.rs:spawn_chat:before_llm_spawn","message":"About to spawn LLM task","data":{{"model":"{}","msg_count":{}}},"timestamp":{}}}"#,
-                    start_model, enriched.messages.len(), chrono::Utc::now().timestamp_millis());
-            }
-        }
-        // #endregion
         let task = tokio::spawn(async move {
             let ms_clone = mode_state_for_task.clone();
             tokio::select! {
@@ -474,27 +446,32 @@ pub async fn spawn_chat(
         let mut assistant_content = String::new();
         let mut pending_question_ids: Vec<String> = Vec::new();
         let mut stream_ended = false; // true if Done or Error received
-        let mut first_event_logged = false;
-        while let Some(event) = rx.recv().await {
-            // #region agent log
-            if !first_event_logged {
-                first_event_logged = true;
-                use std::io::Write;
-                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/home/linzetai/workspace/my_tools/FastClaw/.cursor/debug-a57040.log") {
-                    let event_type = match &event {
-                        StreamEvent::Delta(_) => "Delta",
-                        StreamEvent::Done { .. } => "Done",
-                        StreamEvent::Error(_) => "Error",
-                        StreamEvent::ToolExecuting { .. } => "ToolExecuting",
-                        StreamEvent::ToolResult { .. } => "ToolResult",
-                        StreamEvent::AskQuestion { .. } => "AskQuestion",
-                        _ => "Other",
-                    };
-                    let _ = writeln!(f, r#"{{"sessionId":"a57040","hypothesisId":"C","location":"ws/chat.rs:spawn_chat:first_stream_event","message":"First stream event received from LLM","data":{{"event_type":"{}","elapsed_ms":{}}},"timestamp":{}}}"#,
-                        event_type, chat_start.elapsed().as_millis(), chrono::Utc::now().timestamp_millis());
+
+        // Use tokio::select! to race rx.recv() against task completion.
+        // This prevents a deadlock when the task panics/errors but the extra
+        // tx clone in stream_event_tx keeps the channel alive.
+        let mut task = task;
+        let mut task_completed = false;
+        let mut task_result: Option<Result<anyhow::Result<(u32, u32)>, tokio::task::JoinError>> = None;
+
+        loop {
+            let event = tokio::select! {
+                biased;
+                ev = rx.recv() => {
+                    match ev {
+                        Some(e) => e,
+                        None => break,
+                    }
                 }
-            }
-            // #endregion
+                result = &mut task, if !task_completed => {
+                    task_completed = true;
+                    task_result = Some(result);
+                    // Drop the extra tx clone so rx.recv() can return None
+                    // once any buffered events are drained.
+                    stream_event_map_for_task.remove(&stream_context_key);
+                    continue;
+                }
+            };
             if turn_cancel.is_cancelled() {
                 if reserved > 0.0 {
                     let _ = state.obs.budget_tracker.release_reservation(reserved);
@@ -620,7 +597,12 @@ pub async fn spawn_chat(
             maybe_spawn_smart_title_background(&state, &setup, &assistant_content);
         }
 
-        match task.await {
+        // If select! already captured the task result, use it; otherwise await.
+        let task_result = match task_result {
+            Some(r) => r,
+            None => task.await,
+        };
+        match task_result {
             Ok(Err(e)) if !turn_cancel.is_cancelled() => {
                 if reserved > 0.0 {
                     let _ = state.obs.budget_tracker.release_reservation(reserved);
@@ -674,8 +656,6 @@ pub async fn spawn_chat(
                     .await;
             }
             Ok(Ok(_)) if !turn_cancel.is_cancelled() && !stream_ended => {
-                // Task completed Ok but stream channel closed without sending
-                // Done or Error. Send chat.error so TUI doesn't hang forever.
                 if reserved > 0.0 {
                     let _ = state.obs.budget_tracker.release_reservation(reserved);
                 }

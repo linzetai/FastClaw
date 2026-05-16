@@ -1,7 +1,5 @@
-use crate::embedded::EmbeddedGateway;
 use fastclaw_core::migration::{self, ExportOptions, ImportOptions};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportOptionsDto {
@@ -41,15 +39,21 @@ impl From<ImportOptionsDto> for ImportOptions {
     }
 }
 
-#[tauri::command]
-pub async fn export_data(
-    gateway: State<'_, Option<EmbeddedGateway>>,
-    options: ExportOptionsDto,
-) -> Result<Vec<u8>, String> {
-    let _ = gateway.as_ref().as_ref().ok_or("gateway not started")?;
-    // 使用默认的配置模式，从当前运行环境推断
-    let mode = fastclaw_core::config::ConfigMode::from_flags(false, None);
+/// Get the config mode based on compile flags.
+fn config_mode() -> fastclaw_core::config::ConfigMode {
+    if cfg!(debug_assertions) {
+        fastclaw_core::config::ConfigMode::Development
+    } else {
+        fastclaw_core::config::ConfigMode::Production
+    }
+}
 
+/// Export all data (sessions, skills, agent workspaces) to a binary blob.
+///
+/// This is a local file operation - reads from local state directory.
+#[tauri::command]
+pub async fn export_data(options: ExportOptionsDto) -> Result<Vec<u8>, String> {
+    let mode = config_mode();
     let export_options = ExportOptions::from(options);
     let data = migration::export_data(&mode, &export_options)
         .await
@@ -59,16 +63,12 @@ pub async fn export_data(
         .map_err(|e| format!("Failed to serialize migration data: {}", e))
 }
 
+/// Import data from a binary blob.
+///
+/// This is a local file operation - writes to local state directory.
 #[tauri::command]
-pub async fn import_data(
-    gateway: State<'_, Option<EmbeddedGateway>>,
-    data: Vec<u8>,
-    options: ImportOptionsDto,
-) -> Result<(), String> {
-    let _ = gateway.as_ref().as_ref().ok_or("gateway not started")?;
-    // 使用默认的配置模式，从当前运行环境推断
-    let mode = fastclaw_core::config::ConfigMode::from_flags(false, None);
-
+pub async fn import_data(data: Vec<u8>, options: ImportOptionsDto) -> Result<(), String> {
+    let mode = config_mode();
     let migration_data = migration::deserialize_migration_data(&data)
         .map_err(|e| format!("Failed to deserialize migration data: {}", e))?;
 

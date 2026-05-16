@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use crate::error::{FastClawError, FastClawResult};
 use crate::types::ModelCapabilities;
@@ -15,6 +16,110 @@ pub enum ConfigMode {
     Development,
     /// Named profile: uses `~/.fastclaw-<name>/`
     Profile(String),
+}
+
+/// Gateway runtime state written to gateway.json for client discovery.
+///
+/// This file allows TUI and other clients to discover and connect to
+/// an already-running Gateway instance without manual configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayState {
+    /// Port the gateway is listening on.
+    pub port: u16,
+    /// Process ID of the gateway.
+    pub pid: u32,
+    /// WebSocket URL for client connections.
+    pub ws_url: String,
+    /// HTTP URL for REST API.
+    pub http_url: String,
+    /// Timestamp when the gateway started.
+    pub started_at: SystemTime,
+}
+
+impl GatewayState {
+    /// Create a new gateway state.
+    pub fn new(port: u16) -> Self {
+        let ws_url = format!("ws://127.0.0.1:{port}/ws");
+        let http_url = format!("http://127.0.0.1:{port}");
+        Self {
+            port,
+            pid: std::process::id(),
+            ws_url,
+            http_url,
+            started_at: SystemTime::now(),
+        }
+    }
+
+    /// Get the path to the gateway state file.
+    pub fn path(mode: &ConfigMode) -> PathBuf {
+        state_dir(mode).join("gateway.json")
+    }
+
+    /// Write the state to the gateway.json file.
+    pub fn write(&self, mode: &ConfigMode) -> std::io::Result<()> {
+        let path = Self::path(mode);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let content = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(&path, content)?;
+        tracing::debug!(path = %path.display(), "wrote gateway state file");
+        Ok(())
+    }
+
+    /// Read the state from the gateway.json file.
+    pub fn read(mode: &ConfigMode) -> std::io::Result<Self> {
+        let path = Self::path(mode);
+        let content = std::fs::read_to_string(&path)?;
+        let state: Self = serde_json::from_str(&content)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        Ok(state)
+    }
+
+    /// Remove the gateway state file.
+    pub fn remove(mode: &ConfigMode) -> std::io::Result<()> {
+        let path = Self::path(mode);
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+            tracing::debug!(path = %path.display(), "removed gateway state file");
+        }
+        Ok(())
+    }
+
+    /// Check if the gateway process is still alive.
+    pub fn is_alive(&self) -> bool {
+        // On Unix, we can check if the process exists
+        #[cfg(unix)]
+        {
+            use std::process::Command;
+            Command::new("kill")
+                .arg("-0")
+                .arg(self.pid.to_string())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        }
+        #[cfg(not(unix))]
+        {
+            // On non-Unix, we can't easily check, so just assume alive
+            true
+        }
+    }
+}
+
+/// Get the state directory path for the given config mode.
+///
+/// Returns `~/.fastclaw/` for production, `~/.fastclaw-dev/` for development,
+/// or `~/.fastclaw-<name>/` for named profiles.
+pub fn state_dir(mode: &ConfigMode) -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    match mode {
+        ConfigMode::Development => home.join(".fastclaw-dev"),
+        ConfigMode::Profile(name) => home.join(format!(".fastclaw-{name}")),
+        ConfigMode::Production => home.join(".fastclaw"),
+    }
 }
 
 impl ConfigMode {
@@ -913,15 +1018,29 @@ pub struct CredentialsConfig {
 
 impl CredentialsConfig {
     pub fn get_api_key(&self, provider: &str) -> Option<&str> {
+        // Try exact match first, then case-insensitive fallback
         self.providers
             .get(provider)
+            .or_else(|| {
+                self.providers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(provider))
+                    .map(|(_, v)| v)
+            })
             .and_then(|c| c.api_key.as_deref())
             .filter(|s| !s.is_empty())
     }
 
     pub fn get_base_url(&self, provider: &str) -> Option<&str> {
+        // Try exact match first, then case-insensitive fallback
         self.providers
             .get(provider)
+            .or_else(|| {
+                self.providers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(provider))
+                    .map(|(_, v)| v)
+            })
             .and_then(|c| c.base_url.as_deref())
             .filter(|s| !s.is_empty())
     }

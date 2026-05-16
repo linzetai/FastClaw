@@ -1,8 +1,8 @@
 use serde::Serialize;
-use std::sync::Arc;
-use tokio::sync::oneshot;
+use std::process::Stdio;
+use tokio::process::Command;
 
-pub use fastclaw_gateway::AppState;
+pub use fastclaw_core::config::GatewayState;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct GatewayInfo {
@@ -14,103 +14,204 @@ pub struct GatewayInfo {
     pub version: String,
 }
 
-pub struct EmbeddedGateway {
+/// Gateway process manager for Tauri.
+///
+/// This struct is responsible for:
+/// 1. Discovering an already-running Gateway via gateway.json
+/// 2. Starting a Gateway daemon process if none is found (using fastclaw CLI)
+/// 3. Providing connection info to the frontend
+///
+/// The Tauri frontend connects to the Gateway via WebSocket for all
+/// business logic (chat, sessions, agents, etc.). No IPC commands
+/// for business logic are needed - everything goes through WS.
+pub struct GatewayProcess {
     pub info: GatewayInfo,
-    app_state: Arc<AppState>,
-    shutdown_tx: Option<oneshot::Sender<()>>,
 }
 
-impl EmbeddedGateway {
+impl GatewayProcess {
+    /// Start or connect to a gateway.
+    ///
+    /// Flow:
+    /// 1. Check gateway.json for existing gateway
+    /// 2. If found and alive, use its connection info
+    /// 3. If not found or stale, start gateway daemon via fastclaw CLI
     pub async fn start(mode: &fastclaw_core::config::ConfigMode) -> anyhow::Result<Self> {
-        let mut config = fastclaw_core::config::load_config(mode)?;
-        if config.gateway.cors_origins.is_empty() {
-            config.gateway.cors_origins = vec!["*".to_string()];
-        }
-        let bind_addr = config.gateway.bind_addr();
-
-        let listener = match tokio::net::TcpListener::bind(bind_addr).await {
-            Ok(l) => l,
-            Err(_) => {
-                tracing::warn!(
-                    %bind_addr,
-                    "port in use, binding to random port"
-                );
-                tokio::net::TcpListener::bind("127.0.0.1:0").await?
+        // 1. Check for existing gateway via gateway.json
+        if let Ok(state) = GatewayState::read(mode) {
+            if state.is_alive() {
+                // Verify with HTTP health check
+                if probe_gateway(state.port).await {
+                    tracing::info!(
+                        port = state.port,
+                        pid = state.pid,
+                        "found running gateway, connecting to it"
+                    );
+                    return Self::connect_existing(state);
+                }
             }
-        };
+            // Stale state file — clean it up
+            tracing::debug!("stale gateway state file found, cleaning up");
+            let _ = GatewayState::remove(mode);
+        }
 
-        let local_addr = listener.local_addr()?;
-        let port = local_addr.port();
+        // 2. No existing gateway, start daemon
+        Self::start_daemon(mode).await
+    }
 
+    /// Connect to an existing gateway without starting a new one.
+    fn connect_existing(state: GatewayState) -> anyhow::Result<Self> {
         let info = GatewayInfo {
-            port,
-            ws_url: format!("ws://127.0.0.1:{port}/ws"),
-            http_url: format!("http://127.0.0.1:{port}"),
+            port: state.port,
+            ws_url: state.ws_url.clone(),
+            http_url: state.http_url.clone(),
             version: env!("CARGO_PKG_VERSION").to_string(),
         };
 
-        let app_state = Arc::new(AppState::new(config).await?);
+        tracing::info!(
+            port = state.port,
+            "connected to existing gateway"
+        );
 
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        Ok(Self { info })
+    }
 
-        let state_for_server = (*app_state).clone();
-        tokio::spawn(async move {
-            if let Err(e) =
-                fastclaw_gateway::serve_with_state(state_for_server, listener, shutdown_rx).await
-            {
-                tracing::error!("embedded gateway exited with error: {e}");
-            }
-        });
+    /// Start a gateway daemon process using the fastclaw CLI.
+    ///
+    /// We use `fastclaw gateway start` which handles daemonization internally
+    /// (double-fork, PID file, log file). We cannot use `current_exe()` from
+    /// the Tauri app because that would be the Tauri binary itself, so we
+    /// locate the `fastclaw` CLI binary explicitly.
+    async fn start_daemon(mode: &fastclaw_core::config::ConfigMode) -> anyhow::Result<Self> {
+        // Find fastclaw CLI binary
+        let fastclaw_exe = find_fastclaw_cli()?;
 
-        wait_for_health(port, std::time::Duration::from_secs(10)).await?;
+        let mut cmd = Command::new(&fastclaw_exe);
+        // --dev and --profile are top-level flags (before subcommand)
+        if mode.is_dev() {
+            cmd.arg("--dev");
+        }
+        if let Some(p) = mode.profile_name() {
+            cmd.arg("--profile");
+            cmd.arg(p);
+        }
+        cmd.arg("gateway").arg("start");
 
-        tracing::info!(port, "embedded gateway ready");
+        cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
 
-        Ok(Self {
-            info,
-            app_state,
-            shutdown_tx: Some(shutdown_tx),
-        })
+        // `fastclaw gateway start` daemonizes internally and exits quickly
+        let output = cmd
+            .output()
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to run `fastclaw gateway start`: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return Err(anyhow::anyhow!(
+                "`fastclaw gateway start` failed (exit {}): stdout={stdout} stderr={stderr}",
+                output.status.code().unwrap_or(-1)
+            ));
+        }
+
+        tracing::info!(exe = %fastclaw_exe.display(), "gateway start command succeeded");
+
+        // Wait for the gateway to become ready
+        let state = wait_for_gateway(mode, std::time::Duration::from_secs(15)).await?;
+
+        tracing::info!(port = state.port, "gateway daemon ready");
+
+        Self::connect_existing(state)
     }
 
     pub fn info(&self) -> &GatewayInfo {
         &self.info
     }
+}
 
-    pub fn app_state(&self) -> &AppState {
-        &self.app_state
-    }
-
-    pub fn shutdown(&mut self) {
-        if let Some(tx) = self.shutdown_tx.take() {
-            let _ = tx.send(());
+/// Find the fastclaw CLI executable.
+///
+/// Search order:
+/// 1. FASTCLAW_CLI env var
+/// 2. Same directory as current exe (for bundled installs)
+/// 3. PATH lookup
+fn find_fastclaw_cli() -> anyhow::Result<std::path::PathBuf> {
+    // 1. Check environment variable
+    if let Ok(path) = std::env::var("FASTCLAW_CLI") {
+        let path = std::path::PathBuf::from(path);
+        if path.exists() {
+            return Ok(path);
         }
     }
-}
 
-impl Drop for EmbeddedGateway {
-    fn drop(&mut self) {
-        self.shutdown();
-    }
-}
-
-async fn wait_for_health(port: u16, timeout: std::time::Duration) -> anyhow::Result<()> {
-    let url = format!("http://127.0.0.1:{port}/health");
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
-
-    let start = std::time::Instant::now();
-    loop {
-        match client.get(&url).send().await {
-            Ok(resp) if resp.status().is_success() => return Ok(()),
-            _ => {
-                if start.elapsed() > timeout {
-                    anyhow::bail!("gateway health check timed out after {timeout:?}");
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    // 2. Check same directory as current exe (bundled install scenario)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let sibling = parent.join("fastclaw");
+            if sibling.exists() {
+                return Ok(sibling);
             }
         }
     }
+
+    // 3. Look up in PATH
+    if let Some(path) = which_in_path("fastclaw") {
+        return Ok(path);
+    }
+
+    Err(anyhow::anyhow!(
+        "fastclaw CLI not found. Please install it or set FASTCLAW_CLI environment variable."
+    ))
+}
+
+/// Simple PATH lookup for an executable name.
+fn which_in_path(name: &str) -> Option<std::path::PathBuf> {
+    let Ok(path_var) = std::env::var("PATH") else {
+        return None;
+    };
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Probe whether a gateway is alive on the given port via HTTP health check.
+async fn probe_gateway(port: u16) -> bool {
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(500))
+        .build()
+    else {
+        return false;
+    };
+    client
+        .get(format!("http://127.0.0.1:{port}/health"))
+        .send()
+        .await
+        .is_ok_and(|r| r.status().is_success())
+}
+
+/// Wait for a gateway to become ready by polling the state file and health endpoint.
+async fn wait_for_gateway(
+    mode: &fastclaw_core::config::ConfigMode,
+    timeout: std::time::Duration,
+) -> anyhow::Result<GatewayState> {
+    let start = std::time::Instant::now();
+    let check_interval = std::time::Duration::from_millis(200);
+
+    while start.elapsed() < timeout {
+        // Try reading the state file first
+        if let Ok(state) = GatewayState::read(mode) {
+            if state.is_alive() && probe_gateway(state.port).await {
+                return Ok(state);
+            }
+        }
+
+        tokio::time::sleep(check_interval).await;
+    }
+
+    anyhow::bail!("gateway did not become ready within {}s", timeout.as_secs())
 }
