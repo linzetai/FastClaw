@@ -303,6 +303,11 @@ pub(crate) fn handle_tab_completion(app: &mut TuiApp) {
                     completions.push(cmd.to_string());
                 }
             }
+            for &(alias, _) in COMMAND_ALIASES {
+                if alias.starts_with(&prefix) && !completions.contains(&alias.to_string()) {
+                    completions.push(alias.to_string());
+                }
+            }
 
             if prefix.starts_with("/agent ") {
                 let agent_prefix = prefix.strip_prefix("/agent ").unwrap_or("");

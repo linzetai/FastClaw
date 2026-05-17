@@ -130,7 +130,12 @@ impl ToolResultImportance {
         let referenced = assistant_messages.iter().any(|asst_msg| {
             let asst_text = asst_msg.text_content().unwrap_or_default();
             key_fragments.iter().any(|frag| {
-                let check = if frag.len() > 40 { &frag[..40] } else { frag };
+                let check = if frag.len() > 40 {
+                    let end = frag.floor_char_boundary(40);
+                    &frag[..end]
+                } else {
+                    frag
+                };
                 asst_text.contains(check)
             })
         });

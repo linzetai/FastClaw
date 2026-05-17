@@ -3,14 +3,18 @@
   "name": "FastClaw 助手",
   "description": "通用型 AI 助手，具备飞书 IM 工具调用能力",
   "model": {
-    "provider": "dashscope",
-    "model": "qwen3.5-plus",
+    "provider": "plugin:wps-llm",
+    "model": "zhipu/glm-5",
     "temperature": 0.7,
-    "maxTokens": 4096,
-    "contextWindow": null,
+    "maxTokens": null,
+    "contextWindow": 128000,
     "costPer1kInput": null,
     "costPer1kOutput": null,
     "supportsReasoning": null,
+    "capabilities": {
+      "input": ["text"],
+      "output": ["text", "tool_calls"]
+    },
     "fallbacks": [],
     "maxConcurrentRequests": 10
   },

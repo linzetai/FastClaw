@@ -203,6 +203,6 @@
     // "pluginsDir": "plugins",
     // "extensionsDir": "extensions",
     // "skillsDir": "skills",
-    // "agentsDir": "config/agents"
+    "agentsDir": "/home/linzetai/.fastclaw-dev/config/agents"
   }
 }

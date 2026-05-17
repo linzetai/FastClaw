@@ -35,9 +35,9 @@ pub(crate) fn draw_ui(f: &mut Frame, app: &TuiApp) {
 pub(crate) fn draw_title_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
     let conn = if app.connected { "●" } else { "○" };
     let conn_color = if app.connected {
-        Color::Green
+        Color::Rgb(100, 200, 130)
     } else {
-        Color::Red
+        Color::Rgb(200, 80, 80)
     };
     let session = app.session_id.as_deref().unwrap_or("new");
     let sid_short = &session[..session.len().min(8)];
@@ -46,39 +46,36 @@ pub(crate) fn draw_title_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
         .agents
         .iter()
         .find(|a| a.id == app.agent_id)
-        .map(|a| format!("{}({})", a.id, a.name))
+        .map(|a| a.name.clone())
         .unwrap_or_else(|| app.agent_id.clone());
 
     let title = Line::from(vec![
         Span::styled(
-            " FastClaw TUI ",
+            " FastClaw ",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::Rgb(180, 180, 200))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(conn, Style::default().fg(conn_color)),
-        Span::raw("  "),
         Span::styled(
-            format!("agent:{agent_display}"),
-            Style::default().fg(Color::Yellow),
+            format!("  {agent_display}"),
+            Style::default().fg(Color::Rgb(140, 140, 160)),
         ),
-        Span::raw("  "),
         Span::styled(
-            format!("session:{sid_short}"),
-            Style::default().fg(Color::DarkGray),
+            format!("  {sid_short}"),
+            Style::default().fg(Color::Rgb(80, 80, 100)),
         ),
     ]);
 
     f.render_widget(
-        Paragraph::new(title).style(Style::default().bg(Color::DarkGray)),
+        Paragraph::new(title).style(Style::default().bg(Color::Rgb(25, 25, 35))),
         area,
     );
 }
 
 pub(crate) fn draw_messages(f: &mut Frame, app: &TuiApp, area: Rect) {
     let inner = Block::default()
-        .borders(Borders::LEFT | Borders::RIGHT)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .borders(Borders::NONE);
 
     let inner_area = inner.inner(area);
     f.render_widget(inner, area);
@@ -87,67 +84,73 @@ pub(crate) fn draw_messages(f: &mut Frame, app: &TuiApp, area: Rect) {
 
     let mut lines: Vec<Line> = Vec::new();
     for (msg_idx, msg) in app.messages.iter().enumerate() {
-        let (prefix, color) = match msg.role.as_str() {
-            "user" => ("❯", Color::Green),
-            "assistant" => ("⎿", Color::Cyan),
-            "system" => ("·", Color::Rgb(140, 140, 160)),
-            _ => ("?", Color::White),
-        };
-
         let ts = if msg.timestamp.is_empty() {
             String::new()
         } else {
             format!(" {}", msg.timestamp)
         };
 
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!(" {prefix}"),
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(ts, Style::default().fg(Color::DarkGray)),
-        ]));
-
-        if msg.role == "assistant" {
-            render_markdown_lines(
-                &msg.content,
-                &mut lines,
-                app.streaming && is_last_msg(msg_idx),
-            );
-        } else if msg.role == "system" {
-            for text_line in msg.content.lines() {
-                if text_line.starts_with("[Error]") || text_line.contains("Error:") {
-                    lines.push(Line::from(vec![
-                        Span::styled("  ▎", Style::default().fg(Color::Red)),
-                        Span::styled(
-                            text_line.to_string(),
-                            Style::default().fg(Color::Red),
-                        ),
-                    ]));
-                } else {
-                    lines.push(Line::from(Span::styled(
-                        format!("  {text_line}"),
+        match msg.role.as_str() {
+            "user" => {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        " ❯ ",
                         Style::default().fg(Color::Rgb(140, 140, 160)),
+                    ),
+                    Span::styled(ts.clone(), Style::default().fg(Color::Rgb(100, 100, 120))),
+                ]));
+                for text_line in msg.content.lines() {
+                    lines.push(Line::from(Span::styled(
+                        format!("   {text_line}"),
+                        Style::default().fg(Color::Rgb(220, 220, 230)),
                     )));
                 }
             }
-        } else {
-            for text_line in msg.content.lines() {
-                lines.push(Line::from(Span::raw(format!("  {text_line}"))));
+            "assistant" => {
+                if msg.content.is_empty() && app.streaming && is_last_msg(msg_idx) {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            "  ⎿ ",
+                            Style::default().fg(Color::Rgb(100, 100, 120)),
+                        ),
+                        Span::styled(
+                            app.spinner.display(),
+                            Style::default().fg(Color::Rgb(180, 140, 255)),
+                        ),
+                    ]));
+                } else {
+                    render_markdown_lines(
+                        &msg.content,
+                        &mut lines,
+                        app.streaming && is_last_msg(msg_idx),
+                    );
+                }
+            }
+            "system" => {
+                for text_line in msg.content.lines() {
+                    if text_line.starts_with("[Error]") || text_line.contains("Error:") {
+                        lines.push(Line::from(vec![
+                            Span::styled("  ⎿ ", Style::default().fg(Color::Red)),
+                            Span::styled(
+                                text_line.to_string(),
+                                Style::default().fg(Color::Red),
+                            ),
+                        ]));
+                    } else {
+                        lines.push(Line::from(Span::styled(
+                            format!("    {text_line}"),
+                            Style::default().fg(Color::Rgb(140, 140, 160)),
+                        )));
+                    }
+                }
+            }
+            _ => {
+                for text_line in msg.content.lines() {
+                    lines.push(Line::from(Span::raw(format!("    {text_line}"))));
+                }
             }
         }
 
-        // Spinner at end of streaming assistant message
-        if msg.content.is_empty()
-            && msg.role == "assistant"
-            && app.streaming
-            && is_last_msg(msg_idx)
-        {
-            lines.push(Line::from(Span::styled(
-                format!("  {}", app.spinner.display()),
-                Style::default().fg(Color::Cyan),
-            )));
-        }
         lines.push(Line::default());
     }
 
@@ -220,33 +223,23 @@ pub(crate) fn draw_input(f: &mut Frame, app: &TuiApp, area: Rect) {
         return;
     }
 
-    let (mode_prefix, mode_color) = if app.execution_mode == "plan" {
-        ("[Plan]", Color::Rgb(180, 140, 255))
-    } else {
-        ("[Agent]", Color::Rgb(100, 200, 130))
-    };
-
     let prompt_char = if app.streaming { "…" } else { "❯" };
     let prompt_color = if app.streaming {
-        Color::DarkGray
+        Color::Rgb(80, 80, 100)
     } else {
-        Color::Cyan
+        Color::Rgb(180, 180, 200)
     };
 
-    let prefix_spans = vec![
-        Span::styled(mode_prefix, Style::default().fg(mode_color)),
-        Span::styled(
-            format!("{prompt_char} "),
-            Style::default().fg(prompt_color),
-        ),
-    ];
-    let prefix_width =
-        UnicodeWidthStr::width(mode_prefix) + UnicodeWidthStr::width(prompt_char) + 1;
+    let prefix_spans = vec![Span::styled(
+        format!("{prompt_char} "),
+        Style::default().fg(prompt_color),
+    )];
+    let prefix_width = UnicodeWidthStr::width(prompt_char) + 1;
 
     let input_color = if app.streaming {
-        Color::DarkGray
+        Color::Rgb(80, 80, 100)
     } else {
-        Color::White
+        Color::Rgb(220, 220, 230)
     };
 
     let mut spans = prefix_spans;
@@ -281,8 +274,8 @@ pub(crate) fn draw_input(f: &mut Frame, app: &TuiApp, area: Rect) {
     }
 
     let input_block = Block::default()
-        .borders(Borders::TOP | Borders::BOTTOM)
-        .border_style(Style::default().fg(Color::Rgb(50, 50, 70)));
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(Color::Rgb(40, 40, 55)));
 
     let input_paragraph = Paragraph::new(Line::from(spans)).block(input_block);
     f.render_widget(input_paragraph, area);
@@ -308,18 +301,18 @@ pub(crate) fn draw_input(f: &mut Frame, app: &TuiApp, area: Rect) {
                 let is_selected = app.tab_index == i && !app.tab_completions.is_empty();
                 let cmd_style = if is_selected {
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(Color::Rgb(180, 180, 200))
                         .add_modifier(Modifier::BOLD)
-                        .bg(Color::Rgb(40, 40, 60))
+                        .bg(Color::Rgb(40, 40, 55))
                 } else {
-                    Style::default().fg(Color::Cyan)
+                    Style::default().fg(Color::Rgb(140, 140, 180))
                 };
                 let desc_style = if is_selected {
                     Style::default()
-                        .fg(Color::White)
-                        .bg(Color::Rgb(40, 40, 60))
+                        .fg(Color::Rgb(180, 180, 200))
+                        .bg(Color::Rgb(40, 40, 55))
                 } else {
-                    Style::default().fg(Color::DarkGray)
+                    Style::default().fg(Color::Rgb(100, 100, 120))
                 };
                 overlay_lines.push(Line::from(vec![
                     Span::styled(format!(" {cmd:<14}"), cmd_style),
@@ -328,7 +321,7 @@ pub(crate) fn draw_input(f: &mut Frame, app: &TuiApp, area: Rect) {
             }
             let overlay_block = Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(60, 60, 90)));
+                .border_style(Style::default().fg(Color::Rgb(50, 50, 65)));
             f.render_widget(Clear, overlay_area);
             f.render_widget(
                 Paragraph::new(overlay_lines).block(overlay_block),
@@ -345,49 +338,33 @@ pub(crate) fn draw_input(f: &mut Frame, app: &TuiApp, area: Rect) {
 }
 
 pub(crate) fn draw_status_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
+    let sep = Span::styled(" │ ", Style::default().fg(Color::Rgb(60, 60, 80)));
     let mut spans: Vec<Span> = Vec::new();
-
-    // Left: mode indicator
-    let (mode_label, mode_color) = if app.execution_mode == "plan" {
-        (" PLAN ", Color::Rgb(180, 140, 255))
-    } else {
-        (" AGENT ", Color::Rgb(100, 200, 130))
-    };
-    spans.push(Span::styled(
-        mode_label,
-        Style::default()
-            .fg(Color::Black)
-            .bg(mode_color)
-            .add_modifier(Modifier::BOLD),
-    ));
-    spans.push(Span::raw(" "));
 
     // Model name
     if !app.current_model.is_empty() {
         spans.push(Span::styled(
-            &app.current_model,
+            format!(" {}", &app.current_model),
             Style::default().fg(Color::Rgb(180, 180, 200)),
         ));
-        spans.push(Span::raw(" "));
     }
 
-    // Spinner or status
-    if app.streaming {
-        spans.push(Span::styled(
-            app.spinner.display(),
-            Style::default().fg(Color::Cyan),
-        ));
+    // Mode indicator (compact)
+    let (mode_label, mode_color) = if app.execution_mode == "plan" {
+        ("plan", Color::Rgb(180, 140, 255))
     } else {
-        spans.push(Span::styled(
-            &app.status,
-            Style::default().fg(Color::Rgb(140, 140, 160)),
-        ));
-    }
+        ("agent", Color::Rgb(100, 200, 130))
+    };
+    spans.push(sep.clone());
+    spans.push(Span::styled(
+        mode_label,
+        Style::default().fg(mode_color),
+    ));
 
-    // Context bar (middle section)
+    // Context bar
     if app.ctx_limit_tokens > 0 {
         let pct = (app.ctx_used_tokens as f64 / app.ctx_limit_tokens as f64 * 100.0) as u8;
-        let bar_width = 10u8;
+        let bar_width = 12u8;
         let filled = (pct as u16 * bar_width as u16 / 100).min(bar_width as u16) as u8;
         let empty = bar_width - filled;
         let bar_color = if pct >= 85 {
@@ -399,52 +376,58 @@ pub(crate) fn draw_status_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
         };
         let used_k = app.ctx_used_tokens / 1000;
         let limit_k = app.ctx_limit_tokens / 1000;
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            "ctx:",
-            Style::default().fg(Color::DarkGray),
-        ));
+        spans.push(sep.clone());
         spans.push(Span::styled(
             format!("{pct}%"),
             Style::default().fg(bar_color),
         ));
-        spans.push(Span::styled("[", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(" [", Style::default().fg(Color::Rgb(60, 60, 80))));
         spans.push(Span::styled(
-            "█".repeat(filled as usize),
+            "━".repeat(filled as usize),
             Style::default().fg(bar_color),
         ));
         spans.push(Span::styled(
-            "░".repeat(empty as usize),
-            Style::default().fg(Color::Rgb(60, 60, 80)),
+            "─".repeat(empty as usize),
+            Style::default().fg(Color::Rgb(40, 40, 55)),
         ));
-        spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled("]", Style::default().fg(Color::Rgb(60, 60, 80))));
         spans.push(Span::styled(
             format!(" {used_k}k/{limit_k}k"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::Rgb(100, 100, 120)),
         ));
     }
 
-    // Right: cost/tokens summary
+    // Tokens/cost summary
     if app.total_messages > 0 {
         let total_tok = app.total_input_tokens + app.total_output_tokens;
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            format!("↑{}↓{}", app.total_input_tokens, app.total_output_tokens),
-            Style::default().fg(Color::Rgb(100, 100, 140)),
-        ));
+        spans.push(sep.clone());
         if total_tok >= 1000 {
             spans.push(Span::styled(
-                format!(" ({:.1}k)", total_tok as f64 / 1000.0),
-                Style::default().fg(Color::Rgb(80, 80, 100)),
+                format!("{:.1}k tokens", total_tok as f64 / 1000.0),
+                Style::default().fg(Color::Rgb(100, 100, 140)),
+            ));
+        } else {
+            spans.push(Span::styled(
+                format!("{total_tok} tokens"),
+                Style::default().fg(Color::Rgb(100, 100, 140)),
             ));
         }
     }
 
-    // Shortcut hints (right-aligned conceptually)
-    if !app.streaming {
-        spans.push(Span::raw("  "));
+    // Streaming status or shortcut hints
+    if app.streaming {
+        spans.push(sep.clone());
         spans.push(Span::styled(
-            "? help · Shift+Tab mode · Ctrl+R search",
+            app.spinner.display(),
+            Style::default().fg(Color::Rgb(180, 140, 255)),
+        ));
+    } else {
+        spans.push(Span::styled(
+            "  ",
+            Style::default().fg(Color::Rgb(60, 60, 80)),
+        ));
+        spans.push(Span::styled(
+            "? help",
             Style::default().fg(Color::Rgb(80, 80, 100)),
         ));
     }

@@ -491,7 +491,7 @@ impl Tool for SubAgentListTool {
                     "agent_id": r.agent_id.to_string(),
                     "subagent_type": r.subagent_type.to_string(),
                     "status": format!("{:?}", r.status),
-                    "task": if r.task.len() > 100 { format!("{}…", &r.task[..100]) } else { r.task.clone() },
+                    "task": if r.task.len() > 100 { let end = r.task.floor_char_boundary(100); format!("{}…", &r.task[..end]) } else { r.task.clone() },
                     "has_result": r.result.is_some(),
                 })
             })

@@ -51,6 +51,7 @@ pub(crate) fn render_markdown_lines(
 ) {
     let mut in_code_block = false;
     let mut code_lang = String::new();
+    let prefix_style = Style::default().fg(Color::Rgb(100, 100, 120));
 
     for line in content.lines() {
         if line.starts_with("```") {
@@ -66,7 +67,7 @@ pub(crate) fn render_markdown_lines(
                     format!(" {code_lang} ")
                 };
                 lines.push(Line::from(vec![
-                    Span::raw("  "),
+                    Span::styled("  ⎿ ", prefix_style),
                     Span::styled(
                         format!("─── {label} ───"),
                         Style::default().fg(Color::DarkGray),
@@ -90,12 +91,15 @@ pub(crate) fn render_markdown_lines(
                     (Color::White, Color::Rgb(30, 30, 46))
                 };
                 lines.push(Line::from(vec![
-                    Span::raw("  "),
+                    Span::styled("  ⎿ ", prefix_style),
                     Span::styled(format!("│ {line}"), Style::default().fg(fg).bg(bg)),
                 ]));
             } else {
                 let highlighted = highlight_code_line(line, &code_lang);
-                let mut spans = vec![Span::raw("  ".to_string()), Span::styled("│ ", Style::default().fg(Color::DarkGray).bg(BG_CODE))];
+                let mut spans = vec![
+                    Span::styled("  ⎿ ", prefix_style),
+                    Span::styled("│ ", Style::default().fg(Color::DarkGray).bg(BG_CODE)),
+                ];
                 spans.extend(highlighted);
                 lines.push(Line::from(spans));
             }
@@ -104,30 +108,39 @@ pub(crate) fn render_markdown_lines(
 
         // Headings
         if let Some(rest) = line.strip_prefix("### ") {
-            lines.push(Line::from(Span::styled(
-                format!("  ### {rest}"),
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            )));
+            lines.push(Line::from(vec![
+                Span::styled("  ⎿ ", prefix_style),
+                Span::styled(
+                    format!("### {rest}"),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
             continue;
         }
         if let Some(rest) = line.strip_prefix("## ") {
-            lines.push(Line::from(Span::styled(
-                format!("  ## {rest}"),
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            )));
+            lines.push(Line::from(vec![
+                Span::styled("  ⎿ ", prefix_style),
+                Span::styled(
+                    format!("## {rest}"),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
             continue;
         }
         if let Some(rest) = line.strip_prefix("# ") {
-            lines.push(Line::from(Span::styled(
-                format!("  # {rest}"),
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-            )));
+            lines.push(Line::from(vec![
+                Span::styled("  ⎿ ", prefix_style),
+                Span::styled(
+                    format!("# {rest}"),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                ),
+            ]));
             continue;
         }
 
@@ -135,7 +148,10 @@ pub(crate) fn render_markdown_lines(
         if line.starts_with("- ") || line.starts_with("* ") || line.starts_with("• ") {
             let rest = &line[2..];
             let spans = parse_inline_markdown(rest);
-            let mut result = vec![Span::styled("  • ", Style::default().fg(Color::Yellow))];
+            let mut result = vec![
+                Span::styled("  ⎿ ", prefix_style),
+                Span::styled("• ", Style::default().fg(Color::Rgb(180, 180, 200))),
+            ];
             result.extend(spans);
             lines.push(Line::from(result));
             continue;
@@ -147,10 +163,13 @@ pub(crate) fn render_markdown_lines(
                 let num = &line[..pos];
                 let rest = &line[pos + 2..];
                 let spans = parse_inline_markdown(rest);
-                let mut result = vec![Span::styled(
-                    format!("  {num}. "),
-                    Style::default().fg(Color::Yellow),
-                )];
+                let mut result = vec![
+                    Span::styled("  ⎿ ", prefix_style),
+                    Span::styled(
+                        format!("{num}. "),
+                        Style::default().fg(Color::Rgb(180, 180, 200)),
+                    ),
+                ];
                 result.extend(spans);
                 lines.push(Line::from(result));
                 continue;
@@ -159,7 +178,7 @@ pub(crate) fn render_markdown_lines(
 
         // Regular text with inline markdown
         let spans = parse_inline_markdown(line);
-        let mut result = vec![Span::raw("  ".to_string())];
+        let mut result = vec![Span::styled("  ⎿ ", prefix_style)];
         result.extend(spans);
         lines.push(Line::from(result));
     }
@@ -167,7 +186,7 @@ pub(crate) fn render_markdown_lines(
     // Unclosed code block while streaming
     if in_code_block && streaming {
         lines.push(Line::from(vec![
-            Span::raw("  "),
+            Span::styled("  ⎿ ", prefix_style),
             Span::styled(
                 "│ ▌",
                 Style::default()

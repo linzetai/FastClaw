@@ -463,7 +463,8 @@ impl Tool for ExitPlanModeTool {
                     .read_plan(&pc.session_id)
                     .unwrap_or_default();
                 let preview = if plan_content.len() > 500 {
-                    format!("{}...\n(truncated, read full file for details)", &plan_content[..500])
+                    let end = plan_content.floor_char_boundary(500);
+                    format!("{}...\n(truncated, read full file for details)", &plan_content[..end])
                 } else {
                     plan_content
                 };

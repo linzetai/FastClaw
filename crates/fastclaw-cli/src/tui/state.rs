@@ -5,40 +5,67 @@ use unicode_width::UnicodeWidthChar;
 
 // ── Slash commands ──────────────────────────────────────────────────
 
+/// Grouped slash commands for display in /help and tab completion.
+/// Format: (command, description). Aliases are handled in commands.rs.
 pub(crate) const SLASH_COMMANDS: &[(&str, &str)] = &[
-    ("/help", "Show available commands"),
+    // ── Session ──
+    ("/clear", "Clear conversation history and free up context"),
+    ("/resume", "Resume a previous conversation"),
+    ("/branch", "Create a branch of the current conversation"),
+    ("/rename", "Rename the current conversation"),
+    ("/export", "Export the current conversation to a file"),
+    // ── Model & Agent ──
+    ("/model", "Set the AI model"),
+    ("/models", "List all available models"),
     ("/agent", "Switch agent: /agent <id>"),
     ("/agents", "List available agents"),
-    ("/new", "Start a new session"),
-    ("/sessions", "List recent sessions"),
-    ("/resume", "Resume session: /resume <id>"),
-    ("/clear", "Clear message view"),
-    ("/compact", "Force context compression now"),
-    ("/model", "Show/switch model: /model [name|number]"),
-    ("/models", "List all available models"),
-    ("/stats", "Show session token/time stats"),
-    ("/todo", "Show current todo list"),
-    ("/memory", "Search agent memory: /memory <query>"),
+    // ── Context ──
+    ("/context", "Show context window usage"),
+    ("/compact", "Summarize and compact context"),
+    ("/files", "List all files currently in context"),
+    // ── Development ──
+    ("/diff", "View uncommitted changes and per-turn diffs"),
     ("/undo", "Undo last edit (revert file)"),
-    ("/diff", "Show recent file changes"),
-    ("/doctor", "Run env diagnostics"),
     ("/plan", "Toggle Plan/Agent mode"),
-    ("/cancel", "Cancel current streaming"),
+    ("/todo", "Show current todo list"),
+    ("/skills", "List available skills"),
+    ("/hooks", "View hook configurations"),
+    // ── System ──
+    ("/doctor", "Diagnose installation and settings"),
+    ("/mcp", "Manage MCP servers"),
+    ("/permissions", "Manage tool permission rules"),
+    ("/status", "Show connection and agent status"),
+    ("/config", "Show current configuration"),
+    ("/cost", "Show the total cost and duration of the session"),
+    ("/stats", "Show session token/time stats"),
+    // ── Other ──
+    ("/help", "Show help and available commands"),
     ("/ping", "Ping gateway for latency"),
-    ("/mcp", "Show MCP server status"),
-    ("/export", "Export session to stdout"),
-    ("/cost", "Show session cost estimate"),
     ("/copy", "Copy last response to clipboard"),
-    ("/config", "Show current config"),
-    ("/context", "Show context window details"),
-    ("/quit", "Exit TUI"),
-    ("/exit", "Exit TUI"),
+    ("/memory", "Search agent memory: /memory <query>"),
+    ("/bug", "Send feedback or report a bug"),
+    ("/cancel", "Cancel current streaming"),
+    ("/add-dir", "Add a new working directory"),
+    ("/exit", "Exit the REPL"),
+];
+
+/// Alias mappings: (alias, canonical_command)
+pub(crate) const COMMAND_ALIASES: &[(&str, &str)] = &[
+    ("/quit", "/exit"),
+    ("/reset", "/clear"),
+    ("/new", "/clear"),
+    ("/continue", "/resume"),
+    ("/settings", "/config"),
+    ("/feedback", "/bug"),
+    ("/sessions", "/resume"),
+    ("/rewind", "/undo"),
 ];
 
 // ── Spinner ──────────────────────────────────────────────────────────
 
-pub(crate) const SPINNER_FRAMES: &[&str] =
-    &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+pub(crate) const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+const DOT_FRAMES: &[&str] = &[".", "..", "...", ".."];
 
 pub(crate) struct SpinnerState {
     pub(crate) frame: usize,
@@ -62,18 +89,20 @@ impl SpinnerState {
     }
 
     pub(crate) fn display(&self) -> String {
-        let ch = SPINNER_FRAMES[self.frame];
+        let dots_idx = (self.frame / 3) % DOT_FRAMES.len();
+        let dots = DOT_FRAMES[dots_idx];
         let elapsed = self.started_at.elapsed().as_secs();
-        let time = if elapsed > 0 {
+        let time = if elapsed >= 3 {
             format!(" {elapsed}s")
         } else {
             String::new()
         };
-        if let Some(ref tool) = self.tool_name {
-            format!("{ch} {tool}…{time}")
+        let verb = if let Some(ref tool) = self.tool_name {
+            tool.as_str()
         } else {
-            format!("{ch} {}…{time}", self.verb)
-        }
+            self.verb.as_str()
+        };
+        format!("{verb}{dots}{time}")
     }
 
     pub(crate) fn set_thinking(&mut self) {

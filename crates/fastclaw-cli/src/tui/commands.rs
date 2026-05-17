@@ -12,7 +12,7 @@ pub(crate) async fn handle_slash_command(app: &mut TuiApp, ws_tx: &mut WsTx, tex
     app.cursor_pos = 0;
 
     let parts: Vec<&str> = text.splitn(2, ' ').collect();
-    let cmd = parts[0];
+    let cmd = resolve_alias(parts[0]);
     let arg = parts.get(1).copied().unwrap_or("");
 
     match cmd {
@@ -22,11 +22,7 @@ pub(crate) async fn handle_slash_command(app: &mut TuiApp, ws_tx: &mut WsTx, tex
         "/quit" | "/exit" => {
             app.should_quit = true;
         }
-        "/clear" => {
-            app.messages.clear();
-            app.scroll_offset = 0;
-        }
-        "/new" => {
+        "/clear" | "/reset" | "/new" => {
             app.messages.clear();
             app.session_id = None;
             app.scroll_offset = 0;
@@ -224,13 +220,13 @@ pub(crate) async fn handle_slash_command(app: &mut TuiApp, ws_tx: &mut WsTx, tex
                 }
             }
         }
-        "/sessions" => {
+        "/sessions" | "/continue" if arg.is_empty() => {
             let id = app.next_id();
             let req = json!({"id": id, "method": "sessions.list", "params": {"limit": 10}});
             let _ = ws_tx.send(Message::Text(req.to_string())).await;
             app.status = "Loading sessions...".into();
         }
-        "/resume" if !arg.is_empty() => {
+        "/resume" | "/continue" if !arg.is_empty() => {
             app.session_id = Some(arg.to_string());
             app.messages.clear();
             app.scroll_offset = 0;
@@ -355,12 +351,113 @@ pub(crate) async fn handle_slash_command(app: &mut TuiApp, ws_tx: &mut WsTx, tex
                 }
             }
         }
+        "/bug" | "/feedback" => {
+            if arg.is_empty() {
+                app.push_system("Usage: /bug <description of issue or feedback>".into());
+            } else {
+                let id = app.next_id();
+                let req = json!({"id": id, "method": "chat.feedback", "params": {"message": arg}});
+                let _ = ws_tx.send(Message::Text(req.to_string())).await;
+                app.push_system("Feedback sent. Thank you!".into());
+            }
+        }
+        "/files" => {
+            let id = app.next_id();
+            let req = json!({"id": id, "method": "chat.files"});
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
+            app.status = "Loading files...".into();
+        }
+        "/permissions" => {
+            let id = app.next_id();
+            let req = json!({"id": id, "method": "permissions.list"});
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
+            app.status = "Loading permissions...".into();
+        }
+        "/branch" => {
+            if let Some(sid) = app.session_id.clone() {
+                let id = app.next_id();
+                let req = json!({"id": id, "method": "sessions.branch", "params": {"sessionId": sid}});
+                let _ = ws_tx.send(Message::Text(req.to_string())).await;
+                app.push_system("Creating conversation branch...".into());
+            } else {
+                app.push_system("No active session to branch.".into());
+            }
+        }
+        "/rename" if !arg.is_empty() => {
+            if let Some(sid) = app.session_id.clone() {
+                let id = app.next_id();
+                let req = json!({"id": id, "method": "sessions.rename", "params": {"sessionId": sid, "title": arg}});
+                let _ = ws_tx.send(Message::Text(req.to_string())).await;
+                app.push_system(format!("Renamed session to: {arg}"));
+            } else {
+                app.push_system("No active session to rename.".into());
+            }
+        }
+        "/rename" => {
+            app.push_system("Usage: /rename <new title>".into());
+        }
+        "/skills" => {
+            let id = app.next_id();
+            let req = json!({"id": id, "method": "skills.list"});
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
+            app.status = "Loading skills...".into();
+        }
+        "/hooks" => {
+            let id = app.next_id();
+            let req = json!({"id": id, "method": "hooks.list"});
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
+            app.status = "Loading hooks...".into();
+        }
+        "/status" => {
+            let connected_str = if app.connected { "Connected" } else { "Disconnected" };
+            app.push_system(format!("Connection: {connected_str}"));
+            app.push_system(format!("Agent: {}", app.agent_id));
+            app.push_system(format!("Mode: {}", app.execution_mode));
+            let model = if app.model_override.is_empty() {
+                &app.current_model
+            } else {
+                &app.model_override
+            };
+            app.push_system(format!("Model: {model}"));
+            if let Some(ref sid) = app.session_id {
+                app.push_system(format!("Session: {}", &sid[..sid.len().min(12)]));
+            }
+            if let Some(ref wd) = app.work_dir {
+                app.push_system(format!("Work dir: {wd}"));
+            }
+            app.push_system(format!("Messages: {}", app.total_messages));
+        }
+        "/add-dir" if !arg.is_empty() => {
+            let id = app.next_id();
+            let req = json!({"id": id, "method": "workspace.add_dir", "params": {"path": arg}});
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
+            app.push_system(format!("Adding directory: {arg}"));
+        }
+        "/add-dir" => {
+            app.push_system("Usage: /add-dir <path>".into());
+        }
+        "/rewind" => {
+            let id = app.next_id();
+            let req = json!({"id": id, "method": "chat.undo"});
+            let _ = ws_tx.send(Message::Text(req.to_string())).await;
+            app.push_system("Reverting last file change...".into());
+        }
         _ => {
             app.push_system(format!(
                 "Unknown command: {cmd}. Type /help for available commands."
             ));
         }
     }
+}
+
+/// Resolve a command alias to its canonical form.
+pub(crate) fn resolve_alias(cmd: &str) -> &str {
+    for &(alias, canonical) in COMMAND_ALIASES {
+        if cmd == alias {
+            return canonical;
+        }
+    }
+    cmd
 }
 
 pub(crate) fn run_preflight_checks(app: &mut TuiApp) {

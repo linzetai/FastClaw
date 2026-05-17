@@ -1112,7 +1112,16 @@ pub fn load_config(mode: &ConfigMode) -> FastClawResult<FastClawConfig> {
 
     if let Some(merged) = base {
         warn_unknown_keys(&merged);
-        let config: FastClawConfig = serde_json::from_value(merged)?;
+        let mut config: FastClawConfig = serde_json::from_value(merged)?;
+        if config.paths.state_dir.is_none() {
+            let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+            let default_dir = match mode {
+                ConfigMode::Development => home.join(".fastclaw-dev"),
+                ConfigMode::Profile(name) => home.join(format!(".fastclaw-{name}")),
+                ConfigMode::Production => home.join(".fastclaw"),
+            };
+            config.paths.state_dir = Some(default_dir.to_string_lossy().into_owned());
+        }
         return Ok(config);
     }
 

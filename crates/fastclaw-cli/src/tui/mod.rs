@@ -428,7 +428,7 @@ mod tests {
             &mut app,
             r#"{"type":"chat.tool.start","data":{"tool":"file_read","params":{"path":"/tmp/x"}}}"#,
         );
-        assert!(app.messages.last().unwrap().content.contains("Read file"));
+        assert!(app.messages.last().unwrap().content.contains("● Read"));
         assert!(app.messages.last().unwrap().content.contains("/tmp/x"));
         assert_eq!(app.spinner.tool_name, Some("file_read".into()));
     }
@@ -955,7 +955,7 @@ mod tests {
         handle_ws_message(&mut app, r#"{"type":"chat.tool.start","data":{"tool":"file_read","callId":"c1","params":{"path":"/tmp/test.rs"}}}"#);
         assert_eq!(app.spinner.verb, "reading");
         let content = &app.messages.last().unwrap().content;
-        assert!(content.contains("Read file"));
+        assert!(content.contains("● Read"));
         assert!(content.contains("/tmp/test.rs"));
         handle_ws_message(
             &mut app,
@@ -986,7 +986,7 @@ mod tests {
             r#"{"type":"chat.subagent.start","data":{"runId":"r1","label":"code-review"}}"#,
         );
         assert!(app.spinner.verb.contains("code-review"));
-        assert!(app.messages.last().unwrap().content.contains("Sub-agent"));
+        assert!(app.messages.last().unwrap().content.contains("Task"));
         handle_ws_message(
             &mut app,
             r#"{"type":"chat.subagent.delta","data":{"runId":"r1","content":"Reviewing..."}}"#,
@@ -1250,8 +1250,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| draw_ui(f, &app)).unwrap();
         let (cx, _cy) = terminal.get_cursor_position().unwrap().into();
-        let expected_prefix_width =
-            UnicodeWidthStr::width("[Agent]") + UnicodeWidthStr::width("❯") + 1;
+        let expected_prefix_width = UnicodeWidthStr::width("❯") + 1;
         assert_eq!(
             cx, expected_prefix_width as u16,
             "cursor at start of empty input"
@@ -1269,8 +1268,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| draw_ui(f, &app)).unwrap();
         let (cx, _cy) = terminal.get_cursor_position().unwrap().into();
-        let prefix_w =
-            UnicodeWidthStr::width("[Agent]") + UnicodeWidthStr::width("❯") + 1;
+        let prefix_w = UnicodeWidthStr::width("❯") + 1;
         assert_eq!(cx, (prefix_w + 5) as u16, "cursor after 'hello'");
     }
 
@@ -1285,8 +1283,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| draw_ui(f, &app)).unwrap();
         let (cx, _cy) = terminal.get_cursor_position().unwrap().into();
-        let prefix_w =
-            UnicodeWidthStr::width("[Agent]") + UnicodeWidthStr::width("❯") + 1;
+        let prefix_w = UnicodeWidthStr::width("❯") + 1;
         assert_eq!(
             cx,
             (prefix_w + 4) as u16,
@@ -1305,8 +1302,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| draw_ui(f, &app)).unwrap();
         let (cx, _cy) = terminal.get_cursor_position().unwrap().into();
-        let prefix_w =
-            UnicodeWidthStr::width("[Agent]") + UnicodeWidthStr::width("❯") + 1;
+        let prefix_w = UnicodeWidthStr::width("❯") + 1;
         assert_eq!(
             cx,
             (prefix_w + 2) as u16,
@@ -1325,8 +1321,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| draw_ui(f, &app)).unwrap();
         let (cx, _cy) = terminal.get_cursor_position().unwrap().into();
-        let prefix_w =
-            UnicodeWidthStr::width("[Plan]") + UnicodeWidthStr::width("❯") + 1;
+        let prefix_w = UnicodeWidthStr::width("❯") + 1;
         assert_eq!(cx, (prefix_w + 4) as u16, "cursor in plan mode");
     }
 
@@ -1472,5 +1467,549 @@ mod tests {
         super::input::search_history_from_start(&mut app);
         assert_eq!(app.history_search_index, Some(2));
         assert_eq!(app.input, "hello rust");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Edge-case / boundary tests
+    // ═══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn edge_tool_start_cjk_params_no_panic() {
+        let mut app = new_app();
+        app.streaming = true;
+        app.messages.push(ChatMsg {
+            role: "assistant".into(),
+            content: String::new(),
+            timestamp: "12:00:00".into(),
+        });
+        let long_cjk = "你".repeat(100);
+        let msg = format!(
+            r#"{{"type":"chat.tool.start","data":{{"tool":"file_read","callId":"c1","params":{{"path":"{long_cjk}"}}}}}}"#
+        );
+        handle_ws_message(&mut app, &msg);
+        let content = &app.messages.last().unwrap().content;
+        assert!(content.contains("Read"));
+        assert!(content.contains("…"));
+    }
+
+    #[test]
+    fn edge_empty_delta_content() {
+        let mut app = new_app();
+        app.streaming = true;
+        app.messages.push(ChatMsg {
+            role: "assistant".into(),
+            content: String::new(),
+            timestamp: "12:00:00".into(),
+        });
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"chat.delta","data":{"content":""}}"#,
+        );
+        assert_eq!(app.messages.last().unwrap().content, "");
+    }
+
+    #[test]
+    fn edge_null_content_delta_ignored() {
+        let mut app = new_app();
+        app.streaming = true;
+        app.messages.push(ChatMsg {
+            role: "assistant".into(),
+            content: "before".into(),
+            timestamp: "12:00:00".into(),
+        });
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"chat.delta","data":{"content":null}}"#,
+        );
+        assert_eq!(app.messages.last().unwrap().content, "before");
+    }
+
+    #[test]
+    fn edge_rapid_deltas_accumulate() {
+        let mut app = new_app();
+        app.streaming = true;
+        app.messages.push(ChatMsg {
+            role: "assistant".into(),
+            content: String::new(),
+            timestamp: "12:00:00".into(),
+        });
+        for i in 0..100 {
+            let msg = format!(r#"{{"type":"chat.delta","data":{{"content":"chunk{i} "}}}}"#);
+            handle_ws_message(&mut app, &msg);
+        }
+        let content = &app.messages.last().unwrap().content;
+        assert!(content.contains("chunk0"));
+        assert!(content.contains("chunk99"));
+        assert_eq!(content.matches("chunk").count(), 100);
+    }
+
+    #[test]
+    fn edge_large_content_single_delta() {
+        let mut app = new_app();
+        app.streaming = true;
+        app.messages.push(ChatMsg {
+            role: "assistant".into(),
+            content: String::new(),
+            timestamp: "12:00:00".into(),
+        });
+        let big = "x".repeat(100_000);
+        let msg = format!(r#"{{"type":"chat.delta","data":{{"content":"{big}"}}}}"#);
+        handle_ws_message(&mut app, &msg);
+        assert_eq!(app.messages.last().unwrap().content.len(), 100_000);
+    }
+
+    #[test]
+    fn edge_special_chars_in_delta() {
+        let mut app = new_app();
+        app.streaming = true;
+        app.messages.push(ChatMsg {
+            role: "assistant".into(),
+            content: String::new(),
+            timestamp: "12:00:00".into(),
+        });
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"chat.delta","data":{"content":"emoji: 🦀🔥 tab:\t newline:\n null\u0000byte"}}"#,
+        );
+        let content = &app.messages.last().unwrap().content;
+        assert!(content.contains("🦀🔥"));
+        assert!(content.contains('\t'));
+    }
+
+    #[test]
+    fn edge_multiple_tools_in_sequence() {
+        let mut app = new_app();
+        app.streaming = true;
+        app.messages.push(ChatMsg {
+            role: "assistant".into(),
+            content: String::new(),
+            timestamp: "12:00:00".into(),
+        });
+        for tool in &["file_read", "shell_exec", "web_search"] {
+            let start = format!(
+                r#"{{"type":"chat.tool.start","data":{{"tool":"{tool}","callId":"c","params":{{}}}}}}"#
+            );
+            let done = r#"{"type":"chat.tool.done","data":{"success":true,"elapsedMs":100}}"#;
+            handle_ws_message(&mut app, &start);
+            handle_ws_message(&mut app, done);
+        }
+        let content = &app.messages.last().unwrap().content;
+        assert!(content.contains("● Read"));
+        assert!(content.contains("● Bash"));
+        assert!(content.contains("● WebSearch"));
+        assert_eq!(content.matches('✓').count(), 3);
+    }
+
+    #[test]
+    fn edge_tool_failed() {
+        let mut app = new_app();
+        app.streaming = true;
+        app.messages.push(ChatMsg {
+            role: "assistant".into(),
+            content: String::new(),
+            timestamp: "12:00:00".into(),
+        });
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"chat.tool.start","data":{"tool":"shell_exec","callId":"c1","params":{"command":"rm -rf /"}}}"#,
+        );
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"chat.tool.done","data":{"success":false,"elapsedMs":50}}"#,
+        );
+        let content = &app.messages.last().unwrap().content;
+        assert!(content.contains('✗'));
+    }
+
+    #[test]
+    fn edge_thinking_then_content() {
+        let mut app = new_app();
+        app.streaming = true;
+        app.messages.push(ChatMsg {
+            role: "assistant".into(),
+            content: String::new(),
+            timestamp: "12:00:00".into(),
+        });
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"chat.delta","data":{"reasoning_content":"Let me think about this...\nStep 1: analyze\nStep 2: implement"}}"#,
+        );
+        assert!(app.thinking_content.contains("Step 1"));
+        assert_eq!(app.spinner.verb, "thinking");
+
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"chat.delta","data":{"content":"Here is my answer."}}"#,
+        );
+        assert!(app.thinking_content.is_empty());
+        let content = &app.messages.last().unwrap().content;
+        assert!(content.contains("Thinking (3 lines)"));
+        assert!(content.contains("Here is my answer."));
+    }
+
+    #[test]
+    fn edge_error_with_status_codes() {
+        let mut app = new_app();
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"error","error":{"message":"invalid token","code":401}}"#,
+        );
+        assert!(app.status.contains("Auth error"));
+
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"error","error":{"message":"forbidden","code":403}}"#,
+        );
+        assert!(app.status.contains("Access denied"));
+
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"error","error":{"message":"not found","code":404}}"#,
+        );
+        assert!(app.status.contains("Not found"));
+    }
+
+    #[test]
+    fn edge_context_usage_tracking() {
+        let mut app = new_app();
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"chat.context_usage","data":{"usedTokens":90000,"limitTokens":128000}}"#,
+        );
+        assert_eq!(app.ctx_used_tokens, 90000);
+        assert_eq!(app.ctx_limit_tokens, 128000);
+    }
+
+    #[test]
+    fn edge_compact_warning() {
+        let mut app = new_app();
+        handle_ws_message(&mut app, r#"{"type":"chat.compact.warning"}"#);
+        assert!(app
+            .messages
+            .iter()
+            .any(|m| m.content.contains("compacted")));
+    }
+
+    #[test]
+    fn edge_context_warning_high_percent() {
+        let mut app = new_app();
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"chat.context.warning","data":{"usedPercent":99.9}}"#,
+        );
+        assert!(app.messages.iter().any(|m| m.content.contains("100%")));
+    }
+
+    #[test]
+    fn edge_sessions_messages_restore() {
+        let mut app = new_app();
+        handle_ws_message(&mut app, r#"{"type":"sessions.messages","data":{"messages":[{"role":"user","content":"hello","createdAt":"2025-01-01T12:00:00.000Z"},{"role":"assistant","content":"hi there","createdAt":"2025-01-01T12:00:01.000Z"}]}}"#);
+        assert_eq!(app.messages.len(), 2);
+        assert_eq!(app.messages[0].role, "user");
+        assert_eq!(app.messages[0].content, "hello");
+        assert_eq!(app.messages[1].role, "assistant");
+        assert_eq!(app.messages[1].content, "hi there");
+    }
+
+    #[test]
+    fn edge_complete_accumulates_totals() {
+        let mut app = new_app();
+        app.streaming = true;
+        app.chat_start_time = Some(Instant::now());
+        app.messages.push(ChatMsg {
+            role: "assistant".into(),
+            content: "reply1".into(),
+            timestamp: "12:00:00".into(),
+        });
+        handle_ws_message(&mut app, r#"{"type":"chat.complete","data":{"elapsedMs":1000,"inputTokensEstimate":100,"outputTokensEstimate":50}}"#);
+        assert_eq!(app.total_elapsed_ms, 1000);
+        assert_eq!(app.total_input_tokens, 100);
+
+        app.streaming = true;
+        app.chat_start_time = Some(Instant::now());
+        app.messages.push(ChatMsg {
+            role: "assistant".into(),
+            content: "reply2".into(),
+            timestamp: "12:01:00".into(),
+        });
+        handle_ws_message(&mut app, r#"{"type":"chat.complete","data":{"elapsedMs":2000,"inputTokensEstimate":200,"outputTokensEstimate":100}}"#);
+        assert_eq!(app.total_elapsed_ms, 3000);
+        assert_eq!(app.total_input_tokens, 300);
+        assert_eq!(app.total_output_tokens, 150);
+        assert_eq!(app.total_messages, 2);
+    }
+
+    #[test]
+    fn edge_deeply_nested_json_content() {
+        let mut app = new_app();
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"sessions.messages","data":{"messages":[{"role":"assistant","content":{"blocks":[{"type":"text","text":"nested"}]}}]}}"#,
+        );
+        let content = &app.messages.last().unwrap().content;
+        assert!(content.contains("nested"));
+    }
+
+    #[test]
+    fn edge_narrow_terminal_no_panic() {
+        let mut app = new_app();
+        app.connected = true;
+        app.execution_mode = "agent".into();
+        app.input = "hello world this is a long input".into();
+        app.cursor_pos = 10;
+        app.messages.push(ChatMsg {
+            role: "user".into(),
+            content: "A message".into(),
+            timestamp: "12:00:00".into(),
+        });
+        let backend = TestBackend::new(10, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_ui(f, &app)).unwrap();
+    }
+
+    #[test]
+    fn edge_zero_height_terminal_no_panic() {
+        let mut app = new_app();
+        app.connected = true;
+        let backend = TestBackend::new(80, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_ui(f, &app)).unwrap();
+    }
+
+    #[test]
+    fn edge_many_messages_scroll() {
+        let mut app = new_app();
+        app.connected = true;
+        for i in 0..100 {
+            app.messages.push(ChatMsg {
+                role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
+                content: format!("Message {i} with some content"),
+                timestamp: "12:00:00".into(),
+            });
+        }
+        app.scroll_offset = 50;
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_ui(f, &app)).unwrap();
+    }
+
+    #[test]
+    fn edge_ctrl_w_on_cjk_word_boundary() {
+        let mut app = new_app();
+        app.input = "hello 你好世界 test".into();
+        app.cursor_pos = app.input.chars().count();
+        assert_eq!(app.cursor_pos, 15);
+        let byte_pos = char_to_byte(&app.input, app.cursor_pos);
+        let before = &app.input[..byte_pos];
+        let trimmed = before.trim_end();
+        let new_byte_pos = trimmed
+            .rfind(|c: char| c.is_whitespace())
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let new_char_pos = app.input[..new_byte_pos].chars().count();
+        app.input.drain(new_byte_pos..byte_pos);
+        app.cursor_pos = new_char_pos;
+        assert_eq!(app.input, "hello 你好世界 ");
+        assert_eq!(app.cursor_pos, 11);
+    }
+
+    #[test]
+    fn edge_backspace_cjk_char() {
+        let mut app = new_app();
+        app.input = "你好".into();
+        app.cursor_pos = 2;
+        app.cursor_pos -= 1;
+        let byte_pos = char_to_byte(&app.input, app.cursor_pos);
+        let next_byte = char_to_byte(&app.input, app.cursor_pos + 1);
+        app.input.drain(byte_pos..next_byte);
+        assert_eq!(app.input, "你");
+        assert_eq!(app.cursor_pos, 1);
+    }
+
+    #[test]
+    fn edge_scroll_offset_bounds() {
+        let mut app = new_app();
+        app.scroll_offset = 0;
+        app.scroll_offset = app.scroll_offset.saturating_sub(3);
+        assert_eq!(app.scroll_offset, 0);
+        app.scroll_offset = u16::MAX;
+        app.scroll_offset = app.scroll_offset.saturating_add(3);
+        assert_eq!(app.scroll_offset, u16::MAX);
+    }
+
+    #[test]
+    fn edge_empty_session_restore() {
+        let mut app = new_app();
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"sessions.messages","data":{"messages":[]}}"#,
+        );
+        assert_eq!(app.messages.len(), 0);
+    }
+
+    #[test]
+    fn edge_multiline_input_insert() {
+        let mut app = new_app();
+        app.input = "line1".into();
+        app.cursor_pos = 5;
+        let byte_pos = char_to_byte(&app.input, app.cursor_pos);
+        app.input.insert(byte_pos, '\n');
+        app.cursor_pos += 1;
+        assert_eq!(app.input, "line1\n");
+        assert_eq!(app.cursor_pos, 6);
+        let byte_pos2 = char_to_byte(&app.input, app.cursor_pos);
+        app.input.insert(byte_pos2, 'a');
+        app.cursor_pos += 1;
+        assert_eq!(app.input, "line1\na");
+    }
+
+    #[test]
+    fn edge_mode_change_doesnt_duplicate() {
+        let mut app = new_app();
+        app.execution_mode = "agent".into();
+        handle_ws_message(
+            &mut app,
+            r#"{"type":"chat.mode_change","data":{"to":"agent"}}"#,
+        );
+        assert_eq!(app.execution_mode, "agent");
+        assert!(!app.status.contains("Mode"));
+    }
+
+    // ── resolve_alias tests ────────────────────────────────────────
+
+    #[test]
+    fn alias_quit_resolves_to_exit() {
+        assert_eq!(commands::resolve_alias("/quit"), "/exit");
+    }
+
+    #[test]
+    fn alias_reset_resolves_to_clear() {
+        assert_eq!(commands::resolve_alias("/reset"), "/clear");
+    }
+
+    #[test]
+    fn alias_new_resolves_to_clear() {
+        assert_eq!(commands::resolve_alias("/new"), "/clear");
+    }
+
+    #[test]
+    fn alias_continue_resolves_to_resume() {
+        assert_eq!(commands::resolve_alias("/continue"), "/resume");
+    }
+
+    #[test]
+    fn alias_settings_resolves_to_config() {
+        assert_eq!(commands::resolve_alias("/settings"), "/config");
+    }
+
+    #[test]
+    fn alias_feedback_resolves_to_bug() {
+        assert_eq!(commands::resolve_alias("/feedback"), "/bug");
+    }
+
+    #[test]
+    fn alias_rewind_resolves_to_undo() {
+        assert_eq!(commands::resolve_alias("/rewind"), "/undo");
+    }
+
+    #[test]
+    fn alias_sessions_resolves_to_resume() {
+        assert_eq!(commands::resolve_alias("/sessions"), "/resume");
+    }
+
+    #[test]
+    fn alias_unknown_returns_self() {
+        assert_eq!(commands::resolve_alias("/help"), "/help");
+        assert_eq!(commands::resolve_alias("/nonexistent"), "/nonexistent");
+    }
+
+    // ── Tab completion includes aliases ────────────────────────────
+
+    #[test]
+    fn tab_completion_includes_alias_quit() {
+        let mut app = new_app();
+        app.input = "/qu".into();
+        app.cursor_pos = 3;
+        handle_tab_completion(&mut app);
+        assert_eq!(app.input, "/quit");
+    }
+
+    #[test]
+    fn tab_completion_includes_alias_new() {
+        let mut app = new_app();
+        app.input = "/ne".into();
+        app.cursor_pos = 3;
+        handle_tab_completion(&mut app);
+        assert!(app.input == "/new");
+    }
+
+    #[test]
+    fn tab_completion_includes_new_commands() {
+        let mut app = new_app();
+        app.input = "/bu".into();
+        app.cursor_pos = 3;
+        handle_tab_completion(&mut app);
+        assert_eq!(app.input, "/bug");
+    }
+
+    #[test]
+    fn tab_completion_files_command() {
+        let mut app = new_app();
+        app.input = "/fi".into();
+        app.cursor_pos = 3;
+        handle_tab_completion(&mut app);
+        assert_eq!(app.input, "/files");
+    }
+
+    #[test]
+    fn tab_completion_status_command() {
+        let mut app = new_app();
+        app.input = "/statu".into();
+        app.cursor_pos = 6;
+        handle_tab_completion(&mut app);
+        assert_eq!(app.input, "/status");
+    }
+
+    // ── SLASH_COMMANDS structure tests ─────────────────────────────
+
+    #[test]
+    fn slash_commands_all_start_with_slash() {
+        for (cmd, _desc) in SLASH_COMMANDS {
+            assert!(cmd.starts_with('/'), "Command {cmd} should start with /");
+        }
+    }
+
+    #[test]
+    fn slash_commands_no_duplicates() {
+        let mut seen = std::collections::HashSet::new();
+        for (cmd, _) in SLASH_COMMANDS {
+            assert!(seen.insert(cmd), "Duplicate command: {cmd}");
+        }
+    }
+
+    #[test]
+    fn command_aliases_all_have_valid_targets() {
+        let canonical_cmds: Vec<&str> = SLASH_COMMANDS.iter().map(|(c, _)| *c).collect();
+        for (alias, target) in COMMAND_ALIASES {
+            assert!(
+                canonical_cmds.contains(target) || *target == "/exit" || *target == "/clear" || *target == "/resume" || *target == "/config" || *target == "/bug" || *target == "/undo",
+                "Alias {alias} -> {target} has no matching canonical command"
+            );
+        }
+    }
+
+    #[test]
+    fn command_aliases_no_self_references() {
+        for (alias, target) in COMMAND_ALIASES {
+            assert_ne!(alias, target, "Alias {alias} points to itself");
+        }
+    }
+
+    #[test]
+    fn slash_commands_has_expected_new_commands() {
+        let cmds: Vec<&str> = SLASH_COMMANDS.iter().map(|(c, _)| *c).collect();
+        for expected in &["/bug", "/files", "/permissions", "/branch", "/rename", "/skills", "/hooks", "/status", "/add-dir"] {
+            assert!(cmds.contains(expected), "Missing expected command: {expected}");
+        }
     }
 }

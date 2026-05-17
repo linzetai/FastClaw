@@ -24,87 +24,110 @@ pub(crate) fn draw_popup(f: &mut Frame, popup: &PopupKind, agents: &[AgentInfo],
                         .add_modifier(Modifier::BOLD),
                 )),
                 Line::default(),
-                Line::from(vec![
-                    Span::styled(
-                        " Input Modes         ",
-                        Style::default()
-                            .fg(Color::Magenta)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        "Keyboard Shortcuts   ",
-                        Style::default()
-                            .fg(Color::Magenta)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        "Navigation",
-                        Style::default()
-                            .fg(Color::Magenta)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]),
-                Line::default(),
             ];
 
-            let col1: &[(&str, &str)] = &[
-                ("/ + cmd", "Slash commands"),
-                ("/help", "This help menu"),
-                ("/plan", "Toggle mode"),
-                ("/agents", "List agents"),
-                ("/new", "New session"),
-                ("/stats", "Usage stats"),
-                ("/compact", "Compress ctx"),
-                ("/todo", "Todo list"),
-                ("/mcp", "MCP status"),
-            ];
-            let col2: &[(&str, &str)] = &[
+            let section_style = Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD);
+            let key_style = Style::default().fg(Color::Yellow);
+            let desc_style = Style::default().fg(Color::White);
+
+            // Keyboard shortcuts section
+            lines.push(Line::from(Span::styled(" Keyboard Shortcuts", section_style)));
+            let shortcuts: &[(&str, &str)] = &[
                 ("Ctrl+C", "Quit"),
-                ("Ctrl+L", "Clear+new session"),
-                ("Ctrl+U", "Clear line"),
-                ("Ctrl+W", "Delete word"),
-                ("Ctrl+A/E", "Home/End"),
-                ("Ctrl+S", "Stash input"),
-                ("Ctrl+R", "History search"),
-                ("Shift+Tab", "Toggle mode"),
-                ("Shift+Enter", "Multi-line"),
-            ];
-            let col3: &[(&str, &str)] = &[
+                ("Ctrl+L", "Clear + new session"),
+                ("Esc", "Cancel stream / 2x clear input"),
+                ("Shift+Tab", "Toggle Plan/Agent mode"),
                 ("Enter", "Send message"),
-                ("Tab", "Auto-complete"),
-                ("↑/↓", "History"),
-                ("Shift+↑↓", "Scroll msgs"),
-                ("PageUp/Dn", "Scroll msgs"),
-                ("Esc", "Cancel stream"),
-                ("Esc×2", "Clear input"),
-                ("", ""),
-                ("", ""),
+                ("Shift+Enter", "Newline (multi-line)"),
+                ("Tab", "Auto-complete commands"),
+                ("Ctrl+R", "History search"),
+                ("Ctrl+W", "Delete word"),
+                ("↑/↓", "History navigation"),
+                ("Shift+↑↓ / PgUp/Dn", "Scroll messages"),
             ];
-
-            let max_rows = col1.len().max(col2.len()).max(col3.len());
-            for i in 0..max_rows {
-                let c1 = col1.get(i).copied().unwrap_or(("", ""));
-                let c2 = col2.get(i).copied().unwrap_or(("", ""));
-                let c3 = col3.get(i).copied().unwrap_or(("", ""));
+            for (k, v) in shortcuts {
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        format!(" {:<12}", c1.0),
-                        Style::default().fg(Color::Yellow),
-                    ),
-                    Span::styled(format!("{:<14}", c1.1), Style::default().fg(Color::White)),
-                    Span::styled(
-                        format!("{:<12}", c2.0),
-                        Style::default().fg(Color::Yellow),
-                    ),
-                    Span::styled(format!("{:<14}", c2.1), Style::default().fg(Color::White)),
-                    Span::styled(
-                        format!("{:<10}", c3.0),
-                        Style::default().fg(Color::Yellow),
-                    ),
-                    Span::styled(c3.1.to_string(), Style::default().fg(Color::White)),
+                    Span::styled(format!("  {k:<22}"), key_style),
+                    Span::styled(*v, desc_style),
                 ]));
             }
 
+            lines.push(Line::default());
+
+            // Slash commands by category
+            let groups: &[(&str, &[(&str, &str)])] = &[
+                (
+                    "Session",
+                    &[
+                        ("/clear", "Clear history and free up context"),
+                        ("/resume", "Resume a previous conversation"),
+                        ("/branch", "Branch the current conversation"),
+                        ("/rename", "Rename current conversation"),
+                        ("/export", "Export conversation to file"),
+                    ],
+                ),
+                (
+                    "Model & Agent",
+                    &[
+                        ("/model", "Set or show the AI model"),
+                        ("/agent", "Switch agent"),
+                        ("/agents", "List available agents"),
+                    ],
+                ),
+                (
+                    "Context",
+                    &[
+                        ("/context", "Show context window usage"),
+                        ("/compact", "Summarize and compact context"),
+                        ("/files", "List files in context"),
+                    ],
+                ),
+                (
+                    "Development",
+                    &[
+                        ("/diff", "View uncommitted changes"),
+                        ("/undo", "Undo last edit"),
+                        ("/plan", "Toggle Plan/Agent mode"),
+                        ("/todo", "Show todo list"),
+                        ("/skills", "List available skills"),
+                    ],
+                ),
+                (
+                    "System",
+                    &[
+                        ("/doctor", "Diagnose installation"),
+                        ("/mcp", "MCP server status"),
+                        ("/config", "Show configuration"),
+                        ("/status", "Show connection status"),
+                        ("/cost", "Show session cost"),
+                        ("/stats", "Show token/time stats"),
+                    ],
+                ),
+            ];
+
+            for (group_name, cmds) in groups {
+                lines.push(Line::from(Span::styled(
+                    format!(" {group_name}"),
+                    section_style,
+                )));
+                for (cmd, desc) in *cmds {
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {cmd:<14}"), key_style),
+                        Span::styled(*desc, desc_style),
+                    ]));
+                }
+            }
+
+            lines.push(Line::default());
+            lines.push(Line::from(vec![
+                Span::styled("  Aliases: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    "/new /reset /quit /continue /feedback /settings /rewind",
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
             lines.push(Line::default());
             lines.push(Line::from(Span::styled(
                 " Press Esc/Enter to close ",
@@ -115,7 +138,7 @@ pub(crate) fn draw_popup(f: &mut Frame, popup: &PopupKind, agents: &[AgentInfo],
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan))
                 .title(" Help ");
-            let help_area = centered_rect(80, 60, area);
+            let help_area = centered_rect(70, 80, area);
             f.render_widget(Clear, help_area);
             f.render_widget(
                 Paragraph::new(lines)

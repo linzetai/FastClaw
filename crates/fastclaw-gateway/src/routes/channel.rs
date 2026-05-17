@@ -671,7 +671,8 @@ fn tool_args_summary(tool_name: &str, args: Option<&str>) -> String {
             .and_then(|v| v.as_str())
             .map(|u| {
                 if u.len() > 50 {
-                    format!("{}...", &u[..47])
+                    let end = u.floor_char_boundary(47);
+                    format!("{}...", &u[..end])
                 } else {
                     u.to_string()
                 }
@@ -699,7 +700,8 @@ fn tool_args_summary(tool_name: &str, args: Option<&str>) -> String {
             .and_then(|v| v.as_str())
             .map(|c| {
                 if c.len() > 60 {
-                    format!("{}...", &c[..57])
+                    let end = c.floor_char_boundary(57);
+                    format!("{}...", &c[..end])
                 } else {
                     c.to_string()
                 }

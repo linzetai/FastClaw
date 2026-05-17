@@ -98,7 +98,7 @@ pub(crate) fn handle_ws_message(app: &mut TuiApp, text: &str) {
             app.spinner.set_tool(tool);
             if let Some(last) = app.messages.last_mut() {
                 if last.role == "assistant" {
-                    let (icon, readable_name) = tool_display_info(tool);
+                    let readable_name = tool_display_name(tool);
                     let params_summary = msg["data"]["params"]
                         .as_object()
                         .and_then(|obj| {
@@ -110,8 +110,9 @@ pub(crate) fn handle_ws_message(app: &mut TuiApp, text: &str) {
                                 .or_else(|| obj.get("content"))
                                 .and_then(|v| v.as_str())
                                 .map(|s| {
-                                    if s.len() > 60 {
-                                        format!("{}…", &s[..60])
+                                    if s.chars().count() > 60 {
+                                        let truncated: String = s.chars().take(60).collect();
+                                        format!("{truncated}…")
                                     } else {
                                         s.to_string()
                                     }
@@ -119,9 +120,9 @@ pub(crate) fn handle_ws_message(app: &mut TuiApp, text: &str) {
                         })
                         .unwrap_or_default();
                     let tool_line = if params_summary.is_empty() {
-                        format!("\n{icon} {readable_name}\n")
+                        format!("\n● {readable_name}\n")
                     } else {
-                        format!("\n{icon} {readable_name} — `{params_summary}`\n")
+                        format!("\n● {readable_name}: `{params_summary}`\n")
                     };
                     last.content.push_str(&tool_line);
                 }
@@ -138,10 +139,10 @@ pub(crate) fn handle_ws_message(app: &mut TuiApp, text: &str) {
                     };
                     let elapsed = msg["data"]["elapsedMs"]
                         .as_u64()
-                        .map(|ms| format!(" ({})", format_elapsed(ms)))
+                        .map(|ms| format!(" {}", format_elapsed(ms)))
                         .unwrap_or_default();
                     last.content
-                        .push_str(&format!("  {status_icon}{elapsed}\n"));
+                        .push_str(&format!("  ⎿ {status_icon}{elapsed}\n"));
                 }
             }
         }
@@ -396,7 +397,7 @@ pub(crate) fn handle_ws_message(app: &mut TuiApp, text: &str) {
             if let Some(content) = msg["data"]["content"].as_str() {
                 if let Some(last) = app.messages.last_mut() {
                     if last.role == "assistant" {
-                        last.content.push_str(&format!("  ⋯ {content}\n"));
+                        last.content.push_str(&format!("  ⎿ {content}\n"));
                     }
                 }
             }
@@ -407,7 +408,7 @@ pub(crate) fn handle_ws_message(app: &mut TuiApp, text: &str) {
             if let Some(last) = app.messages.last_mut() {
                 if last.role == "assistant" {
                     last.content
-                        .push_str(&format!("\n🤖 Sub-agent started: {label}\n"));
+                        .push_str(&format!("\n● Task: {label}\n"));
                 }
             }
         }
@@ -454,22 +455,22 @@ pub(crate) fn handle_ws_message(app: &mut TuiApp, text: &str) {
     }
 }
 
-fn tool_display_info(tool: &str) -> (&'static str, String) {
+fn tool_display_name(tool: &str) -> String {
     match tool {
-        "file_read" | "read_file" | "Read" => ("📄", "Read file".into()),
-        "file_write" | "write_file" | "Write" => ("✏️", "Write file".into()),
-        "edit_file" | "StrReplace" => ("🔧", "Edit file".into()),
-        "multi_edit" => ("🔧", "Multi-edit".into()),
-        "file_search" | "search_in_files" | "Grep" => ("🔍", "Search files".into()),
-        "glob" | "Glob" | "list_directory" => ("📁", "Find files".into()),
-        "shell_exec" | "shell" | "Shell" => ("⚡", "Run command".into()),
-        "web_search" | "WebSearch" => ("🌐", "Web search".into()),
-        "web_fetch" | "http_fetch" | "WebFetch" => ("🌐", "Fetch URL".into()),
-        "todo_write" | "TodoWrite" => ("📋", "Update tasks".into()),
-        "memory_search" | "memory_store" => ("🧠", "Memory".into()),
-        "enter_plan_mode" | "exit_plan_mode" | "SwitchMode" => ("🔄", "Switch mode".into()),
-        "Task" => ("🤖", "Launch agent".into()),
-        "Delete" => ("🗑️", "Delete file".into()),
-        _ => ("🔧", format!("`{tool}`")),
+        "file_read" | "read_file" | "Read" => "Read".into(),
+        "file_write" | "write_file" | "Write" => "Write".into(),
+        "edit_file" | "StrReplace" => "Edit".into(),
+        "multi_edit" => "Multi-edit".into(),
+        "file_search" | "search_in_files" | "Grep" => "Search".into(),
+        "glob" | "Glob" | "list_directory" => "List".into(),
+        "shell_exec" | "shell" | "Shell" => "Bash".into(),
+        "web_search" | "WebSearch" => "WebSearch".into(),
+        "web_fetch" | "http_fetch" | "WebFetch" => "WebFetch".into(),
+        "todo_write" | "TodoWrite" => "TodoWrite".into(),
+        "memory_search" | "memory_store" => "Memory".into(),
+        "enter_plan_mode" | "exit_plan_mode" | "SwitchMode" => "SwitchMode".into(),
+        "Task" => "Task".into(),
+        "Delete" => "Delete".into(),
+        _ => tool.to_string(),
     }
 }

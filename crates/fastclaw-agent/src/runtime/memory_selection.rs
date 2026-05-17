@@ -47,7 +47,8 @@ pub fn build_rerank_prompt(query: &str, candidates: &[MemoryCandidate]) -> Strin
 
     for (i, c) in candidates.iter().enumerate() {
         let preview = if c.content.len() > 200 {
-            format!("{}...", &c.content[..200])
+            let end = c.content.floor_char_boundary(200);
+            format!("{}...", &c.content[..end])
         } else {
             c.content.clone()
         };

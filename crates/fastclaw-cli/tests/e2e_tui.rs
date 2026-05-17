@@ -508,3 +508,220 @@ async fn e2e_embedded_gateway_probe() {
         .await;
     assert!(resp.is_err(), "should fail since nothing is listening");
 }
+
+// ── Edge-case E2E tests ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn e2e_cjk_tool_params_no_truncation_panic() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let ws_stream = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let (mut tx, mut rx) = ws_stream.split();
+
+        let _ = tx.send(Message::Text(json!({"type":"connected","data":{"version":"0.0.6","protocol":"fastclaw-ws/1"}}).to_string())).await;
+
+        while let Some(Ok(msg)) = rx.next().await {
+            if let Message::Text(text) = msg {
+                let parsed: Value = serde_json::from_str(&text).unwrap_or_default();
+                if parsed["method"] == "chat" {
+                    let cjk_path = "你".repeat(100);
+                    let _ = tx.send(Message::Text(json!({"type":"chat.start","data":{"sessionId":"s1"}}).to_string())).await;
+                    let _ = tx.send(Message::Text(json!({"type":"chat.tool.start","data":{"tool":"file_read","callId":"c1","params":{"path": cjk_path}}}).to_string())).await;
+                    let _ = tx.send(Message::Text(json!({"type":"chat.tool.done","data":{"success":true,"elapsedMs":50}}).to_string())).await;
+                    let _ = tx.send(Message::Text(json!({"type":"chat.complete","data":{"elapsedMs":100}}).to_string())).await;
+                    break;
+                }
+            }
+        }
+    });
+
+    let (mut tx, mut rx) = connect_and_handshake(addr).await;
+    let req = json!({"id": "r1", "method": "chat", "params": {"messages": [{"role": "user", "content": "read cjk file"}]}});
+    tx.send(Message::Text(req.to_string())).await.unwrap();
+
+    let msgs = collect_messages(&mut rx, 4, Duration::from_secs(2)).await;
+    let types: Vec<&str> = msgs.iter().filter_map(|v| v["type"].as_str()).collect();
+    assert!(types.contains(&"chat.tool.start"));
+    assert!(types.contains(&"chat.complete"));
+    handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn e2e_rapid_delta_flood() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let ws_stream = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let (mut tx, mut rx) = ws_stream.split();
+
+        let _ = tx.send(Message::Text(json!({"type":"connected","data":{"version":"0.0.6","protocol":"fastclaw-ws/1"}}).to_string())).await;
+
+        while let Some(Ok(msg)) = rx.next().await {
+            if let Message::Text(text) = msg {
+                let parsed: Value = serde_json::from_str(&text).unwrap_or_default();
+                if parsed["method"] == "chat" {
+                    let _ = tx.send(Message::Text(json!({"type":"chat.start","data":{"sessionId":"s1"}}).to_string())).await;
+                    for i in 0..200 {
+                        let _ = tx.send(Message::Text(json!({"type":"chat.delta","data":{"content":format!("w{i} ")}}).to_string())).await;
+                    }
+                    let _ = tx.send(Message::Text(json!({"type":"chat.complete","data":{"elapsedMs":500}}).to_string())).await;
+                    break;
+                }
+            }
+        }
+    });
+
+    let (mut tx, mut rx) = connect_and_handshake(addr).await;
+    let req = json!({"id": "r1", "method": "chat", "params": {"messages": [{"role": "user", "content": "flood"}]}});
+    tx.send(Message::Text(req.to_string())).await.unwrap();
+
+    let msgs = collect_messages(&mut rx, 202, Duration::from_secs(5)).await;
+    assert_eq!(msgs.last().unwrap()["type"], "chat.complete");
+    let delta_count = msgs.iter().filter(|v| v["type"] == "chat.delta").count();
+    assert_eq!(delta_count, 200);
+    handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn e2e_server_abrupt_close() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let ws_stream = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let (mut tx, mut rx) = ws_stream.split();
+
+        let _ = tx.send(Message::Text(json!({"type":"connected","data":{"version":"0.0.6","protocol":"fastclaw-ws/1"}}).to_string())).await;
+
+        if let Some(Ok(_)) = rx.next().await {
+            let _ = tx.send(Message::Text(json!({"type":"chat.start","data":{"sessionId":"s1"}}).to_string())).await;
+            let _ = tx.send(Message::Text(json!({"type":"chat.delta","data":{"content":"partial..."}}).to_string())).await;
+            // Abruptly drop: just return without sending Close frame
+        }
+    });
+
+    let (mut tx, mut rx) = connect_and_handshake(addr).await;
+    let req = json!({"id": "r1", "method": "chat", "params": {"messages": [{"role": "user", "content": "abort"}]}});
+    tx.send(Message::Text(req.to_string())).await.unwrap();
+
+    let msgs = collect_messages(&mut rx, 10, Duration::from_secs(2)).await;
+    let types: Vec<&str> = msgs.iter().filter_map(|v| v["type"].as_str()).collect();
+    assert!(types.contains(&"chat.start"));
+    assert!(types.contains(&"chat.delta"));
+    assert!(!types.contains(&"chat.complete"));
+    handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn e2e_thinking_then_content_stream() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let ws_stream = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let (mut tx, mut rx) = ws_stream.split();
+
+        let _ = tx.send(Message::Text(json!({"type":"connected","data":{"version":"0.0.6","protocol":"fastclaw-ws/1"}}).to_string())).await;
+
+        while let Some(Ok(msg)) = rx.next().await {
+            if let Message::Text(text) = msg {
+                let parsed: Value = serde_json::from_str(&text).unwrap_or_default();
+                if parsed["method"] == "chat" {
+                    let _ = tx.send(Message::Text(json!({"type":"chat.start","data":{"sessionId":"s1"}}).to_string())).await;
+                    let _ = tx.send(Message::Text(json!({"type":"chat.delta","data":{"reasoning_content":"Let me think step by step...\n1. First\n2. Second"}}).to_string())).await;
+                    let _ = tx.send(Message::Text(json!({"type":"chat.delta","data":{"content":"The answer is 42."}}).to_string())).await;
+                    let _ = tx.send(Message::Text(json!({"type":"chat.complete","data":{"elapsedMs":300}}).to_string())).await;
+                    break;
+                }
+            }
+        }
+    });
+
+    let (mut tx, mut rx) = connect_and_handshake(addr).await;
+    let req = json!({"id": "r1", "method": "chat", "params": {"messages": [{"role": "user", "content": "think and answer"}]}});
+    tx.send(Message::Text(req.to_string())).await.unwrap();
+
+    let msgs = collect_messages(&mut rx, 4, Duration::from_secs(2)).await;
+    let types: Vec<&str> = msgs.iter().filter_map(|v| v["type"].as_str()).collect();
+    assert_eq!(types, vec!["chat.start", "chat.delta", "chat.delta", "chat.complete"]);
+    assert!(msgs[1]["data"]["reasoning_content"].is_string());
+    assert!(msgs[2]["data"]["content"].is_string());
+    handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn e2e_error_codes_propagated() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let ws_stream = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let (mut tx, mut rx) = ws_stream.split();
+
+        let _ = tx.send(Message::Text(json!({"type":"connected","data":{"version":"0.0.6","protocol":"fastclaw-ws/1"}}).to_string())).await;
+
+        while let Some(Ok(msg)) = rx.next().await {
+            if let Message::Text(text) = msg {
+                let parsed: Value = serde_json::from_str(&text).unwrap_or_default();
+                if parsed["method"] == "chat" {
+                    let _ = tx.send(Message::Text(json!({"type":"error","error":{"message":"rate limited","code":429}}).to_string())).await;
+                    break;
+                }
+            }
+        }
+    });
+
+    let (mut tx, mut rx) = connect_and_handshake(addr).await;
+    let req = json!({"id": "r1", "method": "chat", "params": {"messages": [{"role": "user", "content": "hi"}]}});
+    tx.send(Message::Text(req.to_string())).await.unwrap();
+
+    let msgs = collect_messages(&mut rx, 1, Duration::from_secs(2)).await;
+    assert_eq!(msgs[0]["type"], "error");
+    assert_eq!(msgs[0]["error"]["code"], 429);
+    handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn e2e_large_payload_single_message() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let ws_stream = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let (mut tx, mut rx) = ws_stream.split();
+
+        let _ = tx.send(Message::Text(json!({"type":"connected","data":{"version":"0.0.6","protocol":"fastclaw-ws/1"}}).to_string())).await;
+
+        while let Some(Ok(msg)) = rx.next().await {
+            if let Message::Text(text) = msg {
+                let parsed: Value = serde_json::from_str(&text).unwrap_or_default();
+                if parsed["method"] == "chat" {
+                    let big_content = "A".repeat(50_000);
+                    let _ = tx.send(Message::Text(json!({"type":"chat.start","data":{"sessionId":"s1"}}).to_string())).await;
+                    let _ = tx.send(Message::Text(json!({"type":"chat.delta","data":{"content": big_content}}).to_string())).await;
+                    let _ = tx.send(Message::Text(json!({"type":"chat.complete","data":{"elapsedMs":200}}).to_string())).await;
+                    break;
+                }
+            }
+        }
+    });
+
+    let (mut tx, mut rx) = connect_and_handshake(addr).await;
+    let req = json!({"id": "r1", "method": "chat", "params": {"messages": [{"role": "user", "content": "big"}]}});
+    tx.send(Message::Text(req.to_string())).await.unwrap();
+
+    let msgs = collect_messages(&mut rx, 3, Duration::from_secs(3)).await;
+    assert_eq!(msgs.len(), 3);
+    let content = msgs[1]["data"]["content"].as_str().unwrap();
+    assert_eq!(content.len(), 50_000);
+    handle.await.unwrap();
+}

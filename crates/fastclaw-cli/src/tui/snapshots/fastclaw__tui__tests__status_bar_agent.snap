@@ -2,4 +2,4 @@
 source: crates/fastclaw-cli/src/tui/mod.rs
 expression: terminal.backend().to_string()
 ---
-" AGENT  Connecting...  ? help · Shift+Tab mode · Ctrl+R search                                      "
+" │ agent  ? help                                                                                    "
