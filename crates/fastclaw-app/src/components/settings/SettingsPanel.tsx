@@ -47,7 +47,15 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ animation: "fade-in var(--duration-fast) var(--ease-out)" }}>
-      <div className="absolute inset-0" style={{ background: "rgba(0, 0, 0, 0.3)" }} onClick={onClose} />
+      <div
+        className="absolute inset-0"
+        style={{
+          background: "rgba(0, 0, 0, 0.25)",
+          backdropFilter: "blur(4px)",
+          WebkitBackdropFilter: "blur(4px)",
+        }}
+        onClick={onClose}
+      />
       <div
         className="relative flex overflow-hidden rounded-[var(--radius-xl)]"
         style={{
@@ -55,7 +63,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           height: "min(520px, calc(100vh - 80px))",
           background: "var(--bg-elevated)",
           boxShadow: "var(--shadow-lg)",
-          animation: "scale-in var(--duration-normal) var(--ease-out)",
+          animation: "scale-spring-lg var(--duration-slow) var(--ease-spring)",
           border: `0.5px solid var(--separator)`,
         }}
       >
@@ -87,15 +95,17 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           </div>
           <div className="flex-1 overflow-y-auto px-6 py-5">
             <Suspense fallback={<div className="h-full" style={{ background: "var(--bg-elevated)" }} />}>
-              {tab === "general" && <GeneralTab />}
-              {tab === "models" && <ModelTab />}
-              {tab === "web-search" && <WebSearchTab />}
-              {tab === "skills" && <SkillsTab />}
-              {tab === "mcp" && <McpTab />}
-              {tab === "security" && <SecurityTab />}
-              {tab === "gateway" && <GatewayTab />}
-              {tab === "migration" && <MigrationTab />}
-              {tab === "about" && <AboutTab />}
+              <div key={tab} style={{ animation: "tab-crossfade var(--duration-normal) var(--ease-out)" }}>
+                {tab === "general" && <GeneralTab />}
+                {tab === "models" && <ModelTab />}
+                {tab === "web-search" && <WebSearchTab />}
+                {tab === "skills" && <SkillsTab />}
+                {tab === "mcp" && <McpTab />}
+                {tab === "security" && <SecurityTab />}
+                {tab === "gateway" && <GatewayTab />}
+                {tab === "migration" && <MigrationTab />}
+                {tab === "about" && <AboutTab />}
+              </div>
             </Suspense>
           </div>
         </div>

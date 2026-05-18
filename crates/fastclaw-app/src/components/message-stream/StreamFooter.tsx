@@ -517,10 +517,11 @@ export function StreamFooter({
             style={{
               background: "var(--bg-elevated)",
               border: "2px dashed var(--tint)",
+              boxShadow: "var(--glow-tint)",
               animation: "drop-zone-pulse 2s ease-in-out infinite",
             }}
           >
-            <Paperclip size={32} strokeWidth={1.5} style={{ color: "var(--tint)" }} />
+            <Paperclip size={32} strokeWidth={1.5} style={{ color: "var(--tint)", animation: "icon-float 1.5s ease-in-out infinite" }} />
             <span className="text-[14px] font-medium" style={{ color: "var(--fill-primary)" }}>
               拖放文件到此处
             </span>
@@ -539,9 +540,11 @@ export function StreamFooter({
       )}
 
       <div
-        className="overflow-hidden rounded-2xl transition-shadow duration-200"
+        className="overflow-hidden rounded-2xl transition-all duration-200"
         style={{
-          background: "var(--bg-elevated)",
+          backdropFilter: "saturate(180%) blur(12px)",
+          WebkitBackdropFilter: "saturate(180%) blur(12px)",
+          background: "color-mix(in srgb, var(--bg-elevated) 88%, transparent)",
           border: `1px solid var(--separator)`,
           boxShadow: "var(--shadow-md), inset 0 1px 0 var(--highlight-top)",
         }}
@@ -680,10 +683,12 @@ export function StreamFooter({
               <button
                 key="stop"
                 onClick={stopStream}
-                className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-150"
+                className="relative flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-all duration-150 hover:scale-105 active:scale-90"
                 style={{
-                  background: "var(--fill-warning, #ED8936)",
+                  background: "var(--red, #FF3B30)",
                   color: "#fff",
+                  boxShadow: "0 0 0 3px color-mix(in srgb, var(--red, #FF3B30) 20%, transparent)",
+                  animation: "glow-pulse 1.5s ease-in-out infinite",
                 }}
                 title="停止生成"
               >
@@ -714,11 +719,12 @@ export function StreamFooter({
                   }
                 }}
                 disabled={(!inputHasContent && attachedFiles.length === 0) || messageQueue.length >= 10}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-150 hover:scale-[1.02] active:scale-95 disabled:cursor-default"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-150 hover:scale-110 active:scale-90 disabled:cursor-default disabled:hover:scale-100"
                 style={{
                   background: "var(--tint)",
                   color: "#fff",
                   opacity: (inputHasContent || attachedFiles.length > 0) && messageQueue.length < 10 ? 1 : 0.3,
+                  boxShadow: (inputHasContent || attachedFiles.length > 0) ? "var(--glow-tint)" : "none",
                 }}
                 title={messageQueue.length >= 10 ? "队列已满（最多10条）" : streaming ? "加入队列 ↩" : "发送 ↩"}
               >

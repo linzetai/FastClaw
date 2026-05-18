@@ -12,16 +12,19 @@ import { useAvatarUrl, loadAvatarBlobUrl } from "../../lib/use-avatar-url";
 import { fuzzyMatch } from "../../lib/fuzzy";
 import type { Agent, Chat } from "../../lib/stores/types";
 
-const AgentAvatar = memo(function AgentAvatar({ agent, size = 36 }: { agent: Agent; size?: number }) {
+const AgentAvatar = memo(function AgentAvatar({ agent, size = 36, active = false }: { agent: Agent; size?: number; active?: boolean }) {
   const avatarUrl = useAvatarUrl(agent.avatar);
   return (
     <div
-      className="flex items-center justify-center overflow-hidden rounded-full text-[13px] font-semibold ring-2 ring-transparent"
+      className="flex items-center justify-center overflow-hidden rounded-full text-[13px] font-semibold transition-all duration-200"
       style={{
         width: size,
         height: size,
         background: agent.color || "var(--bg-tertiary)",
         color: agent.color ? "#fff" : "var(--fill-secondary)",
+        boxShadow: active
+          ? `0 0 0 2px var(--bg-sidebar), 0 0 0 3.5px var(--tint)`
+          : "0 0 0 2px transparent",
       }}
     >
       {avatarUrl ? (
@@ -399,9 +402,13 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
             <div className="relative flex items-center gap-1.5" ref={searchContainerRef}>
               <div
                 className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg px-3 transition-all duration-200"
-                style={{ background: "var(--bg-hover)" }}
+                style={{
+                  background: searchFocused ? "var(--bg-elevated)" : "var(--bg-hover)",
+                  border: searchFocused ? "0.5px solid var(--tint)" : "0.5px solid transparent",
+                  boxShadow: searchFocused ? "var(--glow-tint-sm)" : "none",
+                }}
               >
-                <Search size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)", flexShrink: 0 }} />
+                <Search size={14} strokeWidth={1.5} style={{ color: searchFocused ? "var(--tint)" : "var(--fill-tertiary)", flexShrink: 0, transition: "color 0.15s" }} />
                 <input
                   ref={searchInputRef}
                   type="text"
@@ -483,13 +490,14 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
             <button
               onClick={() => setShowNewForm(true)}
               disabled={creating}
-              className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg py-2 text-[13px] font-medium transition-all duration-150 hover:bg-[var(--tint-bg)] disabled:opacity-50"
+              className="gradient-border-wrap flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg py-2 text-[13px] font-medium transition-all duration-200 hover:bg-[var(--tint-subtle)] disabled:opacity-50 group/new"
               style={{
                 color: "var(--fill-secondary)",
-                border: "1px dashed var(--separator-opaque)",
               }}
             >
-              <Plus size={16} strokeWidth={2} />
+              <span className="transition-transform duration-300 group-hover/new:rotate-90">
+                <Plus size={16} strokeWidth={2} />
+              </span>
               新建 Agent
             </button>
           </>
@@ -561,13 +569,23 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
             >
               {/* Agent Row */}
               <div
-                className="group/item relative flex w-full items-center gap-2 rounded-lg px-2 py-1.5 transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+                className="group/item relative flex w-full items-center gap-2 rounded-lg px-2 py-1.5 transition-all duration-150 hover:bg-[var(--bg-hover)]"
                 style={{
                   background: active ? "var(--tint-bg)" : "transparent",
                   borderRadius: "8px",
                   cursor: "pointer",
                 }}
               >
+                {active && (
+                  <span
+                    className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-full"
+                    style={{
+                      height: "60%",
+                      background: "var(--tint)",
+                      animation: "scale-spring var(--duration-normal) var(--ease-spring)",
+                    }}
+                  />
+                )}
                 <div
                   className="flex min-w-0 flex-1 items-center gap-2"
                   onClick={() => {
@@ -575,7 +593,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                     newChat(agent.id);
                   }}
                 >
-                  <AgentAvatar agent={agent} size={28} />
+                  <AgentAvatar agent={agent} size={28} active={active} />
                   <div className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-semibold tracking-[-0.01em]" style={{ color: "var(--fill-primary)" }}>
                       {agent.name}

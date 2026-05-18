@@ -44,7 +44,12 @@ export function NavRail() {
         }}
       >
         <div className="flex flex-col items-center gap-0.5">
-          <div className="mb-3 flex h-9 w-9 items-center justify-center">
+          <div
+            className="mb-3 flex h-9 w-9 items-center justify-center transition-all duration-300"
+            style={{ color: "var(--fill-primary)", filter: "drop-shadow(0 0 0px transparent)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.filter = `drop-shadow(0 0 8px var(--tint))`; e.currentTarget.style.opacity = "1"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.filter = "drop-shadow(0 0 0px transparent)"; e.currentTarget.style.opacity = "0.85"; }}
+          >
             <ClawIcon size={28} />
           </div>
 
@@ -55,14 +60,25 @@ export function NavRail() {
               <button
                 key={item.id}
                 onClick={() => setActiveNav(item.id)}
-                className="group flex h-11 w-11 flex-col items-center justify-center rounded-xl transition-all duration-150"
+                className="group relative flex h-11 w-11 flex-col items-center justify-center rounded-xl transition-all duration-150"
                 style={{
                   background: active ? "var(--tint-bg)" : "transparent",
                   color: active ? "var(--tint)" : "var(--fill-tertiary)",
                 }}
                 title={item.label}
               >
-                <Icon size={18} strokeWidth={active ? 2 : 1.5} />
+                {active && (
+                  <span
+                    className="absolute left-0 top-1/2 w-[3px] h-5 rounded-full -translate-y-1/2"
+                    style={{
+                      background: "var(--tint)",
+                      animation: "scale-spring var(--duration-normal) var(--ease-spring)",
+                    }}
+                  />
+                )}
+                <span className="transition-transform duration-150 group-hover:scale-110">
+                  <Icon size={18} strokeWidth={active ? 2 : 1.5} />
+                </span>
                 <span
                   className="mt-[2px] text-[9px] font-medium leading-none"
                   style={{ color: active ? "var(--tint)" : "var(--fill-quaternary)" }}
@@ -75,8 +91,9 @@ export function NavRail() {
         </div>
 
         <div className="flex flex-col items-center gap-1">
+          <div className="mb-1 w-6 h-px" style={{ background: "var(--separator)" }} />
           <button
-            className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+            className="flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-150 hover:bg-[var(--bg-hover)] hover:scale-105 active:scale-95"
             style={{ color: "var(--fill-tertiary)" }}
             title="帮助"
           >
@@ -84,7 +101,7 @@ export function NavRail() {
           </button>
           <button
             onClick={() => setSettingsOpen(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+            className="flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-150 hover:bg-[var(--bg-hover)] hover:scale-105 active:scale-95"
             style={{ color: "var(--fill-tertiary)" }}
             title="设置"
           >

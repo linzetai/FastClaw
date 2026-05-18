@@ -59,14 +59,14 @@ function WindowControls() {
 
   if (!isTauri) return null;
 
-  const btn = "flex items-center justify-center transition-colors duration-100";
+  const btn = "flex items-center justify-center rounded-[4px] transition-all duration-150";
 
   return (
-    <div className="ml-1 flex h-full items-stretch">
+    <div className="ml-1 flex h-full items-stretch gap-px">
       <div className="my-auto h-4 w-px" style={{ background: "var(--separator)" }} />
       <button
         onClick={minimize}
-        className={`${btn} w-[46px] hover:bg-[var(--bg-hover)]`}
+        className={`${btn} w-[42px] hover:bg-[var(--bg-hover)] hover:scale-[1.02] active:scale-95`}
         style={{ color: "var(--fill-primary)" }}
         title="最小化"
       >
@@ -74,7 +74,7 @@ function WindowControls() {
       </button>
       <button
         onClick={toggleMaximize}
-        className={`${btn} w-[46px] hover:bg-[var(--bg-hover)]`}
+        className={`${btn} w-[42px] hover:bg-[var(--bg-hover)] hover:scale-[1.02] active:scale-95`}
         style={{ color: "var(--fill-primary)" }}
         title={isMaximized ? "还原" : "最大化"}
       >
@@ -82,9 +82,10 @@ function WindowControls() {
       </button>
       <button
         onClick={close}
-        className={`${btn} w-[46px] hover:bg-[#E81123] hover:text-white`}
-        style={{ color: "var(--fill-primary)", transition: "background 0.15s, color 0.15s" }}
-        title="关闭"
+        className={`${btn} w-[42px] hover:bg-[#E81123] hover:text-white active:scale-95`}
+        style={{ color: "var(--fill-primary)", transition: "background 0.15s, color 0.15s, transform 0.1s, box-shadow 0.15s" }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = "0 0 8px rgba(232,17,35,0.3)"; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = "none"; }}
       >
         <X size={16} strokeWidth={1.5} />
       </button>
@@ -99,10 +100,30 @@ function ConnectionDot() {
       className="flex h-7 w-7 items-center justify-center"
       title={connected ? "已连接" : "未连接"}
     >
-      <span
-        className="inline-block h-[7px] w-[7px] rounded-full transition-colors duration-300"
-        style={{ background: connected ? "var(--green)" : "var(--red)" }}
-      />
+      <span className="relative inline-flex items-center justify-center">
+        <span
+          className="inline-block h-[7px] w-[7px] rounded-full transition-colors duration-300"
+          style={{ background: connected ? "var(--green)" : "var(--red)" }}
+        />
+        {connected && (
+          <span
+            className="absolute inline-block h-[7px] w-[7px] rounded-full"
+            style={{
+              background: "var(--green)",
+              animation: "pulse-ring 2s ease-out infinite",
+            }}
+          />
+        )}
+        {!connected && (
+          <span
+            className="absolute inline-block h-[7px] w-[7px] rounded-full"
+            style={{
+              background: "var(--red)",
+              animation: "shake 0.5s ease-in-out",
+            }}
+          />
+        )}
+      </span>
     </div>
   );
 }
@@ -123,9 +144,12 @@ export function TitleBar() {
         style={{
           height: "var(--titlebar-h)",
           background: "var(--bg-sidebar)",
-          borderBottom: `0.5px solid var(--separator)`,
         }}
       >
+        <div
+          className="absolute inset-x-0 bottom-0 h-px pointer-events-none"
+          style={{ background: "linear-gradient(90deg, transparent 5%, var(--separator) 50%, transparent 95%)" }}
+        />
         <div
           className="h-full flex-1"
           data-tauri-drag-region=""

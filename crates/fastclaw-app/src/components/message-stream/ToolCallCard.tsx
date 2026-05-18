@@ -397,14 +397,14 @@ export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCal
             <span
               className="inline-block h-3 w-3 rounded-full border-[1.5px]"
               style={{
-                borderColor: "var(--fill-tertiary) transparent transparent transparent",
+                borderColor: "var(--tint) transparent transparent transparent",
                 animation: "spin 0.8s linear infinite",
               }}
             />
           ) : isError ? (
-            <XIcon size={14} strokeWidth={2} style={{ color: "var(--red)" }} />
+            <XIcon size={14} strokeWidth={2} style={{ color: "var(--red)", animation: "shake 0.3s ease-in-out" }} />
           ) : (
-            <Check size={14} strokeWidth={2} style={{ color: "var(--fill-tertiary)" }} />
+            <Check size={14} strokeWidth={2} style={{ color: "var(--green)", animation: "scale-spring var(--duration-normal) var(--ease-spring)" }} />
           )}
         </span>
 
@@ -440,14 +440,15 @@ export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCal
             style={{
               color: "var(--fill-tertiary)",
               transform: expanded ? "rotate(90deg)" : "rotate(0)",
+              transition: "transform var(--duration-normal) var(--ease-spring)",
             }}
           />
         )}
       </button>
 
       {isRunning && (
-        <div className="h-[2px] w-full overflow-hidden" style={{ background: "var(--separator)" }}>
-          <div className="h-full w-1/4 rounded-full" style={{ background: "linear-gradient(90deg, transparent, var(--tint), transparent)", animation: "shimmer 1.5s ease-in-out infinite" }} />
+        <div className="h-[3px] w-full overflow-hidden" style={{ background: "var(--bg-tertiary)" }}>
+          <div className="h-full w-1/3 rounded-full" style={{ background: "linear-gradient(90deg, transparent 0%, var(--tint) 50%, transparent 100%)", animation: "shimmer 1.5s ease-in-out infinite" }} />
         </div>
       )}
 
@@ -488,7 +489,7 @@ export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCal
           className="px-3 pb-2.5"
           style={{
             borderTop: `0.5px solid var(--separator)`,
-            animation: "fade-in var(--duration-instant) var(--ease-out)",
+            animation: "fade-slide-up var(--duration-normal) var(--ease-out)",
           }}
         >
           {tool.args && (

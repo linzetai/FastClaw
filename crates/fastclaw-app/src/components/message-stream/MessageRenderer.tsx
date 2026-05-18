@@ -109,7 +109,8 @@ const UserBubble = memo(function UserBubble({ msg, copyable, selected, onToggleS
               color: "var(--bubble-user-text)",
               borderRadius: "18px 18px 6px 18px",
               overflowWrap: "anywhere",
-              backgroundImage: "linear-gradient(135deg, var(--bubble-user) 0%, color-mix(in srgb, var(--bubble-user) 85%, black) 100%)",
+              backgroundImage: "linear-gradient(135deg, var(--bubble-user) 0%, color-mix(in srgb, var(--bubble-user) 88%, var(--tint)) 100%)",
+              boxShadow: "0 2px 8px color-mix(in srgb, var(--bubble-user) 25%, transparent)",
             }}
           >
           {text}
@@ -155,11 +156,11 @@ const UserBubble = memo(function UserBubble({ msg, copyable, selected, onToggleS
           {copyable && (
             <button
               onClick={handleCopy}
-              className="mt-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors duration-100 hover:bg-[var(--bg-hover)] opacity-0 group-hover/message:opacity-100"
-              style={{ color: "var(--fill-tertiary)" }}
+              className="mt-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-all duration-150 hover:bg-[var(--bg-hover)] opacity-0 group-hover/message:opacity-100 active:scale-90"
+              style={{ color: copied ? "var(--green)" : "var(--fill-tertiary)" }}
               title="复制"
             >
-              {copied ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={1.5} />}
+              {copied ? <Check size={14} strokeWidth={2} style={{ animation: "scale-spring var(--duration-normal) var(--ease-spring)" }} /> : <Copy size={14} strokeWidth={1.5} />}
             </button>
           )}
         </div>
@@ -183,14 +184,14 @@ const AiReactionBar = memo(function AiReactionBar({ content }: { content: string
     });
   }, [content]);
 
-  const btnCls = "flex h-7 w-7 items-center justify-center rounded-md transition-all duration-150 hover:bg-[var(--bg-hover)]";
+  const btnCls = "flex h-7 w-7 items-center justify-center rounded-md transition-all duration-150 hover:bg-[var(--bg-hover)] active:scale-90";
 
   return (
     <div
-      className="mt-1.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100"
+      className="mt-1.5 flex items-center gap-0.5 opacity-0 translate-y-1 transition-all duration-200 group-hover/message:opacity-100 group-hover/message:translate-y-0"
     >
       <button onClick={handleCopy} className={btnCls} style={{ color: copied ? "var(--green)" : "var(--fill-tertiary)" }} title="复制">
-        {copied ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={1.5} />}
+        {copied ? <Check size={14} strokeWidth={2} style={{ animation: "scale-spring var(--duration-normal) var(--ease-spring)" }} /> : <Copy size={14} strokeWidth={1.5} />}
       </button>
       <button
         onClick={() => { setLiked(!liked); if (disliked) setDisliked(false); }}
@@ -238,7 +239,13 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
             {selected && <Check size={14} strokeWidth={2.5} style={{ color: "white" }} />}
           </button>
         )}
-        <div className="flex-1 min-w-0">
+        <div
+          className="flex-1 min-w-0"
+          style={{
+            borderLeft: "2px solid color-mix(in srgb, var(--tint) 30%, transparent)",
+            paddingLeft: "12px",
+          }}
+        >
       {groupedToolCalls && groupedToolCalls.length > 0 && (
         <div className="mb-2">
           {groupedToolCalls.map((item) => {
@@ -264,7 +271,7 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
         >
           {ts(msg.timestamp)}
           {usage && (
-            <span className="ml-1.5 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100">
+            <span className="ml-1.5 opacity-0 translate-y-1 transition-all duration-200 group-hover/message:opacity-100 group-hover/message:translate-y-0">
               <Clock size={12} strokeWidth={1.5} className="mr-0.5 inline-block translate-y-[-0.5px]" />
               {formatElapsed(usage.elapsedMs)}
             </span>

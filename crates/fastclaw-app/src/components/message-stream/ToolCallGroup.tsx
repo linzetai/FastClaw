@@ -171,7 +171,7 @@ export const ToolCallGroupCard = memo(function ToolCallGroupCard({
     >
       <button
         onClick={handleToggle}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors duration-100 hover:brightness-[1.02]"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-all duration-150 hover:brightness-[1.04]"
         style={{ cursor: "pointer" }}
         aria-expanded={expanded}
         aria-label={`${tools.length} 个工具调用${expanded ? "，已展开" : "，已折叠"}`}

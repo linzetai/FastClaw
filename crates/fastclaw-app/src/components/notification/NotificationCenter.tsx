@@ -200,6 +200,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
         <Bell size={16} strokeWidth={1.5} />
         {unreadCount > 0 && (
           <span
+            key={unreadCount}
             className="absolute flex items-center justify-center rounded-full text-white font-medium"
             style={{
               top: "1px",
@@ -210,6 +211,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
               fontSize: "9px",
               lineHeight: 1,
               background: "var(--red, #E53E3E)",
+              animation: "badge-bounce var(--duration-normal) var(--ease-spring)",
             }}
           >
             {unreadCount > 99 ? "99+" : unreadCount}
@@ -228,6 +230,8 @@ export function NotificationCenter({ onDetailOpen }: Props) {
             background: "var(--bg-primary)",
             border: "0.5px solid var(--separator)",
             boxShadow: "0 8px 30px rgba(0,0,0,0.25)",
+            animation: "scale-spring var(--duration-normal) var(--ease-spring)",
+            transformOrigin: "top right",
           }}
         >
           {/* Header */}
@@ -272,7 +276,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                 <span className="text-[12px]">暂无消息</span>
               </div>
             ) : (
-              notifications.map((n) => (
+              notifications.map((n, i) => (
                 <div
                   key={n.id}
                   onClick={() => handleItemClick(n)}
@@ -280,6 +284,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                   style={{
                     borderBottom: "0.5px solid var(--separator-light, var(--separator))",
                     opacity: n.isRead ? 0.6 : 1,
+                    animation: `fade-slide-up var(--duration-normal) var(--ease-out) ${i * 30}ms backwards`,
                   }}
                 >
                   {/* Unread dot */}
