@@ -16,6 +16,10 @@ fastclaw-session = { path = "../fastclaw-session" }
 fastclaw-self-iter = { path = "../fastclaw-self-iter", optional = true }
 fastclaw-memory = { path = "../fastclaw-memory", default-features = false }
 fastclaw-security = { path = "../fastclaw-security" }
+fastclaw-sandbox = { path = "../fastclaw-sandbox" }
+fastclaw-network-proxy = { path = "../fastclaw-network-proxy" }
+fastclaw-execpolicy = { path = "../fastclaw-execpolicy" }
+fastclaw-guardian = { path = "../fastclaw-guardian" }
 fastclaw-observe = { path = "../fastclaw-observe" }
 tokio.workspace = true
 serde.workspace = true

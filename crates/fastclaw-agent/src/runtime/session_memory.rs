@@ -66,9 +66,17 @@ impl SessionMemory {
     /// Estimated character size of this memory when serialized.
     pub fn estimated_chars(&self) -> usize {
         self.key_facts.iter().map(|s| s.len() + 4).sum::<usize>()
-            + self.decisions_made.iter().map(|s| s.len() + 4).sum::<usize>()
+            + self
+                .decisions_made
+                .iter()
+                .map(|s| s.len() + 4)
+                .sum::<usize>()
             + self.current_task_state.len()
-            + self.files_modified.iter().map(|s| s.len() + 4).sum::<usize>()
+            + self
+                .files_modified
+                .iter()
+                .map(|s| s.len() + 4)
+                .sum::<usize>()
             + 200 // XML tags overhead
     }
 }
@@ -553,7 +561,7 @@ mod tests {
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             },
             ChatMessage {
                 role: Role::User,
@@ -562,7 +570,7 @@ mod tests {
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             },
         ];
 

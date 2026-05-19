@@ -11,9 +11,7 @@ use async_trait::async_trait;
 
 use fastclaw_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolResult};
 
-use super::coordinator::{
-    Coordinator, CoordinatorPlan, CoordinatorStrategy, WorkerTask,
-};
+use super::coordinator::{Coordinator, CoordinatorPlan, CoordinatorStrategy, WorkerTask};
 use super::task::TaskManager;
 
 fn coord_properties() -> HashMap<String, serde_json::Value> {

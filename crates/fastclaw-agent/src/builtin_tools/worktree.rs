@@ -337,19 +337,29 @@ impl WorktreeIsolatedTaskFactory {
         }
 
         let branch = format!("task-{}", &task_id[..8.min(task_id.len())]);
-        let wt_path = std::env::temp_dir().join(format!("fastclaw-task-{}", &task_id[..8.min(task_id.len())]));
+        let wt_path = std::env::temp_dir().join(format!(
+            "fastclaw-task-{}",
+            &task_id[..8.min(task_id.len())]
+        ));
         let path_str = wt_path.display().to_string();
 
-        run_git_command(&self.base_dir, &["worktree", "add", &path_str, "-b", &branch])
-            .await
-            .map_err(|e| format!("failed to create worktree: {e}"))?;
+        run_git_command(
+            &self.base_dir,
+            &["worktree", "add", &path_str, "-b", &branch],
+        )
+        .await
+        .map_err(|e| format!("failed to create worktree: {e}"))?;
 
         Ok((wt_path, branch))
     }
 
     async fn cleanup_worktree(&self, wt_path: &Path, branch: &str) {
         let path_str = wt_path.display().to_string();
-        let _ = run_git_command(&self.base_dir, &["worktree", "remove", &path_str, "--force"]).await;
+        let _ = run_git_command(
+            &self.base_dir,
+            &["worktree", "remove", &path_str, "--force"],
+        )
+        .await;
         let _ = run_git_command(&self.base_dir, &["branch", "-D", branch]).await;
     }
 }
@@ -375,9 +385,7 @@ impl TaskWorkFactory for WorktreeIsolatedTaskFactory {
         self.cleanup_worktree(&wt_path, &branch).await;
 
         match result {
-            Ok(output) => Ok(format!(
-                "[worktree-isolated: branch={branch}]\n{output}"
-            )),
+            Ok(output) => Ok(format!("[worktree-isolated: branch={branch}]\n{output}")),
             Err(e) => Err(format!("[worktree-isolated: branch={branch}]\n{e}")),
         }
     }

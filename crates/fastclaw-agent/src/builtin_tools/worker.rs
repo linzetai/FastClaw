@@ -98,11 +98,7 @@ impl WorkerIsolation {
     ///
     /// Returns the list of tool names that should be available to this worker.
     /// If no allowed_tools are specified, all tools are available except denied ones.
-    pub fn filter_tools_for_worker(
-        &self,
-        worker_id: &str,
-        all_tools: &[String],
-    ) -> Vec<String> {
+    pub fn filter_tools_for_worker(&self, worker_id: &str, all_tools: &[String]) -> Vec<String> {
         let ctx = match self.workers.get(worker_id) {
             Some(ctx) => ctx,
             None => return all_tools.to_vec(),
@@ -171,8 +167,8 @@ mod tests {
     #[test]
     fn isolation_filters_tools() {
         let mut iso = WorkerIsolation::new();
-        let ctx = WorkerContext::new("w1")
-            .with_allowed_tools(vec!["read_file".into(), "grep".into()]);
+        let ctx =
+            WorkerContext::new("w1").with_allowed_tools(vec!["read_file".into(), "grep".into()]);
         iso.register(ctx);
 
         let all = vec![
@@ -207,8 +203,8 @@ mod tests {
     #[test]
     fn isolation_denied_tools() {
         let mut iso = WorkerIsolation::new();
-        let ctx = WorkerContext::new("w1")
-            .with_denied_tools(vec!["shell".into(), "write_file".into()]);
+        let ctx =
+            WorkerContext::new("w1").with_denied_tools(vec!["shell".into(), "write_file".into()]);
         iso.register(ctx);
 
         let all = vec![

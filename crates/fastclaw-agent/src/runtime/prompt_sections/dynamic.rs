@@ -43,9 +43,7 @@ fn session_guidance_en(ctx: &PromptContext) -> String {
                     "A plan file already exists at `{path}`. Read it first, then decide whether to update or replace it."
                 )
             } else {
-                format!(
-                    "No plan file exists yet. Write your plan to `{path}`."
-                )
+                format!("No plan file exists yet. Write your plan to `{path}`.")
             }
         } else {
             "Use `todo_write` to record your plan steps.".to_string()

@@ -157,8 +157,7 @@ impl UndoEngine {
             })
             .collect();
 
-        self.rolled_back
-            .extend(restored_files.iter().cloned());
+        self.rolled_back.extend(restored_files.iter().cloned());
 
         let guidance = self.format_rollback_guidance(&restored_files);
 
@@ -222,7 +221,9 @@ impl UndoEngine {
             }
         }
 
-        guidance.push_str("\nYou MUST try a completely different approach. Do NOT repeat the same strategy.\n");
+        guidance.push_str(
+            "\nYou MUST try a completely different approach. Do NOT repeat the same strategy.\n",
+        );
         guidance.push_str("────────────────────────────────────────────────────\n");
         guidance
     }

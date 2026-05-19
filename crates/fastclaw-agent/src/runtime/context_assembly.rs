@@ -181,7 +181,12 @@ pub fn discover_related_files(
     match task_type {
         TaskType::Coding => {
             // Look for common config files that affect coding
-            let configs = ["tsconfig.json", "Cargo.toml", "package.json", "pyproject.toml"];
+            let configs = [
+                "tsconfig.json",
+                "Cargo.toml",
+                "package.json",
+                "pyproject.toml",
+            ];
             for cfg in configs {
                 let p = work_dir.join(cfg);
                 if p.exists() && files.len() < max_files && !files.contains(&p) {
@@ -214,16 +219,14 @@ pub fn discover_related_files(
 /// Extract keywords from a user message for memory/docs lookup.
 pub fn extract_keywords(message: &str) -> Vec<String> {
     let stop_words: &[&str] = &[
-        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-        "have", "has", "had", "do", "does", "did", "will", "would", "could",
-        "should", "may", "might", "shall", "can", "to", "of", "in", "for",
-        "on", "with", "at", "by", "from", "as", "into", "through", "during",
-        "before", "after", "above", "below", "between", "and", "but", "or",
-        "nor", "not", "so", "yet", "both", "either", "neither", "each",
-        "this", "that", "these", "those", "it", "its", "my", "your", "his",
-        "her", "our", "their", "what", "which", "who", "whom", "whose",
-        "i", "me", "we", "us", "you", "he", "she", "they", "them",
-        "please", "help", "want", "need", "like", "just", "make", "get",
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+        "do", "does", "did", "will", "would", "could", "should", "may", "might", "shall", "can",
+        "to", "of", "in", "for", "on", "with", "at", "by", "from", "as", "into", "through",
+        "during", "before", "after", "above", "below", "between", "and", "but", "or", "nor", "not",
+        "so", "yet", "both", "either", "neither", "each", "this", "that", "these", "those", "it",
+        "its", "my", "your", "his", "her", "our", "their", "what", "which", "who", "whom", "whose",
+        "i", "me", "we", "us", "you", "he", "she", "they", "them", "please", "help", "want",
+        "need", "like", "just", "make", "get",
     ];
 
     message
@@ -243,9 +246,8 @@ fn looks_like_file_path(s: &str) -> bool {
     (s.contains('/') || s.contains('.'))
         && !s.starts_with("http")
         && !s.starts_with("//")
-        && s.chars().all(|c| {
-            c.is_alphanumeric() || c == '/' || c == '.' || c == '_' || c == '-'
-        })
+        && s.chars()
+            .all(|c| c.is_alphanumeric() || c == '/' || c == '.' || c == '_' || c == '-')
 }
 
 #[cfg(test)]
@@ -254,10 +256,14 @@ mod tests {
 
     #[test]
     fn extract_keywords_filters_stop_words() {
-        let keywords = extract_keywords("please help me fix the authentication bug in the login module");
+        let keywords =
+            extract_keywords("please help me fix the authentication bug in the login module");
         assert!(!keywords.contains(&"please".to_string()));
         assert!(!keywords.contains(&"the".to_string()));
-        assert!(keywords.contains(&"fix".to_string()) || keywords.contains(&"authentication".to_string()));
+        assert!(
+            keywords.contains(&"fix".to_string())
+                || keywords.contains(&"authentication".to_string())
+        );
         assert!(keywords.contains(&"authentication".to_string()));
         assert!(keywords.contains(&"login".to_string()));
         assert!(keywords.contains(&"module".to_string()));
@@ -265,7 +271,8 @@ mod tests {
 
     #[test]
     fn extract_keywords_handles_technical_terms() {
-        let keywords = extract_keywords("implement rate-limiting middleware for the Express.js API");
+        let keywords =
+            extract_keywords("implement rate-limiting middleware for the Express.js API");
         assert!(keywords.contains(&"rate-limiting".to_string()));
         assert!(keywords.contains(&"middleware".to_string()));
         assert!(keywords.contains(&"Express.js".to_string()));
@@ -273,7 +280,8 @@ mod tests {
 
     #[test]
     fn extract_keywords_limits_count() {
-        let long_msg = "word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12 word13";
+        let long_msg =
+            "word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12 word13";
         let keywords = extract_keywords(long_msg);
         assert!(keywords.len() <= 10);
     }
@@ -299,7 +307,10 @@ mod tests {
     #[test]
     fn assembled_context_formats_correctly() {
         let ctx = AssembledContext {
-            facts: vec!["User prefers TypeScript".into(), "Project uses React 18".into()],
+            facts: vec![
+                "User prefers TypeScript".into(),
+                "Project uses React 18".into(),
+            ],
             docs_snippet: Some("React hooks documentation excerpt...".into()),
             related_files: vec![PathBuf::from("src/App.tsx"), PathBuf::from("tsconfig.json")],
             project_hints: vec!["TypeScript project".into(), "Test framework: Jest".into()],

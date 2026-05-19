@@ -88,24 +88,41 @@ impl TaskType {
 
     fn from_str_loose(s: &str) -> Self {
         let lower = s.to_lowercase();
-        if lower.contains("cod") || lower.contains("debug") || lower.contains("refactor")
-            || lower.contains("implement") || lower.contains("fix") || lower.contains("compil")
+        if lower.contains("cod")
+            || lower.contains("debug")
+            || lower.contains("refactor")
+            || lower.contains("implement")
+            || lower.contains("fix")
+            || lower.contains("compil")
         {
             Self::Coding
-        } else if lower.contains("research") || lower.contains("search") || lower.contains("find")
-            || lower.contains("compar") || lower.contains("investig")
+        } else if lower.contains("research")
+            || lower.contains("search")
+            || lower.contains("find")
+            || lower.contains("compar")
+            || lower.contains("investig")
         {
             Self::Research
-        } else if lower.contains("writ") || lower.contains("document") || lower.contains("email")
-            || lower.contains("draft") || lower.contains("report")
+        } else if lower.contains("writ")
+            || lower.contains("document")
+            || lower.contains("email")
+            || lower.contains("draft")
+            || lower.contains("report")
         {
             Self::Writing
-        } else if lower.contains("data") || lower.contains("analy") || lower.contains("chart")
-            || lower.contains("statistic") || lower.contains("csv") || lower.contains("sql")
+        } else if lower.contains("data")
+            || lower.contains("analy")
+            || lower.contains("chart")
+            || lower.contains("statistic")
+            || lower.contains("csv")
+            || lower.contains("sql")
         {
             Self::DataAnalysis
-        } else if lower.contains("automat") || lower.contains("workflow") || lower.contains("schedul")
-            || lower.contains("pipeline") || lower.contains("cron")
+        } else if lower.contains("automat")
+            || lower.contains("workflow")
+            || lower.contains("schedul")
+            || lower.contains("pipeline")
+            || lower.contains("cron")
         {
             Self::Workflow
         } else {
@@ -210,7 +227,10 @@ pub fn format_decomposition_for_prompt(decomposition: &Decomposition) -> Option<
 
     let mut block = String::with_capacity(512);
     block.push_str("─── Task Plan ───────────────────────────────────────\n");
-    block.push_str(&format!("Task type: {}\n", decomposition.task_type.as_str()));
+    block.push_str(&format!(
+        "Task type: {}\n",
+        decomposition.task_type.as_str()
+    ));
     block.push_str("Execute these steps in order:\n");
     for (i, step) in decomposition.steps.iter().enumerate() {
         block.push_str(&format!("  {}. {}\n", i + 1, step));
@@ -228,8 +248,9 @@ fn parse_decomposition(response: &str, max_steps: usize) -> Decomposition {
 
     let steps: Vec<String> = lines
         .filter_map(|line| {
-            let stripped = line
-                .trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ')' || c == ' ');
+            let stripped = line.trim_start_matches(|c: char| {
+                c.is_ascii_digit() || c == '.' || c == ')' || c == ' '
+            });
             let stripped = stripped.trim_start_matches(|c: char| c == '-' || c == '*' || c == ' ');
             let stripped = stripped.trim();
             if stripped.len() >= 5 {
@@ -278,7 +299,8 @@ mod tests {
 
     #[test]
     fn parse_decomposition_respects_max_steps() {
-        let response = "research\n1. Step one\n2. Step two\n3. Step three\n4. Step four\n5. Step five";
+        let response =
+            "research\n1. Step one\n2. Step two\n3. Step three\n4. Step four\n5. Step five";
         let result = parse_decomposition(response, 3);
         assert_eq!(result.steps.len(), 3);
     }
@@ -302,11 +324,26 @@ mod tests {
 
     #[test]
     fn task_type_detection() {
-        assert_eq!(TaskType::from_str_loose("fix the compile error"), TaskType::Coding);
-        assert_eq!(TaskType::from_str_loose("research AI trends"), TaskType::Research);
-        assert_eq!(TaskType::from_str_loose("write a report"), TaskType::Writing);
-        assert_eq!(TaskType::from_str_loose("analyze the CSV data"), TaskType::DataAnalysis);
-        assert_eq!(TaskType::from_str_loose("automate daily backup"), TaskType::Workflow);
+        assert_eq!(
+            TaskType::from_str_loose("fix the compile error"),
+            TaskType::Coding
+        );
+        assert_eq!(
+            TaskType::from_str_loose("research AI trends"),
+            TaskType::Research
+        );
+        assert_eq!(
+            TaskType::from_str_loose("write a report"),
+            TaskType::Writing
+        );
+        assert_eq!(
+            TaskType::from_str_loose("analyze the CSV data"),
+            TaskType::DataAnalysis
+        );
+        assert_eq!(
+            TaskType::from_str_loose("automate daily backup"),
+            TaskType::Workflow
+        );
         assert_eq!(TaskType::from_str_loose("hello there"), TaskType::General);
     }
 
@@ -359,13 +396,21 @@ mod tests {
         struct PanicProvider;
         #[async_trait]
         impl LlmProvider for PanicProvider {
-            async fn chat_completion(&self, _: &crate::llm::CompletionParams<'_>) -> anyhow::Result<ChatResponse> {
+            async fn chat_completion(
+                &self,
+                _: &crate::llm::CompletionParams<'_>,
+            ) -> anyhow::Result<ChatResponse> {
                 panic!("should not be called");
             }
             async fn chat_completion_stream(
                 &self,
                 _: &crate::llm::CompletionParams<'_>,
-            ) -> anyhow::Result<futures::stream::BoxStream<'static, anyhow::Result<fastclaw_core::types::StreamDelta>>> {
+            ) -> anyhow::Result<
+                futures::stream::BoxStream<
+                    'static,
+                    anyhow::Result<fastclaw_core::types::StreamDelta>,
+                >,
+            > {
                 panic!("should not be called");
             }
         }
@@ -375,7 +420,8 @@ mod tests {
             enabled: false,
             ..Default::default()
         };
-        let result = decompose_task(&provider, "do something complex with many steps", &config).await;
+        let result =
+            decompose_task(&provider, "do something complex with many steps", &config).await;
         assert!(result.is_none());
     }
 
@@ -387,13 +433,21 @@ mod tests {
         struct PanicProvider;
         #[async_trait]
         impl LlmProvider for PanicProvider {
-            async fn chat_completion(&self, _: &crate::llm::CompletionParams<'_>) -> anyhow::Result<ChatResponse> {
+            async fn chat_completion(
+                &self,
+                _: &crate::llm::CompletionParams<'_>,
+            ) -> anyhow::Result<ChatResponse> {
                 panic!("should not be called");
             }
             async fn chat_completion_stream(
                 &self,
                 _: &crate::llm::CompletionParams<'_>,
-            ) -> anyhow::Result<futures::stream::BoxStream<'static, anyhow::Result<fastclaw_core::types::StreamDelta>>> {
+            ) -> anyhow::Result<
+                futures::stream::BoxStream<
+                    'static,
+                    anyhow::Result<fastclaw_core::types::StreamDelta>,
+                >,
+            > {
                 panic!("should not be called");
             }
         }

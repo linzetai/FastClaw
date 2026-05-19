@@ -105,15 +105,27 @@ pub fn register_builtin_tools(registry: &ToolRegistry) {
 
 /// Register built-in tools, optionally with sandbox enforcement on shell_exec.
 pub fn register_builtin_tools_with_sandbox(registry: &ToolRegistry, sandboxed: bool) {
+    register_builtin_tools_full(registry, sandboxed, None);
+}
+
+/// Register built-in tools with an optional `NetworkProxy` for managed
+/// network routing in sandboxed shell execution.
+pub fn register_builtin_tools_full(
+    registry: &ToolRegistry,
+    sandboxed: bool,
+    network_proxy: Option<fastclaw_network_proxy::NetworkProxy>,
+) {
     // ── Core eager tools (~15) ──────────────────────────────────────────────
     registry.register(Arc::new(GitTool));
     registry.register(Arc::new(HttpFetchTool::new()));
     registry.register(Arc::new(WebSearchTool::unconfigured()));
     registry.register(Arc::new(WebFetchTool::with_defaults()));
     if sandboxed {
-        registry.register(Arc::new(SandboxedShellTool::new(
-            ShellSandboxConfig::default(),
-        )));
+        let mut tool = SandboxedShellTool::new(ShellSandboxConfig::default());
+        if let Some(proxy) = network_proxy {
+            tool = tool.with_network_proxy(proxy);
+        }
+        registry.register(Arc::new(tool));
     } else {
         registry.register(Arc::new(ShellTool::new(300)));
     }

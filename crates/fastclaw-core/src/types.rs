@@ -229,7 +229,11 @@ impl ChatMessage {
     }
 
     /// Create a compact boundary system message marking where compaction occurred.
-    pub fn compact_boundary(trigger: CompactTrigger, pre_tokens: usize, post_tokens: usize) -> Self {
+    pub fn compact_boundary(
+        trigger: CompactTrigger,
+        pre_tokens: usize,
+        post_tokens: usize,
+    ) -> Self {
         Self {
             role: Role::System,
             content: Some(serde_json::Value::String(

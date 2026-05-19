@@ -290,10 +290,7 @@ impl Tool for EnterPlanModeTool {
                     path.display()
                 )
             } else {
-                format!(
-                    "\n\nPlan file will be saved to: {}",
-                    path.display()
-                )
+                format!("\n\nPlan file will be saved to: {}", path.display())
             }
         } else {
             String::new()
@@ -458,13 +455,13 @@ impl Tool for ExitPlanModeTool {
         let plan_ref = if let Some(pc) = current_plan_context() {
             let path = pc.store.plan_path(&pc.session_id);
             if pc.store.plan_exists(&pc.session_id) {
-                let plan_content = pc
-                    .store
-                    .read_plan(&pc.session_id)
-                    .unwrap_or_default();
+                let plan_content = pc.store.read_plan(&pc.session_id).unwrap_or_default();
                 let preview = if plan_content.len() > 500 {
                     let end = plan_content.floor_char_boundary(500);
-                    format!("{}...\n(truncated, read full file for details)", &plan_content[..end])
+                    format!(
+                        "{}...\n(truncated, read full file for details)",
+                        &plan_content[..end]
+                    )
                 } else {
                     plan_content
                 };

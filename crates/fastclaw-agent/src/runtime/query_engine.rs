@@ -184,50 +184,50 @@ impl QueryEngine {
 
             loop {
                 tokio::select! {
-                    _ = cancel.cancelled() => {
-                        break;
-                    }
-                    event = internal_rx.recv() => {
-                        let Some(event) = event else { break };
-                        match &event {
-                            StreamEvent::Delta(delta) => {
-                                for choice in &delta.choices {
-                                    if let Some(ref content) = choice.delta.content {
-                                        assistant_text.push_str(content);
-                                    }
-                                }
-                            }
-                            StreamEvent::Done {
-                                session_id, usage, ..
-                            } => {
-                                let mut s = state.lock().await;
-                                if let Some(sid) = session_id {
-                                    s.session_id = Some(sid.clone());
-                                }
-                                if let Some(u) = usage {
-                                    s.total_usage.prompt_tokens += u.prompt_tokens;
-                                    s.total_usage.completion_tokens += u.completion_tokens;
-                                    s.total_usage.total_tokens += u.total_tokens;
-                                }
-                                if !assistant_text.is_empty() {
-                                    s.messages.push(ChatMessage {
-                                        role: Role::Assistant,
-                                        content: Some(serde_json::json!(assistant_text)),
-                                        reasoning_content: None,
-                                        name: None,
-                                        tool_calls: None,
-                                        tool_call_id: None,
-            compact_metadata: None,
-                                    });
-                                }
-                            }
-                            _ => {}
-                        }
-                        if out_tx.send(event).await.is_err() {
+                        _ = cancel.cancelled() => {
                             break;
                         }
+                        event = internal_rx.recv() => {
+                            let Some(event) = event else { break };
+                            match &event {
+                                StreamEvent::Delta(delta) => {
+                                    for choice in &delta.choices {
+                                        if let Some(ref content) = choice.delta.content {
+                                            assistant_text.push_str(content);
+                                        }
+                                    }
+                                }
+                                StreamEvent::Done {
+                                    session_id, usage, ..
+                                } => {
+                                    let mut s = state.lock().await;
+                                    if let Some(sid) = session_id {
+                                        s.session_id = Some(sid.clone());
+                                    }
+                                    if let Some(u) = usage {
+                                        s.total_usage.prompt_tokens += u.prompt_tokens;
+                                        s.total_usage.completion_tokens += u.completion_tokens;
+                                        s.total_usage.total_tokens += u.total_tokens;
+                                    }
+                                    if !assistant_text.is_empty() {
+                                        s.messages.push(ChatMessage {
+                                            role: Role::Assistant,
+                                            content: Some(serde_json::json!(assistant_text)),
+                                            reasoning_content: None,
+                                            name: None,
+                                            tool_calls: None,
+                                            tool_call_id: None,
+                compact_metadata: None,
+                                        });
+                                    }
+                                }
+                                _ => {}
+                            }
+                            if out_tx.send(event).await.is_err() {
+                                break;
+                            }
+                        }
                     }
-                }
             }
         });
 

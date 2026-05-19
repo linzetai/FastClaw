@@ -2223,7 +2223,7 @@ mod tool_result_truncation_tests {
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             },
         ];
 
@@ -2671,7 +2671,7 @@ mod tool_result_truncation_tests {
                     duration_ms: None,
                 }]),
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             }
         }
 
@@ -2737,7 +2737,7 @@ mod tool_result_truncation_tests {
                     duration_ms: None,
                 }]),
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             }
         }
 
@@ -2842,7 +2842,7 @@ mod tool_result_truncation_tests {
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             },
             ChatMessage {
                 role: Role::Tool,
@@ -2860,7 +2860,7 @@ mod tool_result_truncation_tests {
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             },
             ChatMessage {
                 role: Role::User,
@@ -2869,7 +2869,7 @@ mod tool_result_truncation_tests {
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             },
             ChatMessage {
                 role: Role::Tool,

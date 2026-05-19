@@ -249,7 +249,7 @@ mod tests {
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
-            compact_metadata: None,
+                    compact_metadata: None,
                 },
                 finish_reason: Some("stop".into()),
             }],
@@ -313,7 +313,18 @@ mod tests {
         }];
 
         let result = deps
-            .pre_query_compact(&mut messages, 128_000, None, "test", 0, &[], None, true, None, None)
+            .pre_query_compact(
+                &mut messages,
+                128_000,
+                None,
+                "test",
+                0,
+                &[],
+                None,
+                true,
+                None,
+                None,
+            )
             .await;
         assert!(!result.compressed_by_llm);
         assert!(!result.pipeline_applied);

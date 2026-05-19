@@ -1881,6 +1881,21 @@ impl Default for ShellSandboxConfig {
 /// Sandboxed shell execution tool with policy enforcement.
 pub struct SandboxedShellTool {
     config: ShellSandboxConfig,
+    /// OS-level sandbox manager (optional, enables process isolation).
+    sandbox_manager: Option<fastclaw_sandbox::SandboxManager>,
+    /// Rich filesystem sandbox policy (Codex-aligned type system).
+    fs_sandbox_policy: Option<fastclaw_security::FileSystemSandboxPolicy>,
+    /// Rich network sandbox policy (Codex-aligned type system).
+    net_sandbox_policy: Option<fastclaw_security::NetworkSandboxPolicy>,
+    /// High-level sandbox policy (ReadOnly/WorkspaceWrite/etc.).
+    sandbox_policy: Option<fastclaw_sandbox::sandbox_policy::SandboxPolicy>,
+    /// Network proxy instance — when set, child processes get proxy env vars
+    /// so their traffic is routed through the managed proxy.
+    network_proxy: Option<fastclaw_network_proxy::NetworkProxy>,
+    /// ExecPolicy engine (optional, command-level rule evaluation).
+    exec_policy: Option<std::sync::Arc<fastclaw_execpolicy::PolicyEngine>>,
+    /// Guardian agent (optional, LLM-based review).
+    guardian: Option<std::sync::Arc<fastclaw_guardian::Guardian>>,
 }
 
 impl SandboxedShellTool {
@@ -1889,7 +1904,65 @@ impl SandboxedShellTool {
             config.denied_regexes =
                 ShellSandboxConfig::compile_denied_regexes(&config.denied_patterns);
         }
-        Self { config }
+        Self {
+            config,
+            sandbox_manager: None,
+            fs_sandbox_policy: None,
+            net_sandbox_policy: None,
+            sandbox_policy: None,
+            network_proxy: None,
+            exec_policy: None,
+            guardian: None,
+        }
+    }
+
+    /// Enable OS-level sandbox with rich policy types.
+    ///
+    /// Directly accepts `FileSystemSandboxPolicy` and `NetworkSandboxPolicy`,
+    /// derives the high-level `SandboxPolicy` from them.
+    pub fn with_sandbox(
+        mut self,
+        fs_policy: fastclaw_security::FileSystemSandboxPolicy,
+        net_policy: fastclaw_security::NetworkSandboxPolicy,
+    ) -> Self {
+        use fastclaw_sandbox::sandbox_policy::{
+            compatibility_sandbox_policy_from_fs_sandbox, NetworkAccess,
+        };
+
+        let network_access = if net_policy.is_enabled() {
+            NetworkAccess::Enabled
+        } else {
+            NetworkAccess::Restricted
+        };
+
+        self.sandbox_manager = Some(fastclaw_sandbox::SandboxManager::detect());
+        self.sandbox_policy =
+            Some(compatibility_sandbox_policy_from_fs_sandbox(&fs_policy, network_access));
+        self.fs_sandbox_policy = Some(fs_policy);
+        self.net_sandbox_policy = Some(net_policy);
+        self
+    }
+
+    /// Set a network proxy instance whose env vars will be injected into
+    /// child processes, routing their traffic through the managed proxy.
+    pub fn with_network_proxy(mut self, proxy: fastclaw_network_proxy::NetworkProxy) -> Self {
+        self.network_proxy = Some(proxy);
+        self
+    }
+
+    /// Enable ExecPolicy-based command evaluation.
+    pub fn with_exec_policy(
+        mut self,
+        engine: std::sync::Arc<fastclaw_execpolicy::PolicyEngine>,
+    ) -> Self {
+        self.exec_policy = Some(engine);
+        self
+    }
+
+    /// Enable Guardian LLM-based review.
+    pub fn with_guardian(mut self, guardian: std::sync::Arc<fastclaw_guardian::Guardian>) -> Self {
+        self.guardian = Some(guardian);
+        self
     }
 
     /// Build the namespace-isolated command using unshare + bind mounts.
@@ -2190,6 +2263,19 @@ Sandbox restrictions:\n",
             ));
         }
 
+        if let Some(ref sp) = self.sandbox_policy {
+            prompt.push_str(&format!("- Sandbox policy: {sp}\n"));
+        }
+        if let Some(ref engine) = self.exec_policy {
+            let prefixes = engine.get_allowed_prefixes();
+            if !prefixes.is_empty() {
+                prompt.push_str(&format!(
+                    "- Pre-approved command prefixes: {}\n",
+                    prefixes.join(", ")
+                ));
+            }
+        }
+
         prompt.push_str(
             "\n\
 - Commands validated against allow/deny rules before execution\n\
@@ -2277,24 +2363,96 @@ Sandbox restrictions:\n",
             }
         }
 
+        // ── ExecPolicy check (new security layer) ──────────────────
+        if let Some(policy_engine) = &self.exec_policy {
+            let tokens: Vec<&str> = command.split_whitespace().collect();
+            let evaluation = policy_engine.evaluate(&tokens);
+            match &evaluation.decision {
+                fastclaw_execpolicy::PolicyDecision::Forbidden { justification, .. } => {
+                    return ToolResult::err(format!("POLICY BLOCKED: {justification}"));
+                }
+                fastclaw_execpolicy::PolicyDecision::Prompt { reason, .. } if !user_confirmed => {
+                    // If Guardian is available and enabled, delegate to it
+                    if let Some(guardian) = &self.guardian {
+                        let op = fastclaw_guardian::ReviewOperation {
+                            command: command.to_string(),
+                            working_dir: args
+                                .get("working_dir")
+                                .and_then(|v| v.as_str())
+                                .map(String::from),
+                            operation_type: "shell_exec".to_string(),
+                        };
+                        let ctx = fastclaw_guardian::ReviewContext {
+                            intent_transcript: String::new(),
+                            transcript_tokens: 0,
+                        };
+                        let assessment = guardian.review(&op, &ctx).await;
+                        if !assessment.is_allowed() {
+                            return ToolResult::err(format!(
+                                "GUARDIAN DENIED: {} (risk: {:?})",
+                                assessment.rationale, assessment.risk_level
+                            ));
+                        }
+                    } else {
+                        return ToolResult::needs_confirm(format!(
+                            "Policy requires confirmation: {reason}"
+                        ));
+                    }
+                }
+                _ => {} // Allow — proceed
+            }
+        }
+
         let shell_hint = args.get("shell").and_then(|v| v.as_str());
+        let sandbox_cwd = args
+            .get("working_dir")
+            .and_then(|v| v.as_str())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()));
         let mut cmd = {
-            #[cfg(not(windows))]
-            {
-                let shell = match shell_hint {
-                    Some("sh") => "sh",
-                    Some("bash") => "bash",
-                    _ => preferred_shell(),
-                };
-                if let Some(ns_cmd) = self.build_namespace_command(command, shell) {
-                    ns_cmd
+            // ── Sandbox-wrapped execution ────────────────────
+            if let (Some(sandbox_mgr), Some(fs_policy), Some(net_policy)) = (
+                &self.sandbox_manager,
+                &self.fs_sandbox_policy,
+                &self.net_sandbox_policy,
+            ) {
+                if sandbox_mgr.is_available() {
+                    #[cfg(not(windows))]
+                    let shell = match shell_hint {
+                        Some("sh") => "sh",
+                        Some("bash") => "bash",
+                        _ => preferred_shell(),
+                    };
+                    #[cfg(windows)]
+                    let shell = match shell_hint {
+                        Some("powershell") | Some("pwsh") => "powershell",
+                        _ => "cmd",
+                    };
+                    let sandboxed =
+                        sandbox_mgr.transform(command, shell, fs_policy, *net_policy, &sandbox_cwd);
+                    sandboxed.into_tokio_command()
                 } else {
                     build_shell_command(command, shell_hint)
                 }
-            }
-            #[cfg(windows)]
-            {
-                build_shell_command(command, shell_hint)
+            } else {
+                // No sandbox configured — original path
+                #[cfg(not(windows))]
+                {
+                    let shell = match shell_hint {
+                        Some("sh") => "sh",
+                        Some("bash") => "bash",
+                        _ => preferred_shell(),
+                    };
+                    if let Some(ns_cmd) = self.build_namespace_command(command, shell) {
+                        ns_cmd
+                    } else {
+                        build_shell_command(command, shell_hint)
+                    }
+                }
+                #[cfg(windows)]
+                {
+                    build_shell_command(command, shell_hint)
+                }
             }
         };
 
@@ -2306,6 +2464,12 @@ Sandbox restrictions:\n",
             cmd.env_remove(var);
         }
         cmd.env("FASTCLAW_AGENT", "1");
+
+        if let Some(ref proxy) = self.network_proxy {
+            for (key, value) in proxy.env_vars() {
+                cmd.env(key, value);
+            }
+        }
 
         cmd.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());

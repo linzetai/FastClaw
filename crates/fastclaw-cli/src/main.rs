@@ -389,6 +389,8 @@ fn cmd_daemon_stop(mode: &fastclaw_core::config::ConfigMode) -> anyhow::Result<(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    fastclaw_hardening::pre_main_hardening();
+
     let cli = Cli::parse();
 
     let quiet = matches!(

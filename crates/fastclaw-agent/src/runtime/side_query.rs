@@ -285,7 +285,7 @@ mod tests {
                         name: None,
                         tool_calls: None,
                         tool_call_id: None,
-            compact_metadata: None,
+                        compact_metadata: None,
                     },
                     finish_reason: Some("stop".into()),
                 }],
@@ -326,7 +326,7 @@ mod tests {
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             }],
             ..Default::default()
         }

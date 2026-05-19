@@ -978,6 +978,48 @@ pub struct SecurityConfig {
     /// Defaults to patterns matching rm, rmdir, chmod, chown, mkfs, dd, etc.
     #[serde(default = "default_dangerous_patterns")]
     pub dangerous_patterns: Vec<String>,
+
+    /// Whether OS-level sandbox is enabled for shell command execution.
+    /// When true, commands are executed inside a platform-specific sandbox
+    /// (Landlock on Linux, Seatbelt on macOS, RestrictedToken on Windows).
+    #[serde(default)]
+    pub sandbox_enabled: bool,
+
+    /// Path to the exec-policy TOML configuration file.
+    /// Default: `.fastclaw/exec-policy.toml` (project-level).
+    #[serde(default)]
+    pub exec_policy_path: Option<String>,
+
+    /// Whether the Guardian LLM-based review agent is enabled.
+    /// When true, commands flagged as "prompt" by ExecPolicy are reviewed by an LLM.
+    #[serde(default)]
+    pub guardian_enabled: bool,
+
+    /// Model to use for Guardian reviews (default: "gpt-4o-mini").
+    #[serde(default)]
+    pub guardian_model: Option<String>,
+
+    /// Timeout in seconds for Guardian LLM reviews (default: 60).
+    #[serde(default)]
+    pub guardian_timeout_secs: Option<u64>,
+
+    /// Glob patterns for paths always denied by the sandbox, even within allowed roots.
+    #[serde(default = "default_sandbox_deny_globs")]
+    pub sandbox_deny_globs: Vec<String>,
+}
+
+fn default_sandbox_deny_globs() -> Vec<String> {
+    vec![
+        "**/.env".to_string(),
+        "**/.env.*".to_string(),
+        "**/.ssh/**".to_string(),
+        "**/.gnupg/**".to_string(),
+        "**/.aws/**".to_string(),
+        "**/.kube/**".to_string(),
+        "**/credentials.json".to_string(),
+        "**/*.pem".to_string(),
+        "**/*.key".to_string(),
+    ]
 }
 
 fn default_dangerous_patterns() -> Vec<String> {

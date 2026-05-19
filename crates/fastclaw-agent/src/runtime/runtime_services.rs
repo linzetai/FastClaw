@@ -130,9 +130,7 @@ impl RuntimeServices {
             messages: messages.to_vec(),
             assistant_messages: assistant_messages.to_vec(),
         };
-        let _ = executor
-            .execute_stop_hooks(&event, &self.abort_token)
-            .await;
+        let _ = executor.execute_stop_hooks(&event, &self.abort_token).await;
     }
 
     // ── Cost tracking ─────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ fastclaw-observe = { path = "../fastclaw-observe" }
 fastclaw-session = { path = "../fastclaw-session" }
 fastclaw-agent = { path = "../fastclaw-agent" }
 fastclaw-mcp = { path = "../fastclaw-mcp" }
+fastclaw-hardening = { path = "../fastclaw-hardening" }
 clap.workspace = true
 clap_complete.workspace = true
 tokio.workspace = true

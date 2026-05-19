@@ -1,0 +1,9 @@
+pub const REASON_DENIED: &str = "denied";
+pub const REASON_NO_PROXY: &str = "no_proxy";
+pub const REASON_CONNECT_BLOCKED: &str = "connect_blocked";
+pub const REASON_BLOCKED_IP: &str = "blocked_ip";
+pub const REASON_MODE_GUARD: &str = "mode_guard";
+pub const REASON_NOT_ENABLED: &str = "not_enabled";
+pub const REASON_UNIX_SOCKET_BLOCKED: &str = "unix_socket_blocked";
+pub const REASON_LOOPBACK_BLOCKED: &str = "loopback_blocked";
+pub const REASON_METHOD_NOT_ALLOWED: &str = "method_not_allowed";

@@ -21,9 +21,7 @@ pub enum CodeAction {
         new_name: String,
     },
     /// Get diagnostics for a file (post-edit validation).
-    GetDiagnostics {
-        file: String,
-    },
+    GetDiagnostics { file: String },
     /// Find all references to a symbol.
     FindReferences {
         file: String,
@@ -43,13 +41,9 @@ pub enum CodeAction {
         column: u32,
     },
     /// Organize imports / auto-import.
-    OrganizeImports {
-        file: String,
-    },
+    OrganizeImports { file: String },
     /// Format a file using the LSP formatter.
-    Format {
-        file: String,
-    },
+    Format { file: String },
 }
 
 /// A text edit produced by an LSP action.
@@ -137,16 +131,27 @@ impl Default for LspActionsConfig {
 
 /// Determine if a file has LSP support based on extension.
 pub fn has_lsp_support(file_path: &Path) -> bool {
-    let ext = file_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     matches!(
         ext,
-        "rs" | "ts" | "tsx" | "js" | "jsx" | "py" | "go"
-            | "java" | "kt" | "c" | "cpp" | "h" | "hpp"
-            | "cs" | "rb" | "swift" | "vue" | "svelte"
+        "rs" | "ts"
+            | "tsx"
+            | "js"
+            | "jsx"
+            | "py"
+            | "go"
+            | "java"
+            | "kt"
+            | "c"
+            | "cpp"
+            | "h"
+            | "hpp"
+            | "cs"
+            | "rb"
+            | "swift"
+            | "vue"
+            | "svelte"
     )
 }
 
@@ -209,16 +214,29 @@ pub fn format_action_result_for_prompt(action: &CodeAction, result: &ActionResul
         ActionResult::Actions(items) => {
             let mut out = format!("Available code actions ({}):\n", items.len());
             for item in items.iter().take(10) {
-                let preferred = if item.is_preferred { " [preferred]" } else { "" };
+                let preferred = if item.is_preferred {
+                    " [preferred]"
+                } else {
+                    ""
+                };
                 let kind = item.kind.as_deref().unwrap_or("");
                 out.push_str(&format!("  • {} ({}){}\n", item.title, kind, preferred));
             }
             out
         }
         ActionResult::Diagnostics(diags) => {
-            let errors = diags.iter().filter(|d| d.severity == DiagnosticSeverity::Error).count();
-            let warnings = diags.iter().filter(|d| d.severity == DiagnosticSeverity::Warning).count();
-            let mut out = format!("Diagnostics: {} error(s), {} warning(s)\n", errors, warnings);
+            let errors = diags
+                .iter()
+                .filter(|d| d.severity == DiagnosticSeverity::Error)
+                .count();
+            let warnings = diags
+                .iter()
+                .filter(|d| d.severity == DiagnosticSeverity::Warning)
+                .count();
+            let mut out = format!(
+                "Diagnostics: {} error(s), {} warning(s)\n",
+                errors, warnings
+            );
             for diag in diags.iter().take(10) {
                 let icon = match diag.severity {
                     DiagnosticSeverity::Error => "❌",
@@ -289,7 +307,10 @@ mod tests {
     #[test]
     fn lsp_server_for_common_extensions() {
         assert_eq!(lsp_server_for_extension("rs"), Some("rust-analyzer"));
-        assert_eq!(lsp_server_for_extension("ts"), Some("typescript-language-server"));
+        assert_eq!(
+            lsp_server_for_extension("ts"),
+            Some("typescript-language-server")
+        );
         assert_eq!(lsp_server_for_extension("py"), Some("pyright-langserver"));
         assert_eq!(lsp_server_for_extension("go"), Some("gopls"));
         assert_eq!(lsp_server_for_extension("md"), None);
@@ -375,9 +396,30 @@ mod tests {
     #[test]
     fn count_unique_files_deduplicates() {
         let edits = vec![
-            TextEdit { file: "a.rs".into(), start_line: 1, start_col: 0, end_line: 1, end_col: 5, new_text: "x".into() },
-            TextEdit { file: "a.rs".into(), start_line: 2, start_col: 0, end_line: 2, end_col: 5, new_text: "y".into() },
-            TextEdit { file: "b.rs".into(), start_line: 1, start_col: 0, end_line: 1, end_col: 5, new_text: "z".into() },
+            TextEdit {
+                file: "a.rs".into(),
+                start_line: 1,
+                start_col: 0,
+                end_line: 1,
+                end_col: 5,
+                new_text: "x".into(),
+            },
+            TextEdit {
+                file: "a.rs".into(),
+                start_line: 2,
+                start_col: 0,
+                end_line: 2,
+                end_col: 5,
+                new_text: "y".into(),
+            },
+            TextEdit {
+                file: "b.rs".into(),
+                start_line: 1,
+                start_col: 0,
+                end_line: 1,
+                end_col: 5,
+                new_text: "z".into(),
+            },
         ];
         assert_eq!(count_unique_files(&edits), 2);
     }

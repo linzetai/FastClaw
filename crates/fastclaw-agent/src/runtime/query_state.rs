@@ -343,8 +343,7 @@ impl QueryLoopState {
         }
         // Use Claude-Code style blocking limit: effective_window - 3K buffer
         // This is roughly 98% of context window (for 200K: 200K - 20K - 3K = 177K)
-        let blocking_limit =
-            super::context_compressor::compute_blocking_limit(context_window);
+        let blocking_limit = super::context_compressor::compute_blocking_limit(context_window);
         if estimated_tokens >= blocking_limit {
             Some(LoopTransition::Terminal(TerminalReason::BlockingLimit))
         } else {
@@ -826,7 +825,7 @@ mod tests {
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             },
             ChatMessage {
                 role: Role::User,
@@ -835,7 +834,7 @@ mod tests {
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             },
         ];
 

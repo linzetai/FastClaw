@@ -87,7 +87,8 @@ impl RestorationState {
         // Keep only most recent MAX_FILES_TO_RESTORE files
         if self.recent_files.len() > MAX_FILES_TO_RESTORE {
             // Sort by timestamp descending, keep most recent
-            self.recent_files.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+            self.recent_files
+                .sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
             self.recent_files.truncate(MAX_FILES_TO_RESTORE);
         }
     }
@@ -235,7 +236,11 @@ impl RestorationState {
 
             used_tokens += skill_tokens;
 
-            skills_content.push_str(&format!("---\n**Skill:** {} ({})\n\n", skill.name, skill.path.display()));
+            skills_content.push_str(&format!(
+                "---\n**Skill:** {} ({})\n\n",
+                skill.name,
+                skill.path.display()
+            ));
             skills_content.push_str(&content);
             if content.len() < skill.content.len() {
                 skills_content.push_str("\n... (truncated)");
@@ -328,7 +333,10 @@ mod tests {
         let truncated = truncate_to_tokens(content, 10);
         // Should break at a line boundary and be shorter than original
         assert!(truncated.ends_with('\n') || truncated.len() < content.len());
-        assert!(truncated.len() < content.len(), "should truncate long content");
+        assert!(
+            truncated.len() < content.len(),
+            "should truncate long content"
+        );
     }
 
     #[test]
@@ -368,7 +376,12 @@ mod tests {
         state.add_file(PathBuf::from("/test.txt"), "test content".to_string());
         let messages = state.generate_restoration_messages();
         assert!(!messages.is_empty());
-        assert!(messages[0].content.as_ref().unwrap().to_string().contains("Recently read files"));
+        assert!(messages[0]
+            .content
+            .as_ref()
+            .unwrap()
+            .to_string()
+            .contains("Recently read files"));
     }
 
     #[test]
@@ -407,10 +420,7 @@ mod tests {
     #[test]
     fn clear_plan_removes_plan_content() {
         let mut state = RestorationState::new();
-        state.set_plan(
-            PathBuf::from("/plans/test.md"),
-            "content".to_string(),
-        );
+        state.set_plan(PathBuf::from("/plans/test.md"), "content".to_string());
         assert!(state.plan_content.is_some());
         assert!(state.plan_path.is_some());
 

@@ -7,9 +7,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use fastclaw_evolution::{
-    Trajectory, TrajectoryOutcome, TrajectoryStep, TrajectoryStore,
-};
+use fastclaw_evolution::{Trajectory, TrajectoryOutcome, TrajectoryStep, TrajectoryStore};
 
 /// A single observation recorded during agent execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,12 +104,7 @@ impl ObservationStore {
         });
     }
 
-    pub fn record_compact(
-        &mut self,
-        tokens_before: usize,
-        tokens_after: usize,
-        method: &str,
-    ) {
+    pub fn record_compact(&mut self, tokens_before: usize, tokens_after: usize, method: &str) {
         let now_ms = self.start_time.elapsed().as_millis() as u64;
         self.observations.push(Observation {
             event_type: ObservationType::Compact,
@@ -238,12 +231,7 @@ impl RuntimeObserver {
             .record_llm_call(model, prompt_tokens, completion_tokens, duration);
     }
 
-    pub async fn record_compact(
-        &self,
-        tokens_before: usize,
-        tokens_after: usize,
-        method: &str,
-    ) {
+    pub async fn record_compact(&self, tokens_before: usize, tokens_after: usize, method: &str) {
         self.store
             .lock()
             .await

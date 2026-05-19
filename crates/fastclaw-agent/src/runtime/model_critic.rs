@@ -413,8 +413,10 @@ mod tests {
             TaskComplexity::Low
         );
         assert!(
-            estimate_complexity(TaskType::Coding, "refactor the authentication module to use async traits")
-                >= TaskComplexity::High
+            estimate_complexity(
+                TaskType::Coding,
+                "refactor the authentication module to use async traits"
+            ) >= TaskComplexity::High
         );
     }
 
@@ -442,10 +444,22 @@ mod tests {
             high_model: "claude-opus".into(),
         };
 
-        assert_eq!(select_model(TaskComplexity::Low, &config), Some("gpt-4o-mini"));
-        assert_eq!(select_model(TaskComplexity::Medium, &config), Some("gpt-4o"));
-        assert_eq!(select_model(TaskComplexity::High, &config), Some("claude-opus"));
-        assert_eq!(select_model(TaskComplexity::Critical, &config), Some("claude-opus"));
+        assert_eq!(
+            select_model(TaskComplexity::Low, &config),
+            Some("gpt-4o-mini")
+        );
+        assert_eq!(
+            select_model(TaskComplexity::Medium, &config),
+            Some("gpt-4o")
+        );
+        assert_eq!(
+            select_model(TaskComplexity::High, &config),
+            Some("claude-opus")
+        );
+        assert_eq!(
+            select_model(TaskComplexity::Critical, &config),
+            Some("claude-opus")
+        );
     }
 
     #[test]
@@ -503,7 +517,9 @@ mod tests {
     fn has_complexity_indicators_detects_patterns() {
         assert!(has_complexity_indicators("refactor the module"));
         assert!(has_complexity_indicators("migrate from v1 to v2"));
-        assert!(has_complexity_indicators("fix the trait bound error with lifetimes"));
+        assert!(has_complexity_indicators(
+            "fix the trait bound error with lifetimes"
+        ));
         assert!(!has_complexity_indicators("fix typo in readme"));
     }
 
@@ -515,13 +531,21 @@ mod tests {
         struct PanicProvider;
         #[async_trait]
         impl LlmProvider for PanicProvider {
-            async fn chat_completion(&self, _: &crate::llm::CompletionParams<'_>) -> anyhow::Result<ChatResponse> {
+            async fn chat_completion(
+                &self,
+                _: &crate::llm::CompletionParams<'_>,
+            ) -> anyhow::Result<ChatResponse> {
                 panic!("should not be called");
             }
             async fn chat_completion_stream(
                 &self,
                 _: &crate::llm::CompletionParams<'_>,
-            ) -> anyhow::Result<futures::stream::BoxStream<'static, anyhow::Result<fastclaw_core::types::StreamDelta>>> {
+            ) -> anyhow::Result<
+                futures::stream::BoxStream<
+                    'static,
+                    anyhow::Result<fastclaw_core::types::StreamDelta>,
+                >,
+            > {
                 panic!("should not be called");
             }
         }

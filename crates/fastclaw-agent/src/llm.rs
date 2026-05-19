@@ -1026,7 +1026,7 @@ impl AnthropicProvider {
                         Some(tool_calls)
                     },
                     tool_call_id: None,
-            compact_metadata: None,
+                    compact_metadata: None,
                 },
                 finish_reason: Some(finish_reason),
             }],

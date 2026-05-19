@@ -29,9 +29,6 @@ pub mod api_errors;
 pub mod cache_break_detection;
 pub mod context_assembly;
 pub(crate) mod context_budget;
-#[allow(dead_code)]
-pub mod lsp_actions;
-pub mod model_critic;
 pub(crate) mod context_compressor;
 pub mod cost_tracker;
 #[allow(dead_code)]
@@ -40,9 +37,13 @@ pub mod file_state_cache;
 pub mod hook_config;
 pub mod hook_events;
 pub mod hook_executor;
+#[allow(dead_code)]
+pub mod lsp_actions;
 pub mod magic_docs;
 #[allow(dead_code)]
 pub mod memory_selection;
+pub mod model_critic;
+pub(crate) mod observer;
 pub mod permissions;
 mod post_compact_restore;
 mod prompt_builder;
@@ -53,21 +54,20 @@ pub(crate) mod query_deps;
 pub mod query_engine;
 mod query_state;
 pub mod retry;
-pub(crate) mod observer;
 pub(crate) mod runtime_services;
 mod session_memory;
 pub mod side_query;
 mod stop_hooks;
-pub mod task_decomposer;
-pub mod undo_engine;
-#[allow(dead_code)]
-pub mod validation_pipeline;
 mod stream_engine;
 pub mod streaming_tool_executor;
+pub mod task_decomposer;
 mod tool_executor;
 pub mod tool_result_storage;
 mod trajectory;
+pub mod undo_engine;
 mod unified_compact;
+#[allow(dead_code)]
+pub mod validation_pipeline;
 
 pub use prompt_builder::{build_subagent_prompt_block, SubAgentPromptContext};
 
@@ -108,10 +108,7 @@ fn track_restoration_state(
         "Read" => {
             if let Ok(args) = serde_json::from_str::<serde_json::Value>(arguments) {
                 if let Some(path) = args.get("file_path").and_then(|p| p.as_str()) {
-                    restoration_state.add_file(
-                        std::path::PathBuf::from(path),
-                        output.to_string(),
-                    );
+                    restoration_state.add_file(std::path::PathBuf::from(path), output.to_string());
                 }
             }
         }
@@ -1158,15 +1155,25 @@ impl AgentRuntime {
             if !hints.is_empty() {
                 let hints_block = format!(
                     "\n─── Project Context ───\n{}\n───────────────────────\n",
-                    hints.iter().map(|h| format!("• {}", h)).collect::<Vec<_>>().join("\n")
+                    hints
+                        .iter()
+                        .map(|h| format!("• {}", h))
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 );
                 inject_system_block(&mut messages, &hints_block);
-                tracing::info!(hint_count = hints.len(), "context_assembly: project hints injected");
+                tracing::info!(
+                    hint_count = hints.len(),
+                    "context_assembly: project hints injected"
+                );
             }
         }
 
         // ── Extract last user message for downstream injections ─────────
-        let last_user_msg = request.messages.iter().rev()
+        let last_user_msg = request
+            .messages
+            .iter()
+            .rev()
             .find(|m| m.role == Role::User)
             .and_then(|m| m.text_content())
             .unwrap_or_default();
@@ -1178,9 +1185,10 @@ impl AgentRuntime {
                 model: config.model.model.clone(),
                 ..Default::default()
             };
-            if let Some(decomp) = task_decomposer::decompose_task(
-                &decomp_provider, &last_user_msg, &decomp_config
-            ).await {
+            if let Some(decomp) =
+                task_decomposer::decompose_task(&decomp_provider, &last_user_msg, &decomp_config)
+                    .await
+            {
                 if let Some(block) = task_decomposer::format_decomposition_for_prompt(&decomp) {
                     inject_system_block(&mut messages, &block);
                     tracing::info!(
@@ -1306,7 +1314,8 @@ impl AgentRuntime {
 
         // ── Magic Docs: inject relevant documentation ───────────────────
         {
-            let keywords: Vec<&str> = last_user_msg.split_whitespace()
+            let keywords: Vec<&str> = last_user_msg
+                .split_whitespace()
                 .filter(|w| w.len() > 3)
                 .take(10)
                 .collect();
@@ -1318,7 +1327,10 @@ impl AgentRuntime {
                         docs_content
                     );
                     inject_system_block(&mut messages, &docs_block);
-                    tracing::info!(chars = docs_content.len(), "magic_docs: documentation injected");
+                    tracing::info!(
+                        chars = docs_content.len(),
+                        "magic_docs: documentation injected"
+                    );
                 }
             }
         }
@@ -1361,7 +1373,9 @@ impl AgentRuntime {
             // Read plan file content before compression so it can be restored.
             if let Some(ref session_id) = request.session_id {
                 let plan_store = crate::builtin_tools::PlanFileStore::new(None);
-                state.restoration_state.populate_plan_from_store(session_id, &plan_store);
+                state
+                    .restoration_state
+                    .populate_plan_from_store(session_id, &plan_store);
             }
 
             // ── Unified context compaction (via QueryDeps) ─────────────────
@@ -1567,7 +1581,7 @@ impl AgentRuntime {
                             "perf: stream_connect_success"
                         );
                         s
-                    },
+                    }
                     Err(e) => {
                         tracing::error!(
                             error = %e,
@@ -1651,7 +1665,7 @@ impl AgentRuntime {
                                         name: None,
                                         tool_calls: None,
                                         tool_call_id: None,
-            compact_metadata: None,
+                                        compact_metadata: None,
                                     });
                                 }
                                 stream_resume_attempts += 1;
@@ -1747,9 +1761,7 @@ impl AgentRuntime {
                                 cache_read_tokens: 0,
                                 cache_creation_tokens: 0,
                             };
-                            if let Some(alert) =
-                                services.record_llm_usage(call_usage).await
-                            {
+                            if let Some(alert) = services.record_llm_usage(call_usage).await {
                                 match alert {
                                     cost_tracker::BudgetAlert::Warning => {
                                         let cost = services.accumulated_cost_usd().await;
@@ -1778,12 +1790,14 @@ impl AgentRuntime {
                             }
 
                             // ── Observer: record LLM call ──
-                            runtime_observer.record_llm_call(
-                                &model,
-                                u.prompt_tokens,
-                                u.completion_tokens,
-                                llm_call_t0.elapsed(),
-                            ).await;
+                            runtime_observer
+                                .record_llm_call(
+                                    &model,
+                                    u.prompt_tokens,
+                                    u.completion_tokens,
+                                    llm_call_t0.elapsed(),
+                                )
+                                .await;
 
                             // ── CacheBreakDetector: check for cache invalidation ──
                             let cache_usage = cache_break_detection::CacheAwareUsage {
@@ -1792,12 +1806,11 @@ impl AgentRuntime {
                                 cache_read_tokens: 0,
                                 cache_creation_tokens: 0,
                             };
-                            let cache_snapshot = cache_detector.pre_call_snapshot(
-                                "", &"", &model, false, false,
-                            );
-                            if let Some(report) = cache_detector.post_call_analyze(
-                                &cache_snapshot, &cache_usage
-                            ) {
+                            let cache_snapshot =
+                                cache_detector.pre_call_snapshot("", &"", &model, false, false);
+                            if let Some(report) =
+                                cache_detector.post_call_analyze(&cache_snapshot, &cache_usage)
+                            {
                                 tracing::warn!(
                                     cause = %report.summary(),
                                     "cache_break_detection: prompt cache break detected"
@@ -1904,7 +1917,7 @@ impl AgentRuntime {
                             name: None,
                             tool_calls: None,
                             tool_call_id: None,
-            compact_metadata: None,
+                            compact_metadata: None,
                         });
                     }
                     continue;
@@ -1923,13 +1936,16 @@ impl AgentRuntime {
                         };
                         if critic_config.enabled && !accumulated_content.is_empty() {
                             let critic_provider = self.provider();
-                            let task_type = task_decomposer::TaskType::from_str_loose_pub(&last_user_msg);
+                            let task_type =
+                                task_decomposer::TaskType::from_str_loose_pub(&last_user_msg);
                             if let Some(review) = model_critic::run_critic(
                                 &critic_provider,
                                 task_type,
                                 &accumulated_content,
                                 &critic_config,
-                            ).await {
+                            )
+                            .await
+                            {
                                 if !review.approved {
                                     if let Some(feedback) = review.format_for_injection() {
                                         tracing::info!(
@@ -1965,7 +1981,7 @@ impl AgentRuntime {
                                     name: None,
                                     tool_calls: None,
                                     tool_call_id: None,
-            compact_metadata: None,
+                                    compact_metadata: None,
                                 });
                             }
                             continue;
@@ -2008,7 +2024,7 @@ impl AgentRuntime {
                             name: None,
                             tool_calls: None,
                             tool_call_id: None,
-            compact_metadata: None,
+                            compact_metadata: None,
                         });
 
                         let summary_params = CompletionParams {
@@ -2071,9 +2087,7 @@ impl AgentRuntime {
                         false,
                     )
                     .await;
-                    services
-                        .fire_stop_hooks(&messages, &[])
-                        .await;
+                    services.fire_stop_hooks(&messages, &[]).await;
                     self.finalize_injected_skills(&injected_skill_ids, true)
                         .await;
                     self.record_completed_trajectory(request, config, &trajectory_steps, true)
@@ -2106,9 +2120,7 @@ impl AgentRuntime {
                     false,
                 )
                 .await;
-                services
-                    .fire_stop_hooks(&messages, &[])
-                    .await;
+                services.fire_stop_hooks(&messages, &[]).await;
                 self.finalize_injected_skills(&injected_skill_ids, true)
                     .await;
                 self.record_completed_trajectory(request, config, &trajectory_steps, true)
@@ -2131,7 +2143,7 @@ impl AgentRuntime {
                 name: None,
                 tool_calls: Some(assembled_calls.clone()),
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             });
 
             // Emit ToolExecuting events for all tool calls first.
@@ -2211,7 +2223,10 @@ impl AgentRuntime {
                 }
 
                 // ── UndoEngine + FilePersistence: capture file snapshot before edit ──
-                if matches!(tool_name.as_str(), "edit_file" | "write_file" | "create_file" | "str_replace_editor") {
+                if matches!(
+                    tool_name.as_str(),
+                    "edit_file" | "write_file" | "create_file" | "str_replace_editor"
+                ) {
                     if let Some(file_path) = extract_file_path_from_args(&arguments) {
                         let file_exists = file_path.exists();
                         if let Ok(content) = std::fs::read_to_string(&file_path) {
@@ -2262,12 +2277,14 @@ impl AgentRuntime {
                     .await;
 
                 // ── Observer: record tool call observation ──
-                runtime_observer.record_tool_call(
-                    &tool_name,
-                    result.success,
-                    tool_start_time.elapsed(),
-                    &result.output.chars().take(200).collect::<String>(),
-                ).await;
+                runtime_observer
+                    .record_tool_call(
+                        &tool_name,
+                        result.success,
+                        tool_start_time.elapsed(),
+                        &result.output.chars().take(200).collect::<String>(),
+                    )
+                    .await;
 
                 trajectory_steps.push(TrajectoryStep {
                     role: "assistant".into(),
@@ -2365,7 +2382,9 @@ impl AgentRuntime {
                 }
 
                 // ── ValidationPipeline: append findings to tool output ───
-                let work_dir_for_validation = request.work_dir.as_ref()
+                let work_dir_for_validation = request
+                    .work_dir
+                    .as_ref()
                     .map(std::path::PathBuf::from)
                     .unwrap_or_else(|| std::path::PathBuf::from("."));
                 let val_ctx = validation_pipeline::ValidationContext {
@@ -2377,9 +2396,11 @@ impl AgentRuntime {
                 };
                 let val_result = validation_pipeline.validate(&val_ctx);
                 let validation_suffix = if !val_result.findings.is_empty() {
-                    let msgs: Vec<String> = val_result.findings.iter().map(|f| {
-                        format!("[{:?}] {}", f.severity, f.message)
-                    }).collect();
+                    let msgs: Vec<String> = val_result
+                        .findings
+                        .iter()
+                        .map(|f| format!("[{:?}] {}", f.severity, f.message))
+                        .collect();
                     tracing::info!(
                         tool = %tool_name,
                         findings = msgs.len(),
@@ -2422,8 +2443,12 @@ impl AgentRuntime {
                     &tool_output_with_validation,
                     max_chars,
                 );
-                let header =
-                    semantic_header(&tool_name, &arguments, &tool_output_with_validation, result.success);
+                let header = semantic_header(
+                    &tool_name,
+                    &arguments,
+                    &tool_output_with_validation,
+                    result.success,
+                );
                 let llm_out = format!("{header}\n{processed}");
                 let _ = send_stream_event(
                     tx,
@@ -2851,7 +2876,7 @@ impl AgentRuntime {
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             },
         );
     }
@@ -2910,21 +2935,25 @@ impl AgentRuntime {
                     }
                 });
                 if has_conflicting_identity {
-                    if let Some(last_user_idx) = messages.iter().rposition(|m| m.role == Role::User) {
+                    if let Some(last_user_idx) = messages.iter().rposition(|m| m.role == Role::User)
+                    {
                         let reminder = format!(
                             "[Model Switch Notice] The model has been switched. You are now {}. \
                              Disregard any previous assistant messages claiming a different model identity.",
                             req_model
                         );
-                        messages.insert(last_user_idx, ChatMessage {
-                            role: Role::System,
-                            content: Some(serde_json::Value::String(reminder)),
-                            reasoning_content: None,
-                            name: None,
-                            tool_calls: None,
-                            tool_call_id: None,
-            compact_metadata: None,
-                        });
+                        messages.insert(
+                            last_user_idx,
+                            ChatMessage {
+                                role: Role::System,
+                                content: Some(serde_json::Value::String(reminder)),
+                                reasoning_content: None,
+                                name: None,
+                                tool_calls: None,
+                                tool_call_id: None,
+                                compact_metadata: None,
+                            },
+                        );
                     }
                 }
             }
@@ -3232,7 +3261,7 @@ mod stream_resume_tests {
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             }],
             agent_id: None,
             session_id: None,

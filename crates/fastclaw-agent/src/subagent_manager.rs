@@ -280,7 +280,7 @@ impl SubAgentManager {
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-            compact_metadata: None,
+                compact_metadata: None,
             });
         }
         messages.push(ChatMessage {

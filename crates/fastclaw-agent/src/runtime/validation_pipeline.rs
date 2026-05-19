@@ -80,7 +80,10 @@ impl ValidationResult {
             };
 
             if let (Some(file), Some(line)) = (&finding.file, finding.line) {
-                out.push_str(&format!("{} {}:{} — {}\n", icon, file, line, finding.message));
+                out.push_str(&format!(
+                    "{} {}:{} — {}\n",
+                    icon, file, line, finding.message
+                ));
             } else if let Some(file) = &finding.file {
                 out.push_str(&format!("{} {} — {}\n", icon, file, finding.message));
             } else {
@@ -486,12 +489,7 @@ mod tests {
     #[test]
     fn shell_safety_detects_rm_rf() {
         let v = ShellSafetyValidator;
-        let ctx = test_ctx(
-            "shell_exec",
-            r#"{"command": "rm -rf /"}"#,
-            "",
-            true,
-        );
+        let ctx = test_ctx("shell_exec", r#"{"command": "rm -rf /"}"#, "", true);
         let findings = v.validate(&ctx);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, ValidationSeverity::Error);

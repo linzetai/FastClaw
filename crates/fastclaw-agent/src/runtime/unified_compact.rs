@@ -322,87 +322,86 @@ pub(crate) async fn unified_pre_query_compact(
     // periodic_cleanup uses a lowered threshold (0.25) to proactively compress.
     // Preemptive compact uses the buffer-based threshold (matches Claude-Code).
     // Skip LLM compression entirely if disabled via feature gate.
-    let compress_result =
-        if gates.enable_llm_compact
-            && (force_compact
-                || periodic_cleanup
-                || (should_preemptive_compact && pipeline.should_attempt_autocompact()))
-        {
-            let local_estimate = current_estimate;
-            let effective_window = if force_compact { 1 } else { context_window };
+    let compress_result = if gates.enable_llm_compact
+        && (force_compact
+            || periodic_cleanup
+            || (should_preemptive_compact && pipeline.should_attempt_autocompact()))
+    {
+        let local_estimate = current_estimate;
+        let effective_window = if force_compact { 1 } else { context_window };
 
-            let dynamic_threshold = if force_compact {
-                0.0_f32
-            } else if periodic_cleanup {
-                0.25_f32
-            } else if should_preemptive_compact {
-                // Preemptive threshold: trigger when tokens > effective_window - buffer
-                // Compute as a fraction for the existing compression logic
-                let effective = context_compressor::effective_context_window(context_window);
-                if effective > 0 {
-                    (preemptive_threshold as f32) / (effective as f32)
-                } else {
-                    0.50
-                }
-            } else if enable_smart_compression {
-                let (sys_tok, tool_tok, conv_tok) = estimate_token_distribution(messages);
-                let has_active_task = todo_store.is_some_and(|t| t.has_in_progress_items());
-                context_compressor::compute_compression_threshold(
-                    sys_tok,
-                    tool_tok,
-                    conv_tok,
-                    context_window,
-                    has_active_task,
-                )
+        let dynamic_threshold = if force_compact {
+            0.0_f32
+        } else if periodic_cleanup {
+            0.25_f32
+        } else if should_preemptive_compact {
+            // Preemptive threshold: trigger when tokens > effective_window - buffer
+            // Compute as a fraction for the existing compression logic
+            let effective = context_compressor::effective_context_window(context_window);
+            if effective > 0 {
+                (preemptive_threshold as f32) / (effective as f32)
             } else {
-                context_compressor::COMPRESSION_THRESHOLD
-            };
-
-            tracing::debug!(
-                local_estimate,
-                api_prompt_tokens = last_estimated_tokens,
-                force_compact,
-                periodic_cleanup,
-                should_preemptive_compact,
-                preemptive_threshold,
-                blocking_limit,
-                dynamic_threshold,
-                "pre-compact: entering LLM compression"
-            );
-            let result = context_compressor::try_compress_chat_with_threshold(
-                messages,
-                effective_window,
-                provider,
-                model,
-                last_estimated_tokens,
-                todo_store,
-                dynamic_threshold,
-            )
-            .await;
-
-            if result.compressed {
-                pipeline.record_autocompact_success();
-                tracing::info!(
-                    original = result.original_tokens,
-                    new = result.new_tokens,
-                    saved = result.original_tokens.saturating_sub(result.new_tokens),
-                    force_compact,
-                    should_preemptive_compact,
-                    "post-compact: LLM compression reduced context"
-                );
-            } else if result.original_tokens > 0 && !force_compact {
-                pipeline.record_autocompact_failure();
+                0.50
             }
-            result
+        } else if enable_smart_compression {
+            let (sys_tok, tool_tok, conv_tok) = estimate_token_distribution(messages);
+            let has_active_task = todo_store.is_some_and(|t| t.has_in_progress_items());
+            context_compressor::compute_compression_threshold(
+                sys_tok,
+                tool_tok,
+                conv_tok,
+                context_window,
+                has_active_task,
+            )
         } else {
-            tracing::debug!(
-                local_estimate = current_estimate,
-                preemptive_threshold,
-                circuit_breaker_ok = pipeline.should_attempt_autocompact(),
-                "LLM autocompact skipped"
-            );
-            context_compressor::CompressionResult::no_op(messages.clone())
+            context_compressor::COMPRESSION_THRESHOLD
         };
+
+        tracing::debug!(
+            local_estimate,
+            api_prompt_tokens = last_estimated_tokens,
+            force_compact,
+            periodic_cleanup,
+            should_preemptive_compact,
+            preemptive_threshold,
+            blocking_limit,
+            dynamic_threshold,
+            "pre-compact: entering LLM compression"
+        );
+        let result = context_compressor::try_compress_chat_with_threshold(
+            messages,
+            effective_window,
+            provider,
+            model,
+            last_estimated_tokens,
+            todo_store,
+            dynamic_threshold,
+        )
+        .await;
+
+        if result.compressed {
+            pipeline.record_autocompact_success();
+            tracing::info!(
+                original = result.original_tokens,
+                new = result.new_tokens,
+                saved = result.original_tokens.saturating_sub(result.new_tokens),
+                force_compact,
+                should_preemptive_compact,
+                "post-compact: LLM compression reduced context"
+            );
+        } else if result.original_tokens > 0 && !force_compact {
+            pipeline.record_autocompact_failure();
+        }
+        result
+    } else {
+        tracing::debug!(
+            local_estimate = current_estimate,
+            preemptive_threshold,
+            circuit_breaker_ok = pipeline.should_attempt_autocompact(),
+            "LLM autocompact skipped"
+        );
+        context_compressor::CompressionResult::no_op(messages.clone())
+    };
 
     // Step 7: Post-compact state restoration
     // After LLM compression, inject restoration messages for files/skills/plan
@@ -422,9 +421,7 @@ pub(crate) async fn unified_pre_query_compact(
                 messages.insert(insert_pos, msg);
             }
             state_restored = true;
-            tracing::debug!(
-                "post-compact state restoration injected context"
-            );
+            tracing::debug!("post-compact state restoration injected context");
         }
     }
 
