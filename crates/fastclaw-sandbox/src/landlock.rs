@@ -168,10 +168,10 @@ fn build_linux_sandbox_setup(
         FileSystemSandboxKind::Unrestricted | FileSystemSandboxKind::ExternalSandbox => None,
     };
 
-    let network_seccomp = if !net_policy.is_enabled() {
-        Some(NetworkSeccompMode::Restricted)
-    } else {
+    let network_seccomp = if net_policy.is_enabled() {
         None
+    } else {
+        Some(NetworkSeccompMode::Restricted)
     };
 
     if writable_roots.is_none() && network_seccomp.is_none() {

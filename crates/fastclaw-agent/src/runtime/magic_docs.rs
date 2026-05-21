@@ -13,9 +13,12 @@ use std::path::{Path, PathBuf};
 pub struct DocEntry {
     pub id: String,
     pub title: String,
+    #[allow(dead_code)] // TODO(integrate): expose in doc search diagnostics
     pub headers: Vec<String>,
     pub content: String,
+    #[allow(dead_code)] // TODO(integrate): expose in doc search diagnostics
     pub source_path: PathBuf,
+    #[allow(dead_code)] // TODO(integrate): expose in doc search diagnostics
     pub char_count: usize,
 }
 
@@ -31,6 +34,7 @@ pub struct DocIndex {
 pub struct MagicDocsConfig {
     pub enabled: bool,
     pub docs_dir: PathBuf,
+    #[allow(dead_code)] // TODO(integrate): use as default for select_for_injection
     pub max_injection_chars: usize,
 }
 
@@ -194,6 +198,7 @@ impl DocIndex {
         self.entries.len()
     }
 
+    #[allow(dead_code)] // TODO(integrate): skip injection when index empty
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use fastclaw_security::{
@@ -345,7 +346,7 @@ fn build_filesystem_policy(fs_policy: &FileSystemSandboxPolicy, cwd: &Path) -> S
             if !readable_paths.is_empty() {
                 let roots: Vec<SeatbeltAccessRoot> = readable_paths
                     .iter()
-                    .map(|p| SeatbeltAccessRoot::simple(p))
+                    .map(SeatbeltAccessRoot::simple)
                     .collect();
                 let (_params, policy) =
                     build_seatbelt_access_policy("file-read*", "READABLE_ROOT", &roots);
@@ -497,12 +498,9 @@ fn unix_socket_policy(proxy: &ProxyPolicyInputs) -> String {
     if let UnixDomainSocketPolicy::Restricted { allowed } = &proxy.unix_socket_policy {
         for path in allowed {
             let display = path.display();
-            policy.push_str(&format!(
-                "(allow network-bind (local unix-socket (subpath \"{display}\")))\n"
-            ));
-            policy.push_str(&format!(
-                "(allow network-outbound (remote unix-socket (subpath \"{display}\")))\n"
-            ));
+            let _ = writeln!(policy, "(allow network-bind (local unix-socket (subpath \"{display}\")))");
+            let _ = writeln!(policy, "(allow network-outbound (remote unix-socket (subpath \"{display}\")))");
+
         }
     }
 
@@ -551,9 +549,7 @@ pub fn dynamic_network_policy(
         }
 
         for port in &proxy.ports {
-            policy.push_str(&format!(
-                "(allow network-outbound (remote ip \"localhost:{port}\"))\n"
-            ));
+            let _ = writeln!(policy, "(allow network-outbound (remote ip \"localhost:{port}\"))");
         }
 
         let socket_policy = unix_socket_policy(proxy);
@@ -601,7 +597,7 @@ pub struct CreateSeatbeltCommandArgsParams<'a> {
 /// When `enforce_managed_network` is true and a proxy is configured, the sandbox
 /// only allows loopback connections to the proxy ports. When `enforce_managed_network`
 /// is false, the base `net_policy` controls network access.
-pub fn transform_with_proxy(params: CreateSeatbeltCommandArgsParams<'_>) -> SandboxedCommand {
+pub fn transform_with_proxy(params: &CreateSeatbeltCommandArgsParams<'_>) -> SandboxedCommand {
     let policy = build_seatbelt_policy_with_proxy(
         params.fs_policy,
         params.net_policy,
@@ -1070,7 +1066,7 @@ mod tests {
             network_proxy: None,
             extra_allow_unix_sockets: vec![],
         };
-        let cmd = transform_with_proxy(params);
+        let cmd = transform_with_proxy(&params);
         assert_eq!(cmd.program, "/usr/bin/sandbox-exec");
         assert!(cmd.args.contains(&"-p".to_string()));
         assert!(cmd.args.contains(&"echo hello".to_string()));
@@ -1094,7 +1090,7 @@ mod tests {
             network_proxy: Some(proxy),
             extra_allow_unix_sockets: vec![],
         };
-        let cmd = transform_with_proxy(params);
+        let cmd = transform_with_proxy(&params);
         let policy = &cmd.args[1];
         assert!(policy.contains("localhost:8080"));
     }
@@ -1118,7 +1114,7 @@ mod tests {
             }),
             extra_allow_unix_sockets: vec!["/var/run/docker.sock".into()],
         };
-        let cmd = transform_with_proxy(params);
+        let cmd = transform_with_proxy(&params);
         let policy = &cmd.args[1];
         assert!(policy.contains("docker.sock"));
     }
@@ -1135,7 +1131,7 @@ mod tests {
             network_proxy: None,
             extra_allow_unix_sockets: vec![],
         };
-        let cmd = transform_with_proxy(params);
+        let cmd = transform_with_proxy(&params);
         let policy = &cmd.args[1];
         assert!(policy.contains("(allow network-outbound)"));
     }
@@ -1159,7 +1155,7 @@ mod tests {
             network_proxy: Some(proxy),
             extra_allow_unix_sockets: vec![],
         };
-        let cmd = transform_with_proxy(params);
+        let cmd = transform_with_proxy(&params);
         let policy = &cmd.args[1];
         assert!(policy.contains("WRITABLE_ROOT"));
         assert!(policy.contains("deny file-read*"));
@@ -1254,7 +1250,7 @@ mod tests {
             network_proxy: None,
             extra_allow_unix_sockets: vec![],
         };
-        let cmd = transform_with_proxy(params);
+        let cmd = transform_with_proxy(&params);
         assert_eq!(cmd.env.get("FASTCLAW_SANDBOXED"), Some(&"1".to_string()));
         assert_eq!(cmd.sandbox_type, SandboxType::Seatbelt);
     }

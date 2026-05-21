@@ -61,17 +61,6 @@ impl RuntimeServices {
         }
     }
 
-    /// Empty services — no hooks, no cost tracking, no docs, no permissions.
-    pub fn none(abort_token: CancellationToken) -> Self {
-        Self {
-            hooks: None,
-            cost_tracker: None,
-            magic_docs: None,
-            permissions: None,
-            abort_token,
-        }
-    }
-
     // ── Hook integration ──────────────────────────────────────────────────
 
     /// Fire PreToolUse hooks. Returns the first blocking result, if any.
@@ -306,6 +295,20 @@ fn spec_to_registered_hook(
         handler,
         timeout: spec.timeout(),
         blocking: spec.blocking,
+    }
+}
+
+#[cfg(test)]
+impl RuntimeServices {
+    /// Empty services — no hooks, no cost tracking, no docs, no permissions.
+    pub fn none(abort_token: CancellationToken) -> Self {
+        Self {
+            hooks: None,
+            cost_tracker: None,
+            magic_docs: None,
+            permissions: None,
+            abort_token,
+        }
     }
 }
 

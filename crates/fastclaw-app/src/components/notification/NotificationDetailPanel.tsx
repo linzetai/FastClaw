@@ -12,7 +12,7 @@ function parseUtc(ts: string): Date {
   return new Date(ts.replace(" ", "T") + "Z");
 }
 
-function categoryLabel(category: string): { icon: ReactNode; label: string } {
+function categoryLabel(category?: string): { icon: ReactNode; label: string } {
   switch (category) {
     case "cron":
       return { icon: <Clock size={14} />, label: "定时任务" };

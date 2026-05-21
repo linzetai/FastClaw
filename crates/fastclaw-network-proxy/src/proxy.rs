@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 use crate::http_proxy::run_http_proxy_on_listener;
@@ -17,12 +16,6 @@ pub struct NetworkProxy {
     http_addr: SocketAddr,
     socks_addr: Option<SocketAddr>,
     socks_enabled: bool,
-    runtime_settings: Arc<RwLock<NetworkProxyRuntimeSettings>>,
-}
-
-#[derive(Debug, Clone)]
-struct NetworkProxyRuntimeSettings {
-    allow_local_binding: bool,
 }
 
 impl std::fmt::Debug for NetworkProxy {
@@ -148,7 +141,7 @@ impl NetworkProxy {
 }
 
 /// Builder for constructing a `NetworkProxy`.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct NetworkProxyBuilder {
     state: Option<Arc<NetworkProxyState>>,
     http_addr: Option<SocketAddr>,
@@ -163,18 +156,6 @@ pub trait NetworkPolicyDecider: Send + Sync + 'static {
         &self,
         request: &crate::network_policy::NetworkPolicyRequest,
     ) -> NetworkDecision;
-}
-
-impl Default for NetworkProxyBuilder {
-    fn default() -> Self {
-        Self {
-            state: None,
-            http_addr: None,
-            socks_addr: None,
-            policy_decider: None,
-            blocked_request_observer: None,
-        }
-    }
 }
 
 impl NetworkProxyBuilder {
@@ -226,8 +207,6 @@ impl NetworkProxyBuilder {
             .local_addr()
             .map_err(|e| ProxyBuildError::BindFailed(format!("http local_addr: {e}")))?;
 
-        let config = state.config_state().await;
-
         if let Some(observer) = self.blocked_request_observer {
             state.set_blocked_request_observer(observer).await;
         }
@@ -266,9 +245,6 @@ impl NetworkProxyBuilder {
             http_addr,
             socks_addr,
             socks_enabled,
-            runtime_settings: Arc::new(RwLock::new(NetworkProxyRuntimeSettings {
-                allow_local_binding: config.settings.allow_local_binding,
-            })),
         };
 
         let handle = NetworkProxyHandle {
@@ -392,9 +368,6 @@ mod tests {
             http_addr: "127.0.0.1:8080".parse().unwrap(),
             socks_addr: None,
             socks_enabled: false,
-            runtime_settings: Arc::new(RwLock::new(NetworkProxyRuntimeSettings {
-                allow_local_binding: false,
-            })),
         };
         let env = proxy.env_vars();
         assert_eq!(env.get("HTTP_PROXY").unwrap(), "http://127.0.0.1:8080");

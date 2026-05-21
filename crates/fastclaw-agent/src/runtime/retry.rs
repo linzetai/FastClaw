@@ -19,6 +19,7 @@ use super::api_errors::{ApiErrorClassifier, ApiErrorKind};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuerySource {
     /// User-facing main loop query.
+    #[allow(dead_code)] // used in tests; production paths use Agent/Background
     MainThread,
     /// SubAgent or delegated task.
     Agent,
@@ -112,11 +113,13 @@ impl RetryError {
         }
     }
 
+    #[allow(dead_code)] // test helpers for constructing RetryError
     pub fn with_status(mut self, status: u16) -> Self {
         self.status = Some(status);
         self
     }
 
+    #[allow(dead_code)] // test helpers for constructing RetryError
     pub fn with_body(mut self, body: String) -> Self {
         self.response_body = Some(body);
         self

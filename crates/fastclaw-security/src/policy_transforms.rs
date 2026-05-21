@@ -337,7 +337,7 @@ pub fn merge_permission_profiles(
 pub fn intersect_permission_profiles(
     requested: Option<&crate::AdditionalPermissionProfile>,
     granted: Option<&crate::AdditionalPermissionProfile>,
-    cwd: &Path,
+    _cwd: &Path,
 ) -> Option<crate::AdditionalPermissionProfile> {
     match (requested, granted) {
         (None, _) | (_, None) => None,

@@ -49,6 +49,7 @@ pub struct Decomposition {
     /// Ordered list of steps.
     pub steps: Vec<String>,
     /// Whether the task was deemed complex enough to warrant decomposition.
+    #[allow(dead_code)] // TODO(integrate): expose in decomposition stream events
     pub was_decomposed: bool,
 }
 
@@ -251,7 +252,7 @@ fn parse_decomposition(response: &str, max_steps: usize) -> Decomposition {
             let stripped = line.trim_start_matches(|c: char| {
                 c.is_ascii_digit() || c == '.' || c == ')' || c == ' '
             });
-            let stripped = stripped.trim_start_matches(|c: char| c == '-' || c == '*' || c == ' ');
+            let stripped = stripped.trim_start_matches(['-', '*', ' ']);
             let stripped = stripped.trim();
             if stripped.len() >= 5 {
                 Some(stripped.to_string())

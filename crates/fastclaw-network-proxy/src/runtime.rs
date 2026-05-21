@@ -366,7 +366,7 @@ impl NetworkProxyState {
     /// 4. Dynamic allowed domains → Allowed
     /// 5. Static allow/deny globsets → Allowed / ExplicitlyDenied
     /// 6. Default → NotAllowed
-    pub async fn host_blocked(&self, host: &str, port: u16) -> anyhow::Result<HostBlockDecision> {
+    pub async fn host_blocked(&self, host: &str, _port: u16) -> anyhow::Result<HostBlockDecision> {
         let mode = self.network_mode().await;
         if matches!(mode, NetworkMode::Off) {
             return Ok(HostBlockDecision::Allowed);

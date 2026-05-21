@@ -15,15 +15,6 @@ pub enum HookMatcher {
     ToolPattern { pattern: String },
 }
 
-impl HookMatcher {
-    pub fn matches(&self, tool_name: &str) -> bool {
-        match self {
-            Self::AllTools => true,
-            Self::ToolName { name } => name == tool_name,
-            Self::ToolPattern { pattern } => super::hook_executor::glob_match(pattern, tool_name),
-        }
-    }
-}
 
 /// A single hook specification loaded from configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +82,21 @@ impl HookConfig {
         self.pre_tool_use.is_empty() && self.post_tool_use.is_empty() && self.stop.is_empty()
     }
 
+}
+
+#[cfg(test)]
+impl HookMatcher {
+    pub fn matches(&self, tool_name: &str) -> bool {
+        match self {
+            Self::AllTools => true,
+            Self::ToolName { name } => name == tool_name,
+            Self::ToolPattern { pattern } => super::hook_executor::glob_match(pattern, tool_name),
+        }
+    }
+}
+
+#[cfg(test)]
+impl HookConfig {
     /// Total number of hook specs across all event types.
     pub fn total_hooks(&self) -> usize {
         self.pre_tool_use.len() + self.post_tool_use.len() + self.stop.len()

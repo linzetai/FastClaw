@@ -30,7 +30,7 @@ function relativeTime(iso: string): string {
   return parseUtc(iso).toLocaleDateString();
 }
 
-function categoryIcon(category: string): ReactNode {
+function categoryIcon(category?: string): ReactNode {
   switch (category) {
     case "cron":
       return <Clock size={16} strokeWidth={1.5} />;

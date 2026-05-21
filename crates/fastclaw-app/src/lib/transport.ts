@@ -102,12 +102,33 @@ export async function importData(data: Uint8Array, options: ImportOptions): Prom
 
 export type ExportFormat = "markdown" | "json";
 
+export interface SessionExportResult {
+  success: boolean;
+  path?: string;
+  filename: string;
+  content: string;
+  mimeType: string;
+}
+
 export async function exportSessionContent(
+  sessionId: string,
+  format: ExportFormat,
+): Promise<SessionExportResult> {
+  const resp = (await wsClient.send("sessions.export", { sessionId, format })) as {
+    data?: { filename?: string; content?: string; mimeType?: string };
+  };
+  const filename = resp?.data?.filename ?? `session.${format === "json" ? "json" : "md"}`;
+  const content = resp?.data?.content ?? "";
+  const mimeType = resp?.data?.mimeType ?? (format === "json" ? "application/json" : "text/markdown");
+  return { success: true, filename, content, mimeType };
+}
+
+export async function saveSessionFile(
   content: string,
   filename: string,
   mimeType: string,
 ): Promise<{ success: boolean; path?: string }> {
-  if (!isTauri) throw new Error("export only available in desktop mode");
+  if (!isTauri) throw new Error("save only available in desktop mode");
   return tauriInvoke("export_session_content", { content, filename, mimeType });
 }
 
@@ -485,6 +506,158 @@ export async function submitToolAnswer(requestId: string, answer: string): Promi
     data?: { ok?: boolean };
   };
   return { ok: resp?.data?.ok ?? false };
+}
+
+// ─── Tools (raw IPC) ───
+
+export async function listToolsIpc(): Promise<Array<{ type?: string; function?: { name?: string; description?: string } }>> {
+  const resp = (await wsClient.send("tools.raw_list")) as {
+    data?: { tools?: Array<{ type?: string; function?: { name?: string; description?: string } }> };
+  };
+  return resp?.data?.tools ?? [];
+}
+
+// ─── Cron Jobs ───
+
+export interface CronJobAction {
+  type: "agent_chat" | "webhook";
+  agent_id?: string;
+  message?: string;
+  url?: string;
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+export interface NotifyChannel {
+  channel_id: string;
+  target_id: string;
+  target_type: "p2p" | "group";
+}
+
+export interface CronJob {
+  id: string;
+  name: string;
+  schedule: string;
+  enabled: boolean;
+  agentId?: string;
+  action: CronJobAction;
+  status?: string;
+  run_count?: number;
+  error_count?: number;
+  notify_channels?: NotifyChannel[];
+  last_run?: string | null;
+  next_run?: string | null;
+  last_error?: string | null;
+  created_at?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CronJobRun {
+  id: string;
+  jobId: string;
+  status: "ok" | "running" | "completed" | "failed";
+  started_at: string;
+  ended_at?: string;
+  output?: string;
+  error?: string;
+}
+
+export async function cronListJobs(agentId?: string): Promise<{ jobs: CronJob[] }> {
+  const resp = (await wsClient.send("cron.list_jobs", agentId ? { agentId } : {})) as {
+    data?: { jobs?: CronJob[] };
+  };
+  return { jobs: resp?.data?.jobs ?? [] };
+}
+
+export async function cronGetJob(jobId: string): Promise<CronJob | null> {
+  const resp = (await wsClient.send("cron.get_job", { jobId })) as {
+    data?: CronJob;
+  };
+  return resp?.data ?? null;
+}
+
+export async function cronUpsertJob(job: Partial<CronJob> & { name: string; schedule: string; action: CronJobAction }): Promise<{ ok: boolean; jobId?: string }> {
+  const resp = (await wsClient.send("cron.upsert_job", { job })) as {
+    data?: { ok?: boolean; jobId?: string };
+  };
+  return { ok: resp?.data?.ok ?? false, jobId: resp?.data?.jobId };
+}
+
+export async function cronDeleteJob(jobId: string): Promise<{ ok: boolean }> {
+  const resp = (await wsClient.send("cron.delete_job", { jobId })) as {
+    data?: { ok?: boolean };
+  };
+  return { ok: resp?.data?.ok ?? false };
+}
+
+export async function cronListRuns(jobId: string, limit?: number): Promise<{ runs: CronJobRun[] }> {
+  const resp = (await wsClient.send("cron.list_runs", { jobId, limit: limit ?? 20 })) as {
+    data?: { runs?: CronJobRun[] };
+  };
+  return { runs: resp?.data?.runs ?? [] };
+}
+
+// ─── Notifications ───
+
+export interface AppNotification {
+  id: string;
+  type: "info" | "warning" | "error" | "success";
+  category?: string;
+  title: string;
+  message: string;
+  body?: string;
+  detail?: string;
+  isRead: boolean;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export async function notificationUnreadCount(): Promise<{ count: number }> {
+  const resp = (await wsClient.send("notifications.unread_count")) as {
+    data?: { count?: number };
+  };
+  return { count: resp?.data?.count ?? 0 };
+}
+
+export async function notificationList(limit = 50): Promise<{ notifications: AppNotification[]; unreadCount: number }> {
+  const resp = (await wsClient.send("notifications.list", { limit })) as {
+    data?: { notifications?: AppNotification[]; unreadCount?: number };
+  };
+  return {
+    notifications: resp?.data?.notifications ?? [],
+    unreadCount: resp?.data?.unreadCount ?? 0,
+  };
+}
+
+export async function notificationMarkRead(notificationId: string): Promise<{ unreadCount: number }> {
+  const resp = (await wsClient.send("notifications.mark_read", { notificationId })) as {
+    data?: { unreadCount?: number };
+  };
+  return { unreadCount: resp?.data?.unreadCount ?? 0 };
+}
+
+export async function notificationMarkAllRead(): Promise<{ unreadCount: number }> {
+  const resp = (await wsClient.send("notifications.mark_all_read")) as {
+    data?: { unreadCount?: number };
+  };
+  return { unreadCount: resp?.data?.unreadCount ?? 0 };
+}
+
+export async function notificationDelete(notificationId: string): Promise<void> {
+  await wsClient.send("notifications.delete", { notificationId });
+}
+
+// ─── Model Connection Test ───
+
+export async function testModelConnection(
+  url: string,
+  apiKey: string,
+  model?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isTauri) throw new Error("testModelConnection only available in desktop mode");
+  return tauriInvoke("test_model_connection", { url, apiKey, model });
 }
 
 // ─── Backward Compatibility Aliases ───

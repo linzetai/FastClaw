@@ -353,9 +353,8 @@ impl PolicyEngine {
             return eval;
         }
 
-        let basename = match executable_name::executable_path_lookup_key(Path::new(first)) {
-            Some(b) => b,
-            None => return eval,
+        let Some(basename) = executable_name::executable_path_lookup_key(Path::new(first)) else {
+            return eval;
         };
 
         let mut resolved_tokens: Vec<&str> = Vec::with_capacity(command_tokens.len());
@@ -390,7 +389,7 @@ impl PolicyEngine {
                 all_rules.push(rule.clone());
             }
             let priority = eval.decision.priority();
-            if best.as_ref().map_or(true, |b| priority > b.priority()) {
+            if best.as_ref().is_none_or(|b| priority > b.priority()) {
                 best = Some(eval.decision);
             }
         }
@@ -526,7 +525,7 @@ impl PolicyEngine {
                                     }
                                 }
                             }
-                            _ => {}
+                            config::PatternElement::Exact(_) => {}
                         }
                     }
                 }
@@ -541,6 +540,7 @@ impl PolicyEngine {
     /// - Prefix rules from overlay layers are appended (lower priority).
     /// - Network rules from overlay layers are appended.
     /// - Host executables from overlay override by name.
+    #[must_use]
     pub fn merge_overlay(&self, overlay: &PolicyEngine) -> PolicyEngine {
         let mut combined_layers = self.layers.clone();
         for overlay_layer in &overlay.layers {

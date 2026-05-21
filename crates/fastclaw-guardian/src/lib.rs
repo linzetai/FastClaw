@@ -49,19 +49,14 @@ pub enum GuardianRiskLevel {
 }
 
 /// How much authorization the user has provided for this action.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GuardianUserAuthorization {
+    #[default]
     Unknown,
     Low,
     Medium,
     High,
-}
-
-impl Default for GuardianUserAuthorization {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 /// Structured assessment from Guardian LLM review.
@@ -165,7 +160,7 @@ impl CircuitBreaker {
         let state = self
             .turns
             .entry(turn_id.to_string())
-            .or_insert_with(CircuitBreakerTurnState::default);
+            .or_default();
 
         if state.interrupt_triggered {
             state.consecutive_denials = 0;
@@ -212,7 +207,7 @@ impl CircuitBreaker {
         let state = self
             .turns
             .entry(turn_id.to_string())
-            .or_insert_with(CircuitBreakerTurnState::default);
+            .or_default();
 
         if state.interrupt_triggered {
             state.consecutive_denials = 0;
@@ -355,7 +350,6 @@ pub fn build_intent_transcript_v2(entries: &[TranscriptEntry]) -> ReviewContext 
     let mut tool_slots: Vec<(usize, String)> = Vec::new();
 
     let mut msg_used = 0usize;
-    let tool_used;
 
     // Phase 1: anchor first and last user entries
     let first_user = entries
@@ -424,7 +418,7 @@ pub fn build_intent_transcript_v2(entries: &[TranscriptEntry]) -> ReviewContext 
             tool_slots.push((idx, line));
         }
     }
-    tool_used = tool_chars_used;
+    let tool_used = tool_chars_used;
 
     // Merge and sort by original index to preserve chronological order
     let mut all_slots = message_slots;

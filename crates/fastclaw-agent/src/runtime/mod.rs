@@ -27,6 +27,7 @@ mod accumulator;
 pub mod api_errors;
 #[allow(dead_code)]
 pub mod cache_break_detection;
+#[allow(dead_code)] // TODO(integrate): assemble related files at query start
 pub mod context_assembly;
 pub(crate) mod context_budget;
 pub(crate) mod context_compressor;
@@ -43,12 +44,14 @@ pub mod magic_docs;
 #[allow(dead_code)]
 pub mod memory_selection;
 pub mod model_critic;
+#[allow(dead_code)] // TODO(integrate): consolidate trajectory path
 pub(crate) mod observer;
 pub mod permissions;
 mod post_compact_restore;
 mod prompt_builder;
 pub mod prompt_engine;
 pub mod prompt_sections;
+#[allow(dead_code)] // TODO(integrate): wire into StreamEvent::Suggestions
 pub mod prompt_suggestion;
 pub(crate) mod query_deps;
 pub mod query_engine;
@@ -56,6 +59,7 @@ mod query_state;
 pub mod retry;
 pub(crate) mod runtime_services;
 mod session_memory;
+#[allow(dead_code)] // TODO(integrate): side-query tool handle for auxiliary LLM calls
 pub mod side_query;
 mod stop_hooks;
 mod stream_engine;
@@ -1807,7 +1811,7 @@ impl AgentRuntime {
                                 cache_creation_tokens: 0,
                             };
                             let cache_snapshot =
-                                cache_detector.pre_call_snapshot("", &"", &model, false, false);
+                                cache_detector.pre_call_snapshot("", "", &model, false, false);
                             if let Some(report) =
                                 cache_detector.post_call_analyze(&cache_snapshot, &cache_usage)
                             {

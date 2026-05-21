@@ -3,7 +3,7 @@
 //! Aligned with Codex `windows-sandbox-rs/src/wfp.rs` + `wfp_setup.rs`.
 //! Uses WFP to block or redirect network traffic from sandboxed processes.
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 
 /// A WFP filter rule for network access control.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,7 +132,6 @@ pub fn build_wfp_ruleset(
             condition: WfpCondition::RemotePort(53),
             weight,
         });
-        weight -= 10;
     }
 
     // Block all outbound if requested

@@ -22,11 +22,11 @@ const ATYP_IPV6: u8 = 0x04;
 
 // SOCKS5 reply codes
 const REP_SUCCEEDED: u8 = 0x00;
-const REP_GENERAL_FAILURE: u8 = 0x01;
+const _REP_GENERAL_FAILURE: u8 = 0x01;
 const REP_NOT_ALLOWED: u8 = 0x02;
 const REP_HOST_UNREACHABLE: u8 = 0x04;
 const REP_CMD_NOT_SUPPORTED: u8 = 0x07;
-const REP_ATYP_NOT_SUPPORTED: u8 = 0x08;
+const _REP_ATYP_NOT_SUPPORTED: u8 = 0x08;
 
 /// Run the SOCKS5 proxy engine on a pre-bound listener.
 pub async fn run_socks5_proxy_on_listener(

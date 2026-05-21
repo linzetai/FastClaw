@@ -63,7 +63,7 @@ fn system_bwrap_warning_for_path(system_bwrap_path: Option<&Path>) -> Option<Str
 }
 
 fn system_bwrap_has_user_namespace_access(system_bwrap_path: &Path, timeout: Duration) -> bool {
-    let mut child = match Command::new(system_bwrap_path)
+    let Ok(mut child) = Command::new(system_bwrap_path)
         .args([
             "--unshare-user",
             "--unshare-net",
@@ -75,9 +75,8 @@ fn system_bwrap_has_user_namespace_access(system_bwrap_path: &Path, timeout: Dur
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => return true,
+    else {
+        return true;
     };
 
     let deadline = Instant::now() + timeout;

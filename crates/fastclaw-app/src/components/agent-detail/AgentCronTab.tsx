@@ -124,7 +124,7 @@ function SchedulePicker({ schedule, onChange }: { schedule: string; onChange: (s
 function RunLogList({ jobId }: { jobId: string }) {
   const [runs, setRuns] = useState<CronJobRun[]>([]);
   const [loading, setLoading] = useState(false);
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -199,14 +199,15 @@ function CronJobForm({
   onDelete?: () => void;
   saving: boolean;
 }) {
-  const [form, setForm] = useState({ ...job });
+  type FormShape = Partial<CronJob> & { schedule: string; action: CronJobAction; [k: string]: unknown };
+  const [form, setForm] = useState<FormShape>({ ...job });
   const [actionType, setActionType] = useState<"agent_chat" | "webhook">(
     job.action?.type === "webhook" ? "webhook" : "agent_chat",
   );
   const [showLogs, setShowLogs] = useState(!isNew);
   const [showNotifyChannels, setShowNotifyChannels] = useState(false);
-  const [notifyChannels, setNotifyChannels] = useState<NotifyChannel[]>(job.notify_channels || []);
-  const [newChannel, setNewChannel] = useState<NotifyChannel>({ channel_id: "", target_id: "", target_type: "p2p" });
+  const [notifyChannels, setNotifyChannels] = useState<NotifyChannel[]>((job as Record<string, unknown>).notify_channels as NotifyChannel[] || []);
+  const [newChannel, setNewChannel] = useState<NotifyChannel>({ channel_id: "", target_id: "", target_type: "p2p" } as NotifyChannel);
   const [duplicateWarning, setDuplicateWarning] = useState(false);
 
   const inputCls = "w-full rounded-[6px] px-3 py-2 text-[13px] outline-none transition-colors focus:outline-none";
@@ -444,7 +445,7 @@ function CronJobForm({
             style={{ color: "var(--fill-tertiary)" }}
           >
             {showLogs ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
-            执行记录 {(job as CronJob).run_count > 0 && `(${(job as CronJob).run_count})`}
+            执行记录 {((job as CronJob).run_count ?? 0) > 0 && `(${(job as CronJob).run_count})`}
           </button>
           {showLogs && <div className="mt-2"><RunLogList jobId={job.id!} /></div>}
         </div>
@@ -690,7 +691,7 @@ export function CronTab() {
                 <span className="font-mono">{job.schedule}</span>
                 <span>·</span>
                 <span>{job.action.type === "agent_chat" ? "Agent 对话" : "Webhook"}</span>
-                {job.run_count > 0 && (
+                {(job.run_count ?? 0) > 0 && (
                   <>
                     <span>·</span>
                     <span>已执行 {job.run_count} 次</span>

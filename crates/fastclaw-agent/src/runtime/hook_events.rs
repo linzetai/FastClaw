@@ -105,16 +105,19 @@ impl HookResult {
         }
     }
 
+    pub fn is_blocked(&self) -> bool {
+        self.blocking_error.is_some()
+    }
+}
+
+#[cfg(test)]
+impl HookResult {
     pub fn stop() -> Self {
         Self {
             blocking_error: None,
             prevent_continuation: true,
             modified_output: None,
         }
-    }
-
-    pub fn is_blocked(&self) -> bool {
-        self.blocking_error.is_some()
     }
 
     pub fn should_stop(&self) -> bool {

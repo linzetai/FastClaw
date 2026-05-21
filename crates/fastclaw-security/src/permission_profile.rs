@@ -552,8 +552,8 @@ pub struct AdditionalPermissionProfile {
 
 impl AdditionalPermissionProfile {
     pub fn is_empty(&self) -> bool {
-        self.network.as_ref().map_or(true, |n| n.is_empty())
-            && self.file_system.as_ref().map_or(true, |f| f.is_empty())
+        self.network.as_ref().is_none_or(|n| n.is_empty())
+            && self.file_system.as_ref().is_none_or(|f| f.is_empty())
     }
 }
 

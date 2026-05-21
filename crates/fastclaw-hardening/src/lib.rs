@@ -103,7 +103,7 @@ fn set_core_limit_zero() {
         rlim_cur: 0,
         rlim_max: 0,
     };
-    let ret = unsafe { libc::setrlimit(libc::RLIMIT_CORE, &rlim) };
+    let ret = unsafe { libc::setrlimit(libc::RLIMIT_CORE, &raw const rlim) };
     if ret != 0 {
         eprintln!(
             "ERROR: setrlimit(RLIMIT_CORE) failed: {}",

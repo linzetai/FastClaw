@@ -257,9 +257,9 @@ async fn forward_request(
     for (name, value) in &parts.headers {
         resp_builder = resp_builder.header(name, value);
     }
-    Ok(resp_builder
+    resp_builder
         .body(Full::new(body_bytes))
-        .context("failed to build MITM response")?)
+        .context("failed to build MITM response")
 }
 
 async fn mitm_blocking_response(

@@ -64,6 +64,7 @@ impl SessionMemory {
     }
 
     /// Estimated character size of this memory when serialized.
+    #[allow(dead_code)] // TODO(integrate): use for context budget sizing
     pub fn estimated_chars(&self) -> usize {
         self.key_facts.iter().map(|s| s.len() + 4).sum::<usize>()
             + self

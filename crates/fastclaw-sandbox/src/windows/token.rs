@@ -7,7 +7,7 @@
 //! - Optionally setting integrity level to Low or Untrusted
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+
 
 /// Privilege to retain in restricted tokens (traverse checking bypass).
 pub const SE_CHANGE_NOTIFY_NAME: &str = "SeChangeNotifyPrivilege";
@@ -129,7 +129,7 @@ pub fn create_restricted_token(
 
 #[cfg(not(target_os = "windows"))]
 pub fn create_restricted_token(
-    config: &RestrictedTokenConfig,
+    _config: &RestrictedTokenConfig,
 ) -> Result<RestrictedToken, std::io::Error> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,

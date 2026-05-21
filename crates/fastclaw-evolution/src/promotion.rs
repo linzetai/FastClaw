@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::skill_extractor::{SkillExtractor, SkillStatus};
 use crate::skill_gap::{detect_gaps, GapReport};
 use crate::skill_store::{MaintenanceReport, SkillStore};
-use crate::trajectory::{Trajectory, TrajectoryStore};
+use crate::trajectory::TrajectoryStore;
 
 /// Configuration for the promotion pipeline.
 #[derive(Debug, Clone)]

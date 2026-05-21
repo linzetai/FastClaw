@@ -23,8 +23,6 @@ fn content_fingerprint(msg: &ChatMessage) -> u64 {
 struct CacheEntry {
     fingerprint: u64,
     compressed_content: String,
-    original_tokens: usize,
-    compressed_tokens: usize,
 }
 
 /// Cached microcompact avoids re-compressing tool results that haven't changed
@@ -164,8 +162,6 @@ impl CachedMicrocompactor {
                 CacheEntry {
                     fingerprint,
                     compressed_content: compressed,
-                    original_tokens: before_tokens,
-                    compressed_tokens: after_tokens,
                 },
             );
             self.last_referenced.insert(cache_key, self.pass_count);

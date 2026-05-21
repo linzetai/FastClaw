@@ -40,6 +40,10 @@ impl ModelStats {
         self.total_cache_read_tokens as f64 / self.total_prompt_tokens as f64
     }
 
+}
+
+#[cfg(test)]
+impl ModelStats {
     pub fn total_tokens(&self) -> u64 {
         self.total_prompt_tokens + self.total_completion_tokens
     }
@@ -149,35 +153,6 @@ impl CostTracker {
         self.emit_cost_metrics(call_cost);
         self.check_cache_hit_rate(&usage.model, rate, total_calls);
         self.check_budget()
-    }
-
-    /// Get stats for a specific model.
-    pub fn model_stats(&self, model: &str) -> Option<&ModelStats> {
-        self.per_model.get(model)
-    }
-
-    /// Get all per-model stats.
-    pub fn all_stats(&self) -> &HashMap<String, ModelStats> {
-        &self.per_model
-    }
-
-    /// Global total calls.
-    pub fn total_calls(&self) -> u64 {
-        self.global_calls.load(Ordering::Relaxed)
-    }
-
-    /// Aggregate cache hit rate across all models.
-    pub fn global_cache_hit_rate(&self) -> f64 {
-        let total_prompt: u64 = self.per_model.values().map(|s| s.total_prompt_tokens).sum();
-        let total_cache: u64 = self
-            .per_model
-            .values()
-            .map(|s| s.total_cache_read_tokens)
-            .sum();
-        if total_prompt == 0 {
-            return 0.0;
-        }
-        total_cache as f64 / total_prompt as f64
     }
 
     fn emit_metrics(&self, usage: &CallUsage) {
@@ -292,6 +267,34 @@ fn sanitize_model_label(model: &str) -> String {
         .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == '.' || *c == '/')
         .take(64)
         .collect()
+}
+
+#[cfg(test)]
+impl CostTracker {
+    pub fn model_stats(&self, model: &str) -> Option<&ModelStats> {
+        self.per_model.get(model)
+    }
+
+    pub fn all_stats(&self) -> &HashMap<String, ModelStats> {
+        &self.per_model
+    }
+
+    pub fn total_calls(&self) -> u64 {
+        self.global_calls.load(Ordering::Relaxed)
+    }
+
+    pub fn global_cache_hit_rate(&self) -> f64 {
+        let total_prompt: u64 = self.per_model.values().map(|s| s.total_prompt_tokens).sum();
+        let total_cache: u64 = self
+            .per_model
+            .values()
+            .map(|s| s.total_cache_read_tokens)
+            .sum();
+        if total_prompt == 0 {
+            return 0.0;
+        }
+        total_cache as f64 / total_prompt as f64
+    }
 }
 
 #[cfg(test)]

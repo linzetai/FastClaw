@@ -109,7 +109,7 @@ async fn handle_request(
     let result = if req.method() == Method::CONNECT {
         handle_connect(&state, &snap, req, client_addr).await
     } else {
-        handle_plain_proxy(&*state, &snap, req, client_addr).await
+        handle_plain_proxy(&state, &snap, req, client_addr).await
     };
 
     Ok(result.unwrap_or_else(|e| {

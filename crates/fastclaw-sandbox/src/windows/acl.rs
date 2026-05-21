@@ -4,7 +4,7 @@
 //! Modifies file/directory ACLs to implement deny-read and restrict
 //! write access for sandboxed processes.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// An ACL entry describing access control for a file or directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +63,7 @@ impl AclPlan {
 /// adds explicit deny-read ACL entries. All changes are paired with
 /// rollback entries.
 pub fn build_acl_plan(
-    writable_roots: &[PathBuf],
+    _writable_roots: &[PathBuf],
     deny_read_paths: &[PathBuf],
     _sid: &str,
 ) -> AclPlan {

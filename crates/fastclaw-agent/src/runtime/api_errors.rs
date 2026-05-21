@@ -175,6 +175,10 @@ impl ApiErrorClassifier {
         (None, None)
     }
 
+}
+
+#[cfg(test)]
+impl ApiErrorClassifier {
     /// Generate a human-readable recovery message for the given error kind.
     pub fn recovery_message(kind: &ApiErrorKind) -> String {
         match kind {
@@ -252,7 +256,28 @@ impl ApiErrorClassifier {
             }
         }
     }
+}
 
+#[cfg(test)]
+fn format_file_size(bytes: usize) -> String {
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB"];
+    let mut size = bytes as f64;
+    let mut unit_idx = 0;
+    while size >= 1024.0 && unit_idx < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit_idx += 1;
+    }
+    if unit_idx == 0 {
+        format!("{} B", bytes)
+    } else {
+        format!("{:.1} {}", size, UNITS[unit_idx])
+    }
+}
+
+impl ApiErrorClassifier {
     /// Parse `retry-after` value from error text (seconds).
     fn parse_retry_after(text: &str) -> Option<Duration> {
         let lower = text.to_lowercase();
@@ -279,24 +304,6 @@ impl ApiErrorClassifier {
             }
         }
         None
-    }
-}
-
-fn format_file_size(bytes: usize) -> String {
-    if bytes == 0 {
-        return "0 B".to_string();
-    }
-    const UNITS: &[&str] = &["B", "KB", "MB", "GB"];
-    let mut size = bytes as f64;
-    let mut unit_idx = 0;
-    while size >= 1024.0 && unit_idx < UNITS.len() - 1 {
-        size /= 1024.0;
-        unit_idx += 1;
-    }
-    if unit_idx == 0 {
-        format!("{} B", bytes)
-    } else {
-        format!("{:.1} {}", size, UNITS[unit_idx])
     }
 }
 

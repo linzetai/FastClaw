@@ -116,20 +116,15 @@ impl SandboxedCommand {
 }
 
 /// User-specified sandbox preference for dynamic strategy selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SandboxPreference {
     /// Automatically select the best available sandbox (default behavior).
+    #[default]
     Auto,
     /// Require a real sandbox; fail if none is available.
     Require,
     /// Explicitly disable sandboxing.
     Forbid,
-}
-
-impl Default for SandboxPreference {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl std::fmt::Display for SandboxPreference {
@@ -265,7 +260,7 @@ impl SandboxManager {
     /// into the base policy before applying sandbox rules.
     pub fn transform_request(
         &self,
-        request: SandboxTransformRequest<'_>,
+        request: &SandboxTransformRequest<'_>,
     ) -> Result<SandboxedCommand, SandboxTransformError> {
         let effective_fs = match request.additional_fs_policy {
             Some(additional) => {
@@ -298,10 +293,10 @@ impl SandboxManager {
         {
             let explicit_exe = request.linux_sandbox_exe.map(Path::to_path_buf);
             let resolved_exe = explicit_exe.or_else(|| {
-                if !request.use_legacy_landlock {
-                    landlock::discover_linux_sandbox_exe()
-                } else {
+                if request.use_legacy_landlock {
                     None
+                } else {
+                    landlock::discover_linux_sandbox_exe()
                 }
             });
 
@@ -570,7 +565,7 @@ mod tests {
             additional_fs_policy: None,
             additional_net_policy: None,
         };
-        let cmd = mgr.transform_request(request).unwrap();
+        let cmd = mgr.transform_request(&request).unwrap();
         assert_eq!(cmd.sandbox_type, SandboxType::Noop);
         assert!(cmd.args.contains(&"echo hello".to_string()));
     }
@@ -604,7 +599,7 @@ mod tests {
             additional_fs_policy: Some(&extra_fs),
             additional_net_policy: Some(NetworkSandboxPolicy::Enabled),
         };
-        let cmd = mgr.transform_request(request).unwrap();
+        let cmd = mgr.transform_request(&request).unwrap();
         assert_eq!(cmd.sandbox_type, SandboxType::Noop);
     }
 

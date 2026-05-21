@@ -2,11 +2,9 @@
 //! preventing side effects between parallel workers.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use fastclaw_core::tool::ToolRegistry;
 use fastclaw_core::types::ChatMessage;
 
 /// Isolated context for a single worker in coordinator mode.

@@ -100,12 +100,12 @@ pub fn blocking_append_allow_prefix_rule(
 pub fn blocking_append_network_rule(
     policy_path: &Path,
     host: &str,
-    protocol: NetworkRuleProtocol,
+    protocol: &NetworkRuleProtocol,
     decision: AmendDecision,
     justification: Option<&str>,
 ) -> Result<(), AmendError> {
     let host = normalize_network_rule_host(host)
-        .map_err(|err| AmendError::InvalidNetworkRule(err.to_string()))?;
+        .map_err(|err| AmendError::InvalidNetworkRule(err.clone()))?;
 
     if let Some(raw) = justification {
         if raw.trim().is_empty() {
@@ -312,7 +312,7 @@ mod tests {
         blocking_append_network_rule(
             &policy_path,
             "Api.GitHub.com",
-            NetworkRuleProtocol::Https,
+            &NetworkRuleProtocol::Https,
             AmendDecision::Allow,
             Some("Allow https access to api.github.com"),
         )
@@ -336,7 +336,7 @@ mod tests {
         blocking_append_network_rule(
             &policy_path,
             "api.github.com",
-            NetworkRuleProtocol::Https,
+            &NetworkRuleProtocol::Https,
             AmendDecision::Allow,
             Some("Allow https access to api.github.com"),
         )
@@ -358,7 +358,7 @@ mod tests {
         let err = blocking_append_network_rule(
             &policy_path,
             "*.example.com",
-            NetworkRuleProtocol::Https,
+            &NetworkRuleProtocol::Https,
             AmendDecision::Allow,
             None,
         )
@@ -377,7 +377,7 @@ mod tests {
         let err = blocking_append_network_rule(
             &policy_path,
             "example.com",
-            NetworkRuleProtocol::Https,
+            &NetworkRuleProtocol::Https,
             AmendDecision::Allow,
             Some("  "),
         )
@@ -393,7 +393,7 @@ mod tests {
         blocking_append_network_rule(
             &policy_path,
             "example.com",
-            NetworkRuleProtocol::Any,
+            &NetworkRuleProtocol::Any,
             AmendDecision::Deny,
             None,
         )

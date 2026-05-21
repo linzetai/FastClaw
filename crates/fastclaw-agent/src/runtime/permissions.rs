@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use serde::{Deserialize, Serialize};
 
 /// Rule effect: whether a matching rule allows or denies access.
@@ -145,51 +143,21 @@ impl PermissionRuleEngine {
         }
     }
 
-    /// Load rules from a JSON file in the given directory.
-    /// Looks for `settings.json5` or `settings.json`.
-    pub fn load_from_dir(dir: &Path) -> anyhow::Result<Self> {
-        let json5_path = dir.join("settings.json5");
-        let json_path = dir.join("settings.json");
-
-        let content = if json5_path.exists() {
-            std::fs::read_to_string(&json5_path)?
-        } else if json_path.exists() {
-            std::fs::read_to_string(&json_path)?
-        } else {
-            return Ok(Self::new());
-        };
-
-        let config: PermissionConfig = serde_json::from_str(&content)
-            .map_err(|e| anyhow::anyhow!("failed to parse permission config: {e}"))?;
-
-        let mut engine = Self::new();
-        engine.add_rules(config.permissions);
-
-        let shadows = engine.detect_shadowed_rules();
-        for w in &shadows {
-            tracing::warn!(
-                shadowed = w.shadowed_index,
-                by = w.shadowing_index,
-                "{}",
-                w.message
-            );
-        }
-
-        Ok(engine)
-    }
-
     /// Clear all session-scoped rules (e.g. when session ends).
+    #[allow(dead_code)] // TODO(integrate): expose in CLI
     pub fn clear_session_rules(&mut self) {
         self.session_rules.clear();
     }
 
     /// Number of rules in the engine.
+    #[allow(dead_code)] // TODO(integrate): expose in CLI
     pub fn rule_count(&self) -> usize {
         self.session_rules.len() + self.global_rules.len()
     }
 
     /// Get a detailed explanation of why a tool is allowed/denied,
     /// including which rule matched and its matcher.
+    #[allow(dead_code)] // TODO(integrate): expose in CLI
     pub fn permission_explain(&self, tool_name: &str) -> String {
         if let Some((idx, rule, scope)) = self
             .find_matching_rule(&self.session_rules, tool_name, "session")
@@ -232,20 +200,14 @@ impl PermissionRuleEngine {
     }
 }
 
-/// Configuration file structure for permissions.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct PermissionConfig {
-    #[serde(default)]
-    permissions: Vec<PermissionRule>,
-}
-
 /// Simple wildcard matching (supports `*` and `?`).
 fn wildcard_match(pattern: &str, text: &str) -> bool {
     super::hook_executor::glob_match(pattern, text)
 }
 
-// ── Convenience constructors ─────────────────────────────────────────
+// ── Convenience constructors (tests) ─────────────────────────────────
 
+#[cfg(test)]
 impl PermissionRule {
     pub fn allow_exact(tool: &str) -> Self {
         Self {
@@ -298,260 +260,11 @@ impl PermissionRule {
     }
 }
 
-// ── Shell Rule Matching ──────────────────────────────────────────────
-
-/// Parsed shell rule in the format "command:subcommand" or "command:-flag".
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ShellRule {
-    pub command: String,
-    pub subcommand: Option<String>,
-    pub flag: Option<String>,
-}
-
-impl ShellRule {
-    /// Parse a shell rule string like "git:push", "rm:-rf", or "docker:compose:up".
-    pub fn parse(rule: &str) -> Option<Self> {
-        let parts: Vec<&str> = rule.splitn(3, ':').collect();
-        if parts.is_empty() || parts[0].is_empty() {
-            return None;
-        }
-
-        let command = parts[0].to_string();
-        let (subcommand, flag) = if parts.len() >= 2 {
-            let second = parts[1];
-            if second.starts_with('-') {
-                (None, Some(second.to_string()))
-            } else {
-                let sub = if parts.len() == 3 {
-                    format!("{}:{}", second, parts[2])
-                } else {
-                    second.to_string()
-                };
-                (Some(sub), None)
-            }
-        } else {
-            (None, None)
-        };
-
-        Some(Self {
-            command,
-            subcommand,
-            flag,
-        })
-    }
-
-    /// Check whether a shell command line matches this rule.
-    /// Performs structural matching on parsed command components.
-    pub fn matches_command(&self, command_line: &str) -> bool {
-        let tokens = shell_tokenize(command_line);
-        if tokens.is_empty() {
-            return false;
-        }
-
-        // Match the base command (may be a path like /usr/bin/git → "git")
-        let base_cmd = extract_command_name(&tokens[0]);
-        if base_cmd != self.command {
-            return false;
-        }
-
-        // If we have a subcommand requirement, check it's present
-        if let Some(sub) = &self.subcommand {
-            let non_flag_args: Vec<&str> = tokens[1..]
-                .iter()
-                .filter(|t| !t.starts_with('-'))
-                .map(|s| s.as_str())
-                .collect();
-
-            if sub.contains(':') {
-                // Multi-level subcommand like "compose:up"
-                let sub_parts: Vec<&str> = sub.split(':').collect();
-                if non_flag_args.len() < sub_parts.len() {
-                    return false;
-                }
-                for (i, sp) in sub_parts.iter().enumerate() {
-                    if non_flag_args.get(i) != Some(sp) {
-                        return false;
-                    }
-                }
-            } else if !non_flag_args.contains(&sub.as_str()) {
-                return false;
-            }
-        }
-
-        // If we have a flag requirement, check it's present
-        if let Some(flag) = &self.flag {
-            let has_flag = tokens[1..]
-                .iter()
-                .any(|t| t == flag || (flag.len() > 2 && t.contains(&flag[1..])));
-            if !has_flag {
-                return false;
-            }
-        }
-
-        true
-    }
-}
-
-// ── Auto Mode Classifier ─────────────────────────────────────────────
-
-/// Safety classification result from LLM side-query.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SafetyDecision {
-    Safe,
-    Unsafe,
-    NeedsConfirmation,
-}
-
-/// Result of auto-mode classification.
-#[derive(Debug, Clone)]
-pub struct AutoClassification {
-    pub decision: SafetyDecision,
-    pub reason: String,
-}
-
-impl AutoClassification {
-    /// Parse an LLM response into a classification.
-    /// Expected format: "SAFE: <reason>" or "UNSAFE: <reason>".
-    pub fn parse_response(response: &str) -> Self {
-        let trimmed = response.trim();
-        if trimmed.is_empty() {
-            return Self {
-                decision: SafetyDecision::NeedsConfirmation,
-                reason: "empty response from classifier".into(),
-            };
-        }
-
-        let upper = trimmed.to_uppercase();
-        if upper.starts_with("SAFE") {
-            let reason = trimmed
-                .get(4..)
-                .map(|s| s.trim_start_matches(':').trim())
-                .unwrap_or("")
-                .to_string();
-            Self {
-                decision: SafetyDecision::Safe,
-                reason: if reason.is_empty() {
-                    "classified as safe".into()
-                } else {
-                    reason
-                },
-            }
-        } else if upper.starts_with("UNSAFE") {
-            let reason = trimmed
-                .get(6..)
-                .map(|s| s.trim_start_matches(':').trim())
-                .unwrap_or("")
-                .to_string();
-            Self {
-                decision: SafetyDecision::Unsafe,
-                reason: if reason.is_empty() {
-                    "classified as unsafe".into()
-                } else {
-                    reason
-                },
-            }
-        } else {
-            Self {
-                decision: SafetyDecision::NeedsConfirmation,
-                reason: format!(
-                    "unrecognized classification: {}",
-                    &trimmed[..trimmed.len().min(100)]
-                ),
-            }
-        }
-    }
-}
-
-/// Auto-mode classifier that uses LLM side-query to determine if a
-/// command is safe to execute without user confirmation.
-pub struct AutoModeClassifier {
-    _placeholder: (),
-}
-
-impl AutoModeClassifier {
-    pub fn new() -> Self {
-        Self { _placeholder: () }
-    }
-
-    /// Build the LLM prompt for classifying a command's safety.
-    pub fn build_classification_prompt(command: &str, context: &str) -> String {
-        format!(
-            "You are a security classifier. Determine if the following command is safe to \
-             execute automatically without user confirmation.\n\n\
-             Command: {command}\n\
-             Context: {context}\n\n\
-             Rules:\n\
-             - Commands that only READ data are SAFE\n\
-             - Commands that WRITE/DELETE/MODIFY important data are UNSAFE\n\
-             - Commands that affect system configuration are UNSAFE\n\
-             - Network requests to trusted APIs are generally SAFE\n\
-             - Commands with irreversible effects (rm -rf, git push --force) are UNSAFE\n\n\
-             Respond with exactly one line in the format:\n\
-             SAFE: <brief reason>\n\
-             or\n\
-             UNSAFE: <brief reason>"
-        )
-    }
-
-    /// Classify a command using the provided LLM provider.
-    /// Returns NeedsConfirmation on any failure (safe fallback).
-    pub async fn classify(
-        &self,
-        command: &str,
-        context: &str,
-        provider: &std::sync::Arc<dyn crate::llm::LlmProvider>,
-        model: &str,
-    ) -> AutoClassification {
-        use crate::llm::CompletionParams;
-        use fastclaw_core::types::{ChatMessage, Role};
-
-        let prompt = Self::build_classification_prompt(command, context);
-        let messages = vec![ChatMessage {
-            role: Role::User,
-            content: Some(serde_json::Value::String(prompt)),
-            reasoning_content: None,
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-            compact_metadata: None,
-        }];
-
-        let params = CompletionParams {
-            model,
-            messages: &messages,
-            max_tokens: Some(100),
-            temperature: 0.0,
-            tools: None,
-        };
-
-        match provider.chat_completion(&params).await {
-            Ok(response) => {
-                let text = response
-                    .choices
-                    .first()
-                    .and_then(|c| c.message.content.as_ref())
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                AutoClassification::parse_response(text)
-            }
-            Err(_) => AutoClassification {
-                decision: SafetyDecision::NeedsConfirmation,
-                reason: "classifier LLM call failed; falling back to confirmation".into(),
-            },
-        }
-    }
-}
-
-impl Default for AutoModeClassifier {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // ── Shadowed Rule Detection ──────────────────────────────────────────
 
 /// A warning about a rule that is shadowed (will never fire) by an earlier rule.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // TODO(integrate): call from load_permissions
 pub struct ShadowWarning {
     pub shadowed_index: usize,
     pub shadowing_index: usize,
@@ -562,6 +275,7 @@ impl PermissionRuleEngine {
     /// Detect rules that are shadowed by earlier rules in the same scope.
     /// A deny rule is shadowed if an earlier deny rule with a broader matcher
     /// already covers the same tools. Similarly for allow rules.
+    #[allow(dead_code)] // TODO(integrate): call from load_permissions
     pub fn detect_shadowed_rules(&self) -> Vec<ShadowWarning> {
         let mut warnings = Vec::new();
         Self::detect_in_scope(&self.global_rules, 0, &mut warnings);
@@ -570,6 +284,7 @@ impl PermissionRuleEngine {
         warnings
     }
 
+    #[allow(dead_code)] // TODO(integrate): call from load_permissions
     fn detect_in_scope(
         rules: &[PermissionRule],
         index_offset: usize,
@@ -596,6 +311,7 @@ impl PermissionRuleEngine {
     }
 
     /// Check if matcher `a` covers all cases that matcher `b` would match.
+    #[allow(dead_code)] // TODO(integrate): call from load_permissions
     fn matcher_covers(a: &RuleMatcher, b: &RuleMatcher) -> bool {
         match (a, b) {
             (RuleMatcher::Wildcard { pattern }, _) if pattern == "*" => true,
@@ -617,6 +333,7 @@ impl PermissionRuleEngine {
 
 /// Records a user denial for a specific tool+pattern combination.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // TODO(integrate): use in confirm flow
 pub struct DenialRecord {
     pub tool_name: String,
     pub input_pattern: String,
@@ -625,10 +342,12 @@ pub struct DenialRecord {
 
 /// Tracks denied permissions within a session to avoid re-asking.
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)] // TODO(integrate): use in confirm flow
 pub struct DenialTracker {
     denials: Vec<DenialRecord>,
 }
 
+#[allow(dead_code)] // TODO(integrate): use in confirm flow
 impl DenialTracker {
     pub fn new() -> Self {
         Self::default()
@@ -664,43 +383,6 @@ impl DenialTracker {
     pub fn count(&self) -> usize {
         self.denials.len()
     }
-}
-
-/// Basic shell tokenization (splits on whitespace, respects quotes).
-fn shell_tokenize(input: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut escaped = false;
-
-    for ch in input.chars() {
-        if escaped {
-            current.push(ch);
-            escaped = false;
-            continue;
-        }
-        match ch {
-            '\\' if !in_single_quote => escaped = true,
-            '\'' if !in_double_quote => in_single_quote = !in_single_quote,
-            '"' if !in_single_quote => in_double_quote = !in_double_quote,
-            ' ' | '\t' if !in_single_quote && !in_double_quote => {
-                if !current.is_empty() {
-                    tokens.push(std::mem::take(&mut current));
-                }
-            }
-            _ => current.push(ch),
-        }
-    }
-    if !current.is_empty() {
-        tokens.push(current);
-    }
-    tokens
-}
-
-/// Extract the command name from a potentially full path.
-fn extract_command_name(token: &str) -> &str {
-    token.rsplit('/').next().unwrap_or(token)
 }
 
 #[cfg(test)]
@@ -829,35 +511,6 @@ mod tests {
     }
 
     #[test]
-    fn load_from_dir_parses_json() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = PermissionConfig {
-            permissions: vec![
-                PermissionRule::allow_exact("file_read"),
-                PermissionRule::deny_prefix("rm:").with_reason("no deletion"),
-            ],
-        };
-        let json = serde_json::to_string_pretty(&config).unwrap();
-        let mut f = std::fs::File::create(dir.path().join("settings.json")).unwrap();
-        f.write_all(json.as_bytes()).unwrap();
-
-        let engine = PermissionRuleEngine::load_from_dir(dir.path()).unwrap();
-        assert_eq!(engine.rule_count(), 2);
-        assert_eq!(engine.evaluate("file_read"), PermissionDecision::Allowed);
-        assert_eq!(
-            engine.evaluate("rm:-rf"),
-            PermissionDecision::Denied(Some("no deletion".into()))
-        );
-    }
-
-    #[test]
-    fn load_from_dir_returns_empty_when_no_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let engine = PermissionRuleEngine::load_from_dir(dir.path()).unwrap();
-        assert_eq!(engine.rule_count(), 0);
-    }
-
-    #[test]
     fn permission_explain_messages() {
         let mut engine = PermissionRuleEngine::new();
         engine.add_rule(PermissionRule::allow_exact("safe_tool"));
@@ -941,106 +594,6 @@ mod tests {
 
         assert!(tracker.is_tool_denied("shell_exec"));
         assert!(!tracker.is_tool_denied("file_read"));
-    }
-
-    // ── Auto Mode Classifier Tests ────────────────────────────────────
-
-    #[test]
-    fn safety_classification_parse_safe() {
-        let result = AutoClassification::parse_response("SAFE: this is a read-only command");
-        assert_eq!(result.decision, SafetyDecision::Safe);
-        assert!(result.reason.contains("read-only"));
-    }
-
-    #[test]
-    fn safety_classification_parse_unsafe() {
-        let result = AutoClassification::parse_response("UNSAFE: deletes important files");
-        assert_eq!(result.decision, SafetyDecision::Unsafe);
-        assert!(result.reason.contains("deletes"));
-    }
-
-    #[test]
-    fn safety_classification_parse_unknown_defaults_confirm() {
-        let result = AutoClassification::parse_response("not sure about this");
-        assert_eq!(result.decision, SafetyDecision::NeedsConfirmation);
-    }
-
-    #[test]
-    fn safety_classification_parse_empty() {
-        let result = AutoClassification::parse_response("");
-        assert_eq!(result.decision, SafetyDecision::NeedsConfirmation);
-    }
-
-    #[test]
-    fn auto_classifier_prompt_contains_command() {
-        let prompt =
-            AutoModeClassifier::build_classification_prompt("rm -rf /", "user wants cleanup");
-        assert!(prompt.contains("rm -rf /"));
-        assert!(prompt.contains("user wants cleanup"));
-    }
-
-    // ── Shell Rule Matching Tests ────────────────────────────────────
-
-    #[test]
-    fn shell_rule_parse_basic() {
-        let rule = ShellRule::parse("git:push").unwrap();
-        assert_eq!(rule.command, "git");
-        assert_eq!(rule.subcommand, Some("push".into()));
-        assert_eq!(rule.flag, None);
-    }
-
-    #[test]
-    fn shell_rule_parse_flag() {
-        let rule = ShellRule::parse("rm:-rf").unwrap();
-        assert_eq!(rule.command, "rm");
-        assert_eq!(rule.subcommand, None);
-        assert_eq!(rule.flag, Some("-rf".into()));
-    }
-
-    #[test]
-    fn shell_rule_parse_command_only() {
-        let rule = ShellRule::parse("curl").unwrap();
-        assert_eq!(rule.command, "curl");
-        assert_eq!(rule.subcommand, None);
-        assert_eq!(rule.flag, None);
-    }
-
-    #[test]
-    fn shell_rule_git_push_matches() {
-        let rule = ShellRule::parse("git:push").unwrap();
-        assert!(rule.matches_command("git push origin main"));
-        assert!(rule.matches_command("git push"));
-        assert!(!rule.matches_command("git pull"));
-        assert!(!rule.matches_command("git commit -m 'msg'"));
-    }
-
-    #[test]
-    fn shell_rule_rm_rf_matches() {
-        let rule = ShellRule::parse("rm:-rf").unwrap();
-        assert!(rule.matches_command("rm -rf /tmp/foo"));
-        assert!(rule.matches_command("rm -rf ."));
-        assert!(!rule.matches_command("rm file.txt"));
-        assert!(!rule.matches_command("rm -r dir/"));
-    }
-
-    #[test]
-    fn shell_rule_path_command_matches() {
-        let rule = ShellRule::parse("git:push").unwrap();
-        assert!(rule.matches_command("/usr/bin/git push"));
-    }
-
-    #[test]
-    fn shell_rule_quoted_args() {
-        let rule = ShellRule::parse("git:commit").unwrap();
-        assert!(rule.matches_command("git commit -m 'hello world'"));
-        assert!(rule.matches_command("git commit --amend"));
-        assert!(!rule.matches_command("git push"));
-    }
-
-    #[test]
-    fn shell_tokenize_handles_quotes() {
-        let tokens = shell_tokenize("echo 'hello world' \"foo bar\"");
-        assert_eq!(tokens, vec!["echo", "hello world", "foo bar"]);
     }
 
     // ── Shadow Detection Tests ──

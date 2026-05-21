@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::trajectory::{Trajectory, TrajectoryOutcome, TrajectoryStep};
+use crate::trajectory::{Trajectory, TrajectoryOutcome};
 
 /// A detected gap in the agent's skill repertoire.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,6 +163,7 @@ fn suggest_recommendation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::trajectory::TrajectoryStep;
 
     fn make_trajectory(
         task_type: &str,

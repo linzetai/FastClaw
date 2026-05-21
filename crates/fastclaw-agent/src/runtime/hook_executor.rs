@@ -1,6 +1,4 @@
-use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
@@ -37,9 +35,6 @@ impl HookEventFilter {
     }
 }
 
-type HookFn =
-    Box<dyn Fn(HookEvent) -> Pin<Box<dyn Future<Output = HookResult> + Send>> + Send + Sync>;
-
 /// Handler types for hook execution.
 pub enum HookHandler {
     /// Execute a shell command. The event is passed as JSON via stdin.
@@ -47,10 +42,6 @@ pub enum HookHandler {
         command: String,
         working_dir: Option<PathBuf>,
     },
-    /// Make an HTTP request with the event as JSON body.
-    Http { url: String, method: String },
-    /// Rust closure handler.
-    Internal(HookFn),
 }
 
 impl std::fmt::Debug for HookHandler {
@@ -59,12 +50,6 @@ impl std::fmt::Debug for HookHandler {
             Self::Shell { command, .. } => {
                 f.debug_struct("Shell").field("command", command).finish()
             }
-            Self::Http { url, method } => f
-                .debug_struct("Http")
-                .field("url", url)
-                .field("method", method)
-                .finish(),
-            Self::Internal(_) => f.write_str("Internal(<fn>)"),
         }
     }
 }
@@ -76,8 +61,6 @@ pub struct RegisteredHook {
     pub timeout: Duration,
     pub blocking: bool,
 }
-
-const DEFAULT_HOOK_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Executor that manages and dispatches hook events.
 pub struct HookExecutor {
@@ -180,14 +163,11 @@ impl HookExecutor {
     }
 
     async fn run_handler(&self, handler: &HookHandler, event: HookEvent) -> HookResult {
-        match handler {
-            HookHandler::Shell {
-                command,
-                working_dir,
-            } => run_shell_hook(command, working_dir.as_deref(), &event).await,
-            HookHandler::Http { url, method } => run_http_hook(url, method, &event).await,
-            HookHandler::Internal(func) => func(event).await,
-        }
+        let HookHandler::Shell {
+            command,
+            working_dir,
+        } = handler;
+        run_shell_hook(command, working_dir.as_deref(), &event).await
     }
 }
 
@@ -233,98 +213,6 @@ async fn run_shell_hook(
     }
 
     serde_json::from_str(stdout.trim()).unwrap_or_else(|_| HookResult::allow())
-}
-
-async fn run_http_hook(url: &str, _method: &str, _event: &HookEvent) -> HookResult {
-    if let Ok(parsed) = url::Url::parse(url) {
-        if let Some(host) = parsed.host_str() {
-            if let Ok(addr) = host.parse::<std::net::IpAddr>() {
-                if is_blocked_address(&addr) {
-                    return HookResult::block(format!(
-                        "SSRF guard: blocked request to private address {addr}"
-                    ));
-                }
-            }
-        }
-    }
-
-    tracing::debug!("HTTP hook would call: {url}");
-    HookResult::allow()
-}
-
-/// SSRF guard: check if an IP address is in a private/internal range.
-/// Blocks private IPs but ALLOWS loopback (127.0.0.0/8, ::1) since
-/// local dev hooks commonly target localhost.
-pub fn is_blocked_address(address: &std::net::IpAddr) -> bool {
-    use std::net::IpAddr;
-
-    match address {
-        IpAddr::V4(v4) => {
-            let octets = v4.octets();
-            if octets[0] == 127 {
-                return false; // loopback allowed
-            }
-            if octets[0] == 0 {
-                return true; // 0.0.0.0/8
-            }
-            if octets[0] == 10 {
-                return true; // 10.0.0.0/8
-            }
-            if octets[0] == 100 && (octets[1] & 0xC0) == 64 {
-                return true; // 100.64.0.0/10 (Carrier-grade NAT)
-            }
-            if octets[0] == 169 && octets[1] == 254 {
-                return true; // 169.254.0.0/16 (link-local)
-            }
-            if octets[0] == 172 && (octets[1] & 0xF0) == 16 {
-                return true; // 172.16.0.0/12
-            }
-            if octets[0] == 192 && octets[1] == 168 {
-                return true; // 192.168.0.0/16
-            }
-            if octets[0] == 192 && octets[1] == 0 && octets[2] == 0 {
-                return true; // 192.0.0.0/24 (IETF protocol assignments)
-            }
-            if octets[0] == 198 && (octets[1] == 18 || octets[1] == 19) {
-                return true; // 198.18.0.0/15 (benchmark testing)
-            }
-            if octets[0] == 240 {
-                return true; // 240.0.0.0/4 (reserved)
-            }
-            if octets == [255, 255, 255, 255] {
-                return true; // broadcast
-            }
-            false
-        }
-        IpAddr::V6(v6) => {
-            if v6.is_loopback() {
-                return false; // ::1 allowed
-            }
-            if v6.is_unspecified() {
-                return true; // ::
-            }
-            let segments = v6.segments();
-            // fc00::/7 (unique local)
-            if (segments[0] & 0xFE00) == 0xFC00 {
-                return true;
-            }
-            // fe80::/10 (link-local)
-            if (segments[0] & 0xFFC0) == 0xFE80 {
-                return true;
-            }
-            // ::ffff:<v4> (IPv4-mapped IPv6) — check the embedded v4
-            if segments[0..5] == [0, 0, 0, 0, 0] && segments[5] == 0xFFFF {
-                let v4 = std::net::Ipv4Addr::new(
-                    (segments[6] >> 8) as u8,
-                    (segments[6] & 0xFF) as u8,
-                    (segments[7] >> 8) as u8,
-                    (segments[7] & 0xFF) as u8,
-                );
-                return is_blocked_address(&IpAddr::V4(v4));
-            }
-            false
-        }
-    }
 }
 
 /// Simple glob matching supporting `*` and `?`.
@@ -398,14 +286,18 @@ mod tests {
         }
     }
 
-    fn blocking_hook(filter: HookEventFilter, result: HookResult) -> RegisteredHook {
+    fn shell_hook(command: &str) -> HookHandler {
+        HookHandler::Shell {
+            command: command.into(),
+            working_dir: None,
+        }
+    }
+
+    fn blocking_hook(filter: HookEventFilter, command: &str) -> RegisteredHook {
         RegisteredHook {
             filter,
-            handler: HookHandler::Internal(Box::new(move |_| {
-                let r = result.clone();
-                Box::pin(async move { r })
-            })),
-            timeout: DEFAULT_HOOK_TIMEOUT,
+            handler: shell_hook(command),
+            timeout: Duration::from_secs(10),
             blocking: true,
         }
     }
@@ -413,8 +305,8 @@ mod tests {
     fn non_blocking_hook(filter: HookEventFilter) -> RegisteredHook {
         RegisteredHook {
             filter,
-            handler: HookHandler::Internal(Box::new(|_| Box::pin(async { HookResult::allow() }))),
-            timeout: DEFAULT_HOOK_TIMEOUT,
+            handler: shell_hook("true"),
+            timeout: Duration::from_secs(10),
             blocking: false,
         }
     }
@@ -424,11 +316,11 @@ mod tests {
         let mut executor = HookExecutor::new();
         executor.register(blocking_hook(
             HookEventFilter::ToolName("shell_exec".into()),
-            HookResult::block("denied"),
+            "exit 1",
         ));
         executor.register(blocking_hook(
             HookEventFilter::ToolName("read_file".into()),
-            HookResult::allow(),
+            "true",
         ));
 
         let event = make_pre_tool_event("shell_exec");
@@ -455,7 +347,7 @@ mod tests {
     async fn execute_post_tool_hooks_includes_non_blocking() {
         let mut executor = HookExecutor::new();
         executor.register(non_blocking_hook(HookEventFilter::All));
-        executor.register(blocking_hook(HookEventFilter::All, HookResult::allow()));
+        executor.register(blocking_hook(HookEventFilter::All, "true"));
 
         let event = make_post_tool_event("test_tool");
         let token = CancellationToken::new();
@@ -469,11 +361,11 @@ mod tests {
         let mut executor = HookExecutor::new();
         executor.register(blocking_hook(
             HookEventFilter::EventType("stop"),
-            HookResult::stop(),
+            r#"echo '{"prevent_continuation":true}'"#,
         ));
         executor.register(blocking_hook(
             HookEventFilter::EventType("pre_tool_use"),
-            HookResult::block("nope"),
+            "exit 1",
         ));
 
         let event = make_stop_event();
@@ -489,12 +381,7 @@ mod tests {
         let mut executor = HookExecutor::new();
         executor.register(RegisteredHook {
             filter: HookEventFilter::All,
-            handler: HookHandler::Internal(Box::new(|_| {
-                Box::pin(async {
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                    HookResult::block("should not reach")
-                })
-            })),
+            handler: shell_hook("sleep 5"),
             timeout: Duration::from_millis(50),
             blocking: true,
         });
@@ -510,27 +397,17 @@ mod tests {
     #[tokio::test]
     async fn abort_cancels_remaining_hooks() {
         let token = CancellationToken::new();
-        let token_clone = token.clone();
+        token.cancel();
 
         let mut executor = HookExecutor::new();
-        executor.register(RegisteredHook {
-            filter: HookEventFilter::All,
-            handler: HookHandler::Internal(Box::new(move |_| {
-                token_clone.cancel();
-                Box::pin(async { HookResult::allow() })
-            })),
-            timeout: DEFAULT_HOOK_TIMEOUT,
-            blocking: true,
-        });
-        executor.register(blocking_hook(
-            HookEventFilter::All,
-            HookResult::block("should not run"),
-        ));
+        executor.register(blocking_hook(HookEventFilter::All, "true"));
+        executor.register(blocking_hook(HookEventFilter::All, "exit 1"));
 
         let event = make_pre_tool_event("test");
         let results = executor.execute_pre_tool_hooks(&event, &token).await;
 
         assert_eq!(results.len(), 1);
+        assert!(!results[0].is_blocked());
     }
 
     #[tokio::test]
@@ -566,76 +443,4 @@ mod tests {
         assert!(!filter.matches(&event));
     }
 
-    #[test]
-    fn ssrf_blocks_private_ipv4() {
-        use std::net::IpAddr;
-        let blocked: Vec<IpAddr> = vec![
-            "10.0.0.1".parse().unwrap(),
-            "172.16.0.1".parse().unwrap(),
-            "172.31.255.255".parse().unwrap(),
-            "192.168.1.1".parse().unwrap(),
-            "169.254.0.1".parse().unwrap(),
-            "100.64.0.1".parse().unwrap(),
-            "0.0.0.1".parse().unwrap(),
-        ];
-        for addr in blocked {
-            assert!(is_blocked_address(&addr), "should block {addr}");
-        }
-    }
-
-    #[test]
-    fn ssrf_allows_loopback() {
-        use std::net::IpAddr;
-        let allowed: Vec<IpAddr> = vec![
-            "127.0.0.1".parse().unwrap(),
-            "127.0.0.2".parse().unwrap(),
-            "::1".parse().unwrap(),
-        ];
-        for addr in allowed {
-            assert!(!is_blocked_address(&addr), "should allow {addr}");
-        }
-    }
-
-    #[test]
-    fn ssrf_allows_public_ipv4() {
-        use std::net::IpAddr;
-        let allowed: Vec<IpAddr> = vec![
-            "8.8.8.8".parse().unwrap(),
-            "1.1.1.1".parse().unwrap(),
-            "93.184.216.34".parse().unwrap(),
-        ];
-        for addr in allowed {
-            assert!(!is_blocked_address(&addr), "should allow {addr}");
-        }
-    }
-
-    #[test]
-    fn ssrf_blocks_ipv6_private() {
-        use std::net::IpAddr;
-        let blocked: Vec<IpAddr> = vec![
-            "fc00::1".parse().unwrap(),
-            "fd12:3456::1".parse().unwrap(),
-            "fe80::1".parse().unwrap(),
-            "::".parse().unwrap(),
-        ];
-        for addr in blocked {
-            assert!(is_blocked_address(&addr), "should block {addr}");
-        }
-    }
-
-    #[test]
-    fn ssrf_blocks_mapped_private_v4() {
-        use std::net::IpAddr;
-        let mapped: IpAddr = "::ffff:10.0.0.1".parse().unwrap();
-        assert!(
-            is_blocked_address(&mapped),
-            "should block mapped private v4"
-        );
-
-        let mapped_public: IpAddr = "::ffff:8.8.8.8".parse().unwrap();
-        assert!(
-            !is_blocked_address(&mapped_public),
-            "should allow mapped public v4"
-        );
-    }
 }

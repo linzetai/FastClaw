@@ -189,7 +189,7 @@ export function AppLayout() {
   }, []);
 
   useEffect(() => {
-    if (mode === "connecting" || (!connected && mode !== "embedded")) return;
+    if (mode === "connecting" || !connected) return;
     let cancelled = false;
     (async () => {
       try {

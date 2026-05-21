@@ -1,16 +1,10 @@
-//! Multi-model collaboration: routing and critic/verifier.
+//! Critic/verifier side-query for model gap compensation.
 //!
-//! Implements two complementary strategies for model gap compensation:
+//! After the agent produces a key output (code, document, analysis), a separate
+//! side-query reviews the output for correctness. Issues found are fed back for
+//! immediate correction.
 //!
-//! 1. **Task-complexity routing**: Route sub-tasks to appropriately-sized models.
-//!    Simple operations use cheap/small models, complex reasoning uses strong models.
-//!
-//! 2. **Critic/Verifier**: After the agent produces a key output (code, document,
-//!    analysis), a separate side-query reviews the output for correctness. Issues
-//!    found are fed back for immediate correction.
-//!
-//! Together these reduce cost by ~60% while maintaining or improving quality,
-//! since weak model errors get caught before being committed.
+//! Task-complexity routing lives in `fastclaw-model-router`.
 
 use std::sync::Arc;
 
@@ -19,44 +13,6 @@ use fastclaw_core::types::{ChatMessage, Role};
 use super::side_query::{side_query, SideQueryOptions, SideQuerySource};
 use super::task_decomposer::TaskType;
 use crate::llm::LlmProvider;
-
-/// Complexity level for routing decisions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum TaskComplexity {
-    /// Pure tool operations, no LLM reasoning needed.
-    Trivial,
-    /// Simple Q&A, formatting, translation.
-    Low,
-    /// Information summarization, content writing.
-    Medium,
-    /// Bug analysis, architecture decisions, complex reasoning.
-    High,
-    /// Creative/divergent thinking, multi-factor trade-off analysis.
-    Critical,
-}
-
-/// Configuration for model routing.
-#[derive(Debug, Clone)]
-pub struct ModelRoutingConfig {
-    pub enabled: bool,
-    /// Model to use for low-complexity tasks.
-    pub low_model: String,
-    /// Model to use for medium-complexity tasks.
-    pub medium_model: String,
-    /// Model to use for high/critical-complexity tasks.
-    pub high_model: String,
-}
-
-impl Default for ModelRoutingConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            low_model: String::new(),
-            medium_model: String::new(),
-            high_model: String::new(),
-        }
-    }
-}
 
 /// Configuration for the critic/verifier.
 #[derive(Debug, Clone)]
@@ -117,74 +73,6 @@ impl CriticReview {
         block.push_str("\nPlease fix the issues above before proceeding.\n");
         block.push_str("────────────────────────────────────────────────────\n");
         Some(block)
-    }
-}
-
-/// Estimate task complexity from task type and message characteristics.
-pub fn estimate_complexity(task_type: TaskType, message: &str) -> TaskComplexity {
-    let msg_len = message.len();
-    let word_count = message.split_whitespace().count();
-
-    // Multi-factor heuristic
-    let base = match task_type {
-        TaskType::General => {
-            if word_count < 10 {
-                TaskComplexity::Low
-            } else {
-                TaskComplexity::Medium
-            }
-        }
-        TaskType::Coding => {
-            if has_complexity_indicators(message) {
-                TaskComplexity::High
-            } else if msg_len > 200 {
-                TaskComplexity::Medium
-            } else {
-                TaskComplexity::Low
-            }
-        }
-        TaskType::Research => TaskComplexity::Medium,
-        TaskType::Writing => {
-            if msg_len > 500 {
-                TaskComplexity::High
-            } else {
-                TaskComplexity::Medium
-            }
-        }
-        TaskType::DataAnalysis => TaskComplexity::Medium,
-        TaskType::Workflow => TaskComplexity::High,
-    };
-
-    // Escalate if message contains explicit complexity signals
-    if message.contains("architecture")
-        || message.contains("design")
-        || message.contains("trade-off")
-        || message.contains("compare")
-        || message.contains("analyze why")
-        || message.contains("root cause")
-    {
-        return std::cmp::max(base, TaskComplexity::High);
-    }
-
-    base
-}
-
-/// Select the appropriate model based on complexity and routing config.
-pub fn select_model(complexity: TaskComplexity, config: &ModelRoutingConfig) -> Option<&str> {
-    if !config.enabled {
-        return None;
-    }
-
-    let model = match complexity {
-        TaskComplexity::Trivial | TaskComplexity::Low => &config.low_model,
-        TaskComplexity::Medium => &config.medium_model,
-        TaskComplexity::High | TaskComplexity::Critical => &config.high_model,
-    };
-
-    if model.is_empty() {
-        None
-    } else {
-        Some(model)
     }
 }
 
@@ -345,7 +233,7 @@ fn parse_critic_response(response: &str) -> CriticReview {
 
         if line.starts_with('-') || line.starts_with('•') || line.starts_with('*') {
             let content = line
-                .trim_start_matches(|c: char| c == '-' || c == '•' || c == '*' || c == ' ')
+                .trim_start_matches(['-', '•', '*', ' '])
                 .trim()
                 .to_string();
             if content.len() >= 5 {
@@ -367,24 +255,6 @@ fn parse_critic_response(response: &str) -> CriticReview {
     }
 }
 
-fn has_complexity_indicators(message: &str) -> bool {
-    let indicators = [
-        "refactor",
-        "migrate",
-        "redesign",
-        "cross-file",
-        "multiple files",
-        "architecture",
-        "concurrent",
-        "async",
-        "generic",
-        "trait bound",
-        "lifetime",
-    ];
-    let lower = message.to_lowercase();
-    indicators.iter().any(|ind| lower.contains(ind))
-}
-
 fn truncate_for_review(text: &str, max_chars: usize) -> &str {
     if text.len() <= max_chars {
         text
@@ -401,66 +271,6 @@ fn truncate_for_review(text: &str, max_chars: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn estimate_complexity_basic() {
-        assert_eq!(
-            estimate_complexity(TaskType::General, "hello"),
-            TaskComplexity::Low
-        );
-        assert_eq!(
-            estimate_complexity(TaskType::Coding, "fix the typo"),
-            TaskComplexity::Low
-        );
-        assert!(
-            estimate_complexity(
-                TaskType::Coding,
-                "refactor the authentication module to use async traits"
-            ) >= TaskComplexity::High
-        );
-    }
-
-    #[test]
-    fn estimate_complexity_escalates_on_keywords() {
-        let complexity = estimate_complexity(
-            TaskType::General,
-            "analyze why the system crashes and find the root cause",
-        );
-        assert!(complexity >= TaskComplexity::High);
-    }
-
-    #[test]
-    fn select_model_disabled_returns_none() {
-        let config = ModelRoutingConfig::default();
-        assert!(select_model(TaskComplexity::High, &config).is_none());
-    }
-
-    #[test]
-    fn select_model_routes_correctly() {
-        let config = ModelRoutingConfig {
-            enabled: true,
-            low_model: "gpt-4o-mini".into(),
-            medium_model: "gpt-4o".into(),
-            high_model: "claude-opus".into(),
-        };
-
-        assert_eq!(
-            select_model(TaskComplexity::Low, &config),
-            Some("gpt-4o-mini")
-        );
-        assert_eq!(
-            select_model(TaskComplexity::Medium, &config),
-            Some("gpt-4o")
-        );
-        assert_eq!(
-            select_model(TaskComplexity::High, &config),
-            Some("claude-opus")
-        );
-        assert_eq!(
-            select_model(TaskComplexity::Critical, &config),
-            Some("claude-opus")
-        );
-    }
 
     #[test]
     fn parse_critic_approved() {
@@ -511,16 +321,6 @@ mod tests {
         assert!(formatted.contains("Race condition"));
         assert!(formatted.contains("Add mutex lock"));
         assert!(formatted.contains("fix the issues"));
-    }
-
-    #[test]
-    fn has_complexity_indicators_detects_patterns() {
-        assert!(has_complexity_indicators("refactor the module"));
-        assert!(has_complexity_indicators("migrate from v1 to v2"));
-        assert!(has_complexity_indicators(
-            "fix the trait bound error with lifetimes"
-        ));
-        assert!(!has_complexity_indicators("fix typo in readme"));
     }
 
     #[tokio::test]

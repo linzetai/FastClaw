@@ -18,7 +18,7 @@ export function GatewayTab() {
     }).catch(() => {});
   }, []);
 
-  const modeLabel = gwMode === "embedded" ? "内嵌网关" : gwMode === "remote" ? "远程网关" : gwMode === "browser" ? "浏览器开发" : "连接中...";
+  const modeLabel = gwMode === "ready" ? "已就绪" : gwMode === "browser" ? "浏览器开发" : "连接中...";
 
   return (
     <div className="space-y-6">
