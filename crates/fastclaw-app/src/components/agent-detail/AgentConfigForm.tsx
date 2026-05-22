@@ -7,6 +7,7 @@ import { AgentTools } from "./AgentTools";
 import { AgentSkills } from "./AgentSkills";
 import { ChannelManager } from "./AgentChannels";
 import { encodeModelOption, decodeModelOption, useAgentConfigForm } from "./useAgentConfigForm";
+import { ICON } from "../../lib/ui-tokens";
 
 export type ConfigSection = "basic" | "tools" | "skills" | "identity";
 
@@ -125,7 +126,7 @@ export function AgentConfigForm({ section }: { section: ConfigSection }) {
         {confirmDelete ? (
           <ListContainer>
             <div className="flex items-center gap-3 px-3 py-3">
-              <AlertTriangle size={16} strokeWidth={1.5} className="shrink-0" style={{ color: "var(--fill-tertiary)" }} />
+              <AlertTriangle {...ICON.md} className="shrink-0" style={{ color: "var(--fill-tertiary)" }} />
               <span className="flex-1 text-[12px]" style={{ color: "var(--fill-secondary)" }}>
                 确认删除 &quot;{agent.name}&quot;？此操作不可撤销。
               </span>
@@ -157,7 +158,7 @@ export function AgentConfigForm({ section }: { section: ConfigSection }) {
             title={isLastAgent ? "至少保留一个 Agent" : undefined}
           >
             <span className="flex items-center gap-1.5">
-              <Trash2 size={16} strokeWidth={1.5} />
+              <Trash2 {...ICON.md} />
               删除此 Agent
             </span>
           </button>

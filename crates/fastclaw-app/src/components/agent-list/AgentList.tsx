@@ -6,25 +6,24 @@ import {
   Search, Plus, ChevronDown, ChevronRight, Check, Camera, X,
   PanelLeftClose, PanelLeftOpen, MoreHorizontal, Pin, User, Trash2, MessageCircle,
 } from "lucide-react";
+import { ICON, BTN_ICON } from "../../lib/ui-tokens";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
 import { useAvatarUrl, loadAvatarBlobUrl } from "../../lib/use-avatar-url";
 import { fuzzyMatch } from "../../lib/fuzzy";
 import type { Agent, Chat } from "../../lib/stores/types";
 
-const AgentAvatar = memo(function AgentAvatar({ agent, size = 36, active = false }: { agent: Agent; size?: number; active?: boolean }) {
+const AgentAvatar = memo(function AgentAvatar({ agent, size = 36 }: { agent: Agent; size?: number }) {
   const avatarUrl = useAvatarUrl(agent.avatar);
   return (
     <div
-      className="flex items-center justify-center overflow-hidden rounded-full text-[13px] font-semibold transition-all duration-200"
+      className="flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold"
       style={{
         width: size,
         height: size,
+        fontSize: Math.round(size * 0.38),
         background: agent.color || "var(--bg-tertiary)",
         color: agent.color ? "#fff" : "var(--fill-secondary)",
-        boxShadow: active
-          ? `0 0 0 2px var(--bg-sidebar), 0 0 0 3.5px var(--tint)`
-          : "0 0 0 2px transparent",
       }}
     >
       {avatarUrl ? (
@@ -91,7 +90,7 @@ function AgentContextMenu({
             className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)]"
             style={{ color: item.danger ? "var(--red)" : "var(--fill-secondary)" }}
           >
-            <Icon size={16} strokeWidth={1.5} />
+            <Icon {...ICON.md} />
             {item.label}
           </button>
         );
@@ -114,7 +113,7 @@ function ChatItem({
       }`}
       style={active ? { background: "var(--tint-bg)" } : undefined}
     >
-      <MessageCircle size={14} strokeWidth={1.5} style={{ color: active ? "var(--tint)" : "var(--fill-quaternary)", flexShrink: 0 }} />
+      <MessageCircle {...ICON.sm} style={{ color: active ? "var(--tint)" : "var(--fill-quaternary)", flexShrink: 0 }} />
       <span
         className="min-w-0 truncate text-[12px]"
         style={{ color: active ? "var(--tint)" : "var(--fill-tertiary)" }}
@@ -378,7 +377,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
     <aside
       className="flex shrink-0 flex-col"
       style={{
-        width: collapsed ? "72px" : "240px",
+        width: collapsed ? "52px" : "240px",
         background: "var(--bg-sidebar)",
         borderRight: "0.5px solid var(--separator)",
         transition: "width var(--duration-slow) var(--ease-in-out)",
@@ -387,15 +386,15 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
       tabIndex={0}
     >
       {/* Header: Search + New Agent */}
-      <div className="flex flex-col gap-2 px-3 pb-2 pt-4">
+      <div className={`flex flex-col gap-2 pb-2 pt-2 ${collapsed ? "items-center px-2" : "px-3"}`}>
         {collapsed ? (
           <button
             onClick={onToggleCollapse}
-            className="mx-auto flex h-9 w-9 items-center justify-center rounded-[var(--radius-xs)] transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+            className={BTN_ICON.lg}
             style={{ color: "var(--fill-tertiary)" }}
             title="展开侧边栏"
           >
-            <PanelLeftOpen size={16} strokeWidth={1.5} />
+            <PanelLeftOpen size={20} strokeWidth={1.2} />
           </button>
         ) : (
           <>
@@ -408,7 +407,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                   boxShadow: searchFocused ? "var(--glow-tint-sm)" : "none",
                 }}
               >
-                <Search size={14} strokeWidth={1.5} style={{ color: searchFocused ? "var(--tint)" : "var(--fill-tertiary)", flexShrink: 0, transition: "color 0.15s" }} />
+                <Search {...ICON.sm} style={{ color: searchFocused ? "var(--tint)" : "var(--fill-tertiary)", flexShrink: 0, transition: "color 0.15s" }} />
                 <input
                   ref={searchInputRef}
                   type="text"
@@ -426,17 +425,17 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                     className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-150 hover:bg-[var(--bg-active)]"
                     style={{ color: "var(--fill-tertiary)" }}
                   >
-                    <X size={14} strokeWidth={2} />
+                    <X {...ICON.sm} />
                   </button>
                 )}
               </div>
               <button
                 onClick={onToggleCollapse}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-xs)] transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+                className={`${BTN_ICON.lg} shrink-0`}
                 style={{ color: "var(--fill-tertiary)" }}
                 title="折叠侧边栏"
               >
-                <PanelLeftClose size={16} strokeWidth={1.5} />
+                <PanelLeftClose size={20} strokeWidth={1.2} />
               </button>
 
               {showSearchDropdown && (
@@ -455,7 +454,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                 >
                   {searchResults.length === 0 ? (
                     <div className="flex items-center gap-2 px-3 py-3">
-                      <Search size={14} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />
+                      <Search {...ICON.sm} style={{ color: "var(--fill-quaternary)" }} />
                       <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
                         未找到「{query}」相关 Agent
                       </span>
@@ -490,14 +489,13 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
             <button
               onClick={() => setShowNewForm(true)}
               disabled={creating}
-              className="gradient-border-wrap flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg py-2 text-[13px] font-medium transition-all duration-200 hover:bg-[var(--tint-subtle)] disabled:opacity-50 group/new"
+              className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg py-2 text-[12px] font-medium transition-colors duration-150 hover:bg-[var(--bg-hover)] disabled:opacity-50"
               style={{
-                color: "var(--fill-secondary)",
+                color: "var(--fill-tertiary)",
+                border: "0.5px dashed var(--separator-opaque)",
               }}
             >
-              <span className="transition-transform duration-300 group-hover/new:rotate-90">
-                <Plus size={16} strokeWidth={2} />
-              </span>
+              <Plus {...ICON.sm} />
               新建 Agent
             </button>
           </>
@@ -505,7 +503,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
       </div>
 
       {/* Agent Tree List */}
-      <div className="flex-1 overflow-y-auto px-3 py-1.5">
+      <div className={`flex-1 overflow-x-hidden overflow-y-auto py-1.5 ${collapsed ? "flex flex-col items-center px-2" : "px-3"}`}>
         {!collapsed && agents.length === 0 && (
           <div
             className="mx-2 mt-3 rounded-[var(--radius-sm)] p-4"
@@ -549,14 +547,14 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
               <button
                 key={agent.id}
                 onClick={() => { setActiveAgent(agent.id); newChat(agent.id); }}
-                className="group relative mx-auto mb-1 flex h-[52px] w-[52px] items-center justify-center rounded-[var(--radius-sm)] hover:bg-[var(--bg-hover)]"
+                className="group relative mx-auto mb-1 flex h-9 w-9 items-center justify-center rounded-[var(--radius-xs)] hover:bg-[var(--bg-hover)]"
                 style={{
                   background: active ? "var(--bg-active)" : "transparent",
                   animation: `slide-up var(--duration-slow) var(--ease-out) ${i * 0.04}s backwards`,
                 }}
                 title={agent.name}
               >
-                <AgentAvatar agent={agent} />
+                <AgentAvatar agent={agent} size={28} />
               </button>
             );
           }
@@ -576,16 +574,6 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                   cursor: "pointer",
                 }}
               >
-                {active && (
-                  <span
-                    className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-full"
-                    style={{
-                      height: "60%",
-                      background: "var(--tint)",
-                      animation: "scale-spring var(--duration-normal) var(--ease-spring)",
-                    }}
-                  />
-                )}
                 <div
                   className="flex min-w-0 flex-1 items-center gap-2"
                   onClick={() => {
@@ -593,7 +581,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                     newChat(agent.id);
                   }}
                 >
-                  <AgentAvatar agent={agent} size={28} active={active} />
+                  <AgentAvatar agent={agent} size={34} />
                   <div className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-semibold tracking-[-0.01em]" style={{ color: "var(--fill-primary)" }}>
                       {agent.name}
@@ -611,10 +599,10 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                       const rect = (e.target as HTMLElement).getBoundingClientRect();
                       setContextMenu({ agentId: agent.id, x: rect.right, y: rect.bottom });
                     }}
-                    className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-[var(--bg-active)]"
+                    className={BTN_ICON.sm}
                     style={{ color: "var(--fill-tertiary)" }}
                   >
-                    <MoreHorizontal size={16} strokeWidth={1.5} />
+                    <MoreHorizontal {...ICON.md} />
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleExpand(agent.id); }}
@@ -622,7 +610,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                     style={{ color: "var(--fill-quaternary)" }}
                     title={expanded ? "收起会话" : "展开会话"}
                   >
-                    {expanded ? <ChevronDown size={14} strokeWidth={2} /> : <ChevronRight size={14} strokeWidth={2} />}
+                    {expanded ? <ChevronDown {...ICON.sm} /> : <ChevronRight {...ICON.sm} />}
                   </button>
                 </div>
               </div>
@@ -719,7 +707,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
             <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: "0.5px solid var(--separator)" }}>
               <h3 className="text-[14px] font-semibold" style={{ color: "var(--fill-primary)" }}>新建 Agent</h3>
               <button onClick={cancelNew} className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" style={{ color: "var(--fill-tertiary)" }}>
-                <X size={14} strokeWidth={2} />
+                <X {...ICON.sm} />
               </button>
             </div>
             <div className="space-y-4 px-5 py-4">
@@ -737,7 +725,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                     </span>
                   )}
                   <div className="absolute inset-0 flex items-center justify-center rounded-full opacity-0 transition-opacity duration-100 group-hover:opacity-100" style={{ background: "rgba(0,0,0,0.3)" }}>
-                    <Camera size={14} strokeWidth={1.5} color="white" />
+                    <Camera {...ICON.sm} color="white" />
                   </div>
                 </button>
                 <div className="min-w-0 flex-1">
@@ -777,7 +765,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                     {!modelsLoading && models.length === 0 && <option value="">暂无可用模型</option>}
                     {models.map((m) => <option key={`${m.provider}/${m.model}`} value={m.model}>{m.model}</option>)}
                   </select>
-                  <ChevronDown size={14} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
+                  <ChevronDown {...ICON.sm} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
                 </div>
               </div>
             </div>
@@ -788,7 +776,7 @@ export function AgentList({ collapsed = false, onToggleCollapse }: AgentListProp
                 className="flex cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium transition-opacity duration-100 hover:opacity-90 disabled:opacity-40"
                 style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
               >
-                <Check size={14} strokeWidth={2} />
+                <Check {...ICON.sm} />
                 {creating ? "创建中..." : "创建"}
               </button>
             </div>

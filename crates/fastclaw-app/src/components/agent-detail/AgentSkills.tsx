@@ -1,6 +1,7 @@
 import { FileText, FolderOpen, RefreshCw, Upload } from "lucide-react";
 import * as api from "../../lib/api";
 import { CollapsibleList, SectionHeader, Toggle } from "./common";
+import { ICON } from "../../lib/ui-tokens";
 
 export function AgentSkills({
   agentSkills,
@@ -46,7 +47,7 @@ export function AgentSkills({
             className="cursor-pointer rounded-[var(--radius-xs)] p-1.5 transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-40"
             title="刷新 Skills"
           >
-            <RefreshCw size={14} strokeWidth={1.5} className={refreshingSkills ? "animate-spin" : ""} style={{ color: "var(--fill-tertiary)" }} />
+            <RefreshCw {...ICON.sm} className={refreshingSkills ? "animate-spin" : ""} style={{ color: "var(--fill-tertiary)" }} />
           </button>
           <div className="relative">
             <button
@@ -55,7 +56,7 @@ export function AgentSkills({
               className="cursor-pointer rounded-[var(--radius-xs)] p-1.5 transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-40"
               title="上传 Skill"
             >
-              <Upload size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+              <Upload {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
             </button>
             {skillMenuOpen && (
               <div
@@ -68,14 +69,14 @@ export function AgentSkills({
                   className="w-full cursor-pointer px-3 py-2 text-left text-[12px] transition-colors hover:bg-[var(--bg-hover)]"
                   style={{ color: "var(--fill-primary)" }}
                 >
-                  <FolderOpen size={14} className="mr-2 inline" strokeWidth={1.5} />选择文件夹
+                  <FolderOpen {...ICON.sm} className="mr-2 inline" />选择文件夹
                 </button>
                 <button
                   onClick={() => { onSkillMenuOpen(false); onUploadSkillZip(); }}
                   className="w-full cursor-pointer px-3 py-2 text-left text-[12px] transition-colors hover:bg-[var(--bg-hover)]"
                   style={{ color: "var(--fill-primary)" }}
                 >
-                  <FileText size={14} className="mr-2 inline" strokeWidth={1.5} />选择 ZIP 文件
+                  <FileText {...ICON.sm} className="mr-2 inline" />选择 ZIP 文件
                 </button>
               </div>
             )}

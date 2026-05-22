@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { X, Search } from "lucide-react";
+import { ICON } from "../../lib/ui-tokens";
 
 export const COLLAPSE_THRESHOLD = 10;
 
@@ -36,12 +37,12 @@ export function SectionHeader({ children, count, total, searchable, query, onQue
               autoFocus
             />
             <button onClick={() => { setShowSearch(false); onQueryChange?.(""); }} className="cursor-pointer" style={{ color: "var(--fill-tertiary)" }}>
-              <X size={14} strokeWidth={2} />
+              <X {...ICON.sm} />
             </button>
           </div>
         ) : (
           <button onClick={() => setShowSearch(true)} className="cursor-pointer transition-colors duration-100 hover:opacity-70" style={{ color: "var(--fill-tertiary)" }}>
-            <Search size={14} strokeWidth={1.5} />
+            <Search {...ICON.sm} />
           </button>
         )
       )}
@@ -122,7 +123,7 @@ export function FormModal({ open, onClose, title, children }: {
         <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: "0.5px solid var(--separator)" }}>
           <h3 className="text-[14px] font-semibold" style={{ color: "var(--fill-primary)" }}>{title}</h3>
           <button onClick={onClose} className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" style={{ color: "var(--fill-tertiary)" }}>
-            <X size={14} strokeWidth={2} />
+            <X {...ICON.sm} />
           </button>
         </div>
         <div className="overflow-y-auto px-5 py-4" style={{ maxHeight: "calc(100vh - 160px)" }}>

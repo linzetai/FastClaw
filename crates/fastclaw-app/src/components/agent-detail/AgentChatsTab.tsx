@@ -3,6 +3,7 @@ import { X, Search, FolderOpen, Monitor, MessageSquare, Code, Clock, Download } 
 import { useAgentStore, type Chat } from "../../lib/agent-store";
 import { useActiveAgentChats } from "../../lib/stores/selectors";
 import { ListContainer } from "./common";
+import { ICON } from "../../lib/ui-tokens";
 import * as api from "../../lib/api";
 
 const SOURCE_META: Record<string, { label: string; icon: typeof Monitor; color: string }> = {
@@ -18,10 +19,10 @@ function SourceBadge({ source }: { source: string }) {
   const Icon = meta.icon;
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-[3px] rounded-[4px] px-[5px] py-[1px] text-[10px] font-medium leading-tight"
+      className="inline-flex shrink-0 items-center gap-[3px] rounded-[var(--radius-xs)] px-[5px] py-[1px] text-[10px] font-medium leading-tight"
       style={{ background: `${meta.color}18`, color: meta.color }}
     >
-      <Icon size={14} strokeWidth={2} />
+      <Icon {...ICON.sm} />
       {meta.label}
     </span>
   );
@@ -52,7 +53,7 @@ function ChatRow({ chat, isActive, onClick, onClose, onExport, isLast }: {
             style={{ color: "var(--fill-tertiary)" }}
             title="导出会话"
           >
-            <Download size={12} strokeWidth={2} />
+            <Download {...ICON.sm} />
           </button>
         )}
         {onClose && (
@@ -62,7 +63,7 @@ function ChatRow({ chat, isActive, onClick, onClose, onExport, isLast }: {
             style={{ color: "var(--fill-tertiary)" }}
             title="关闭会话"
           >
-            <X size={14} strokeWidth={2} />
+            <X {...ICON.sm} />
           </button>
         )}
       </div>
@@ -79,7 +80,7 @@ function ChatRow({ chat, isActive, onClick, onClose, onExport, isLast }: {
       </div>
       {chat.workDir && (
         <div className="flex items-center gap-1.5 text-[10px] font-mono" style={{ color: "var(--fill-quaternary)" }}>
-          <FolderOpen size={14} strokeWidth={1.5} />
+          <FolderOpen {...ICON.sm} />
           <span className="truncate">{chat.workDir.replace(/^\/home\/[^/]+\//, "~/")}</span>
         </div>
       )}
@@ -180,7 +181,7 @@ export function ChatsTab() {
         className="mb-4 flex items-center gap-2.5 rounded-[10px] px-3 py-[7px]"
         style={{ background: "var(--bg-hover)" }}
       >
-        <Search size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+        <Search {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
         <input
           type="text"
           value={chatQuery}
@@ -191,7 +192,7 @@ export function ChatsTab() {
         />
         {chatQuery && (
           <button onClick={() => setChatQuery("")} className="cursor-pointer" style={{ color: "var(--fill-tertiary)" }}>
-            <X size={14} strokeWidth={2} />
+            <X {...ICON.sm} />
           </button>
         )}
       </div>
@@ -200,7 +201,7 @@ export function ChatsTab() {
         <div className="mb-3 flex flex-wrap gap-1.5 px-1">
           <button
             onClick={() => setSourceFilter(null)}
-            className="rounded-[6px] px-2 py-[3px] text-[11px] font-medium transition-colors"
+            className="rounded-[var(--radius-xs)] px-2 py-[3px] text-[11px] font-medium transition-colors"
             style={{
               background: sourceFilter === null ? "var(--fill-primary)" : "var(--bg-hover)",
               color: sourceFilter === null ? "var(--fill-inverse)" : "var(--fill-tertiary)",
@@ -216,7 +217,7 @@ export function ChatsTab() {
               <button
                 key={src}
                 onClick={() => setSourceFilter(active ? null : src)}
-                className="rounded-[6px] px-2 py-[3px] text-[11px] font-medium transition-colors"
+                className="rounded-[var(--radius-xs)] px-2 py-[3px] text-[11px] font-medium transition-colors"
                 style={{
                   background: active ? `${meta.color}20` : "var(--bg-hover)",
                   color: active ? meta.color : "var(--fill-tertiary)",

@@ -1,6 +1,7 @@
 import { ChevronDown } from "lucide-react";
 import * as api from "../../lib/api";
 import { SectionHeader } from "./common";
+import { ICON } from "../../lib/ui-tokens";
 
 export function AgentBasicInfo({
   name,
@@ -53,7 +54,7 @@ export function AgentBasicInfo({
               </option>
             )}
           </select>
-          <ChevronDown size={14} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
+          <ChevronDown {...ICON.sm} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
         </div>
       </div>
     </>

@@ -9,6 +9,7 @@ function parseUtc(ts: string): Date {
   return new Date(ts.replace(" ", "T") + "Z");
 }
 import type { CronJob, CronJobAction, CronJobRun, NotifyChannel } from "../../lib/transport";
+import { ICON } from "../../lib/ui-tokens";
 import { FormModal, ListContainer, SectionHeader, Toggle } from "./common";
 
 
@@ -59,7 +60,7 @@ function SchedulePicker({ schedule, onChange }: { schedule: string; onChange: (s
 
   const selectCls = "select-premium";
   const selectStyle = {} as React.CSSProperties;
-  const inlineCls = "rounded-[6px] px-2.5 py-1.5 text-[13px] outline-none text-center transition-colors focus:outline-none";
+  const inlineCls = "rounded-[var(--radius-xs)] px-2.5 py-1.5 text-[13px] outline-none text-center transition-colors focus:outline-none";
   const inlineStyle = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
   const labelStyle = { color: "var(--fill-tertiary)" };
 
@@ -74,7 +75,7 @@ function SchedulePicker({ schedule, onChange }: { schedule: string; onChange: (s
           <option value="weekly">每周定时</option>
           <option value="custom">自定义 Cron</option>
         </select>
-        <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={labelStyle} />
+        <ChevronDown {...ICON.sm} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={labelStyle} />
       </div>
 
       {mode === "every_n_min" && (
@@ -103,7 +104,7 @@ function SchedulePicker({ schedule, onChange }: { schedule: string; onChange: (s
         <div className="flex flex-wrap gap-1">
           {WEEKDAY_NAMES.map((name, i) => (
             <button key={i} onClick={() => { const next = weekdays.includes(i) ? weekdays.filter(d => d !== i) : [...weekdays, i].sort(); setWeekdays(next); emit(mode, { atHour, atMin, weekdays: next }); }}
-              className="cursor-pointer rounded-[4px] px-2 py-1 text-[11px] font-medium transition-colors"
+              className="cursor-pointer rounded-[var(--radius-xs)] px-2 py-1 text-[11px] font-medium transition-colors"
               style={{ background: weekdays.includes(i) ? "var(--fill-primary)" : "var(--bg-base)", color: weekdays.includes(i) ? "var(--fill-inverse)" : "var(--fill-tertiary)", border: "0.5px solid var(--separator-opaque)" }}
             >{name}</button>
           ))}
@@ -111,7 +112,7 @@ function SchedulePicker({ schedule, onChange }: { schedule: string; onChange: (s
       )}
       {mode === "custom" && (
         <div>
-          <input value={custom} onChange={(e) => { setCustom(e.target.value); onChange(e.target.value); }} placeholder="0 */5 * * * *" className={"w-full rounded-[6px] px-3 py-2 font-mono text-[13px] outline-none transition-colors focus:outline-none"} style={inlineStyle} />
+          <input value={custom} onChange={(e) => { setCustom(e.target.value); onChange(e.target.value); }} placeholder="0 */5 * * * *" className={"w-full rounded-[var(--radius-xs)] px-3 py-2 font-mono text-[13px] outline-none transition-colors focus:outline-none"} style={inlineStyle} />
           <p className="mt-1 text-[10px]" style={{ color: "var(--fill-quaternary)" }}>6 字段: 秒 分 时 日 月 周</p>
         </div>
       )}
@@ -137,7 +138,7 @@ function RunLogList({ jobId }: { jobId: string }) {
   return (
     <div className="space-y-1">
       {runs.map((run) => (
-        <div key={run.id} className="rounded-[6px] text-[11px]" style={{ background: "var(--bg-base)", border: "0.5px solid var(--separator-opaque)" }}>
+        <div key={run.id} className="rounded-[var(--radius-xs)] text-[11px]" style={{ background: "var(--bg-base)", border: "0.5px solid var(--separator-opaque)" }}>
           <div className="flex cursor-pointer items-center justify-between gap-2 px-2.5 py-1.5" onClick={() => setExpanded(expanded === run.id ? null : run.id)}>
             <div className="flex items-center gap-2">
               <span className="inline-block h-[6px] w-[6px] rounded-full" style={{ background: run.status === "ok" ? "var(--green, #48bb78)" : run.status === "running" ? "var(--blue, #4299e1)" : "var(--red, #e53e3e)" }} />
@@ -150,13 +151,13 @@ function RunLogList({ jobId }: { jobId: string }) {
               {run.output && (
                 <div className="mb-1">
                   <span className="font-medium" style={{ color: "var(--fill-tertiary)" }}>Agent 回复:</span>
-                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-[4px] p-2 text-[11px]" style={{ background: "var(--bg-tertiary)", color: "var(--fill-secondary)" }}>{run.output}</pre>
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-[var(--radius-xs)] p-2 text-[11px]" style={{ background: "var(--bg-tertiary)", color: "var(--fill-secondary)" }}>{run.output}</pre>
                 </div>
               )}
               {run.error && (
                 <div>
                   <span className="font-medium" style={{ color: "var(--red, #e53e3e)" }}>错误:</span>
-                  <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-[4px] p-2 text-[11px]" style={{ background: "var(--bg-tertiary)", color: "var(--red, #e53e3e)" }}>{run.error}</pre>
+                  <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-[var(--radius-xs)] p-2 text-[11px]" style={{ background: "var(--bg-tertiary)", color: "var(--red, #e53e3e)" }}>{run.error}</pre>
                 </div>
               )}
               {run.ended_at && (
@@ -210,7 +211,7 @@ function CronJobForm({
   const [newChannel, setNewChannel] = useState<NotifyChannel>({ channel_id: "", target_id: "", target_type: "p2p" } as NotifyChannel);
   const [duplicateWarning, setDuplicateWarning] = useState(false);
 
-  const inputCls = "w-full rounded-[6px] px-3 py-2 text-[13px] outline-none transition-colors focus:outline-none";
+  const inputCls = "w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-colors focus:outline-none";
   const inputStyle = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
   const labelCls = "mb-1 block text-[11px] font-medium";
   const labelStyle = { color: "var(--fill-tertiary)" };
@@ -248,7 +249,7 @@ function CronJobForm({
             <option value="agent_chat">Agent 对话</option>
             <option value="webhook">Webhook</option>
           </select>
-          <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={labelStyle} />
+          <ChevronDown {...ICON.sm} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={labelStyle} />
         </div>
       </div>
 
@@ -295,7 +296,7 @@ function CronJobForm({
                 <option value="PUT">PUT</option>
                 <option value="DELETE">DELETE</option>
               </select>
-              <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={labelStyle} />
+              <ChevronDown {...ICON.sm} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={labelStyle} />
             </div>
           </div>
         </>
@@ -317,17 +318,17 @@ function CronJobForm({
           className="flex w-full cursor-pointer items-center gap-1 text-[11px] font-medium transition-colors"
           style={{ color: "var(--fill-tertiary)" }}
         >
-          {showNotifyChannels ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
+          {showNotifyChannels ? <ChevronDown {...ICON.sm} /> : <ChevronRight {...ICON.sm} />}
           通知渠道 {notifyChannels.length > 0 && <span className="rounded-full px-1.5 text-[10px]" style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}>{notifyChannels.length}</span>}
         </button>
       </div>
 
       {showNotifyChannels && (
-        <div className="rounded-[6px] p-3 space-y-3" style={{ background: "var(--bg-tertiary)", border: "0.5px solid var(--separator-opaque)" }}>
+        <div className="rounded-[var(--radius-xs)] p-3 space-y-3" style={{ background: "var(--bg-tertiary)", border: "0.5px solid var(--separator-opaque)" }}>
           {notifyChannels.length > 0 && (
             <div className="space-y-1.5">
               {notifyChannels.map((channel, index) => (
-                <div key={index} className="flex items-center gap-2 rounded-[4px] px-2.5 py-2" style={{ background: "var(--bg-base)", border: "0.5px solid var(--separator-opaque)" }}>
+                <div key={index} className="flex items-center gap-2 rounded-[var(--radius-xs)] px-2.5 py-2" style={{ background: "var(--bg-base)", border: "0.5px solid var(--separator-opaque)" }}>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 text-[12px] font-medium" style={{ color: "var(--fill-primary)" }}>
                       <span>
@@ -340,7 +341,7 @@ function CronJobForm({
                          channel.channel_id === "whatsapp" ? "WhatsApp" :
                          channel.channel_id}
                       </span>
-                      <span className="rounded-[3px] px-1 text-[9px]" style={{ background: "var(--bg-tertiary)", color: "var(--fill-quaternary)" }}>
+                      <span className="rounded-[var(--radius-xs)] px-1 text-[10px]" style={{ background: "var(--bg-tertiary)", color: "var(--fill-quaternary)" }}>
                         {channel.target_type === "p2p" ? "私聊" : "群组"}
                       </span>
                     </div>
@@ -351,7 +352,7 @@ function CronJobForm({
                   <button
                     type="button"
                     onClick={() => setNotifyChannels(notifyChannels.filter((_, i) => i !== index))}
-                    className="shrink-0 cursor-pointer rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors hover:opacity-80"
+                    className="shrink-0 cursor-pointer rounded-[var(--radius-xs)] px-1.5 py-0.5 text-[10px] transition-colors hover:opacity-80"
                     style={{ color: "var(--red, #e53e3e)" }}
                   >
                     移除
@@ -379,7 +380,7 @@ function CronJobForm({
                   <option value="whatsapp">WhatsApp</option>
                   <option value="telegram">Telegram</option>
                 </select>
-                <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2" style={labelStyle} />
+                <ChevronDown {...ICON.sm} className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2" style={labelStyle} />
               </div>
               <div className="relative" style={{ width: "80px" }}>
                 <select
@@ -390,7 +391,7 @@ function CronJobForm({
                   <option value="p2p">私聊</option>
                   <option value="group">群组</option>
                 </select>
-                <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2" style={labelStyle} />
+                <ChevronDown {...ICON.sm} className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2" style={labelStyle} />
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -421,10 +422,10 @@ function CronJobForm({
                   }
                 }}
                 disabled={!newChannel.channel_id || !newChannel.target_id}
-                className="shrink-0 cursor-pointer rounded-[6px] px-3 py-2 text-[11px] font-medium transition-colors hover:opacity-90 disabled:opacity-40"
+                className="shrink-0 cursor-pointer rounded-[var(--radius-xs)] px-3 py-2 text-[11px] font-medium transition-colors hover:opacity-90 disabled:opacity-40"
                 style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
               >
-                <Plus size={14} strokeWidth={2} />
+                <Plus {...ICON.sm} />
               </button>
             </div>
             {duplicateWarning && (
@@ -444,7 +445,7 @@ function CronJobForm({
             className="flex w-full cursor-pointer items-center gap-1 text-[11px] font-medium transition-colors"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            {showLogs ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
+            {showLogs ? <ChevronDown {...ICON.sm} /> : <ChevronRight {...ICON.sm} />}
             执行记录 {((job as CronJob).run_count ?? 0) > 0 && `(${(job as CronJob).run_count})`}
           </button>
           {showLogs && <div className="mt-2"><RunLogList jobId={job.id!} /></div>}
@@ -457,7 +458,7 @@ function CronJobForm({
             <button
               onClick={onDelete}
               disabled={saving}
-              className="rounded-[6px] px-3 py-1.5 text-[12px] font-medium transition-colors hover:opacity-80"
+              className="rounded-[var(--radius-xs)] px-3 py-1.5 text-[12px] font-medium transition-colors hover:opacity-80"
               style={{ color: "var(--red, #e53e3e)" }}
             >
               删除任务
@@ -468,7 +469,7 @@ function CronJobForm({
           <button
             onClick={onCancel}
             disabled={saving}
-            className="cursor-pointer rounded-[6px] px-3 py-1.5 text-[12px] font-medium transition-colors"
+            className="cursor-pointer rounded-[var(--radius-xs)] px-3 py-1.5 text-[12px] font-medium transition-colors"
             style={{ color: "var(--fill-secondary)" }}
           >
             取消
@@ -476,7 +477,7 @@ function CronJobForm({
           <button
             onClick={handleSubmit}
             disabled={saving || !form.name || !form.schedule}
-            className="cursor-pointer rounded-[6px] px-4 py-1.5 text-[12px] font-medium transition-colors hover:opacity-90 disabled:opacity-50"
+            className="cursor-pointer rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium transition-colors hover:opacity-90 disabled:opacity-50"
             style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
           >
             {saving ? "保存中..." : "保存"}
@@ -607,7 +608,7 @@ export function CronTab() {
             className="cursor-pointer rounded-[var(--radius-xs)] p-1.5 transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-40"
             title="刷新"
           >
-            <RefreshCw size={16} strokeWidth={1.5} className={loading ? "animate-spin" : ""} style={{ color: "var(--fill-tertiary)" }} />
+            <RefreshCw {...ICON.md} className={loading ? "animate-spin" : ""} style={{ color: "var(--fill-tertiary)" }} />
           </button>
           {!adding && (
             <button
@@ -615,7 +616,7 @@ export function CronTab() {
               className="flex cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] p-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
               style={{ color: "var(--fill-tertiary)" }}
             >
-              <Plus size={14} strokeWidth={2} /> 新增
+              <Plus {...ICON.sm} /> 新增
             </button>
           )}
         </div>
@@ -649,7 +650,7 @@ export function CronTab() {
       {jobs.length === 0 ? (
         <ListContainer>
           <div className="px-3 py-6 text-center">
-            <Clock size={18} strokeWidth={1.5} className="mx-auto mb-2" style={{ color: "var(--fill-quaternary)" }} />
+            <Clock {...ICON.md} className="mx-auto mb-2" style={{ color: "var(--fill-quaternary)" }} />
             <p className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
               暂无定时任务
             </p>
@@ -669,7 +670,7 @@ export function CronTab() {
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <Clock size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                  <Clock {...ICON.md} style={{ color: "var(--fill-tertiary)" }} />
                   <span className="truncate text-[13px] font-medium" style={{ color: "var(--fill-primary)" }}>
                     {job.name}
                   </span>
@@ -684,7 +685,7 @@ export function CronTab() {
                     checked={job.enabled}
                     onChange={(v) => { handleToggle(job.id, v); }}
                   />
-                  <Pencil size={14} strokeWidth={1.5} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ color: "var(--fill-quaternary)" }} />
+                  <Pencil {...ICON.sm} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ color: "var(--fill-quaternary)" }} />
                 </div>
               </div>
               <div className="mt-1 flex items-center gap-3 text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
@@ -700,7 +701,7 @@ export function CronTab() {
               </div>
               {job.last_error && (
                 <div className="mt-1 flex items-center gap-1 text-[10px]" style={{ color: "var(--red, #e53e3e)" }}>
-                  <AlertTriangle size={12} strokeWidth={1.5} />
+                  <AlertTriangle {...ICON.sm} />
                   <span className="truncate">{job.last_error}</span>
                 </div>
               )}

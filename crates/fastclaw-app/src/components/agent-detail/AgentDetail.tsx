@@ -5,6 +5,7 @@ import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
 import { useAvatarUrl, loadAvatarBlobUrl } from "../../lib/use-avatar-url";
 import type { ConfigSection } from "./AgentConfigForm";
+import { ICON } from "../../lib/ui-tokens";
 
 const ChatsTab = lazy(() => import("./AgentChatsTab").then((m) => ({ default: m.ChatsTab })));
 const CronTab = lazy(() => import("./AgentCronTab").then((m) => ({ default: m.CronTab })));
@@ -93,13 +94,13 @@ export function AgentDetail({ open, onClose, agentName, agentInitial, agentColor
               agentInitial
             )}
             <div className="absolute inset-0 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100" style={{ background: "rgba(0,0,0,0.3)", transition: `opacity var(--duration-instant) var(--ease-in-out)` }}>
-              <Camera size={14} strokeWidth={1.5} color="white" />
+              <Camera {...ICON.sm} color="white" />
             </div>
           </button>
           <span className="min-w-0 truncate text-[14px] font-semibold" style={{ color: "var(--fill-primary)" }} title={agentName}>{agentName}</span>
         </div>
         <button onClick={onClose} className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full hover:bg-[var(--bg-hover)]" style={{ color: "var(--fill-tertiary)", transition: `background var(--duration-instant) var(--ease-in-out)` }} title="关闭面板">
-          <X size={16} strokeWidth={1.5} />
+          <X {...ICON.md} />
         </button>
       </div>
 
@@ -109,7 +110,7 @@ export function AgentDetail({ open, onClose, agentName, agentInitial, agentColor
             <button
               key={t}
               onClick={() => setTab(t)}
-              className="flex min-w-0 flex-1 cursor-pointer rounded-[4px] px-1.5 py-1.5 text-center text-[11px] font-medium sm:px-2 sm:text-[12px]"
+              className="flex min-w-0 flex-1 cursor-pointer rounded-[var(--radius-xs)] px-1.5 py-1.5 text-center text-[11px] font-medium sm:px-2 sm:text-[12px]"
               style={{
                 background: tab === t ? "var(--bg-elevated)" : "transparent",
                 color: tab === t ? "var(--fill-primary)" : "var(--fill-tertiary)",

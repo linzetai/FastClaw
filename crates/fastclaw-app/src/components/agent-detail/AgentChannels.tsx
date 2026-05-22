@@ -3,6 +3,7 @@ import { ChevronDown, Link2, Plus, Pencil, Eye, EyeOff } from "lucide-react";
 import * as api from "../../lib/api";
 import { onChannelsChanged } from "../../lib/transport";
 import { FormModal, ListContainer, Toggle } from "./common";
+import { ICON } from "../../lib/ui-tokens";
 
 const CHANNEL_TYPES = [
   { id: "feishu", label: "飞书" },
@@ -51,7 +52,7 @@ function ChannelForm({
   const patch = (k: keyof api.AgentChannelConfig, v: string | boolean | undefined) =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  const inputCls = "w-full rounded-[6px] px-3 py-2 text-[13px] outline-none transition-colors focus:outline-none";
+  const inputCls = "w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-colors focus:outline-none";
   const inputStyle = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
   const labelCls = "mb-1 block text-[11px] font-medium";
   const labelStyle = { color: "var(--fill-tertiary)" };
@@ -74,7 +75,7 @@ function ChannelForm({
                   <option key={t.id} value={t.id}>{t.label}</option>
                 ))}
               </select>
-              <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
+              <ChevronDown {...ICON.sm} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
             </div>
           ) : (
             <div className={inputCls} style={{ ...inputStyle, opacity: 0.7 }}>
@@ -103,7 +104,7 @@ function ChannelForm({
               <option value="websocket">WebSocket</option>
               <option value="webhook">Webhook</option>
             </select>
-            <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
+            <ChevronDown {...ICON.sm} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
           </div>
         </div>
         <div>
@@ -117,7 +118,7 @@ function ChannelForm({
               <option value="all">全部消息</option>
               <option value="mention_only">仅 @提及</option>
             </select>
-            <ChevronDown size={12} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
+            <ChevronDown {...ICON.sm} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
           </div>
         </div>
       </div>
@@ -159,12 +160,12 @@ function ChannelForm({
               <button
                 type="button"
                 onClick={() => setShowAppSecret((v) => !v)}
-                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[4px] transition-colors hover:bg-[var(--bg-hover)]"
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[var(--radius-xs)] transition-colors hover:bg-[var(--bg-hover)]"
                 title={showAppSecret ? "隐藏密钥" : "显示密钥"}
               >
                 {showAppSecret
-                  ? <EyeOff size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
-                  : <Eye size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                  ? <EyeOff {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
+                  : <Eye {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
                 }
               </button>
             </div>
@@ -188,12 +189,12 @@ function ChannelForm({
               <button
                 type="button"
                 onClick={() => setShowVerificationToken((v) => !v)}
-                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[4px] transition-colors hover:bg-[var(--bg-hover)]"
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[var(--radius-xs)] transition-colors hover:bg-[var(--bg-hover)]"
                 title={showVerificationToken ? "隐藏令牌" : "显示令牌"}
               >
                 {showVerificationToken
-                  ? <EyeOff size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
-                  : <Eye size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                  ? <EyeOff {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
+                  : <Eye {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
                 }
               </button>
             </div>
@@ -214,12 +215,12 @@ function ChannelForm({
               <button
                 type="button"
                 onClick={() => setShowEncryptKey((v) => !v)}
-                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[4px] transition-colors hover:bg-[var(--bg-hover)]"
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[var(--radius-xs)] transition-colors hover:bg-[var(--bg-hover)]"
                 title={showEncryptKey ? "隐藏密钥" : "显示密钥"}
               >
                 {showEncryptKey
-                  ? <EyeOff size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
-                  : <Eye size={14} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                  ? <EyeOff {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
+                  : <Eye {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
                 }
               </button>
             </div>
@@ -233,7 +234,7 @@ function ChannelForm({
             <button
               onClick={onDelete}
               disabled={saving}
-              className="rounded-[6px] px-3 py-1.5 text-[12px] font-medium transition-colors hover:opacity-80"
+              className="rounded-[var(--radius-xs)] px-3 py-1.5 text-[12px] font-medium transition-colors hover:opacity-80"
               style={{ color: "var(--red, #e53e3e)" }}
             >
               删除渠道
@@ -244,7 +245,7 @@ function ChannelForm({
           <button
             onClick={onCancel}
             disabled={saving}
-            className="cursor-pointer rounded-[6px] px-3 py-1.5 text-[12px] font-medium transition-colors"
+            className="cursor-pointer rounded-[var(--radius-xs)] px-3 py-1.5 text-[12px] font-medium transition-colors"
             style={{ color: "var(--fill-secondary)" }}
           >
             取消
@@ -252,7 +253,7 @@ function ChannelForm({
           <button
             onClick={() => onSave(id, form)}
             disabled={saving || !id || duplicate}
-            className="cursor-pointer rounded-[6px] px-4 py-1.5 text-[12px] font-medium transition-colors hover:opacity-90 disabled:opacity-50"
+            className="cursor-pointer rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium transition-colors hover:opacity-90 disabled:opacity-50"
             style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
           >
             {saving ? "保存中..." : "保存"}
@@ -348,7 +349,7 @@ export function ChannelManager({ agentId, backendAgent, ready, onRefresh }: {
             className="flex cursor-pointer items-center gap-1 text-[11px] font-medium transition-colors hover:opacity-70"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            <Plus size={14} strokeWidth={2} />
+            <Plus {...ICON.sm} />
             添加
           </button>
         )}
@@ -384,7 +385,7 @@ export function ChannelManager({ agentId, backendAgent, ready, onRefresh }: {
       {entries.length === 0 ? (
         <ListContainer>
           <div className="px-3 py-4 text-center">
-            <Link2 size={16} strokeWidth={1.5} className="mx-auto mb-1.5" style={{ color: "var(--fill-quaternary)" }} />
+            <Link2 {...ICON.md} className="mx-auto mb-1.5" style={{ color: "var(--fill-quaternary)" }} />
             <p className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
               添加渠道以连接飞书、Slack 等外部平台
             </p>
@@ -401,7 +402,7 @@ export function ChannelManager({ agentId, backendAgent, ready, onRefresh }: {
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
-                    <Link2 size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                    <Link2 {...ICON.md} style={{ color: "var(--fill-tertiary)" }} />
                     <span className="text-[13px] font-medium" style={{ color: "var(--fill-primary)" }}>
                       {CHANNEL_LABEL_MAP[chId] ?? chId}
                     </span>
@@ -410,7 +411,7 @@ export function ChannelManager({ agentId, backendAgent, ready, onRefresh }: {
                       style={{ background: cfg.enabled !== false ? "var(--green, #48bb78)" : "var(--fill-quaternary)" }}
                     />
                   </div>
-                  <Pencil size={14} strokeWidth={1.5} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ color: "var(--fill-quaternary)" }} />
+                  <Pencil {...ICON.sm} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ color: "var(--fill-quaternary)" }} />
                 </div>
                 {cfg.domain && (
                   <div className="mt-0.5 truncate text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
