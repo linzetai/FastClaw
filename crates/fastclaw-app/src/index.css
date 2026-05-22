@@ -68,7 +68,7 @@
   --radius-xl: 20px;
 
   --sidebar-w: 320px;
-  --nav-rail-w: 56px;
+  --nav-rail-w: 48px;
   --titlebar-h: 44px;
   --statusbar-h: 30px;
 
@@ -103,6 +103,14 @@
   --glow-tint: 0 0 12px color-mix(in srgb, var(--tint) 35%, transparent);
   --glow-tint-sm: 0 0 6px color-mix(in srgb, var(--tint) 20%, transparent);
   --gradient-border: linear-gradient(135deg, var(--tint), color-mix(in srgb, var(--tint) 60%, var(--green)));
+
+  /* Aesthetic tokens */
+  --gradient-hero: radial-gradient(ellipse 600px 400px at 50% 40%, color-mix(in srgb, var(--tint) 8%, transparent), transparent);
+  --bubble-user-gradient: linear-gradient(135deg, var(--bubble-user), color-mix(in srgb, var(--bubble-user) 80%, #000));
+  --noise-overlay: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+
+  /* Code */
+  --code-font-size: 11px;
 }
 
 /* Non-macOS: use opaque chrome to avoid transparency-induced contrast loss.
@@ -192,6 +200,9 @@
   --red: #FF453A;
   --orange: #FF9F0A;
   --yellow: #FFD60A;
+
+  --gradient-hero: radial-gradient(ellipse 600px 400px at 50% 40%, color-mix(in srgb, var(--tint) 12%, transparent), transparent);
+  --bubble-user-gradient: linear-gradient(135deg, var(--bubble-user), color-mix(in srgb, var(--bubble-user) 70%, #000));
 }
 
 /* ━━━ Full Immersive Theme Overrides ━━━
@@ -533,8 +544,8 @@
 /* ━━━ Scrollbar / Selection / Focus ━━━ */
 @layer base {
   * { scrollbar-gutter: stable; }
-  ::-webkit-scrollbar { width: 4px; transition: width 0.2s; }
-  ::-webkit-scrollbar:hover { width: 8px; }
+  ::-webkit-scrollbar { width: 4px; height: 4px; transition: width 0.2s, height 0.2s; }
+  ::-webkit-scrollbar:hover { width: 8px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; transition: background 0.2s; }
   ::-webkit-scrollbar-track:hover { background: var(--bg-hover); }
   ::-webkit-scrollbar-thumb {
@@ -1073,6 +1084,10 @@
 @keyframes glow-pulse {
   0%, 100% { box-shadow: 0 0 6px color-mix(in srgb, var(--tint) 20%, transparent); }
   50% { box-shadow: 0 0 16px color-mix(in srgb, var(--tint) 45%, transparent); }
+}
+@keyframes breath {
+  0%, 100% { opacity: 0.4; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
 }
 @keyframes border-flow {
   0% { background-position: 0% 50%; }
