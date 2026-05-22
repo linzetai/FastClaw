@@ -1,5 +1,6 @@
 import { Settings, ArrowRight } from "lucide-react";
 import { ClawIcon } from "../layout/ClawIcon";
+import { ICON } from "../../lib/ui-tokens";
 
 export function WelcomeStep({ onNext, onImport }: { onNext: () => void; onImport: () => void }) {
   return (
@@ -31,7 +32,7 @@ export function WelcomeStep({ onNext, onImport }: { onNext: () => void; onImport
           style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
         >
           新手配置
-          <Settings size={16} strokeWidth={2} />
+          <Settings {...ICON.md} />
         </button>
         <button
           onClick={onImport}
@@ -43,7 +44,7 @@ export function WelcomeStep({ onNext, onImport }: { onNext: () => void; onImport
           }}
         >
           导入现有配置
-          <ArrowRight size={16} strokeWidth={2} />
+          <ArrowRight {...ICON.md} />
         </button>
       </div>
     </div>

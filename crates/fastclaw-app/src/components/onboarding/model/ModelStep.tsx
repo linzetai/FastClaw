@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { ChevronLeft } from "lucide-react";
+import { ICON } from "../../../lib/ui-tokens";
 import { useModelTest, saveModelConfig } from "../../../lib/model-utils";
 import type { ModelState, ModelAction } from "./model-state";
 import { SubStepBreadcrumb } from "./SubStepBreadcrumb";
@@ -51,7 +52,7 @@ export function ModelStep({
           className="flex cursor-pointer items-center gap-1 text-[13px] font-medium transition-colors hover:opacity-80"
           style={{ color: "var(--fill-tertiary)" }}
         >
-          <ChevronLeft size={16} />
+          <ChevronLeft {...ICON.md} />
           {state.subStep > 1 ? "上一步" : "返回"}
         </button>
       </div>

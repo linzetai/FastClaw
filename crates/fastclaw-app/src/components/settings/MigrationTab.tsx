@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Download, Upload, RotateCcw, AlertTriangle, CheckCircle, XCircle } from "lucide-react";
 import * as transport from "../../lib/transport";
+import { ICON } from "../../lib/ui-tokens";
 
 export function MigrationTab() {
   const [exportStatus, setExportStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -118,8 +119,8 @@ export function MigrationTab() {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case "success": return <CheckCircle size={16} style={{ color: "var(--green)" }} />;
-      case "error": return <XCircle size={16} style={{ color: "var(--red)" }} />;
+      case "success": return <CheckCircle {...ICON.md} style={{ color: "var(--green)" }} />;
+      case "error": return <XCircle {...ICON.md} style={{ color: "var(--red)" }} />;
       case "loading": return <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--fill-primary)]" />;
       default: return null;
     }
@@ -142,7 +143,7 @@ export function MigrationTab() {
         style={{ background: "var(--bg-base)", border: "1px solid var(--separator)" }}
       >
         <div className="flex items-center gap-2 mb-3">
-          <Download size={18} style={{ color: "var(--blue)" }} />
+          <Download {...ICON.md} style={{ color: "var(--blue)" }} />
           <h4 className="font-medium" style={{ color: "var(--fill-primary)" }}>
             导出数据
           </h4>
@@ -217,7 +218,7 @@ export function MigrationTab() {
         style={{ background: "var(--bg-base)", border: "1px solid var(--separator)" }}
       >
         <div className="flex items-center gap-2 mb-3">
-          <Upload size={18} style={{ color: "var(--green)" }} />
+          <Upload {...ICON.md} style={{ color: "var(--green)" }} />
           <h4 className="font-medium" style={{ color: "var(--fill-primary)" }}>
             导入数据
           </h4>
@@ -244,7 +245,7 @@ export function MigrationTab() {
           </div>
 
           <div className="flex items-start gap-2 pt-2">
-            <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" style={{ color: "var(--yellow)" }} />
+            <AlertTriangle {...ICON.sm} className="mt-0.5 flex-shrink-0" style={{ color: "var(--yellow)" }} />
             <p className="text-[12px] leading-relaxed" style={{ color: "var(--fill-secondary)" }}>
               注意：导入操作将覆盖当前配置。如有重要数据，请先执行导出备份。
             </p>
@@ -258,7 +259,7 @@ export function MigrationTab() {
         style={{ background: "var(--bg-base)", border: "1px solid var(--separator)" }}
       >
         <summary className="cursor-pointer font-medium flex items-center gap-2" style={{ color: "var(--fill-primary)" }}>
-          <RotateCcw size={16} />
+          <RotateCcw {...ICON.md} />
           <span>高级选项</span>
         </summary>
         <div className="pt-4 space-y-3">

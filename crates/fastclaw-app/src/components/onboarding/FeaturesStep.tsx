@@ -2,6 +2,7 @@ import {
   ChevronLeft, Bot, MessageSquare, Clock, Search,
   Wrench, Sparkles, ArrowRight,
 } from "lucide-react";
+import { ICON } from "../../lib/ui-tokens";
 
 const FEATURES = [
   { icon: Bot, cssColor: "var(--tint)", title: "多 Agent 管理", desc: "创建和管理多个 AI Agent，各自独立配置模型、人设和工具" },
@@ -21,7 +22,7 @@ export function FeaturesStep({ onNext, onPrev }: { onNext: () => void; onPrev: (
           className="flex cursor-pointer items-center gap-1 text-[13px] font-medium transition-colors hover:opacity-80"
           style={{ color: "var(--fill-tertiary)" }}
         >
-          <ChevronLeft size={16} />
+          <ChevronLeft {...ICON.md} />
           返回
         </button>
       </div>
@@ -46,7 +47,7 @@ export function FeaturesStep({ onNext, onPrev }: { onNext: () => void; onPrev: (
               className="mb-3 flex h-9 w-9 items-center justify-center rounded-[8px]"
               style={{ background: `color-mix(in srgb, ${f.cssColor} 10%, transparent)` }}
             >
-              <f.icon size={18} strokeWidth={1.5} style={{ color: f.cssColor }} />
+              <f.icon {...ICON.lg} style={{ color: f.cssColor }} />
             </div>
             <h3 className="text-[13px] font-semibold" style={{ color: "var(--fill-primary)" }}>
               {f.title}
@@ -68,7 +69,7 @@ export function FeaturesStep({ onNext, onPrev }: { onNext: () => void; onPrev: (
           style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
         >
           开始使用
-          <ArrowRight size={16} strokeWidth={2} />
+          <ArrowRight {...ICON.md} />
         </button>
       </div>
     </div>

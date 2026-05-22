@@ -4,6 +4,7 @@ import * as api from "../../lib/api";
 import { SectionTitle } from "./SettingsShared";
 import { inferContextWindow, takeModelSnapshot, popModelSnapshot, hasModelSnapshots } from "../../lib/model-registry";
 import { useModelTest } from "../../lib/model-utils";
+import { ICON } from "../../lib/ui-tokens";
 
 
 /* ━━━ Models Tab ━━━ */
@@ -71,7 +72,7 @@ function ModelFormModal({
     runTest(baseUrl, cred.apiKey, form.model || undefined);
   };
 
-  const inputCls = "w-full rounded-[6px] px-3 py-2 text-[13px] outline-none transition-all focus:ring-2 focus:ring-[var(--tint)]";
+  const inputCls = "w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-all focus:ring-2 focus:ring-[var(--tint)]";
   const inputStyle: React.CSSProperties = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
   const labelCls = "mb-1.5 block text-[11px] font-medium";
   const labelStyle: React.CSSProperties = { color: "var(--fill-tertiary)" };
@@ -89,7 +90,7 @@ function ModelFormModal({
             {isNew ? "新增模型" : `编辑 · ${entry.key}`}
           </h3>
           <button onClick={onCancel} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-[var(--bg-hover)]" style={{ color: "var(--fill-tertiary)" }}>
-            <X size={16} strokeWidth={1.5} />
+            <X {...ICON.md} />
           </button>
         </div>
         <div className="max-h-[60vh] space-y-4 overflow-y-auto px-5 py-4">
@@ -106,7 +107,7 @@ function ModelFormModal({
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic</option>
                 </select>
-                <ChevronDown size={14} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
+                <ChevronDown {...ICON.sm} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" style={{ color: "var(--fill-tertiary)" }} />
               </div>
             </div>
           </div>
@@ -164,26 +165,26 @@ function ModelFormModal({
                 <button
                   type="button"
                   onClick={() => setShowApiKey((v) => !v)}
-                  className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[4px] transition-colors hover:bg-[var(--bg-hover)]"
+                  className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[var(--radius-xs)] transition-colors hover:bg-[var(--bg-hover)]"
                   title={showApiKey ? "隐藏密钥" : "显示密钥"}
                 >
                   {showApiKey
-                    ? <EyeOff size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
-                    : <Eye size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                    ? <EyeOff {...ICON.md} style={{ color: "var(--fill-tertiary)" }} />
+                    : <Eye {...ICON.md} style={{ color: "var(--fill-tertiary)" }} />
                   }
                 </button>
                 <button
                   type="button"
                   onClick={handleTest}
                   disabled={testStatus === "testing"}
-                  className="flex h-7 cursor-pointer items-center gap-1 rounded-[4px] px-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                  className="flex h-7 cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
                   style={{ color: testStatus === "success" ? "var(--green)" : testStatus === "error" ? "var(--red)" : "var(--tint)" }}
                   title="测试连接"
                 >
-                  {testStatus === "testing" ? <Loader2 size={16} strokeWidth={1.5} className="animate-spin" />
-                    : testStatus === "success" ? <CheckCircle size={16} strokeWidth={1.5} />
-                    : testStatus === "error" ? <XCircle size={16} strokeWidth={1.5} />
-                    : <Zap size={16} strokeWidth={1.5} />
+                  {testStatus === "testing" ? <Loader2 {...ICON.md} className="animate-spin" />
+                    : testStatus === "success" ? <CheckCircle {...ICON.md} />
+                    : testStatus === "error" ? <XCircle {...ICON.md} />
+                    : <Zap {...ICON.md} />
                   }
                   {testStatus === "idle" && "测试"}
                 </button>
@@ -203,7 +204,7 @@ function ModelFormModal({
               className="flex cursor-pointer items-center gap-1.5 text-[11px] font-medium transition-colors hover:opacity-80"
               style={{ color: "var(--fill-tertiary)" }}
             >
-              <ChevronDown size={14} strokeWidth={2} style={{ transform: showAdvanced ? "rotate(180deg)" : "rotate(0)", transition: "transform var(--duration-fast)" }} />
+              <ChevronDown {...ICON.sm} style={{ transform: showAdvanced ? "rotate(180deg)" : "rotate(0)", transition: "transform var(--duration-fast)" }} />
               高级设置
             </button>
             {showAdvanced && (
@@ -292,22 +293,22 @@ function ModelFormModal({
               <button
                 onClick={onDelete}
                 disabled={saving}
-                className="flex cursor-pointer items-center gap-1 rounded-[6px] px-3 py-1.5 text-[12px] font-medium transition-colors hover:opacity-80"
+                className="flex cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-3 py-1.5 text-[12px] font-medium transition-colors hover:opacity-80"
                 style={{ color: "var(--red)" }}
               >
-                <Trash2 size={16} strokeWidth={1.5} />
+                <Trash2 {...ICON.md} />
                 删除
               </button>
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={onCancel} disabled={saving} className="cursor-pointer rounded-[6px] px-3 py-1.5 text-[12px] font-medium transition-colors hover:bg-[var(--bg-hover)]" style={{ color: "var(--fill-secondary)" }}>
+            <button onClick={onCancel} disabled={saving} className="cursor-pointer rounded-[var(--radius-xs)] px-3 py-1.5 text-[12px] font-medium transition-colors hover:bg-[var(--bg-hover)]" style={{ color: "var(--fill-secondary)" }}>
               取消
             </button>
             <button
               onClick={() => onSave(form, cred)}
               disabled={saving || !form.key || !form.model}
-              className="rounded-[6px] px-4 py-1.5 text-[12px] font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               style={{ background: "var(--tint)", cursor: saving || !form.key || !form.model ? "not-allowed" : "pointer" }}
             >
               {saving ? "保存中..." : "保存"}
@@ -480,7 +481,7 @@ export function ModelTab() {
             animation: "fade-in var(--duration-fast) var(--ease-out)",
           }}
         >
-          {toast.type === "ok" ? <CheckCircle size={16} strokeWidth={1.5} /> : <XCircle size={16} strokeWidth={1.5} />}
+          {toast.type === "ok" ? <CheckCircle {...ICON.md} /> : <XCircle {...ICON.md} />}
           {toast.msg}
         </div>
       )}
@@ -491,7 +492,7 @@ export function ModelTab() {
             <button
               onClick={handleRollback}
               disabled={saving}
-              className="flex cursor-pointer items-center gap-1 rounded-[6px] px-2.5 py-1 text-[12px] font-medium transition-colors hover:opacity-80 disabled:opacity-40"
+              className="flex cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-2.5 py-1 text-[12px] font-medium transition-colors hover:opacity-80 disabled:opacity-40"
               style={{ color: "var(--fill-tertiary)" }}
             >
               撤销
@@ -499,10 +500,10 @@ export function ModelTab() {
           )}
           <button
             onClick={() => { setAdding(true); setEditing(null); }}
-            className="flex cursor-pointer items-center gap-1 rounded-[6px] px-2.5 py-1 text-[12px] font-medium transition-colors hover:opacity-80"
+            className="flex cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-2.5 py-1 text-[12px] font-medium transition-colors hover:opacity-80"
             style={{ color: "var(--tint)" }}
           >
-            <Plus size={16} strokeWidth={2} />
+            <Plus {...ICON.md} />
             新增模型
           </button>
         </div>
@@ -537,7 +538,7 @@ export function ModelTab() {
                   </div>
                 )}
               </div>
-              <Pencil size={16} strokeWidth={1.5} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ color: "var(--fill-quaternary)" }} />
+              <Pencil {...ICON.md} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ color: "var(--fill-quaternary)" }} />
             </div>
           </div>
         ))}

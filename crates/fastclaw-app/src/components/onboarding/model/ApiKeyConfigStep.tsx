@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   ChevronRight, Eye, EyeOff, Zap, CheckCircle, XCircle,
 } from "lucide-react";
+import { ICON } from "../../../lib/ui-tokens";
 import { inferContextWindow } from "../../../lib/model-registry";
 import type { TestStatus } from "../../../lib/model-utils";
 import { inputCls, inputStyle, labelCls, labelStyle } from "../shared";
@@ -127,7 +128,7 @@ export function ApiKeyConfigStep({
                 className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-[var(--bg-hover)]"
                 style={{ color: "var(--fill-tertiary)" }}
               >
-                {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                {showApiKey ? <EyeOff {...ICON.sm} /> : <Eye {...ICON.sm} />}
               </button>
               <button
                 onClick={onTest}
@@ -143,13 +144,13 @@ export function ApiKeyConfigStep({
                 }}
               >
                 {testStatus === "testing" ? (
-                  <Zap size={14} className="animate-pulse" />
+                  <Zap {...ICON.sm} className="animate-pulse" />
                 ) : testStatus === "success" ? (
-                  <CheckCircle size={14} />
+                  <CheckCircle {...ICON.sm} />
                 ) : testStatus === "error" ? (
-                  <XCircle size={14} />
+                  <XCircle {...ICON.sm} />
                 ) : (
-                  <Zap size={14} />
+                  <Zap {...ICON.sm} />
                 )}
                 测试
               </button>
@@ -212,7 +213,7 @@ export function ApiKeyConfigStep({
           style={{ color: "var(--fill-tertiary)" }}
         >
           <ChevronRight
-            size={14}
+            {...ICON.sm}
             className={`transition-transform ${showAdvanced ? "rotate-90" : ""}`}
           />
           高级选项

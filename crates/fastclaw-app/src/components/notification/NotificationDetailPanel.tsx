@@ -1,4 +1,5 @@
 import { X, Clock, AlertTriangle, Info, Zap } from "lucide-react";
+import { ICON } from "../../lib/ui-tokens";
 import type { AppNotification } from "../../lib/transport";
 import { lazy, Suspense, type ReactNode } from "react";
 
@@ -15,13 +16,13 @@ function parseUtc(ts: string): Date {
 function categoryLabel(category?: string): { icon: ReactNode; label: string } {
   switch (category) {
     case "cron":
-      return { icon: <Clock size={14} />, label: "定时任务" };
+      return { icon: <Clock {...ICON.md} />, label: "定时任务" };
     case "agent":
-      return { icon: <Zap size={14} />, label: "Agent" };
+      return { icon: <Zap {...ICON.md} />, label: "Agent" };
     case "error":
-      return { icon: <AlertTriangle size={14} />, label: "错误" };
+      return { icon: <AlertTriangle {...ICON.md} />, label: "错误" };
     default:
-      return { icon: <Info size={14} />, label: "系统" };
+      return { icon: <Info {...ICON.md} />, label: "系统" };
   }
 }
 
@@ -87,7 +88,7 @@ export function NotificationDetailPanel({ notification, onClose }: Props) {
             className="flex items-center justify-center rounded-md p-1.5 hover:bg-[var(--bg-hover)] transition-colors"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            <X size={16} />
+            <X {...ICON.md} />
           </button>
         </div>
 

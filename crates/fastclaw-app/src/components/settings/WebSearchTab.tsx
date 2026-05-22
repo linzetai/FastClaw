@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Eye, EyeOff, Zap, CheckCircle, XCircle, Loader2, Search } from "lucide-react";
 import * as api from "../../lib/api";
 import { SectionTitle } from "./SettingsShared";
+import { ICON } from "../../lib/ui-tokens";
 
 
 type TestStatus = "idle" | "testing" | "success" | "error";
@@ -148,7 +149,7 @@ export function WebSearchTab() {
     );
   }
 
-  const inputCls = "w-full rounded-[6px] px-3 py-2 text-[13px] outline-none transition-all focus:ring-2 focus:ring-[var(--tint)]";
+  const inputCls = "w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-all focus:ring-2 focus:ring-[var(--tint)]";
   const inputStyle: React.CSSProperties = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
   const labelCls = "mb-1.5 block text-[11px] font-medium";
   const labelStyle: React.CSSProperties = { color: "var(--fill-tertiary)" };
@@ -164,7 +165,7 @@ export function WebSearchTab() {
             animation: "fade-in var(--duration-fast) var(--ease-out)",
           }}
         >
-          {toast.type === "ok" ? <CheckCircle size={16} strokeWidth={1.5} /> : <XCircle size={16} strokeWidth={1.5} />}
+          {toast.type === "ok" ? <CheckCircle {...ICON.md} /> : <XCircle {...ICON.md} />}
           {toast.msg}
         </div>
       )}
@@ -232,7 +233,7 @@ export function WebSearchTab() {
                   }}
                 >
                   <div
-                    className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[3px]"
+                    className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[var(--radius-xs)]"
                     style={{
                       border: `2px solid ${checked ? "var(--tint)" : "var(--fill-quaternary)"}`,
                       background: checked ? "var(--tint)" : "transparent",
@@ -275,24 +276,24 @@ export function WebSearchTab() {
                   <button
                     type="button"
                     onClick={() => setShowKey((v) => !v)}
-                    className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[4px] transition-colors hover:bg-[var(--bg-hover)]"
+                    className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[var(--radius-xs)] transition-colors hover:bg-[var(--bg-hover)]"
                   >
                     {showKey
-                      ? <EyeOff size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
-                      : <Eye size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+                      ? <EyeOff {...ICON.md} style={{ color: "var(--fill-tertiary)" }} />
+                      : <Eye {...ICON.md} style={{ color: "var(--fill-tertiary)" }} />
                     }
                   </button>
                   <button
                     type="button"
                     onClick={handleTest}
                     disabled={testStatus === "testing"}
-                    className="flex h-7 cursor-pointer items-center gap-1 rounded-[4px] px-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                    className="flex h-7 cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
                     style={{ color: testStatus === "success" ? "var(--green)" : testStatus === "error" ? "var(--red)" : "var(--tint)" }}
                   >
-                    {testStatus === "testing" ? <Loader2 size={16} strokeWidth={1.5} className="animate-spin" />
-                      : testStatus === "success" ? <CheckCircle size={16} strokeWidth={1.5} />
-                      : testStatus === "error" ? <XCircle size={16} strokeWidth={1.5} />
-                      : <Zap size={16} strokeWidth={1.5} />
+                    {testStatus === "testing" ? <Loader2 {...ICON.md} className="animate-spin" />
+                      : testStatus === "success" ? <CheckCircle {...ICON.md} />
+                      : testStatus === "error" ? <XCircle {...ICON.md} />
+                      : <Zap {...ICON.md} />
                     }
                     {testStatus === "idle" && "测试"}
                   </button>
@@ -329,13 +330,13 @@ export function WebSearchTab() {
                   type="button"
                   onClick={handleTest}
                   disabled={testStatus === "testing"}
-                  className="absolute top-1/2 right-2 flex h-7 -translate-y-1/2 cursor-pointer items-center gap-1 rounded-[4px] px-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                  className="absolute top-1/2 right-2 flex h-7 -translate-y-1/2 cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
                   style={{ color: testStatus === "success" ? "var(--green)" : testStatus === "error" ? "var(--red)" : "var(--tint)" }}
                 >
-                  {testStatus === "testing" ? <Loader2 size={16} strokeWidth={1.5} className="animate-spin" />
-                    : testStatus === "success" ? <CheckCircle size={16} strokeWidth={1.5} />
-                    : testStatus === "error" ? <XCircle size={16} strokeWidth={1.5} />
-                    : <Zap size={16} strokeWidth={1.5} />
+                  {testStatus === "testing" ? <Loader2 {...ICON.md} className="animate-spin" />
+                    : testStatus === "success" ? <CheckCircle {...ICON.md} />
+                    : testStatus === "error" ? <XCircle {...ICON.md} />
+                    : <Zap {...ICON.md} />
                   }
                   {testStatus === "idle" && "测试"}
                 </button>
@@ -366,7 +367,7 @@ export function WebSearchTab() {
         <button
           onClick={handleSave}
           disabled={saving}
-          className="rounded-[6px] px-4 py-2 text-[13px] font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
+          className="rounded-[var(--radius-xs)] px-4 py-2 text-[13px] font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
           style={{ background: "var(--tint)", cursor: saving ? "not-allowed" : "pointer" }}
         >
           {saving ? "保存中..." : "保存"}

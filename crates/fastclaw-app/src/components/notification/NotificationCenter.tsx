@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { Bell, Check, CheckCheck, Trash2, Clock, AlertTriangle, Info, Zap } from "lucide-react";
+import { ICON } from "../../lib/ui-tokens";
 import * as transport from "../../lib/transport";
 
 const isTauri =
@@ -33,13 +34,13 @@ function relativeTime(iso: string): string {
 function categoryIcon(category?: string): ReactNode {
   switch (category) {
     case "cron":
-      return <Clock size={16} strokeWidth={1.5} />;
+      return <Clock {...ICON.md} />;
     case "agent":
-      return <Zap size={16} strokeWidth={1.5} />;
+      return <Zap {...ICON.md} />;
     case "error":
-      return <AlertTriangle size={16} strokeWidth={1.5} />;
+      return <AlertTriangle {...ICON.md} />;
     default:
-      return <Info size={16} strokeWidth={1.5} />;
+      return <Info {...ICON.md} />;
   }
 }
 
@@ -193,11 +194,11 @@ export function NotificationCenter({ onDetailOpen }: Props) {
       {/* Bell button */}
       <button
         onClick={handleToggle}
-        className="relative flex h-7 w-7 items-center justify-center rounded-md transition-all duration-100 hover:bg-[var(--bg-hover)] hover:scale-105 active:scale-95"
-        style={{ color: "var(--fill-secondary)" }}
+        className="relative flex h-7 w-7 items-center justify-center rounded-md transition-all duration-100 hover:bg-[var(--bg-hover)] active:scale-95"
+        style={{ color: "var(--fill-quaternary)" }}
         title="消息中心"
       >
-        <Bell size={16} strokeWidth={1.5} />
+        <Bell size={14} strokeWidth={1.2} />
         {unreadCount > 0 && (
           <span
             key={unreadCount}
@@ -252,7 +253,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                 style={{ color: "var(--blue)" }}
                 title="全部标为已读"
               >
-                <CheckCheck size={14} />
+                <CheckCheck {...ICON.sm} />
                 全部已读
               </button>
             )}
@@ -360,7 +361,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                         style={{ color: "var(--fill-tertiary)" }}
                         title="标为已读"
                       >
-                        <Check size={14} />
+                        <Check {...ICON.sm} />
                       </button>
                     )}
                     <button
@@ -369,7 +370,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                       style={{ color: "var(--fill-tertiary)" }}
                       title="删除"
                     >
-                      <Trash2 size={14} />
+                      <Trash2 {...ICON.sm} />
                     </button>
                   </div>
                 </div>

@@ -8,6 +8,7 @@ import {
   listLlmPlugins, createLlmPlugin, updateLlmPlugin, deleteLlmPlugin,
   testLlmPlugin, type LlmPluginSummary,
 } from "../../lib/api";
+import { ICON } from "../../lib/ui-tokens";
 
 type AuthType = "none" | "bearer_token" | "custom_header" | "oauth2_client_credentials" | "pre_request_hook";
 
@@ -94,7 +95,6 @@ function formToPayload(f: PluginFormState): Record<string, unknown> {
   return payload;
 }
 
-const ICON_SIZE = 14;
 const BTN_BASE = "flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-xs)] px-3 py-1.5 text-[12px] font-medium transition-all duration-150";
 
 function Btn({ children, onClick, variant = "default", disabled = false }: {
@@ -242,8 +242,8 @@ export function LlmPluginTab() {
       <div className="flex items-center justify-between">
         <SectionTitle>LLM 提供商插件</SectionTitle>
         <div className="flex gap-2">
-          <Btn onClick={refresh}><RefreshCw size={ICON_SIZE} /> 刷新</Btn>
-          <Btn variant="primary" onClick={openNew}><Plus size={ICON_SIZE} /> 添加插件</Btn>
+          <Btn onClick={refresh}><RefreshCw {...ICON.sm} /> 刷新</Btn>
+          <Btn variant="primary" onClick={openNew}><Plus {...ICON.sm} /> 添加插件</Btn>
         </div>
       </div>
 
@@ -271,7 +271,7 @@ export function LlmPluginTab() {
               <div key={p.id} className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-secondary)", border: "0.5px solid var(--separator)" }}>
                 <div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={() => toggleExpand(p.id)}>
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-xs)]" style={{ background: "var(--bg-hover)" }}>
-                    {p.type === "middleware" ? <Zap size={16} style={{ color: "var(--tint)" }} /> : <Terminal size={16} style={{ color: "var(--tint)" }} />}
+                    {p.type === "middleware" ? <Zap {...ICON.md} style={{ color: "var(--tint)" }} /> : <Terminal {...ICON.md} style={{ color: "var(--tint)" }} />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -292,7 +292,7 @@ export function LlmPluginTab() {
                         : "暂无模型定义"}
                     </div>
                   </div>
-                  {isExpanded ? <ChevronUp size={14} style={{ color: "var(--fill-tertiary)" }} /> : <ChevronDown size={14} style={{ color: "var(--fill-tertiary)" }} />}
+                  {isExpanded ? <ChevronUp {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} /> : <ChevronDown {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />}
                 </div>
                 {isExpanded && (
                   <div className="px-4 pb-3 pt-0">
@@ -302,13 +302,13 @@ export function LlmPluginTab() {
                     </div>
                     {p.description && <div className="mb-3 text-[12px]" style={{ color: "var(--fill-secondary)" }}>{p.description}</div>}
                     <div className="flex gap-2">
-                      <Btn onClick={() => handleTest(p.id)}><Play size={ICON_SIZE} /> 测试连接</Btn>
-                      <Btn onClick={() => openEdit(p)}><Pencil size={ICON_SIZE} /> 编辑</Btn>
-                      <Btn variant="danger" onClick={() => handleDelete(p.id)}><Trash2 size={ICON_SIZE} /> 删除</Btn>
+                      <Btn onClick={() => handleTest(p.id)}><Play {...ICON.sm} /> 测试连接</Btn>
+                      <Btn onClick={() => openEdit(p)}><Pencil {...ICON.sm} /> 编辑</Btn>
+                      <Btn variant="danger" onClick={() => handleDelete(p.id)}><Trash2 {...ICON.sm} /> 删除</Btn>
                     </div>
                     {tr && (
                       <div className="mt-2 flex items-center gap-2 text-[12px]" style={{ color: tr.ok ? "var(--system-green)" : "var(--system-red)" }}>
-                        {tr.ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                        {tr.ok ? <CheckCircle2 {...ICON.sm} /> : <XCircle {...ICON.sm} />}
                         {tr.message}
                       </div>
                     )}
@@ -522,7 +522,7 @@ function PluginForm({ form, setForm, onSave, onCancel, isNew }: {
       <div className="space-y-3 rounded-[var(--radius-sm)] p-4" style={{ background: "var(--bg-secondary)", border: "0.5px solid var(--separator)" }}>
         <div className="flex items-center justify-between">
           <SectionTitle>模型列表</SectionTitle>
-          <Btn onClick={addModel}><Plus size={ICON_SIZE} /> 添加模型</Btn>
+          <Btn onClick={addModel}><Plus {...ICON.sm} /> 添加模型</Btn>
         </div>
         {form.models.length === 0 ? (
           <div className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>暂无模型。点击「添加模型」定义此插件支持的模型。</div>
@@ -550,7 +550,7 @@ function PluginForm({ form, setForm, onSave, onCancel, isNew }: {
                   className="w-28"
                 />
                 <button onClick={() => removeModel(idx)} className="cursor-pointer p-1" style={{ color: "var(--system-red)" }}>
-                  <Trash2 size={14} />
+                  <Trash2 {...ICON.sm} />
                 </button>
               </div>
             ))}

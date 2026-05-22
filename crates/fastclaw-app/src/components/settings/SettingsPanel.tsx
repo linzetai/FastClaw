@@ -1,5 +1,6 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { Settings2, Box, Wrench, Server, Info, Search, Shield, Plug, X, RotateCcw } from "lucide-react";
+import { ICON, BTN_ICON } from "../../lib/ui-tokens";
 
 const GeneralTab = lazy(() => import("./GeneralTab").then((m) => ({ default: m.GeneralTab })));
 const ModelTab = lazy(() => import("./ModelTab").then((m) => ({ default: m.ModelTab })));
@@ -18,17 +19,16 @@ interface SettingsPanelProps {
 
 type SettingsTab = "general" | "models" | "web-search" | "skills" | "mcp" | "security" | "gateway" | "about" | "migration";
 
-const ICON_PROPS = { size: 16, strokeWidth: 1.5 } as const;
 const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
-  { id: "general", label: "通用", icon: <Settings2 {...ICON_PROPS} /> },
-  { id: "models", label: "模型", icon: <Box {...ICON_PROPS} /> },
-  { id: "web-search", label: "联网搜索", icon: <Search {...ICON_PROPS} /> },
-  { id: "skills", label: "Skills", icon: <Wrench {...ICON_PROPS} /> },
-  { id: "mcp", label: "MCP", icon: <Plug {...ICON_PROPS} /> },
-  { id: "security", label: "安全", icon: <Shield {...ICON_PROPS} /> },
-  { id: "gateway", label: "网关", icon: <Server {...ICON_PROPS} /> },
-  { id: "migration", label: "迁移", icon: <RotateCcw {...ICON_PROPS} /> },
-  { id: "about", label: "关于", icon: <Info {...ICON_PROPS} /> },
+  { id: "general", label: "通用", icon: <Settings2 {...ICON.md} /> },
+  { id: "models", label: "模型", icon: <Box {...ICON.md} /> },
+  { id: "web-search", label: "联网搜索", icon: <Search {...ICON.md} /> },
+  { id: "skills", label: "Skills", icon: <Wrench {...ICON.md} /> },
+  { id: "mcp", label: "MCP", icon: <Plug {...ICON.md} /> },
+  { id: "security", label: "安全", icon: <Shield {...ICON.md} /> },
+  { id: "gateway", label: "网关", icon: <Server {...ICON.md} /> },
+  { id: "migration", label: "迁移", icon: <RotateCcw {...ICON.md} /> },
+  { id: "about", label: "关于", icon: <Info {...ICON.md} /> },
 ];
 
 export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
@@ -89,8 +89,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             <h2 className="text-[15px] font-semibold" style={{ color: "var(--fill-primary)" }}>
               {TABS.find((t) => t.id === tab)?.label}
             </h2>
-            <button onClick={onClose} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]" style={{ color: "var(--fill-tertiary)" }}>
-              <X size={16} strokeWidth={1.5} />
+            <button onClick={onClose} className={`${BTN_ICON.sm} cursor-pointer rounded-full`} style={{ color: "var(--fill-tertiary)" }}>
+              <X {...ICON.md} />
             </button>
           </div>
           <div className="flex-1 overflow-y-auto px-6 py-5">

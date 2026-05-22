@@ -63,7 +63,7 @@ export function GeneralTab() {
             <button
               key={opt.value}
               onClick={() => setMode(opt.value)}
-              className="flex-1 cursor-pointer rounded-[4px] py-1.5 text-center text-[12px] font-medium transition-all duration-200"
+              className="flex-1 cursor-pointer rounded-[var(--radius-xs)] py-1.5 text-center text-[12px] font-medium transition-all duration-200"
               style={{
                 background: mode === opt.value ? "var(--bg-elevated)" : "transparent",
                 color: mode === opt.value ? "var(--fill-primary)" : "var(--fill-tertiary)",
@@ -155,7 +155,7 @@ function DisplaySection() {
               <button
                 key={opt.value}
                 onClick={() => setDisplayConfig({ fontSize: opt.value })}
-                className="cursor-pointer rounded-[4px] px-2.5 py-1 text-center text-[12px] font-medium transition-all duration-200"
+                className="cursor-pointer rounded-[var(--radius-xs)] px-2.5 py-1 text-center text-[12px] font-medium transition-all duration-200"
                 style={{
                   background: display.fontSize === opt.value ? "var(--bg-elevated)" : "transparent",
                   color: display.fontSize === opt.value ? "var(--fill-primary)" : "var(--fill-tertiary)",
@@ -173,7 +173,7 @@ function DisplaySection() {
               <button
                 key={opt.value}
                 onClick={() => setDisplayConfig({ toolCallGroupThreshold: opt.value })}
-                className="cursor-pointer rounded-[4px] px-2.5 py-1 text-center text-[12px] font-medium transition-all duration-200"
+                className="cursor-pointer rounded-[var(--radius-xs)] px-2.5 py-1 text-center text-[12px] font-medium transition-all duration-200"
                 style={{
                   background: display.toolCallGroupThreshold === opt.value ? "var(--bg-elevated)" : "transparent",
                   color: display.toolCallGroupThreshold === opt.value ? "var(--fill-primary)" : "var(--fill-tertiary)",

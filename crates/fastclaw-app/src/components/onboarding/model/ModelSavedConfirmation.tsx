@@ -1,4 +1,5 @@
 import { CheckCircle, ArrowRight } from "lucide-react";
+import { ICON } from "../../../lib/ui-tokens";
 
 export function ModelSavedConfirmation({ model, onNext }: { model: string; onNext: () => void }) {
   return (
@@ -20,7 +21,7 @@ export function ModelSavedConfirmation({ model, onNext }: { model: string; onNex
         className="mt-8 flex cursor-pointer items-center gap-2 rounded-full px-8 py-3 text-[14px] font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
         style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
       >
-        了解功能 <ArrowRight size={16} strokeWidth={2} />
+        了解功能 <ArrowRight {...ICON.md} />
       </button>
     </div>
   );

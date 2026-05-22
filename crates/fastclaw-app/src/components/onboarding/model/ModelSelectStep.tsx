@@ -1,4 +1,5 @@
 import { ChevronRight, Sparkles } from "lucide-react";
+import { ICON } from "../../../lib/ui-tokens";
 import type { ProviderPreset } from "../../../lib/model-registry";
 import type { ModelAction } from "./model-state";
 
@@ -43,7 +44,7 @@ export function ModelSelectStep({
                   {m.description}
                 </div>
               </div>
-              <ChevronRight size={14} style={{ color: "var(--fill-tertiary)" }} />
+              <ChevronRight {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
             </div>
           ))}
         </div>
@@ -53,7 +54,7 @@ export function ModelSelectStep({
           className="flex items-center gap-2 px-4 py-2.5"
           style={{ borderTop: "0.5px solid var(--separator)" }}
         >
-              <Sparkles size={14} style={{ color: "var(--tint)" }} />
+              <Sparkles {...ICON.sm} style={{ color: "var(--tint)" }} />
           <span className="text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
             还没有 API Key？
           </span>

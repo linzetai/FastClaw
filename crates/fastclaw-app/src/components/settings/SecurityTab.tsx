@@ -3,6 +3,7 @@ import { CheckCircle, XCircle, X, Plus } from "lucide-react";
 import * as api from "../../lib/api";
 import { useAgentStore } from "../../lib/stores";
 import { SectionTitle } from "./SettingsShared";
+import { ICON } from "../../lib/ui-tokens";
 
 type DangerousOpsPolicy = "deny" | "allow" | "confirm";
 type ExecutionMode = "plan" | "default" | "auto-edit" | "yolo";
@@ -182,7 +183,7 @@ export function SecurityTab() {
     }
   };
 
-  const inputCls = "w-full rounded-[6px] px-3 py-2 text-[13px] font-mono outline-none transition-all focus:ring-2 focus:ring-[var(--tint)]";
+  const inputCls = "w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] font-mono outline-none transition-all focus:ring-2 focus:ring-[var(--tint)]";
   const inputStyle: React.CSSProperties = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
 
   if (loading) {
@@ -204,7 +205,7 @@ export function SecurityTab() {
             animation: "fade-in var(--duration-fast) var(--ease-out)",
           }}
         >
-          {toast.type === "ok" ? <CheckCircle size={14} strokeWidth={1.5} /> : <XCircle size={14} strokeWidth={1.5} />}
+          {toast.type === "ok" ? <CheckCircle {...ICON.sm} /> : <XCircle {...ICON.sm} />}
           {toast.msg}
         </div>
       )}
@@ -303,7 +304,7 @@ export function SecurityTab() {
                   className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full opacity-0 transition-all duration-100 hover:bg-[var(--bg-hover)] group-hover:opacity-100"
                   title="移除"
                 >
-                  <X size={14} strokeWidth={2} style={{ color: "var(--red)" }} />
+                  <X {...ICON.sm} style={{ color: "var(--red)" }} />
                 </button>
               </div>
             ))
@@ -323,10 +324,10 @@ export function SecurityTab() {
           <button
             onClick={handleAdd}
             disabled={saving || !newHost.trim()}
-            className="flex shrink-0 cursor-pointer items-center gap-1 rounded-[6px] px-3 py-2 text-[12px] font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex shrink-0 cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-3 py-2 text-[12px] font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             style={{ background: "var(--tint)" }}
           >
-            <Plus size={14} strokeWidth={2} />
+            <Plus {...ICON.sm} />
             添加
           </button>
         </div>

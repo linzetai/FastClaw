@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Settings, CheckCircle, XCircle, Play, Square, RotateCcw, Plug } from "lucide-react";
+import { ICON } from "../../lib/ui-tokens";
 
 interface McpServerStatus {
   id: string;
@@ -108,10 +109,10 @@ export const McpServerCard = ({
   };
 
   const statusIcons = {
-    connected: <CheckCircle size={14} style={{ color: "var(--green)" }} />,
-    failed: <XCircle size={14} style={{ color: "var(--red)" }} />,
-    connecting: <RotateCcw size={14} className="animate-spin" style={{ color: "var(--yellow)" }} />,
-    disabled: <XCircle size={14} style={{ color: "var(--fill-quaternary)" }} />
+    connected: <CheckCircle {...ICON.sm} style={{ color: "var(--green)" }} />,
+    failed: <XCircle {...ICON.sm} style={{ color: "var(--red)" }} />,
+    connecting: <RotateCcw {...ICON.sm} className="animate-spin" style={{ color: "var(--yellow)" }} />,
+    disabled: <XCircle {...ICON.sm} style={{ color: "var(--fill-quaternary)" }} />
   };
 
   return (
@@ -125,7 +126,7 @@ export const McpServerCard = ({
     >
       <div className="flex items-center gap-3 px-4 py-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: "color-mix(in srgb, var(--accent) 15%, transparent)" }}>
-          <Plug size={16} style={{ color: "var(--accent)" }} />
+          <Plug {...ICON.md} style={{ color: "var(--accent)" }} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -160,9 +161,9 @@ export const McpServerCard = ({
             title={server.enabled ? "禁用服务器" : "启用服务器"}
           >
             {server.enabled ? (
-              <Square size={16} style={{ color: "var(--red)" }} />
+              <Square {...ICON.md} style={{ color: "var(--red)" }} />
             ) : (
-              <Play size={16} style={{ color: "var(--green)" }} />
+              <Play {...ICON.md} style={{ color: "var(--green)" }} />
             )}
           </button>
           <button 
@@ -170,14 +171,14 @@ export const McpServerCard = ({
             className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]"
             title="编辑服务器配置"
           >
-            <Settings size={14} style={{ color: "var(--fill-tertiary)" }} />
+            <Settings {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
           </button>
           <button 
             onClick={() => onDelete(server.id)}
             className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]"
             title="删除服务器"
           >
-            <XCircle size={14} style={{ color: "var(--red)" }} />
+            <XCircle {...ICON.sm} style={{ color: "var(--red)" }} />
           </button>
         </div>
       </div>

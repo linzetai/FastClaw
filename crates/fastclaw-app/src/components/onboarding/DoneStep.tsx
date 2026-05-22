@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Sparkles, ArrowRight } from "lucide-react";
+import { ICON } from "../../lib/ui-tokens";
 
 export function DoneStep({ onComplete }: { onComplete: () => void }) {
   const [ready, setReady] = useState(false);
@@ -35,7 +36,7 @@ export function DoneStep({ onComplete }: { onComplete: () => void }) {
             style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
           >
             开始使用
-            <ArrowRight size={16} strokeWidth={2} />
+            <ArrowRight {...ICON.md} />
           </button>
         )}
       </div>

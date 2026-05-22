@@ -1,4 +1,5 @@
 import { Settings } from "lucide-react";
+import { ICON } from "../../../lib/ui-tokens";
 import { getAllProviders } from "../../../lib/model-registry";
 import type { ModelAction } from "./model-state";
 
@@ -40,7 +41,7 @@ export function ProviderSelectStep({ dispatch }: { dispatch: React.Dispatch<Mode
             style={{ borderColor: "var(--separator)" }}
             onClick={() => dispatch({ type: "SELECT_CUSTOM" })}
           >
-            <Settings size={16} style={{ color: "var(--fill-tertiary)" }} />
+            <Settings {...ICON.md} style={{ color: "var(--fill-tertiary)" }} />
             <span className="text-[13px] font-medium" style={{ color: "var(--fill-secondary)" }}>
               自定义
             </span>
