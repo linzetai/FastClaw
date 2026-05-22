@@ -651,6 +651,7 @@ mod tests {
             pending_todo_summary: None,
             plan_file_path: None,
             plan_file_exists: false,
+            system_base_prompt: None,
         }
     }
 

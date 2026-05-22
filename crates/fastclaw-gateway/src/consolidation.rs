@@ -140,7 +140,8 @@ fn build_compact_context(messages: &[ChatMessage]) -> String {
         };
         let text = m.text_content().unwrap_or_default();
         let text = if matches!(m.role, Role::Tool) && text.len() > MAX_TOOL_RESULT_CHARS {
-            format!("{}...", &text[..MAX_TOOL_RESULT_CHARS])
+            let end = text.floor_char_boundary(MAX_TOOL_RESULT_CHARS);
+            format!("{}...", &text[..end])
         } else {
             text
         };

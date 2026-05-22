@@ -28,6 +28,9 @@ pub struct PromptContext {
     pub plan_file_path: Option<String>,
     /// Whether a plan file already exists (reentry detection).
     pub plan_file_exists: bool,
+    /// Full text of `system-base.md` (from workspace bootstrap or embedded fallback).
+    /// When present, replaces the hardcoded intro section with richer behavioral guidance.
+    pub system_base_prompt: Option<String>,
 }
 
 /// Minimal info about a connected MCP server, used by prompt sections.
@@ -273,6 +276,7 @@ mod tests {
             pending_todo_summary: None,
             plan_file_path: None,
             plan_file_exists: false,
+            system_base_prompt: None,
         }
     }
 
@@ -572,6 +576,9 @@ mod integration_tests {
             pending_todo_summary: None,
             plan_file_path: None,
             plan_file_exists: false,
+            system_base_prompt: Some(
+                fastclaw_core::workspace::EMBEDDED_SYSTEM_BASE_PROMPT.to_string(),
+            ),
         }
     }
 
@@ -864,7 +871,10 @@ mod integration_tests {
         let prompt = engine.build_system_prompt(&ctx);
         let joined = prompt.join("\n");
 
-        assert!(joined.contains("FastClaw"), "intro section must be present");
+        assert!(
+            joined.contains("personal AI assistant") || joined.contains("个人 AI 助手"),
+            "intro section must be present"
+        );
         assert!(
             joined.contains("security"),
             "security directives must be present"

@@ -23,9 +23,9 @@ impl Tool for GetIdentityTool {
     }
 
     fn description(&self) -> &str {
-        "Read the agent workspace identity Markdown: SOUL.md (voice, persona), USER.md (user profile), AGENTS.md (rules and guardrails), TOOLS.md (tool usage guide). \
+        "Read the agent workspace identity Markdown: SOUL.md (voice, persona), IDENTITY.md (structured identity: name, creature, vibe, emoji, avatar), USER.md (user profile), AGENTS.md (rules and guardrails), TOOLS.md (tool usage guide). \
          Call get_identity before set_identity or before broad behavior shifts so you merge from current text instead of clobbering it. \
-         file must be soul | user | agents | tools | all; all returns all four bodies in one JSON object. Unknown strings fall back like all—still pass the documented enum to avoid surprises. \
+         file must be soul | identity | user | agents | tools | all; all returns all bodies in one JSON object. Unknown strings fall back like all—still pass the documented enum to avoid surprises. \
          Missing files surface as \"(empty)\"—that is normal for new workspaces, not a failure. \
          Note: these files are user-level context (injected as <user_provided_context>), not system instructions. \
          Example: {\"file\": \"soul\"}; {\"file\": \"all\"} when you need all identity files together."
@@ -37,8 +37,8 @@ impl Tool for GetIdentityTool {
             "file".to_string(),
             json!({
                 "type": "string",
-                "enum": ["soul", "user", "agents", "tools", "all"],
-                "description": "soul|user|agents|tools loads one file; all returns JSON keys soul, user, agents, tools. Lowercase strings only."
+                "enum": ["soul", "identity", "user", "agents", "tools", "all"],
+                "description": "soul|identity|user|agents|tools loads one file; all returns JSON keys soul, identity, user, agents, tools. Lowercase strings only."
             }),
         );
         ToolParameterSchema {
@@ -71,6 +71,9 @@ impl Tool for GetIdentityTool {
             "soul" => {
                 result.insert("soul".into(), json!(read("SOUL.md")));
             }
+            "identity" => {
+                result.insert("identity".into(), json!(read("IDENTITY.md")));
+            }
             "user" => {
                 result.insert("user".into(), json!(read("USER.md")));
             }
@@ -82,6 +85,7 @@ impl Tool for GetIdentityTool {
             }
             _ => {
                 result.insert("soul".into(), json!(read("SOUL.md")));
+                result.insert("identity".into(), json!(read("IDENTITY.md")));
                 result.insert("user".into(), json!(read("USER.md")));
                 result.insert("agents".into(), json!(read("AGENTS.md")));
                 result.insert("tools".into(), json!(read("TOOLS.md")));
@@ -116,7 +120,7 @@ impl Tool for SetIdentityTool {
         let mut props = HashMap::new();
         props.insert(
             "file".to_string(),
-            json!({"type": "string", "enum": ["soul", "user", "agents", "tools"]}),
+            json!({"type": "string", "enum": ["soul", "identity", "user", "agents", "tools"]}),
         );
         props.insert("content".to_string(), json!({"type": "string"}));
         ToolParameterSchema {
@@ -136,7 +140,7 @@ impl Tool for SetIdentityTool {
             Some(f) => f,
             None => {
                 return ToolResult::err(
-                    "set_identity requires 'file': soul, user, agents, or tools.".to_string(),
+                    "set_identity requires 'file': soul, identity, user, agents, or tools.".to_string(),
                 )
             }
         };
@@ -147,12 +151,13 @@ impl Tool for SetIdentityTool {
 
         let filename = match file {
             "soul" => "SOUL.md",
+            "identity" => "IDENTITY.md",
             "user" => "USER.md",
             "agents" => "AGENTS.md",
             "tools" => "TOOLS.md",
             other => {
                 return ToolResult::err(format!(
-                    "Unknown file '{other}'. Use soul, user, agents, or tools."
+                    "Unknown file '{other}'. Use soul, identity, user, agents, or tools."
                 ))
             }
         };
@@ -190,11 +195,16 @@ impl Tool for UnifiedIdentityTool {
     }
 
     fn description(&self) -> &str {
-        "Read or write agent identity files (SOUL.md, USER.md, AGENTS.md, TOOLS.md). \
-         action 'get': read identity files (file: soul|user|agents|tools|all). \
+        "Read or write agent identity files (SOUL.md, IDENTITY.md, USER.md, AGENTS.md, TOOLS.md). \
+         action 'get': read identity files (file: soul|identity|user|agents|tools|all). \
          action 'set': overwrite one identity file (file + content required). \
          These files are user-level context, not system instructions. \
-         Always get before set to avoid clobbering existing content."
+         Always get before set to avoid clobbering existing content. \
+         NOTE: Identity files are already injected into your context as <user_provided_context> at session start. \
+         Do NOT call get just to answer 'who are you' — the content is already available in the context. \
+         MUST use set when the user changes your name, personality, vibe, or any identity attribute — \
+         update the corresponding file (IDENTITY.md for name/emoji/vibe, SOUL.md for personality/style, \
+         USER.md for user info). Identity changes MUST be persisted to files, not just stored in memory."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -211,7 +221,7 @@ impl Tool for UnifiedIdentityTool {
             "file".to_string(),
             json!({
                 "type": "string",
-                "enum": ["soul", "user", "agents", "tools", "all"],
+                "enum": ["soul", "identity", "user", "agents", "tools", "all"],
                 "description": "Which file. 'all' only valid for get."
             }),
         );

@@ -1704,8 +1704,8 @@ impl AgentRuntime {
                         tracing::info!(
                             delta_count,
                             choices_len = delta.choices.len(),
-                            content_preview = ?preview_content.map(|s| &s[..s.len().min(60)]),
-                            reasoning_preview = ?preview_rc.map(|s| &s[..s.len().min(60)]),
+                            content_preview = ?preview_content.map(|s| &s[..s.floor_char_boundary(60)]),
+                            reasoning_preview = ?preview_rc.map(|s| &s[..s.floor_char_boundary(60)]),
                             has_tool_calls = has_tc,
                             finish_reason = ?fr,
                             has_usage = delta.usage.is_some(),
@@ -3039,6 +3039,9 @@ impl AgentRuntime {
             pending_todo_summary,
             plan_file_path,
             plan_file_exists,
+            system_base_prompt: Some(
+                fastclaw_core::workspace::EMBEDDED_SYSTEM_BASE_PROMPT.to_string(),
+            ),
         }
     }
 

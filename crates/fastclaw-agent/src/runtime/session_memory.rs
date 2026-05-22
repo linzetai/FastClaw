@@ -252,7 +252,8 @@ fn build_conversation_summary(messages: &[ChatMessage]) -> String {
 
         if let Some(text) = msg.text_content() {
             if text.len() > MAX_MSG_CHARS {
-                out.push_str(&text[..MAX_MSG_CHARS]);
+                let end = text.floor_char_boundary(MAX_MSG_CHARS);
+                out.push_str(&text[..end]);
                 out.push_str("...(truncated)");
             } else {
                 out.push_str(&text);

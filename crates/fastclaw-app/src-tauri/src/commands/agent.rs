@@ -89,6 +89,7 @@ pub async fn read_identity_files(agent_id: String) -> Result<serde_json::Value, 
 
     Ok(json!({
         "soul": read("SOUL.md"),
+        "identity": read("IDENTITY.md"),
         "user": read("USER.md"),
         "agents": read("AGENTS.md"),
         "tools": read("TOOLS.md"),

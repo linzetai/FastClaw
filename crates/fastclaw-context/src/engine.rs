@@ -894,8 +894,11 @@ impl ContextHook for AgentPersonalityHook {
             return Ok(());
         };
         let soul = Self::read_file(root, fastclaw_core::workspace::DEFAULT_SOUL_FILENAME);
+        let identity = Self::read_file(root, fastclaw_core::workspace::DEFAULT_IDENTITY_FILENAME);
         let user = Self::read_file(root, fastclaw_core::workspace::DEFAULT_USER_FILENAME);
         let agents = Self::read_file(root, fastclaw_core::workspace::DEFAULT_AGENTS_FILENAME);
+        let bootstrap =
+            Self::read_file(root, fastclaw_core::workspace::DEFAULT_BOOTSTRAP_FILENAME);
 
         let insert_pos = messages
             .iter()
@@ -903,21 +906,78 @@ impl ContextHook for AgentPersonalityHook {
             .unwrap_or(messages.len());
         let mut offset = 0;
 
+        if let Some(ref bootstrap_content) = bootstrap {
+            messages.insert(
+                insert_pos + offset,
+                ChatMessage {
+                    role: Role::User,
+                    content: Some(
+                        format!(
+                            "## Bootstrap Pending\n\n\
+                             BOOTSTRAP.md exists in this workspace. This means identity setup is \
+                             not yet complete. Your first reply MUST follow BOOTSTRAP.md — do NOT \
+                             use a generic greeting.\n\n\
+                             <user_provided_context type=\"bootstrap\" file=\"BOOTSTRAP.md\">\n\
+                             {bootstrap_content}\n\
+                             </user_provided_context>"
+                        )
+                        .into(),
+                    ),
+                    reasoning_content: None,
+                    name: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                    compact_metadata: None,
+                },
+            );
+            offset += 1;
+        }
+
         if let Some(ref soul_content) = soul {
             messages.insert(
                 insert_pos + offset,
                 ChatMessage {
                     role: Role::User,
-                    content: Some(format!(
-                        "<user_provided_context type=\"personality\" file=\"SOUL.md\" editable=\"true\">\n\
-                         {soul_content}\n\
-                         </user_provided_context>"
-                    ).into()),
+                    content: Some(
+                        format!(
+                            "If SOUL.md is present, embody its persona and tone naturally. \
+                             Avoid stiff, generic replies; follow its guidance unless \
+                             higher-priority safety instructions override it.\n\
+                             <user_provided_context type=\"personality\" file=\"SOUL.md\" \
+                             editable=\"true\">\n\
+                             {soul_content}\n\
+                             </user_provided_context>"
+                        )
+                        .into(),
+                    ),
                     reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
-            compact_metadata: None,
+                    compact_metadata: None,
+                },
+            );
+            offset += 1;
+        }
+        if let Some(ref identity_content) = identity {
+            messages.insert(
+                insert_pos + offset,
+                ChatMessage {
+                    role: Role::User,
+                    content: Some(
+                        format!(
+                            "<user_provided_context type=\"identity\" file=\"IDENTITY.md\" \
+                             editable=\"true\">\n\
+                             {identity_content}\n\
+                             </user_provided_context>"
+                        )
+                        .into(),
+                    ),
+                    reasoning_content: None,
+                    name: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                    compact_metadata: None,
                 },
             );
             offset += 1;
@@ -927,16 +987,20 @@ impl ContextHook for AgentPersonalityHook {
                 insert_pos + offset,
                 ChatMessage {
                     role: Role::User,
-                    content: Some(format!(
-                        "<user_provided_context type=\"operating_preferences\" file=\"AGENTS.md\" editable=\"true\">\n\
-                         {agents_content}\n\
-                         </user_provided_context>"
-                    ).into()),
+                    content: Some(
+                        format!(
+                            "<user_provided_context type=\"operating_preferences\" \
+                             file=\"AGENTS.md\" editable=\"true\">\n\
+                             {agents_content}\n\
+                             </user_provided_context>"
+                        )
+                        .into(),
+                    ),
                     reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
-            compact_metadata: None,
+                    compact_metadata: None,
                 },
             );
             offset += 1;
@@ -946,16 +1010,20 @@ impl ContextHook for AgentPersonalityHook {
                 insert_pos + offset,
                 ChatMessage {
                     role: Role::User,
-                    content: Some(format!(
-                        "<user_provided_context type=\"user_profile\" file=\"USER.md\" editable=\"true\">\n\
-                         {user_content}\n\
-                         </user_provided_context>"
-                    ).into()),
+                    content: Some(
+                        format!(
+                            "<user_provided_context type=\"user_profile\" file=\"USER.md\" \
+                             editable=\"true\">\n\
+                             {user_content}\n\
+                             </user_provided_context>"
+                        )
+                        .into(),
+                    ),
                     reasoning_content: None,
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
-            compact_metadata: None,
+                    compact_metadata: None,
                 },
             );
         }
