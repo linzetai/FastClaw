@@ -8,6 +8,7 @@ import {
 import { TodoCard, isTodoResult } from "./TodoCard";
 import { DiffCard, isEditResult } from "./DiffCard";
 import { PlanApprovalCard, isPlanExitResult } from "./PlanApprovalCard";
+import { ICON } from "../../lib/ui-tokens";
 
 export interface ToolCall {
   id: string;
@@ -19,41 +20,39 @@ export interface ToolCall {
   startTime?: number;
 }
 
-const ICON_PROPS = { size: 13, strokeWidth: 1.5 } as const;
-
 const TOOL_META: Record<string, { icon: ReactNode; label?: string }> = {
-  file_read: { icon: <FileText {...ICON_PROPS} />, label: "读取文件" },
-  file_write: { icon: <PenLine {...ICON_PROPS} />, label: "写入文件" },
-  file_search: { icon: <Search {...ICON_PROPS} />, label: "搜索文件" },
-  shell: { icon: <Terminal {...ICON_PROPS} />, label: "执行命令" },
-  shell_exec: { icon: <Terminal {...ICON_PROPS} />, label: "执行命令" },
-  web_search: { icon: <Globe {...ICON_PROPS} />, label: "搜索网络" },
-  web_fetch: { icon: <Download {...ICON_PROPS} />, label: "获取网页" },
-  browser: { icon: <Monitor {...ICON_PROPS} />, label: "浏览器" },
-  memory_search: { icon: <Brain {...ICON_PROPS} />, label: "搜索记忆" },
-  memory_store: { icon: <Database {...ICON_PROPS} />, label: "存储记忆" },
-  image_generate: { icon: <Image {...ICON_PROPS} />, label: "生成图片" },
-  text_to_speech: { icon: <Volume2 {...ICON_PROPS} />, label: "文本转语音" },
-  hub_search: { icon: <PackageSearch {...ICON_PROPS} />, label: "搜索 Hub" },
-  hub_install: { icon: <PackagePlus {...ICON_PROPS} />, label: "安装插件" },
-  sql_query: { icon: <TableProperties {...ICON_PROPS} />, label: "SQL 查询" },
-  code_execute: { icon: <Play {...ICON_PROPS} />, label: "执行代码" },
-  read_file: { icon: <FileText {...ICON_PROPS} />, label: "读取文件" },
-  write_file: { icon: <PenLine {...ICON_PROPS} />, label: "写入文件" },
-  list_directory: { icon: <Search {...ICON_PROPS} />, label: "列出目录" },
-  read_skill: { icon: <FileText {...ICON_PROPS} />, label: "读取 Skill" },
-  list_skills: { icon: <Search {...ICON_PROPS} />, label: "列出 Skills" },
-  write_skill: { icon: <PenLine {...ICON_PROPS} />, label: "写入 Skill" },
-  http_fetch: { icon: <Globe {...ICON_PROPS} />, label: "HTTP 请求" },
-  calculator: { icon: <TableProperties {...ICON_PROPS} />, label: "计算器" },
-  todo_write: { icon: <ListTodo {...ICON_PROPS} />, label: "任务管理" },
-  edit_file: { icon: <Code2 {...ICON_PROPS} />, label: "编辑文件" },
-  lsp: { icon: <Code2 {...ICON_PROPS} />, label: "代码分析" },
-  enter_plan_mode: { icon: <Compass {...ICON_PROPS} />, label: "进入 Plan 模式" },
-  exit_plan_mode: { icon: <Code2 {...ICON_PROPS} />, label: "退出 Plan 模式" },
+  file_read: { icon: <FileText {...ICON.sm} />, label: "读取文件" },
+  file_write: { icon: <PenLine {...ICON.sm} />, label: "写入文件" },
+  file_search: { icon: <Search {...ICON.sm} />, label: "搜索文件" },
+  shell: { icon: <Terminal {...ICON.sm} />, label: "执行命令" },
+  shell_exec: { icon: <Terminal {...ICON.sm} />, label: "执行命令" },
+  web_search: { icon: <Globe {...ICON.sm} />, label: "搜索网络" },
+  web_fetch: { icon: <Download {...ICON.sm} />, label: "获取网页" },
+  browser: { icon: <Monitor {...ICON.sm} />, label: "浏览器" },
+  memory_search: { icon: <Brain {...ICON.sm} />, label: "搜索记忆" },
+  memory_store: { icon: <Database {...ICON.sm} />, label: "存储记忆" },
+  image_generate: { icon: <Image {...ICON.sm} />, label: "生成图片" },
+  text_to_speech: { icon: <Volume2 {...ICON.sm} />, label: "文本转语音" },
+  hub_search: { icon: <PackageSearch {...ICON.sm} />, label: "搜索 Hub" },
+  hub_install: { icon: <PackagePlus {...ICON.sm} />, label: "安装插件" },
+  sql_query: { icon: <TableProperties {...ICON.sm} />, label: "SQL 查询" },
+  code_execute: { icon: <Play {...ICON.sm} />, label: "执行代码" },
+  read_file: { icon: <FileText {...ICON.sm} />, label: "读取文件" },
+  write_file: { icon: <PenLine {...ICON.sm} />, label: "写入文件" },
+  list_directory: { icon: <Search {...ICON.sm} />, label: "列出目录" },
+  read_skill: { icon: <FileText {...ICON.sm} />, label: "读取 Skill" },
+  list_skills: { icon: <Search {...ICON.sm} />, label: "列出 Skills" },
+  write_skill: { icon: <PenLine {...ICON.sm} />, label: "写入 Skill" },
+  http_fetch: { icon: <Globe {...ICON.sm} />, label: "HTTP 请求" },
+  calculator: { icon: <TableProperties {...ICON.sm} />, label: "计算器" },
+  todo_write: { icon: <ListTodo {...ICON.sm} />, label: "任务管理" },
+  edit_file: { icon: <Code2 {...ICON.sm} />, label: "编辑文件" },
+  lsp: { icon: <Code2 {...ICON.sm} />, label: "代码分析" },
+  enter_plan_mode: { icon: <Compass {...ICON.sm} />, label: "进入 Plan 模式" },
+  exit_plan_mode: { icon: <Code2 {...ICON.sm} />, label: "退出 Plan 模式" },
 };
 
-const DEFAULT_META = { icon: <Wrench {...ICON_PROPS} /> };
+const DEFAULT_META = { icon: <Wrench {...ICON.sm} /> };
 
 function getMcpMeta(name: string): { icon: ReactNode; label: string } | null {
   if (!name.startsWith("mcp_")) return null;
@@ -61,7 +60,7 @@ function getMcpMeta(name: string): { icon: ReactNode; label: string } | null {
   const idx = rest.indexOf("_");
   const serverId = idx >= 0 ? rest.slice(0, idx) : rest;
   const toolName = idx >= 0 ? rest.slice(idx + 1) : "";
-  return { icon: <Plug size={16} strokeWidth={1.5} />, label: `${serverId}/${toolName}` };
+  return { icon: <Plug {...ICON.sm} />, label: `${serverId}/${toolName}` };
 }
 
 
@@ -147,7 +146,7 @@ function ImageViewer({ src }: { src: string }) {
             title={copied ? "已复制" : "复制图片"}
             aria-label={copied ? "已复制" : "复制图片"}
           >
-            {copied ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={1.5} />}
+            {copied ? <Check {...ICON.sm} /> : <Copy {...ICON.sm} />}
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); setLightbox(true); }}
@@ -156,7 +155,7 @@ function ImageViewer({ src }: { src: string }) {
             title="查看大图"
             aria-label="查看大图"
           >
-            <Maximize2 size={14} strokeWidth={1.5} />
+            <Maximize2 {...ICON.sm} />
           </button>
         </div>
       </div>
@@ -180,7 +179,7 @@ function ImageViewer({ src }: { src: string }) {
               style={{ background: "rgba(255,255,255,0.15)", color: copied ? "var(--green)" : "#fff" }}
               aria-label={copied ? "已复制" : "复制图片"}
             >
-              {copied ? <Check size={14} /> : <Copy size={14} />}
+              {copied ? <Check {...ICON.sm} /> : <Copy {...ICON.sm} />}
               {copied ? "已复制" : "复制"}
             </button>
             <button
@@ -189,7 +188,7 @@ function ImageViewer({ src }: { src: string }) {
               style={{ background: "rgba(255,255,255,0.15)", color: "#fff" }}
               aria-label="关闭预览"
             >
-              <XIcon size={18} strokeWidth={2} />
+              <XIcon {...ICON.md} />
             </button>
           </div>
           <img
@@ -239,7 +238,7 @@ function StreamingDiffPreview({ args }: { args: string }) {
         )}
       </div>
       <pre
-        className="overflow-x-auto text-[10.5px] leading-[1.6]"
+        className="overflow-x-auto text-[11px] leading-[1.6]"
         style={{ fontFamily: '"SF Mono","Fira Code",Menlo,Monaco,monospace', maxHeight: "200px", overflowY: "auto" }}
       >
         {isCreate ? (
@@ -331,7 +330,7 @@ function OutputBlock({ content, error }: { content: string; error?: boolean }) {
       {formatted && (
         <>
           <pre
-            className="overflow-x-auto whitespace-pre-wrap break-all rounded-md p-2.5 text-[11.5px] leading-[1.55]"
+            className="overflow-x-auto whitespace-pre-wrap break-all rounded-md p-2.5 text-[11px] leading-[1.55]"
             style={{
               background: "var(--bg-primary)",
               color: error ? "var(--red)" : "var(--fill-secondary)",
@@ -402,9 +401,9 @@ export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCal
               }}
             />
           ) : isError ? (
-            <XIcon size={14} strokeWidth={2} style={{ color: "var(--red)", animation: "shake 0.3s ease-in-out" }} />
+            <XIcon {...ICON.sm} style={{ color: "var(--red)", animation: "shake 0.3s ease-in-out" }} />
           ) : (
-            <Check size={14} strokeWidth={2} style={{ color: "var(--green)", animation: "scale-spring var(--duration-normal) var(--ease-spring)" }} />
+            <Check {...ICON.sm} style={{ color: "var(--green)", animation: "scale-spring var(--duration-normal) var(--ease-spring)" }} />
           )}
         </span>
 
@@ -434,8 +433,7 @@ export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCal
         {/* Expand chevron */}
         {hasDetails && (
           <ChevronRight
-            size={12}
-            strokeWidth={2}
+            {...ICON.sm}
             className="shrink-0 transition-transform duration-150"
             style={{
               color: "var(--fill-tertiary)",

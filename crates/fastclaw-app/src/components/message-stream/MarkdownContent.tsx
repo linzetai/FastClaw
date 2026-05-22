@@ -3,6 +3,8 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Check, Copy } from "lucide-react";
+import { ICON, ICON_ACTIVE_STROKE } from "../../lib/ui-tokens";
+import { openLightbox } from "../common/ImageLightbox";
 
 interface MarkdownContentProps {
   content: string;
@@ -80,7 +82,7 @@ function CopyButton({ text }: { text: string }) {
       title={copied ? "已复制" : "复制代码"}
       aria-label={copied ? "已复制" : "复制代码"}
     >
-      {copied ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={1.5} />}
+      {copied ? <Check {...ICON.sm} strokeWidth={ICON_ACTIVE_STROKE} /> : <Copy {...ICON.sm} />}
       <span>{copied ? "已复制" : "复制"}</span>
     </button>
   );
@@ -161,9 +163,10 @@ function MarkdownImage({ src, alt, ...rest }: ComponentPropsWithoutRef<"img">) {
       {...rest}
       src={safeSrc}
       alt={alt || ""}
-      className="my-2 max-h-[400px] rounded-md object-contain"
+      className="my-2 max-h-[400px] cursor-pointer rounded-md object-contain"
       style={{ border: "0.5px solid var(--separator)", maxWidth: "100%" }}
       loading="lazy"
+      onClick={() => openLightbox(safeSrc, alt || "")}
     />
   );
 }

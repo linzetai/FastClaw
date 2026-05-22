@@ -4,6 +4,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAgentStore } from "../../lib/agent-store";
 import * as transport from "../../lib/transport";
+import { ICON } from "../../lib/ui-tokens";
 
 const remarkPlugins = [remarkGfm];
 
@@ -71,7 +72,7 @@ export function PlanApprovalCard({
       }}
     >
       <div className="flex items-center gap-2 px-3 py-2">
-        <Compass size={16} strokeWidth={2} style={{ color: "var(--tint, #4299E1)" }} className="shrink-0" />
+        <Compass {...ICON.md} style={{ color: "var(--tint, #4299E1)" }} className="shrink-0" />
         <span className="text-[12px] font-semibold" style={{ color: "var(--tint, #4299E1)" }}>
           计划已完成
         </span>
@@ -92,9 +93,9 @@ export function PlanApprovalCard({
           className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-medium transition-colors duration-100 hover:bg-[color-mix(in_srgb,var(--tint,#4299E1)_8%,transparent)]"
           style={{ color: "var(--fill-tertiary)", borderTop: "0.5px solid var(--separator)" }}
         >
-          <FileText size={12} strokeWidth={1.5} />
+          <FileText {...ICON.sm} />
           <span>{expanded ? "收起计划" : "查看计划内容"}</span>
-          {expanded ? <ChevronUp size={12} strokeWidth={2} /> : <ChevronDown size={12} strokeWidth={2} />}
+          {expanded ? <ChevronUp {...ICON.sm} /> : <ChevronDown {...ICON.sm} />}
         </button>
       )}
 
@@ -145,7 +146,7 @@ export function PlanApprovalCard({
               color: "#fff",
             }}
           >
-            <Code2 size={13} strokeWidth={2} />
+            <Code2 {...ICON.sm} />
             开始实现
           </button>
           <span className="text-[10px]" style={{ color: "var(--fill-quaternary)" }}>

@@ -1,5 +1,6 @@
 import { Component, memo, useMemo, useState, useRef, useCallback, useEffect, lazy, Suspense, type ReactNode, type ErrorInfo } from "react";
 import type { ChatMessage, ChatUsage, SubAgentRunUI } from "../../lib/agent-store";
+import { ICON, ICON_ACTIVE_STROKE, BTN_ICON } from "../../lib/ui-tokens";
 import { ToolCallCard } from "./ToolCallCard";
 import { SubAgentCard } from "./SubAgentCard";
 import {
@@ -9,6 +10,7 @@ import {
   ToolCallGroupTimeline,
 } from "./ToolCallGroup";
 import { AlertTriangle } from "lucide-react";
+import { openLightbox } from "../common/ImageLightbox";
 
 const MarkdownContent = lazy(() =>
   import("./MarkdownContent").then((m) => ({ default: m.MarkdownContent })),
@@ -39,7 +41,7 @@ class MessageErrorBoundary extends Component<
             color: "var(--red)",
           }}
         >
-          <AlertTriangle size={14} strokeWidth={1.5} />
+          <AlertTriangle {...ICON.sm} />
           <span>渲染出错：{this.state.error.message}</span>
           <button
             onClick={() => this.setState({ error: null })}
@@ -55,13 +57,23 @@ class MessageErrorBoundary extends Component<
   }
 }
 import {
-  Clock, Copy, Check, ThumbsUp, ThumbsDown, RotateCw,
+  Clock, Copy, Check, ThumbsUp, ThumbsDown, RotateCw, Pencil,
 } from "lucide-react";
 import type { StreamSegment } from "./types";
 import { useConfigStore } from "../../lib/stores/config-store";
 
 function ts(d: Date) {
-  return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  const now = new Date();
+  const isToday =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  if (isToday) {
+    return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  }
+  return d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }) +
+    " " +
+    d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
 }
 
 const REF_PATTERN = /\n\n\[(引用|附件): ([^\]]+)\]$/;
@@ -86,6 +98,9 @@ const UserBubble = memo(function UserBubble({ msg, copyable, selected, onToggleS
       setTimeout(() => setCopied(false), 1500);
     });
   }, [text]);
+  const handleEdit = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("fastclaw:edit-message", { detail: { text, images: msg.images } }));
+  }, [text, msg.images]);
   return (
     <div className="pb-5 flex justify-end group/message" style={{ animation: animate ? "slide-right var(--duration-normal) var(--ease-out)" : "none" }}>
       <div className="flex flex-col items-end" style={{ maxWidth: "65%" }}>
@@ -103,14 +118,14 @@ const UserBubble = memo(function UserBubble({ msg, copyable, selected, onToggleS
             </button>
           )}
           <div
-            className="user-bubble-content px-3.5 py-2 text-[15px] leading-[1.6] break-words relative"
+            className="user-bubble-content px-3.5 py-2 text-[14px] leading-[1.6] break-words relative"
             style={{
               background: "var(--bubble-user)",
               color: "var(--bubble-user-text)",
-              borderRadius: "18px 18px 6px 18px",
+              borderRadius: "var(--radius-lg) var(--radius-lg) var(--radius-xs) var(--radius-lg)",
               overflowWrap: "anywhere",
-              backgroundImage: "linear-gradient(135deg, var(--bubble-user) 0%, color-mix(in srgb, var(--bubble-user) 88%, var(--tint)) 100%)",
-              boxShadow: "0 2px 8px color-mix(in srgb, var(--bubble-user) 25%, transparent)",
+              backgroundImage: "var(--bubble-user-gradient)",
+              boxShadow: "0 2px 8px color-mix(in srgb, var(--bubble-user) 25%, transparent), inset 0 1px 0 rgba(255,255,255,0.12)",
             }}
           >
           {text}
@@ -121,13 +136,14 @@ const UserBubble = memo(function UserBubble({ msg, copyable, selected, onToggleS
                   key={i}
                   src={img.url}
                   alt={img.alt || "attached image"}
-                  className="rounded-md object-cover"
+                  className="cursor-pointer rounded-md object-cover"
                   style={{
                     maxHeight: 200,
                     maxWidth: "100%",
                     border: "0.5px solid rgba(255,255,255,0.2)",
                   }}
                   loading="lazy"
+                  onClick={() => openLightbox(img.url, img.alt || "attached image")}
                 />
               ))}
             </div>
@@ -153,20 +169,32 @@ const UserBubble = memo(function UserBubble({ msg, copyable, selected, onToggleS
             </div>
           )}
           </div>
+        </div>
+        <div className="mt-1 flex w-full flex-col items-end gap-0.5">
+          <span className="text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
+            {ts(msg.timestamp)}
+          </span>
           {copyable && (
-            <button
-              onClick={handleCopy}
-              className="mt-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-all duration-150 hover:bg-[var(--bg-hover)] opacity-0 group-hover/message:opacity-100 active:scale-90"
-              style={{ color: copied ? "var(--green)" : "var(--fill-tertiary)" }}
-              title="复制"
-            >
-              {copied ? <Check size={14} strokeWidth={2} style={{ animation: "scale-spring var(--duration-normal) var(--ease-spring)" }} /> : <Copy size={14} strokeWidth={1.5} />}
-            </button>
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={handleCopy}
+                className="flex h-6 w-6 items-center justify-center rounded transition-all duration-150 hover:bg-[var(--bg-hover)] active:scale-90"
+                style={{ color: copied ? "var(--green)" : "var(--fill-quaternary)" }}
+                title="复制"
+              >
+                {copied ? <Check size={12} strokeWidth={1.5} style={{ animation: "scale-spring var(--duration-normal) var(--ease-spring)" }} /> : <Copy size={12} strokeWidth={1.2} />}
+              </button>
+              <button
+                onClick={handleEdit}
+                className="flex h-6 w-6 items-center justify-center rounded transition-all duration-150 hover:bg-[var(--bg-hover)] active:scale-90"
+                style={{ color: "var(--fill-quaternary)" }}
+                title="编辑"
+              >
+                <Pencil size={12} strokeWidth={1.2} />
+              </button>
+            </div>
           )}
         </div>
-        <span className="mt-1 pr-1 text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
-          {ts(msg.timestamp)}
-        </span>
       </div>
     </div>
   );
@@ -184,33 +212,34 @@ const AiReactionBar = memo(function AiReactionBar({ content }: { content: string
     });
   }, [content]);
 
-  const btnCls = "flex h-7 w-7 items-center justify-center rounded-md transition-all duration-150 hover:bg-[var(--bg-hover)] active:scale-90";
+  const btnCls = `${BTN_ICON.sm} transition-all duration-150 active:scale-90`;
+  const thin = { ...ICON.sm, strokeWidth: 1.2 } as const;
 
   return (
     <div
-      className="mt-1.5 flex items-center gap-0.5 opacity-0 translate-y-1 transition-all duration-200 group-hover/message:opacity-100 group-hover/message:translate-y-0"
+      className="mt-1 flex items-center gap-0.5 -ml-1.5"
     >
-      <button onClick={handleCopy} className={btnCls} style={{ color: copied ? "var(--green)" : "var(--fill-tertiary)" }} title="复制">
-        {copied ? <Check size={14} strokeWidth={2} style={{ animation: "scale-spring var(--duration-normal) var(--ease-spring)" }} /> : <Copy size={14} strokeWidth={1.5} />}
+      <button onClick={handleCopy} className={btnCls} style={{ color: copied ? "var(--green)" : "var(--fill-quaternary)" }} title="复制">
+        {copied ? <Check {...thin} strokeWidth={ICON_ACTIVE_STROKE} style={{ animation: "scale-spring var(--duration-normal) var(--ease-spring)" }} /> : <Copy {...thin} />}
       </button>
       <button
         onClick={() => { setLiked(!liked); if (disliked) setDisliked(false); }}
         className={btnCls}
-        style={{ color: liked ? "var(--tint)" : "var(--fill-tertiary)" }}
+        style={{ color: liked ? "var(--tint)" : "var(--fill-quaternary)" }}
         title="点赞"
       >
-        <ThumbsUp size={14} strokeWidth={liked ? 2 : 1.5} />
+        <ThumbsUp {...thin} strokeWidth={liked ? ICON_ACTIVE_STROKE : thin.strokeWidth} />
       </button>
       <button
         onClick={() => { setDisliked(!disliked); if (liked) setLiked(false); }}
         className={btnCls}
-        style={{ color: disliked ? "var(--red)" : "var(--fill-tertiary)" }}
+        style={{ color: disliked ? "var(--red)" : "var(--fill-quaternary)" }}
         title="点踩"
       >
-        <ThumbsDown size={14} strokeWidth={disliked ? 2 : 1.5} />
+        <ThumbsDown {...thin} strokeWidth={disliked ? ICON_ACTIVE_STROKE : thin.strokeWidth} />
       </button>
-      <button className={btnCls} style={{ color: "var(--fill-tertiary)" }} title="重试">
-        <RotateCw size={14} strokeWidth={1.5} />
+      <button className={btnCls} style={{ color: "var(--fill-quaternary)" }} title="重试">
+        <RotateCw {...thin} />
       </button>
     </div>
   );
@@ -239,13 +268,7 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
             {selected && <Check size={14} strokeWidth={2.5} style={{ color: "white" }} />}
           </button>
         )}
-        <div
-          className="flex-1 min-w-0"
-          style={{
-            borderLeft: "2px solid color-mix(in srgb, var(--tint) 30%, transparent)",
-            paddingLeft: "12px",
-          }}
-        >
+        <div className="flex-1 min-w-0">
       {groupedToolCalls && groupedToolCalls.length > 0 && (
         <div className="mb-2">
           {groupedToolCalls.map((item) => {
@@ -271,8 +294,8 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
         >
           {ts(msg.timestamp)}
           {usage && (
-            <span className="ml-1.5 opacity-0 translate-y-1 transition-all duration-200 group-hover/message:opacity-100 group-hover/message:translate-y-0">
-              <Clock size={12} strokeWidth={1.5} className="mr-0.5 inline-block translate-y-[-0.5px]" />
+            <span className="ml-1.5">
+              <Clock size={10} strokeWidth={1.2} className="mr-0.5 inline-block translate-y-[-0.5px]" />
               {formatElapsed(usage.elapsedMs)}
             </span>
           )}

@@ -4,6 +4,7 @@
  */
 
 import { FileCode, Plus, Minus } from "lucide-react";
+import { ICON } from "../../lib/ui-tokens";
 
 interface EditResult {
   edited: boolean;
@@ -112,7 +113,7 @@ function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
 
   return (
     <pre
-      className="mt-1.5 overflow-x-auto rounded-md text-[10.5px] leading-[1.6]"
+      className="mt-1.5 overflow-x-auto rounded-md text-[11px] leading-[1.6]"
       style={{
         background: "var(--bg-primary)",
         border: "0.5px solid var(--separator)",
@@ -175,7 +176,7 @@ export function DiffCard({ result, args }: { result: string; args?: string }) {
     >
       <div className="flex items-center justify-between px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <FileCode size={16} strokeWidth={1.5} style={{ color: "var(--tint, #4299E1)" }} />
+          <FileCode {...ICON.md} style={{ color: "var(--tint, #4299E1)" }} />
           <div className="min-w-0">
             <span className="text-[12px] font-medium" style={{ color: "var(--fill-primary)" }}>
               {fileName}

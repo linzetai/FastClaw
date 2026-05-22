@@ -6,12 +6,14 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { MentionInput, type MentionInputHandle, type InlineMention, type MentionOption, type SlashCommand } from "./MentionInput";
 import { useAgentStore } from "../../lib/agent-store";
+import { ICON, BTN_ICON } from "../../lib/ui-tokens";
 import { QuestionPanel } from "./MessageRenderer";
 import { QueueIndicator } from "./QueueIndicator";
 import { QueuePanel } from "./QueuePanel";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
 import type { Chat } from "../../lib/agent-store";
+import { openLightbox } from "../common/ImageLightbox";
 
 const isMacPlatform = /Mac|iPhone|iPad/.test((navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform ?? "");
 const MOD_KEY = isMacPlatform ? "⌘" : "Ctrl+";
@@ -34,31 +36,30 @@ export interface AttachedFile {
 function FilePill({ file, onRemove }: { file: AttachedFile; onRemove: () => void }) {
   const isImage = file.type.startsWith("image/");
   const icon = isImage
-    ? <ImageIcon size={14} strokeWidth={1.5} />
+    ? <ImageIcon {...ICON.sm} />
     : file.type.includes("pdf")
-      ? <FileText size={14} strokeWidth={1.5} />
-      : <Paperclip size={14} strokeWidth={1.5} />;
+      ? <FileText {...ICON.sm} />
+      : <Paperclip {...ICON.sm} />;
 
   if (isImage && file.previewUrl) {
     return (
       <div
-        className="relative inline-block rounded-lg overflow-hidden"
-        style={{
-          border: `0.5px solid var(--separator)`,
-          animation: "pop var(--duration-normal) var(--ease-spring)",
-        }}
+        className="relative inline-block"
+        style={{ animation: "pop var(--duration-normal) var(--ease-spring)" }}
       >
         <img
           src={file.previewUrl}
           alt={file.name}
-          className="block max-h-[80px] max-w-[120px] object-cover"
+          className="block max-h-[80px] max-w-[120px] cursor-pointer rounded-lg object-cover"
+          style={{ border: `0.5px solid var(--separator)` }}
+          onClick={() => openLightbox(file.previewUrl!, file.name)}
         />
         <button
-          onClick={onRemove}
-          className="absolute top-0.5 right-0.5 flex h-4 w-4 cursor-pointer items-center justify-center rounded-full transition-colors duration-100"
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          className="absolute -top-1.5 -right-1.5 z-10 flex h-4 w-4 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[rgba(0,0,0,0.7)]"
           style={{ background: "rgba(0,0,0,0.5)", color: "#fff" }}
         >
-          <X size={8} strokeWidth={2.5} />
+          <X size={10} strokeWidth={2} />
         </button>
       </div>
     );
@@ -81,7 +82,7 @@ function FilePill({ file, onRemove }: { file: AttachedFile; onRemove: () => void
         className="ml-0.5 flex h-4 w-4 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]"
         style={{ color: "var(--fill-tertiary)" }}
       >
-        <X size={8} strokeWidth={2.5} />
+        <X size={10} strokeWidth={2} />
       </button>
     </div>
   );
@@ -248,7 +249,7 @@ function ModelSelector() {
       >
         <span className="h-2 w-2 rounded-full" style={{ background: dotColor }} />
         <span className="max-w-[100px] truncate">{displayName}</span>
-        <ChevronDown size={14} strokeWidth={2} />
+        <ChevronDown {...ICON.sm} />
       </button>
       {open && createPortal(
         <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)}>
@@ -323,9 +324,9 @@ function ModeToggle({
       title={isPlan ? "Plan Mode -- 只读探索模式" : "Agent Mode -- 完整工具访问"}
     >
       {isPlan ? (
-        <Compass size={16} strokeWidth={2} />
+        <Compass {...ICON.md} />
       ) : (
-        <Code2 size={16} strokeWidth={2} />
+        <Code2 {...ICON.md} />
       )}
       <span>{isPlan ? "Plan" : "Agent"}</span>
     </button>
@@ -584,9 +585,14 @@ export function StreamFooter({
           />
         )}
         {attachedFiles.length > 0 && (
-          <div className="flex flex-wrap gap-2 px-4 pt-3" style={{ animation: "slide-up var(--duration-fast) var(--ease-out)" }}>
+          <div className="flex flex-wrap gap-2 px-4 pt-3">
             {attachedFiles.map((f, i) => (
-              <FilePill key={`${f.name}-${i}`} file={f} onRemove={() => removeFile(i)} />
+              <div
+                key={`${f.name}-${i}`}
+                style={{ animation: `fade-slide-up var(--duration-normal) var(--ease-out) ${i * 50}ms backwards` }}
+              >
+                <FilePill file={f} onRemove={() => removeFile(i)} />
+              </div>
             ))}
           </div>
         )}
@@ -600,7 +606,7 @@ export function StreamFooter({
               color: "var(--tint, #4299E1)",
             }}
           >
-            <Compass size={16} strokeWidth={2} className="shrink-0" />
+            <Compass {...ICON.md} className="shrink-0" />
             <span className="min-w-0 truncate">
               Plan Mode — 只读探索模式
               {planFilePath && (
@@ -632,11 +638,11 @@ export function StreamFooter({
             <ModelSelector />
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-100 hover:bg-[var(--bg-hover)]"
+              className={BTN_ICON.sm}
               style={{ color: "var(--fill-tertiary)" }}
               title={`附件 (${MOD_KEY}${isMacPlatform ? "⇧" : "Shift+"}A)`}
             >
-              <Paperclip size={16} strokeWidth={2} />
+              <Paperclip {...ICON.md} />
             </button>
             <button
               onClick={async () => {
@@ -660,7 +666,7 @@ export function StreamFooter({
               style={{ color: workDir ? "var(--fill-secondary)" : "var(--fill-tertiary)" }}
               title={workDir ? `工作目录: ${workDir}` : "设置工作目录"}
             >
-              <FolderOpen className="shrink-0" size={16} strokeWidth={1.5} />
+              <FolderOpen className="shrink-0" {...ICON.md} />
               <span className="max-w-[120px] truncate font-mono text-[11px]">
                 {workDir ? workDir.replace(/^\/home\/[^/]+\//, "~/") : "工作目录"}
               </span>
@@ -706,7 +712,7 @@ export function StreamFooter({
                 }}
                 title="发送中..."
               >
-                <Loader2 size={16} strokeWidth={2} className="animate-spin" />
+                <Loader2 {...ICON.md} className="animate-spin" />
               </button>
             ) : (
               <button
@@ -728,7 +734,7 @@ export function StreamFooter({
                 }}
                 title={messageQueue.length >= 10 ? "队列已满（最多10条）" : streaming ? "加入队列 ↩" : "发送 ↩"}
               >
-                <ArrowUp size={16} strokeWidth={2} />
+                <ArrowUp {...ICON.md} />
               </button>
             )}
           </div>

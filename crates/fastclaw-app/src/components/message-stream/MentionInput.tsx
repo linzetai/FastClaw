@@ -18,6 +18,7 @@ import {
   size as floatingSize,
 } from "@floating-ui/react";
 import { File, Folder, Sparkles, Search, Terminal } from "lucide-react";
+import { ICON } from "../../lib/ui-tokens";
 import { fuzzyFilter, type FuzzyResult } from "../../lib/fuzzy";
 
 /* ─── Types ─── */
@@ -70,9 +71,9 @@ interface MentionInputProps {
 }
 
 const MENTION_TYPE_META: Record<MentionType, { text: string; icon: React.ReactNode; color: string }> = {
-  file: { text: "文件", icon: <File size={14} strokeWidth={1.5} />, color: "var(--tint)" },
-  dir: { text: "目录", icon: <Folder size={14} strokeWidth={1.5} />, color: "var(--orange)" },
-  skill: { text: "Skill", icon: <Sparkles size={14} strokeWidth={1.5} />, color: "var(--green)" },
+  file: { text: "文件", icon: <File {...ICON.sm} />, color: "var(--tint)" },
+  dir: { text: "目录", icon: <Folder {...ICON.sm} />, color: "var(--orange)" },
+  skill: { text: "Skill", icon: <Sparkles {...ICON.sm} />, color: "var(--green)" },
 };
 
 /* ─── Fuzzy Highlight ─── */
@@ -161,7 +162,7 @@ function MentionPopup({
         }}
       >
         <div className="flex items-center gap-2 px-3 py-3">
-          <Search size={14} strokeWidth={1.5} style={{ color: "var(--fill-quaternary)" }} />
+          <Search {...ICON.sm} style={{ color: "var(--fill-quaternary)" }} />
           <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
             {query
               ? `未找到「${query}」相关${triggerType === "/" ? "命令" : "项目"}`
@@ -258,7 +259,7 @@ function getItemGroup(item: PopupItem): string {
 
 function getItemMeta(item: PopupItem): { icon: React.ReactNode; color: string } {
   if (item.kind === "mention") return MENTION_TYPE_META[item.option.type];
-  return { icon: <Terminal size={14} strokeWidth={1.5} />, color: "var(--purple)" };
+  return { icon: <Terminal {...ICON.sm} />, color: "var(--purple)" };
 }
 
 function getItemKey(item: PopupItem): string {
@@ -764,18 +765,91 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
             onInput={autoGrow}
             onScroll={syncOverlayScroll}
             onPaste={(e) => {
-              const items = e.clipboardData?.items;
-              if (!items || !onPasteFiles) return;
-              const imageFiles: File[] = [];
-              for (const item of items) {
-                if (item.type.startsWith("image/")) {
-                  const file = item.getAsFile();
-                  if (file) imageFiles.push(file);
+              e.preventDefault();
+
+              // 同步读取 clipboardData（必须在 preventDefault 之后、异步之前读取）
+              const clipText = e.clipboardData?.getData("text/plain") ?? "";
+              const clipUri = e.clipboardData?.getData("text/uri-list") ?? "";
+              const clipItems = e.clipboardData?.items;
+
+              // 1) Web 标准：clipboardData 直接含图片文件（macOS/Windows 可用）
+              if (clipItems && onPasteFiles) {
+                const imageFiles: globalThis.File[] = [];
+                for (const item of clipItems) {
+                  if (item.type.startsWith("image/")) {
+                    const file = item.getAsFile();
+                    if (file) imageFiles.push(file);
+                  }
+                }
+                if (imageFiles.length > 0) {
+                  onPasteFiles(imageFiles);
+                  return;
                 }
               }
-              if (imageFiles.length > 0) {
-                e.preventDefault();
-                onPasteFiles(imageFiles);
+
+              const isTauri = "__TAURI_INTERNALS__" in window || "__TAURI__" in window;
+              const textToCheck = (clipText || clipUri).trim();
+
+              // 2) Tauri: file:// URL 或绝对路径指向图片
+              if (isTauri && onPasteFiles) {
+                const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+                const fileUrlMatch = textToCheck.match(/^file:\/\/(.+\.(png|jpe?g|gif|webp|bmp|svg))$/im);
+                const isAbsImgPath = !fileUrlMatch && IMG_EXT.test(textToCheck) && textToCheck.startsWith("/");
+                const filePathToRead = fileUrlMatch
+                  ? decodeURIComponent(fileUrlMatch[1])
+                  : isAbsImgPath ? textToCheck : null;
+
+                if (filePathToRead) {
+                  import("@tauri-apps/api/core").then(({ invoke }) => {
+                    invoke<[string, string]>("read_image_file", { path: filePathToRead })
+                      .then(([b64, mime]) => {
+                        const arr = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+                        const blob = new Blob([arr], { type: mime });
+                        const name = filePathToRead.split("/").pop() ?? "image.png";
+                        const file = new (globalThis.File as unknown as new (p: BlobPart[], n: string, o: FilePropertyBag) => globalThis.File)([blob], name, { type: mime });
+                        onPasteFiles([file]);
+                      })
+                      .catch(() => {});
+                  });
+                  return;
+                }
+              }
+
+              // 3) 有文本 → 手动插入到光标位置（不依赖浏览器默认粘贴行为）
+              if (clipText) {
+                const ta = taRef.current;
+                const selStart = ta?.selectionStart ?? text.length;
+                const selEnd = ta?.selectionEnd ?? selStart;
+                const before = text.slice(0, selStart);
+                const after = text.slice(selEnd);
+                const newText = before + clipText + after;
+                const newCursor = selStart + clipText.length;
+
+                setText(newText);
+                onContentChange?.(!!newText.trim());
+                pushHistory(newText, mentions, newCursor);
+
+                setTimeout(() => {
+                  ta?.setSelectionRange(newCursor, newCursor);
+                }, 0);
+              }
+
+              // 4) Tauri: 异步检查剪贴板是否有图片（截图场景）
+              if (isTauri && onPasteFiles) {
+                import("@tauri-apps/api/core").then(({ invoke }) => {
+                  invoke<string | null>("clipboard_read_image")
+                    .then((b64) => {
+                      if (b64) {
+                        const arr = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+                        const blob = new Blob([arr], { type: "image/png" });
+                        const file = new (globalThis.File as unknown as new (p: BlobPart[], n: string, o: FilePropertyBag) => globalThis.File)(
+                          [blob], `screenshot-${Date.now()}.png`, { type: "image/png" }
+                        );
+                        onPasteFiles([file]);
+                      }
+                    })
+                    .catch(() => {});
+                });
               }
             }}
             placeholder={placeholder}

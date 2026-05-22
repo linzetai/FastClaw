@@ -4,18 +4,17 @@ import {
   Globe, Wrench, Square,
 } from "lucide-react";
 import type { SubAgentRunUI, SubAgentToolCall } from "../../lib/agent-store";
-
-const ICON_PROPS = { size: 13, strokeWidth: 1.5 } as const;
+import { ICON } from "../../lib/ui-tokens";
 
 const TYPE_META: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
-  general: { icon: <Bot {...ICON_PROPS} />, label: "通用子智能体", color: "var(--tint)" },
-  explore: { icon: <Search {...ICON_PROPS} />, label: "探索 (只读)", color: "#34c759" },
-  shell: { icon: <Terminal {...ICON_PROPS} />, label: "命令执行", color: "#ff9500" },
-  browser: { icon: <Globe {...ICON_PROPS} />, label: "浏览器", color: "#af52de" },
+  general: { icon: <Bot {...ICON.sm} />, label: "通用子智能体", color: "var(--tint)" },
+  explore: { icon: <Search {...ICON.sm} />, label: "探索 (只读)", color: "#34c759" },
+  shell: { icon: <Terminal {...ICON.sm} />, label: "命令执行", color: "#ff9500" },
+  browser: { icon: <Globe {...ICON.sm} />, label: "浏览器", color: "#af52de" },
 };
 
 function getTypeMeta(type: string) {
-  return TYPE_META[type] ?? { icon: <Wrench {...ICON_PROPS} />, label: type, color: "var(--fill-tertiary)" };
+  return TYPE_META[type] ?? { icon: <Wrench {...ICON.sm} />, label: type, color: "var(--fill-tertiary)" };
 }
 
 function StatusIndicator({ status }: { status: SubAgentRunUI["status"] }) {
@@ -32,11 +31,11 @@ function StatusIndicator({ status }: { status: SubAgentRunUI["status"] }) {
         />
       );
     case "completed":
-      return <Check size={14} strokeWidth={2} style={{ color: "var(--green, #34c759)" }} />;
+      return <Check {...ICON.sm} style={{ color: "var(--green, #34c759)" }} />;
     case "failed":
-      return <XIcon size={14} strokeWidth={2} style={{ color: "var(--red)" }} />;
+      return <XIcon {...ICON.sm} style={{ color: "var(--red)" }} />;
     case "cancelled":
-      return <Square size={12} strokeWidth={2} style={{ color: "var(--fill-quaternary)" }} />;
+      return <Square {...ICON.sm} style={{ color: "var(--fill-quaternary)" }} />;
   }
 }
 
@@ -45,7 +44,7 @@ function MiniToolCall({ tc }: { tc: SubAgentToolCall }) {
   const isError = tc.status === "error";
   return (
     <div
-      className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[10.5px]"
+      className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px]"
       style={{
         background: "var(--bg-primary)",
         border: "0.5px solid var(--separator)",
@@ -54,11 +53,11 @@ function MiniToolCall({ tc }: { tc: SubAgentToolCall }) {
     >
       <span className="flex h-3 w-3 items-center justify-center">
         {isRunning ? (
-          <Loader size={12} className="animate-spin" style={{ color: "var(--fill-tertiary)" }} />
+          <Loader {...ICON.sm} className="animate-spin" style={{ color: "var(--fill-tertiary)" }} />
         ) : isError ? (
-          <XIcon size={12} strokeWidth={2} style={{ color: "var(--red)" }} />
+          <XIcon {...ICON.sm} style={{ color: "var(--red)" }} />
         ) : (
-          <Check size={12} strokeWidth={2} style={{ color: "var(--fill-tertiary)" }} />
+          <Check {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
         )}
       </span>
       <span className="truncate font-mono">{tc.name}</span>
@@ -127,13 +126,12 @@ export function SubAgentCard({ run, onCancel }: SubAgentCardProps) {
             title="取消"
             aria-label="取消子智能体"
           >
-            <Square size={12} strokeWidth={2} style={{ color: "var(--fill-tertiary)" }} />
+            <Square {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
           </button>
         )}
 
         <ChevronRight
-          size={12}
-          strokeWidth={2}
+          {...ICON.sm}
           className="shrink-0 transition-transform duration-150"
           style={{
             color: "var(--fill-tertiary)",
@@ -173,7 +171,7 @@ export function SubAgentCard({ run, onCancel }: SubAgentCardProps) {
             >
               任务
             </span>
-            <p className="mt-0.5 text-[11.5px] leading-relaxed" style={{ color: "var(--fill-secondary)" }}>
+            <p className="mt-0.5 text-[11px] leading-relaxed" style={{ color: "var(--fill-secondary)" }}>
               {run.task}
             </p>
           </div>
@@ -225,11 +223,11 @@ export function SubAgentCard({ run, onCancel }: SubAgentCardProps) {
                   >
                     <span className="flex h-3.5 w-3.5 items-center justify-center">
                       {tc.status === "running" ? (
-                        <Loader size={12} className="animate-spin" style={{ color: "var(--fill-tertiary)" }} />
+                        <Loader {...ICON.sm} className="animate-spin" style={{ color: "var(--fill-tertiary)" }} />
                       ) : tc.status === "error" ? (
-                        <XIcon size={12} strokeWidth={2} />
+                        <XIcon {...ICON.sm} />
                       ) : (
-                        <Check size={12} strokeWidth={2} style={{ color: "var(--fill-tertiary)" }} />
+                        <Check {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
                       )}
                     </span>
                     <span className="font-mono font-medium">{tc.name}</span>

@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronUp, Clock } from "lucide-react";
+import { ICON } from "../../lib/ui-tokens";
 
 interface QueueIndicatorProps {
   count: number;
@@ -20,11 +21,11 @@ export function QueueIndicator({ count, expanded, onToggle }: QueueIndicatorProp
         cursor: "pointer",
       }}
     >
-      <Clock size={14} strokeWidth={2} />
+      <Clock {...ICON.sm} />
       <span className="flex-1 text-left font-medium">
         {count} 条消息待发送
       </span>
-      {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      {expanded ? <ChevronUp {...ICON.sm} /> : <ChevronDown {...ICON.sm} />}
     </button>
   );
 }

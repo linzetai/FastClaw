@@ -233,6 +233,7 @@ export function useMessageStreamChat({
         parts.push({ type: "image_url", image_url: { url: img.url } });
       }
       messageContent = parts;
+      console.log(`[FastClaw] Sending ${imageDataUrls.length} image(s), data URL sizes:`, imageDataUrls.map((img) => `${(img.url.length / 1024).toFixed(1)}KB`));
     } else {
       messageContent = txt + mentionDesc + fileDesc;
     }

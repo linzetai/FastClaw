@@ -12,6 +12,7 @@ import { X, ChevronUp, ChevronDown, Upload, Search, ArrowDown } from "lucide-rea
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
 import { StreamEmptyState } from "./StreamEmptyState";
+import { ICON } from "../../lib/ui-tokens";
 
 const VIEWPORT_INCREASE = { top: 200, bottom: 200 };
 
@@ -252,6 +253,45 @@ export function MessageStream(_props: MessageStreamProps) {
     }
   }, [processFiles]);
 
+  useEffect(() => {
+    const handleEdit = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      const text = detail?.text;
+      if (text && mentionInputRef.current) {
+        mentionInputRef.current.setText(text);
+        mentionInputRef.current.focus();
+      }
+      const images = detail?.images as Array<{ url: string; alt?: string }> | undefined;
+      if (images?.length) {
+        const restored: AttachedFile[] = [];
+        for (let i = 0; i < images.length; i++) {
+          const img = images[i];
+          const match = img.url.match(/^data:([^;]+);base64,(.+)$/);
+          if (!match) continue;
+          const mime = match[1];
+          const b64 = match[2];
+          const bin = atob(b64);
+          const arr = new Uint8Array(bin.length);
+          for (let j = 0; j < bin.length; j++) arr[j] = bin.charCodeAt(j);
+          const blob = new Blob([arr], { type: mime });
+          const file = new File([blob], img.alt || `image-${i}.png`, { type: mime });
+          restored.push({ name: file.name, size: file.size, type: file.type, file, previewUrl: URL.createObjectURL(blob) });
+        }
+        if (restored.length) setAttachedFiles((prev) => [...prev, ...restored]);
+      }
+    };
+    const handlePaste = (e: Event) => {
+      const files = (e as CustomEvent).detail?.files as File[] | undefined;
+      if (files?.length) processFiles(files);
+    };
+    window.addEventListener("fastclaw:edit-message", handleEdit);
+    window.addEventListener("fastclaw:paste-files", handlePaste);
+    return () => {
+      window.removeEventListener("fastclaw:edit-message", handleEdit);
+      window.removeEventListener("fastclaw:paste-files", handlePaste);
+    };
+  }, [processFiles]);
+
   const removeFile = useCallback((index: number) => {
     setAttachedFiles((prev) => {
       const removed = prev[index];
@@ -261,6 +301,8 @@ export function MessageStream(_props: MessageStreamProps) {
   }, []);
 
   const chatKey = `${activeAgentId}:${activeChat?.localKey ?? ac?.activeChatId ?? ""}`;
+  const firstVisibleIndexRef = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const [visibleCount, setVisibleCount] = useState(STREAM_PAGE_SIZE);
   useEffect(() => {
@@ -359,6 +401,28 @@ export function MessageStream(_props: MessageStreamProps) {
     Footer: VirtuosoFooter,
   }), [hasMore]);
 
+  const prevWidthRef = useRef(0);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (prevWidthRef.current > 0 && Math.abs(w - prevWidthRef.current) > 2 && virtuosoRef.current) {
+        const idx = firstVisibleIndexRef.current;
+        requestAnimationFrame(() => {
+          virtuosoRef.current?.scrollToIndex({ index: idx, align: "start", behavior: "auto" });
+        });
+      }
+      prevWidthRef.current = w;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [chatKey]);
+
+  const handleRangeChanged = useCallback((range: { startIndex: number; endIndex: number }) => {
+    firstVisibleIndexRef.current = range.startIndex;
+  }, []);
+
   const isEmpty = stream.length === 0 && !streaming;
 
   return (
@@ -401,7 +465,7 @@ export function MessageStream(_props: MessageStreamProps) {
           className="flex shrink-0 items-center gap-2 px-4 py-2"
           style={{ background: "var(--bg-secondary)", borderBottom: `0.5px solid var(--separator)`, animation: "slide-down var(--duration-fast) var(--ease-out)" }}
         >
-          <Search size={16} strokeWidth={1.5} style={{ color: "var(--fill-tertiary)" }} />
+          <Search {...ICON.md} style={{ color: "var(--fill-tertiary)" }} />
           <input
             ref={searchInputRef}
             value={searchQuery}
@@ -427,7 +491,7 @@ export function MessageStream(_props: MessageStreamProps) {
               className="flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-30"
               style={{ color: "var(--fill-tertiary)" }}
             >
-              <ChevronUp size={14} strokeWidth={2} />
+              <ChevronUp {...ICON.sm} />
             </button>
             <button
               onClick={() => setSearchIdx((i) => (i + 1) % Math.max(searchResults.length, 1))}
@@ -435,7 +499,7 @@ export function MessageStream(_props: MessageStreamProps) {
               className="flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-30"
               style={{ color: "var(--fill-tertiary)" }}
             >
-              <ChevronDown size={14} strokeWidth={2} />
+              <ChevronDown {...ICON.sm} />
             </button>
           </div>
           <button
@@ -443,7 +507,7 @@ export function MessageStream(_props: MessageStreamProps) {
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-100 hover:bg-[var(--bg-hover)]"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            <X size={14} strokeWidth={2} />
+            <X {...ICON.sm} />
           </button>
         </div>
       )}
@@ -458,39 +522,42 @@ export function MessageStream(_props: MessageStreamProps) {
           }} />
         </div>
       ) : (
-        <Virtuoso
-          ref={virtuosoRef}
-          key={chatKey}
-          data={displayData}
-          initialTopMostItemIndex={Math.max(0, displayData.length - 1)}
-          followOutput={(isAtBottom) => {
-            if (isAtBottom) return "smooth";
-            if (streaming && atBottomRef.current) return "smooth";
-            return false;
-          }}
-          atBottomStateChange={handleAtBottomChange}
-          atBottomThreshold={120}
-          className="flex-1"
-          style={{ overflowX: "hidden", overflowY: "scroll" }}
-          onScroll={handleScroll}
-          startReached={handleStartReached}
-          itemContent={(idx, item) => (
-            <MessageRendererRow
-              item={item}
-              idx={idx}
-              paginationOffset={paginationOffset}
-              searchQuery={searchQuery}
-              searchIdx={searchIdx}
-              searchResults={searchResults}
-              streamSegments={streamSegments}
-              subAgentRuns={activeChat?.subAgentRuns}
-              bottomRef={bottomRef}
-              animate={animateMessages}
-            />
-          )}
-          increaseViewportBy={VIEWPORT_INCREASE}
-          components={virtuosoComponents}
-        />
+        <div ref={containerRef} className="flex min-h-0 flex-1 flex-col">
+          <Virtuoso
+            ref={virtuosoRef}
+            key={chatKey}
+            data={displayData}
+            initialTopMostItemIndex={Math.max(0, displayData.length - 1)}
+            followOutput={(isAtBottom) => {
+              if (isAtBottom) return "smooth";
+              if (streaming && atBottomRef.current) return "smooth";
+              return false;
+            }}
+            atBottomStateChange={handleAtBottomChange}
+            atBottomThreshold={120}
+            className="flex-1"
+            style={{ overflowX: "hidden", overflowY: "scroll" }}
+            onScroll={handleScroll}
+            startReached={handleStartReached}
+            rangeChanged={handleRangeChanged}
+            itemContent={(idx, item) => (
+              <MessageRendererRow
+                item={item}
+                idx={idx}
+                paginationOffset={paginationOffset}
+                searchQuery={searchQuery}
+                searchIdx={searchIdx}
+                searchResults={searchResults}
+                streamSegments={streamSegments}
+                subAgentRuns={activeChat?.subAgentRuns}
+                bottomRef={bottomRef}
+                animate={animateMessages}
+              />
+            )}
+            increaseViewportBy={VIEWPORT_INCREASE}
+            components={virtuosoComponents}
+          />
+        </div>
       )}
 
       {showScrollFab && !isEmpty && (
@@ -505,7 +572,7 @@ export function MessageStream(_props: MessageStreamProps) {
               boxShadow: "var(--shadow-lg)",
             }}
           >
-            <ArrowDown size={14} strokeWidth={2} />
+            <ArrowDown {...ICON.sm} />
             {streamDoneLabel ? (
               <span className="text-[11px] font-medium" style={{ color: "var(--tint)" }}>
                 输出完成

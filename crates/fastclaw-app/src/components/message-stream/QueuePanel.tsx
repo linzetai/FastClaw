@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X, Pencil, Check, AlertCircle, ArrowUp, ArrowDown } from "lucide-react";
 import type { QueuedMessage } from "../../lib/agent-store";
+import { ICON } from "../../lib/ui-tokens";
 
 interface QueuePanelProps {
   queue: QueuedMessage[];
@@ -36,7 +37,7 @@ function StatusBadge({ status }: { status: QueuedMessage["status"] }) {
           className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium"
           style={{ background: "rgba(252,129,129,0.15)", color: "var(--red, #FC8181)" }}
         >
-          <AlertCircle size={12} />
+          <AlertCircle {...ICON.sm} />
           失败
         </span>
       );
@@ -97,7 +98,7 @@ function QueueItem({
             className="flex h-4 w-4 cursor-pointer items-center justify-center rounded opacity-50 transition-opacity hover:opacity-100 disabled:cursor-default disabled:opacity-20"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            <ArrowUp size={12} />
+            <ArrowUp {...ICON.sm} />
           </button>
           <button
             onClick={() => onReorder(index, index + 1)}
@@ -105,7 +106,7 @@ function QueueItem({
             className="flex h-4 w-4 cursor-pointer items-center justify-center rounded opacity-50 transition-opacity hover:opacity-100 disabled:cursor-default disabled:opacity-20"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            <ArrowDown size={12} />
+            <ArrowDown {...ICON.sm} />
           </button>
         </div>
         <StatusBadge status={item.status} />
@@ -125,7 +126,7 @@ function QueueItem({
             className="flex h-5 w-5 cursor-pointer items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            <Pencil size={12} />
+            <Pencil {...ICON.sm} />
           </button>
         )}
         <button
@@ -133,7 +134,7 @@ function QueueItem({
           className="flex h-5 w-5 cursor-pointer items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
           style={{ color: "var(--fill-tertiary)" }}
         >
-          <X size={12} />
+          <X {...ICON.sm} />
         </button>
       </div>
       {editing ? (
@@ -159,7 +160,7 @@ function QueueItem({
             className="flex h-5 w-5 cursor-pointer items-center justify-center rounded"
             style={{ background: "var(--tint)", color: "#fff" }}
           >
-            <Check size={12} />
+            <Check {...ICON.sm} />
           </button>
         </div>
       ) : (

@@ -4,6 +4,7 @@
  */
 
 import { CircleDot, CheckCircle2, Circle, XCircle } from "lucide-react";
+import { ICON } from "../../lib/ui-tokens";
 
 interface TodoItem {
   marker: string;
@@ -155,8 +156,7 @@ export function TodoCard({ result }: { result: string }) {
                 style={{ background: cfg.bg }}
               >
                 <Icon
-                  size={14}
-                  strokeWidth={2}
+                  {...ICON.sm}
                   className="mt-[1px] shrink-0"
                   style={{ color: cfg.color, animation: item.status === "completed" ? "scale-spring var(--duration-normal) var(--ease-spring)" : "none" }}
                 />
@@ -176,7 +176,7 @@ export function TodoCard({ result }: { result: string }) {
                   </span>
                 </div>
                 <span
-                  className="mt-[1px] shrink-0 text-[9px] font-mono"
+                  className="mt-[1px] shrink-0 text-[10px] font-mono"
                   style={{ color: "var(--fill-quaternary)" }}
                 >
                   {item.id}
