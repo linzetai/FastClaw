@@ -79,8 +79,8 @@ pub use screenshot::{register_screenshot_tool, ScreenshotTool};
 pub use session::{session_inbox_topic, SessionsSendTool, SessionsSpawnTool};
 pub use shell::{
     has_binary_hijack_prefix, parse_sed_edit, sed_to_edit_suggestion, strip_safe_wrappers,
-    validate_command_paths, validate_readonly_command, PermissionRule, SandboxedShellTool,
-    SedEditInfo, ShellSandboxConfig, ShellTool,
+    validate_command_paths, validate_readonly_command, PermissionRule, SedEditInfo,
+    ShellDefinitionStub,
 };
 pub use skill::{ListSkillsTool, ReadSkillTool, UnifiedSkillTool, WriteSkillTool};
 pub use snip::SnipTool;
@@ -120,15 +120,11 @@ pub fn register_builtin_tools_full(
     registry.register(Arc::new(HttpFetchTool::new()));
     registry.register(Arc::new(WebSearchTool::unconfigured()));
     registry.register(Arc::new(WebFetchTool::with_defaults()));
-    if sandboxed {
-        let mut tool = SandboxedShellTool::new(ShellSandboxConfig::default());
-        if let Some(proxy) = network_proxy {
-            tool = tool.with_network_proxy(proxy);
-        }
-        registry.register(Arc::new(tool));
-    } else {
-        registry.register(Arc::new(ShellTool::new(300)));
-    }
+    // Shell execution is now handled by RuntimeRegistry → orchestrator → ShellRuntime.
+    // Register a definition-only stub so the LLM sees the tool schema.
+    let _ = sandboxed;
+    let _ = network_proxy;
+    registry.register(Arc::new(shell::ShellDefinitionStub));
     registry.register(Arc::new(ReadFileTool));
     registry.register(Arc::new(WriteFileTool));
     registry.register(Arc::new(EditFileTool));

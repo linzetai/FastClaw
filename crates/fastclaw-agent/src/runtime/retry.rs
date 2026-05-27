@@ -69,6 +69,12 @@ pub struct RetryState {
     pub total_wait: Duration,
 }
 
+impl Default for RetryState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RetryState {
     pub fn new() -> Self {
         Self {

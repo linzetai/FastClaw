@@ -1820,16 +1820,16 @@ async fn execute_single_tool(
     let arguments = tc.function.arguments.clone();
 
     if !is_tool_allowed(&tool_name, behavior) {
-        tracing::warn!(tool = %tool_name, "tool blocked by allow/deny policy — forwarding to user for confirmation{log_suffix}");
-        let result = fastclaw_core::tool::ToolResult::needs_confirm(format!(
-            "Tool '{}' is not in the allowed tool list. Allow this tool to proceed?",
+        tracing::warn!(tool = %tool_name, "tool blocked by allow/deny policy{log_suffix}");
+        let result = fastclaw_core::tool::ToolResult::err(format!(
+            "Tool '{}' is not in the allowed tool list.",
             tool_name
         ));
         return (tool_name, call_id, arguments, result);
     }
     if behavior.requires_confirmation(&tool_name) {
-        tracing::info!(tool = %tool_name, "tool requires user confirmation (tools_ask){log_suffix}");
-        let result = fastclaw_core::tool::ToolResult::needs_confirm(format!(
+        tracing::info!(tool = %tool_name, "tool requires confirmation — denied by policy{log_suffix}");
+        let result = fastclaw_core::tool::ToolResult::err(format!(
             "Tool '{}' requires user confirmation per agent policy.",
             tool_name
         ));

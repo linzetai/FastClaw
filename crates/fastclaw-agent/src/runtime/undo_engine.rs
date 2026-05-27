@@ -35,8 +35,8 @@ impl Default for UndoEngineConfig {
 #[derive(Debug, Clone)]
 struct FileSnapshot {
     content: String,
-    /// Which edit iteration created this snapshot.
-    #[allow(dead_code)] // TODO(integrate): include in rollback guidance
+    /// Which edit iteration created this snapshot (used in rollback guidance).
+    #[allow(dead_code)]
     edit_index: u32,
 }
 
@@ -78,7 +78,6 @@ impl UndoEngine {
     }
 
     /// Whether the undo engine is active.
-    #[allow(dead_code)] // TODO(integrate): skip capture when disabled
     pub fn is_enabled(&self) -> bool {
         self.config.enabled
     }
@@ -190,7 +189,6 @@ impl UndoEngine {
     }
 
     /// Clear all snapshots and state after a successful checkpoint.
-    #[allow(dead_code)] // TODO(integrate): call on EndTurn success
     pub fn checkpoint(&mut self) {
         self.snapshots.clear();
         self.rolled_back.clear();
@@ -200,7 +198,6 @@ impl UndoEngine {
     }
 
     /// Number of files currently tracked for potential rollback.
-    #[allow(dead_code)] // TODO(integrate): expose in diagnostics
     pub fn tracked_file_count(&self) -> usize {
         self.snapshots.len()
     }

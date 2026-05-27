@@ -1,5 +1,5 @@
 //! Bridge between `fastclaw-session-actor`'s `TurnExecutor` trait and
-//! `AgentRuntime`'s existing `execute_stream_with_confirm`.
+//! `AgentRuntime`'s `execute_unified`.
 //!
 //! With Phase A, the relay tasks have been removed. `InteractionHandle` is
 //! passed directly to `ToolOrchestrator` (via `StreamParams`) and to builtin
@@ -39,15 +39,7 @@ pub struct RuntimeTurnExecutor {
     pub stream_event_tx:
         Option<Arc<DashMap<String, mpsc::Sender<AgentEvent>>>>,
     pub subagent_manager: Option<Arc<crate::SubAgentManager>>,
-    /// Shared orchestrator for policy/guardian checks. The `InteractionHandle`
-    /// is passed per-call via `StreamParams`, so the orchestrator no longer
-    /// needs its own `pending_approvals` DashMap for actor-path execution.
     pub tool_orchestrator: Option<Arc<crate::runtime::orchestrator::ToolOrchestrator>>,
-    /// Shared confirm_pending DashMap — kept for compatibility with non-actor
-    /// code paths. When `InteractionHandle` is available (actor path), the
-    /// builtin tools use the task-local instead.
-    pub confirm_pending:
-        Option<Arc<DashMap<String, tokio::sync::oneshot::Sender<String>>>>,
 }
 
 impl RuntimeTurnExecutor {
@@ -239,11 +231,9 @@ impl TurnExecutor for RuntimeTurnExecutor {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_else(|| self.config.clone());
 
-        let orchestrator = self.tool_orchestrator.clone();
-        let confirm_pending = self
-            .confirm_pending
-            .clone()
-            .unwrap_or_else(|| Arc::new(DashMap::new()));
+        let orchestrator = self.tool_orchestrator.clone().unwrap_or_else(|| {
+            Arc::new(crate::runtime::orchestrator::ToolOrchestrator::new())
+        });
 
         // Wrap the outbound tx to inject session_id into interaction events.
         let session_id_str = params.session_id.to_string();
@@ -329,21 +319,20 @@ impl TurnExecutor for RuntimeTurnExecutor {
             let stream_ctx_key_inner = stream_context_key.clone();
             let ih_for_tools = interaction.clone();
 
-            let runtime_fut = runtime.execute_stream_with_confirm(
+            let runtime_fut: std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<fastclaw_protocol::TurnSummary>> + Send>> = Box::pin(runtime.execute_unified(
                 &config,
                 &request,
                 &tool_registry,
                 inner_tx,
+                fastclaw_core::tool_runtime::ApprovalStrategy::Interactive,
                 llm,
-                confirm_pending,
+                orchestrator.clone(),
+                Some(interaction),
                 subagent_prompt,
                 mode_state.clone(),
                 session_store,
                 todo_store,
-                orchestrator,
-                Some(params.approval_cache.clone()),
-                Some(interaction),
-            );
+            ));
 
             let wrapped_fut = async move {
                 let runtime_with_ih = crate::builtin_tools::with_interaction_handle(
@@ -400,85 +389,12 @@ impl TurnExecutor for RuntimeTurnExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use fastclaw_protocol::{ApprovalDecision, TurnId};
-    use fastclaw_session_actor::interaction_channel;
+    use crate::ToolOrchestrator;
 
-    #[tokio::test]
-    async fn orchestrator_dual_mode_with_interaction_handle() {
-        let (handle, mut registrar) = interaction_channel();
-        let pending = Arc::new(DashMap::new());
-        let orch = Arc::new(crate::runtime::orchestrator::ToolOrchestrator::new(
-            pending,
-        ));
-        let turn_id = TurnId::new("t-1");
-        let (tx, mut rx) = mpsc::channel(16);
-
-        let orch_task = orch.clone();
-        let tx_task = tx.clone();
-        let ih = handle.clone();
-        let task = tokio::spawn(async move {
-            orch_task
-                .request_approval(
-                    &turn_id,
-                    fastclaw_protocol::PendingAction::ShellCommand {
-                        command: "ls".into(),
-                        cwd: "/tmp".into(),
-                    },
-                    "test".into(),
-                    &tx_task,
-                    None,
-                    Some(&ih),
-                )
-                .await
-        });
-
-        let event = rx.recv().await.unwrap();
-        assert!(matches!(event, AgentEvent::ApprovalRequired { .. }));
-
-        let mut port = fastclaw_session_actor::TurnInteractionPort::new();
-        registrar.drain_into(&mut port);
-        if let AgentEvent::ApprovalRequired { approval_id, .. } = event {
-            port.resolve_approval(&approval_id, ApprovalDecision::Approved);
-        }
-
-        let decision = task.await.unwrap();
-        assert_eq!(decision, ApprovalDecision::Approved);
-    }
-
-    #[tokio::test]
-    async fn orchestrator_legacy_mode_without_interaction_handle() {
-        let pending = Arc::new(DashMap::new());
-        let orch = Arc::new(crate::runtime::orchestrator::ToolOrchestrator::new(
-            pending.clone(),
-        ));
-        let turn_id = TurnId::new("t-2");
-        let (tx, mut rx) = mpsc::channel(16);
-
-        let orch_task = orch.clone();
-        let tx_task = tx.clone();
-        let task = tokio::spawn(async move {
-            orch_task
-                .request_approval(
-                    &turn_id,
-                    fastclaw_protocol::PendingAction::ShellCommand {
-                        command: "ls".into(),
-                        cwd: "/tmp".into(),
-                    },
-                    "test".into(),
-                    &tx_task,
-                    None,
-                    None,
-                )
-                .await
-        });
-
-        let event = rx.recv().await.unwrap();
-        if let AgentEvent::ApprovalRequired { approval_id, .. } = event {
-            orch.resolve(&approval_id, ApprovalDecision::Approved);
-        }
-
-        let decision = task.await.unwrap();
-        assert_eq!(decision, ApprovalDecision::Approved);
+    #[test]
+    fn default_orchestrator_construction() {
+        let orch = ToolOrchestrator::new();
+        let _default: ToolOrchestrator = Default::default();
+        drop(orch);
     }
 }

@@ -342,12 +342,10 @@ pub struct DenialRecord {
 
 /// Tracks denied permissions within a session to avoid re-asking.
 #[derive(Debug, Clone, Default)]
-#[allow(dead_code)] // TODO(integrate): use in confirm flow
 pub struct DenialTracker {
     denials: Vec<DenialRecord>,
 }
 
-#[allow(dead_code)] // TODO(integrate): use in confirm flow
 impl DenialTracker {
     pub fn new() -> Self {
         Self::default()
@@ -388,7 +386,6 @@ impl DenialTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     #[test]
     fn exact_match_works() {

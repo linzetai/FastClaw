@@ -79,31 +79,32 @@ pub async fn run_exec(
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(1024);
 
-    let orchestrator = match approval_policy {
-        ApprovalPolicy::AutoApprove | ApprovalPolicy::DenyAll => None,
-        ApprovalPolicy::PolicyBased => Some(state.strm.tool_orchestrator.clone()),
+    let orchestrator = state.strm.tool_orchestrator.clone();
+
+    let strategy = match approval_policy {
+        ApprovalPolicy::AutoApprove => fastclaw_core::tool_runtime::ApprovalStrategy::AutoApprove,
+        ApprovalPolicy::DenyAll => fastclaw_core::tool_runtime::ApprovalStrategy::DenyAll,
+        ApprovalPolicy::PolicyBased => fastclaw_core::tool_runtime::ApprovalStrategy::PolicyBased,
     };
 
     let runtime = state.rt.runtime.clone();
     let tool_reg = state.rt.tool_registry.clone();
     let config_clone = agent_config.clone();
     let request_clone = request.clone();
-    let confirm_pending = std::sync::Arc::new(dashmap::DashMap::new());
 
     tokio::spawn(async move {
         let result = runtime
-            .execute_stream_with_confirm(
+            .execute_unified(
                 &config_clone,
                 &request_clone,
                 &tool_reg,
                 tx.clone(),
-                None,
-                confirm_pending,
-                None,
-                None,
-                None,
+                strategy,
                 None,
                 orchestrator,
+                None,
+                None,
+                None,
                 None,
                 None,
             )
@@ -146,18 +147,9 @@ pub async fn run_exec(
                     }
                 }
             }
-            AgentEvent::ApprovalRequired {
-                approval_id, ..
-            } => {
-                let decision = match approval_policy {
-                    ApprovalPolicy::AutoApprove => {
-                        fastclaw_protocol::ApprovalDecision::Approved
-                    }
-                    ApprovalPolicy::DenyAll | ApprovalPolicy::PolicyBased => {
-                        fastclaw_protocol::ApprovalDecision::Denied
-                    }
-                };
-                state.strm.tool_orchestrator.resolve(approval_id, decision);
+            AgentEvent::ApprovalRequired { .. } => {
+                // Approvals are resolved internally by the orchestrator via strategy.
+                // This event is only informational in the new pipeline.
             }
             AgentEvent::TurnEnd { .. } => {
                 break;

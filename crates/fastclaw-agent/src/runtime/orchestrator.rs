@@ -1,26 +1,27 @@
-use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
-use dashmap::DashMap;
+use fastclaw_core::tool_runtime::{
+    ApprovalStrategy, DecisionSource, ExecApprovalRequirement, OrchestratorResult, SandboxAttempt,
+    SandboxBackend, ToolExecContext, ToolRuntimeError,
+};
+
+use super::runtimes::ErasedToolRuntime;
 use fastclaw_execpolicy::{PolicyDecision, PolicyEngine};
 use fastclaw_protocol::{AgentEvent, ApprovalDecision, PendingAction, TurnId};
 use fastclaw_session_actor::InteractionHandle;
 use tokio::sync::Mutex;
 
+use super::approval_cache::ApprovalCache;
+use super::permissions::DenialTracker;
 use crate::guardian::GuardianReviewer;
 
-/// Shared, per-session approval cache. Matches the type exposed by
-/// `fastclaw-session-actor`.
-pub type SessionApprovalCache = Arc<std::sync::Mutex<HashMap<String, ApprovalDecision>>>;
 
 /// Result of policy pre-check before entering the user-approval flow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PolicyRequirement {
-    /// Policy explicitly allows — skip user approval entirely.
     Skip,
-    /// Policy says "prompt" — fall through to user/Guardian approval.
     NeedsApproval { reason: String },
-    /// Policy explicitly forbids — reject without asking the user.
     Forbidden { reason: String },
 }
 
@@ -61,12 +62,10 @@ pub fn map_tool_to_pending_action(
                 paths: vec![path],
             }
         }
-        _ => {
-            PendingAction::ShellCommand {
-                command: format!("{tool_name}({arguments})"),
-                cwd,
-            }
-        }
+        _ => PendingAction::ShellCommand {
+            command: format!("{tool_name}({arguments})"),
+            cwd,
+        },
     }
 }
 
@@ -89,49 +88,305 @@ fn action_to_command_tokens(action: &PendingAction) -> Vec<String> {
     }
 }
 
-/// Centralized tool approval pipeline.
+/// Context for a single orchestrator `run()` invocation.
+pub struct OrchestratorContext<'a> {
+    pub turn_id: &'a TurnId,
+    pub cwd: &'a Path,
+    pub approval_cache: &'a mut ApprovalCache,
+    pub approval_strategy: &'a ApprovalStrategy,
+    pub interaction_handle: Option<&'a InteractionHandle>,
+    pub event_tx: &'a tokio::sync::mpsc::Sender<AgentEvent>,
+    pub denial_tracker: &'a mut DenialTracker,
+}
+
+/// Centralized tool approval + sandbox + execution pipeline.
 ///
-/// Flow: PolicyCheck → Hooks → Guardian → User → Execute
-///
-/// This provides a unified decision pathway for tool calls that require
-/// approval, replacing the inline `needs_confirmation` + re-exec pattern.
+/// The new unified orchestrator implements a 5-phase pipeline:
+/// 1. Requirement — ask the runtime if approval/sandbox is needed
+/// 2. Approval — resolve via cache, policy, guardian, or user
+/// 3. Sandbox selection — pick the appropriate sandbox backend
+/// 4. Execution — run the tool
+/// 5. Escalation — retry without sandbox on sandbox denial (if allowed)
 pub struct ToolOrchestrator {
-    pending_approvals: Arc<DashMap<String, tokio::sync::oneshot::Sender<ApprovalDecision>>>,
-    session_approvals: Arc<DashMap<String, ApprovalDecision>>,
     policy: Arc<Mutex<PolicyEngine>>,
     guardian: Option<Arc<GuardianReviewer>>,
 }
 
+impl Default for ToolOrchestrator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToolOrchestrator {
-    pub fn new(
-        pending_approvals: Arc<DashMap<String, tokio::sync::oneshot::Sender<ApprovalDecision>>>,
-    ) -> Self {
+    pub fn new() -> Self {
         Self {
-            pending_approvals,
-            session_approvals: Arc::new(DashMap::new()),
             policy: Arc::new(Mutex::new(PolicyEngine::new())),
             guardian: None,
         }
     }
 
-    /// Create an orchestrator with a pre-configured policy engine.
-    pub fn with_policy(
-        pending_approvals: Arc<DashMap<String, tokio::sync::oneshot::Sender<ApprovalDecision>>>,
-        policy: PolicyEngine,
-    ) -> Self {
+    pub fn with_policy(policy: PolicyEngine) -> Self {
         Self {
-            pending_approvals,
-            session_approvals: Arc::new(DashMap::new()),
             policy: Arc::new(Mutex::new(policy)),
             guardian: None,
         }
     }
 
-    /// Attach a Guardian reviewer for automatic LLM-based safety review.
     pub fn with_guardian(mut self, guardian: Arc<GuardianReviewer>) -> Self {
         self.guardian = Some(guardian);
         self
     }
+
+    /// New unified 5-phase execution pipeline.
+    pub async fn run(
+        &self,
+        runtime: &dyn ErasedToolRuntime,
+        args: &serde_json::Value,
+        ctx: &mut OrchestratorContext<'_>,
+    ) -> Result<OrchestratorResult, ToolRuntimeError> {
+        // Phase 1: Determine approval requirement
+        let requirement = runtime.exec_requirement(args, ctx.cwd);
+
+        // Phase 2: Resolve approval
+        let decision_source = match requirement {
+            ExecApprovalRequirement::Skip => DecisionSource::NotRequired,
+            ExecApprovalRequirement::Forbidden { ref reason } => {
+                ctx.denial_tracker
+                    .record_denial(runtime.name(), &format!("{args}"));
+                return Err(ToolRuntimeError::Rejected {
+                    reason: reason.clone(),
+                });
+            }
+            ExecApprovalRequirement::NeedsApproval { reason } => {
+                match self.resolve_approval(runtime, args, ctx, &reason).await {
+                    Ok(source) => source,
+                    Err(e) => {
+                        ctx.denial_tracker
+                            .record_denial(runtime.name(), &format!("{args}"));
+                        return Err(e);
+                    }
+                }
+            }
+        };
+
+        // Phase 3: Select sandbox
+        let sandbox = self.select_sandbox(runtime, ctx.cwd);
+
+        // Phase 4: Execute
+        let exec_ctx = ToolExecContext {
+            turn_id: ctx.turn_id.clone(),
+            session_id: fastclaw_protocol::SessionId::new(""),
+            call_id: uuid::Uuid::new_v4().to_string(),
+            cwd: ctx.cwd.to_path_buf(),
+        };
+
+        match runtime.run(args, &sandbox, &exec_ctx).await {
+            Ok(output) => Ok(OrchestratorResult {
+                output,
+                decision_source,
+                sandbox_used: sandbox.sandbox_type,
+            }),
+            Err(ToolRuntimeError::SandboxDenied { reason }) => {
+                // Phase 5: Escalation
+                if runtime.escalate_on_sandbox_failure() {
+                    let no_sandbox = SandboxAttempt {
+                        sandbox_type: SandboxBackend::None,
+                        cwd: ctx.cwd.to_path_buf(),
+                    };
+                    let output = runtime.run(args, &no_sandbox, &exec_ctx).await?;
+                    Ok(OrchestratorResult {
+                        output,
+                        decision_source,
+                        sandbox_used: SandboxBackend::None,
+                    })
+                } else {
+                    Err(ToolRuntimeError::SandboxDenied { reason })
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Phase 2 implementation: resolve approval through the pipeline.
+    async fn resolve_approval(
+        &self,
+        runtime: &dyn ErasedToolRuntime,
+        args: &serde_json::Value,
+        ctx: &mut OrchestratorContext<'_>,
+        reason: &str,
+    ) -> Result<DecisionSource, ToolRuntimeError> {
+        let keys = runtime.approval_keys(args);
+
+        // 2a: Check cache
+        if ctx.approval_cache.check(&keys).is_some() {
+            return Ok(DecisionSource::Cached);
+        }
+
+        // 2b: Check ExecPolicy
+        let action = runtime.to_pending_action(args, ctx.cwd);
+        let tokens = action_to_command_tokens(&action);
+        let token_refs: Vec<&str> = tokens.iter().map(String::as_str).collect();
+        let policy_decision = {
+            let policy = self.policy.lock().await;
+            policy.evaluate(&token_refs).decision
+        };
+
+        match policy_decision {
+            PolicyDecision::Allow { .. } => return Ok(DecisionSource::PolicyAllowed),
+            PolicyDecision::Forbidden { justification, .. } => {
+                return Err(ToolRuntimeError::Rejected {
+                    reason: justification,
+                });
+            }
+            PolicyDecision::Prompt { .. } => { /* fall through to strategy */ }
+        }
+
+        // 2c: Guardian review (if configured)
+        if let Some(ref guardian) = self.guardian {
+            if !guardian.is_circuit_tripped().await {
+                let action_desc = format!("{action:?}");
+                match guardian.review(&action_desc).await {
+                    Ok(assessment) => {
+                        let _ = ctx
+                            .event_tx
+                            .send(AgentEvent::GuardianAssessment {
+                                turn_id: ctx.turn_id.clone(),
+                                review_id: assessment.review_id.clone(),
+                                risk_level: assessment.risk_level,
+                                outcome: assessment.outcome,
+                                rationale: assessment.rationale.clone(),
+                            })
+                            .await;
+
+                        if assessment.outcome == fastclaw_protocol::GuardianOutcome::Allow {
+                            ctx.approval_cache
+                                .store(&keys, ApprovalDecision::ApprovedForSession);
+                            return Ok(DecisionSource::GuardianAllowed);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "guardian review failed, falling through");
+                    }
+                }
+            }
+        }
+
+        // 2d: Strategy-based resolution
+        match ctx.approval_strategy {
+            ApprovalStrategy::AutoApprove => {
+                ctx.approval_cache
+                    .store(&keys, ApprovalDecision::ApprovedForSession);
+                Ok(DecisionSource::AutoApproved)
+            }
+            ApprovalStrategy::DenyAll => Err(ToolRuntimeError::Rejected {
+                reason: "approval required but strategy is DenyAll".into(),
+            }),
+            ApprovalStrategy::PolicyBased => Err(ToolRuntimeError::Rejected {
+                reason: "tool requires approval but no interactive session available".into(),
+            }),
+            ApprovalStrategy::Interactive => {
+                let ih = ctx.interaction_handle.ok_or(ToolRuntimeError::Internal {
+                    message: "Interactive strategy requires an InteractionHandle".into(),
+                })?;
+
+                let approval_id = uuid::Uuid::new_v4().to_string();
+                let available_decisions = vec![
+                    ApprovalDecision::Approved,
+                    ApprovalDecision::ApprovedForSession,
+                    ApprovalDecision::Denied,
+                    ApprovalDecision::Abort,
+                ];
+
+                let _ = ctx
+                    .event_tx
+                    .send(AgentEvent::ApprovalRequired {
+                        turn_id: ctx.turn_id.clone(),
+                        approval_id: approval_id.clone(),
+                        action: action.clone(),
+                        reason: reason.to_string(),
+                        available_decisions,
+                        session_id: None,
+                    })
+                    .await;
+
+                let rx = ih.request_approval(approval_id.clone(), &action);
+                let decision = rx.await.unwrap_or(ApprovalDecision::TimedOut);
+
+                if decision == ApprovalDecision::ApprovedForSession {
+                    ctx.approval_cache
+                        .store(&keys, ApprovalDecision::ApprovedForSession);
+                }
+
+                let _ = ctx
+                    .event_tx
+                    .send(AgentEvent::ApprovalResolved {
+                        turn_id: ctx.turn_id.clone(),
+                        approval_id,
+                        decision: decision.clone(),
+                        source: "user".to_string(),
+                    })
+                    .await;
+
+                match decision {
+                    ApprovalDecision::Approved | ApprovalDecision::ApprovedForSession => {
+                        Ok(DecisionSource::UserApproved)
+                    }
+                    ApprovalDecision::Denied => Err(ToolRuntimeError::Rejected {
+                        reason: "user denied".into(),
+                    }),
+                    ApprovalDecision::Abort => Err(ToolRuntimeError::Rejected {
+                        reason: "user aborted".into(),
+                    }),
+                    ApprovalDecision::TimedOut => Err(ToolRuntimeError::Rejected {
+                        reason: "approval timed out".into(),
+                    }),
+                    _ => Err(ToolRuntimeError::Rejected {
+                        reason: "unexpected approval decision".into(),
+                    }),
+                }
+            }
+        }
+    }
+
+    /// Phase 3: Select sandbox based on runtime preference.
+    fn select_sandbox(&self, runtime: &dyn ErasedToolRuntime, cwd: &Path) -> SandboxAttempt {
+        use fastclaw_core::tool_runtime::SandboxPreference;
+        match runtime.sandbox_preference() {
+            SandboxPreference::Skip => SandboxAttempt {
+                sandbox_type: SandboxBackend::None,
+                cwd: cwd.to_path_buf(),
+            },
+            SandboxPreference::Auto | SandboxPreference::Required => {
+                let backend = Self::detect_platform_sandbox();
+                SandboxAttempt {
+                    sandbox_type: backend,
+                    cwd: cwd.to_path_buf(),
+                }
+            }
+        }
+    }
+
+    fn detect_platform_sandbox() -> SandboxBackend {
+        #[cfg(target_os = "linux")]
+        {
+            SandboxBackend::Landlock
+        }
+        #[cfg(target_os = "macos")]
+        {
+            SandboxBackend::Seatbelt
+        }
+        #[cfg(target_os = "windows")]
+        {
+            SandboxBackend::RestrictedToken
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        {
+            SandboxBackend::None
+        }
+    }
+
+    // ─── Legacy API (kept during migration, used by mod.rs) ───────────────────
 
     /// Check policy for an action without entering the approval flow.
     pub async fn check_policy(&self, action: &PendingAction) -> PolicyRequirement {
@@ -145,360 +400,19 @@ impl ToolOrchestrator {
             PolicyDecision::Forbidden { justification, .. } => {
                 PolicyRequirement::Forbidden { reason: justification }
             }
-            PolicyDecision::Prompt { reason, .. } => {
-                PolicyRequirement::NeedsApproval { reason }
-            }
+            PolicyDecision::Prompt { reason, .. } => PolicyRequirement::NeedsApproval { reason },
         }
     }
 
-    /// Run the approval pipeline for a pending action.
-    ///
-    /// Steps:
-    /// 1. Check ExecPolicy — `Allow` skips approval, `Forbidden` rejects immediately
-    /// 2. Check session-level cache (from actor-owned `SessionApprovalCache` if
-    ///    provided, otherwise the orchestrator's own DashMap)
-    /// 3. Otherwise request user confirmation
-    ///
-    /// When `session_cache` is `Some`, `ApprovedForSession` decisions are stored
-    /// there (scoped to the session). When `None`, the orchestrator's internal
-    /// DashMap is used (legacy path).
-    pub async fn request_approval(
-        &self,
-        turn_id: &TurnId,
-        action: PendingAction,
-        reason: String,
-        tx: &tokio::sync::mpsc::Sender<AgentEvent>,
-        session_cache: Option<&SessionApprovalCache>,
-        interaction: Option<&InteractionHandle>,
-    ) -> ApprovalDecision {
-        // Step 1: ExecPolicy pre-check
-        match self.check_policy(&action).await {
-            PolicyRequirement::Skip => return ApprovalDecision::Approved,
-            PolicyRequirement::Forbidden { reason } => {
-                let _ = tx
-                    .send(AgentEvent::ApprovalResolved {
-                        turn_id: turn_id.clone(),
-                        approval_id: String::new(),
-                        decision: ApprovalDecision::Denied,
-                        source: format!("policy: {reason}"),
-                    })
-                    .await;
-                return ApprovalDecision::Denied;
-            }
-            PolicyRequirement::NeedsApproval { .. } => {}
-        }
-
-        // Step 1b: Guardian LLM review (if configured)
-        if let Some(ref guardian) = self.guardian {
-            if guardian.is_circuit_tripped().await {
-                let _ = tx
-                    .send(AgentEvent::GuardianWarning {
-                        turn_id: turn_id.clone(),
-                        message: "Guardian circuit breaker tripped: too many denials".into(),
-                    })
-                    .await;
-                return ApprovalDecision::Denied;
-            }
-
-            let action_desc = format!("{action:?}");
-            match guardian.review(&action_desc).await {
-                Ok(assessment) => {
-                    let _ = tx
-                        .send(AgentEvent::GuardianAssessment {
-                            turn_id: turn_id.clone(),
-                            review_id: assessment.review_id.clone(),
-                            risk_level: assessment.risk_level,
-                            outcome: assessment.outcome,
-                            rationale: assessment.rationale.clone(),
-                        })
-                        .await;
-
-                    if assessment.outcome == fastclaw_protocol::GuardianOutcome::Allow {
-                        return ApprovalDecision::Approved;
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "guardian review failed, falling through to user approval");
-                }
-            }
-        }
-
-        let action_key = self.action_cache_key(&action);
-
-        // Step 2: Check session-level cached approvals (prefer actor-owned cache)
-        if let Some(cache) = session_cache {
-            if let Some(cached) = cache.lock().unwrap().get(&action_key).cloned() {
-                return cached;
-            }
-        } else if let Some(cached) = self.session_approvals.get(&action_key) {
-            return cached.clone();
-        }
-
-        // Step 3: Ask the user — via InteractionHandle (actor path) or DashMap (legacy/CLI)
-        let approval_id = uuid::Uuid::new_v4().to_string();
-
-        let available_decisions = vec![
-            ApprovalDecision::Approved,
-            ApprovalDecision::ApprovedForSession,
-            ApprovalDecision::Denied,
-            ApprovalDecision::Abort,
-        ];
-
-        let _ = tx
-            .send(AgentEvent::ApprovalRequired {
-                turn_id: turn_id.clone(),
-                approval_id: approval_id.clone(),
-                action: action.clone(),
-                reason,
-                available_decisions,
-                session_id: None,
-            })
-            .await;
-
-        let decision = if let Some(ih) = interaction {
-            let rx = ih.request_approval(approval_id.clone(), &action);
-            rx.await.unwrap_or(ApprovalDecision::TimedOut)
-        } else {
-            let (answer_tx, answer_rx) = tokio::sync::oneshot::channel::<ApprovalDecision>();
-            self.pending_approvals.insert(approval_id.clone(), answer_tx);
-            let d = match answer_rx.await {
-                Ok(d) => d,
-                Err(_) => ApprovalDecision::TimedOut,
-            };
-            self.pending_approvals.remove(&approval_id);
-            d
-        };
-
-        if decision == ApprovalDecision::ApprovedForSession {
-            if let Some(cache) = session_cache {
-                cache
-                    .lock()
-                    .unwrap()
-                    .insert(action_key, ApprovalDecision::Approved);
-            } else {
-                self.session_approvals
-                    .insert(action_key, ApprovalDecision::Approved);
-            }
-
-            let tokens = action_to_command_tokens(&action);
-            let pattern_elements: Vec<fastclaw_execpolicy::PatternElement> = tokens
-                .iter()
-                .map(|t| fastclaw_execpolicy::PatternElement::Exact(t.clone()))
-                .collect();
-            let mut policy = self.policy.lock().await;
-            policy.add_session_rule(fastclaw_execpolicy::PrefixRule {
-                id: Some(format!("session_approved_{}", uuid::Uuid::new_v4())),
-                pattern: pattern_elements,
-                decision: "allow".into(),
-                justification: Some("approved for session by user".into()),
-            });
-        }
-
-        let _ = tx
-            .send(AgentEvent::ApprovalResolved {
-                turn_id: turn_id.clone(),
-                approval_id,
-                decision: decision.clone(),
-                source: "user".to_string(),
-            })
-            .await;
-
-        decision
-    }
-
-    /// Access the underlying pending-approvals map (used by relay tasks).
-    pub fn pending_approvals(
-        &self,
-    ) -> Arc<DashMap<String, tokio::sync::oneshot::Sender<ApprovalDecision>>> {
-        self.pending_approvals.clone()
-    }
-
-    /// Resolve a pending approval from the gateway (user input).
-    pub fn resolve(&self, approval_id: &str, decision: ApprovalDecision) -> bool {
-        if let Some((_, tx)) = self.pending_approvals.remove(approval_id) {
-            let _ = tx.send(decision);
-            true
-        } else {
-            false
-        }
-    }
-
-    fn action_cache_key(&self, action: &PendingAction) -> String {
-        match action {
-            PendingAction::ShellCommand { command, cwd } => {
-                format!("shell:{}:{}", cwd, command)
-            }
-            PendingAction::FileWrite { path } => format!("file_write:{path}"),
-            PendingAction::ApplyPatch { paths } => format!("patch:{}", paths.join(",")),
-            PendingAction::NetworkAccess { host, port } => format!("net:{host}:{port}"),
-            _ => format!("unknown:{action:?}"),
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn request_approval_resolves_via_gateway() {
-        let pending = Arc::new(DashMap::new());
-        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
-        let turn_id = TurnId::new("turn-1");
-
-        let action = PendingAction::FileWrite {
-            path: "/tmp/test.txt".into(),
-        };
-
-        let pending_for_task = pending.clone();
-        let tx_for_task = tx.clone();
-        let approval_task = tokio::spawn(async move {
-            let orch = ToolOrchestrator::new(pending_for_task);
-            orch.request_approval(
-                &turn_id,
-                action,
-                "write file".into(),
-                &tx_for_task,
-                None,
-                None,
-            )
-            .await
-        });
-
-        let required = rx.recv().await.unwrap();
-        let approval_id = match required {
-            AgentEvent::ApprovalRequired { approval_id, .. } => approval_id,
-            other => panic!("expected ApprovalRequired, got {other:?}"),
-        };
-
-        let orch = ToolOrchestrator::new(pending);
-        assert!(orch.resolve(&approval_id, ApprovalDecision::Approved));
-
-        let decision = approval_task.await.unwrap();
-        assert_eq!(decision, ApprovalDecision::Approved);
-
-        let resolved = rx.recv().await.unwrap();
-        match resolved {
-            AgentEvent::ApprovalResolved { decision, .. } => {
-                assert_eq!(decision, ApprovalDecision::Approved);
-            }
-            other => panic!("expected ApprovalResolved, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn approved_for_session_caches_subsequent_requests() {
-        let pending = Arc::new(DashMap::new());
-        let orchestrator = Arc::new(ToolOrchestrator::new(pending));
-        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
-        let turn_id = TurnId::new("turn-2");
-
-        let action = PendingAction::ShellCommand {
-            command: "echo hi".into(),
-            cwd: "/tmp".into(),
-        };
-
-        let first = tokio::spawn({
-            let orchestrator = orchestrator.clone();
-            let tx = tx.clone();
-            let turn_id = turn_id.clone();
-            let action = action.clone();
-            async move {
-                orchestrator
-                    .request_approval(&turn_id, action, "run shell".into(), &tx, None, None)
-                    .await
-            }
-        });
-
-        let approval_id = match rx.recv().await.unwrap() {
-            AgentEvent::ApprovalRequired { approval_id, .. } => approval_id,
-            other => panic!("expected ApprovalRequired, got {other:?}"),
-        };
-        assert!(orchestrator.resolve(
-            &approval_id,
-            ApprovalDecision::ApprovedForSession,
-        ));
-        assert_eq!(first.await.unwrap(), ApprovalDecision::ApprovedForSession);
-        let _ = rx.recv().await;
-
-        let second = orchestrator
-            .request_approval(&turn_id, action, "run shell again".into(), &tx, None, None)
-            .await;
-        assert_eq!(second, ApprovalDecision::Approved);
-    }
-
-    #[test]
-    fn resolve_unknown_approval_returns_false() {
-        let pending = Arc::new(DashMap::new());
-        let orchestrator = ToolOrchestrator::new(pending);
-        assert!(!orchestrator.resolve("missing", ApprovalDecision::Denied));
-    }
-
-    #[tokio::test]
-    async fn policy_allow_skips_user_approval() {
-        let pending = Arc::new(DashMap::new());
-        let mut engine = PolicyEngine::new();
-        engine
-            .load_str(
-                r#"
-[[rules]]
-pattern = ["echo"]
-decision = "allow"
-"#,
-                "test",
-            )
-            .unwrap();
-
-        let orch = ToolOrchestrator::with_policy(pending, engine);
-        let (tx, _rx) = tokio::sync::mpsc::channel(8);
-        let turn_id = TurnId::new("turn-1");
-        let action = PendingAction::ShellCommand {
-            command: "echo hello".into(),
-            cwd: ".".into(),
-        };
-
-        let decision = orch
-            .request_approval(&turn_id, action, "run echo".into(), &tx, None, None)
-            .await;
-        assert_eq!(decision, ApprovalDecision::Approved);
-    }
-
-    #[tokio::test]
-    async fn policy_forbidden_denies_without_user_prompt() {
-        let pending = Arc::new(DashMap::new());
-        let mut engine = PolicyEngine::new();
-        engine
-            .load_str(
-                r#"
-[[rules]]
-pattern = ["rm", "-rf", "/"]
-decision = "forbidden"
-justification = "destructive"
-"#,
-                "test",
-            )
-            .unwrap();
-
-        let orch = ToolOrchestrator::with_policy(pending, engine);
-        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
-        let turn_id = TurnId::new("turn-1");
-        let action = PendingAction::ShellCommand {
-            command: "rm -rf /".into(),
-            cwd: ".".into(),
-        };
-
-        let decision = orch
-            .request_approval(&turn_id, action, "danger".into(), &tx, None, None)
-            .await;
-        assert_eq!(decision, ApprovalDecision::Denied);
-
-        let event = rx.recv().await.unwrap();
-        assert!(matches!(event, AgentEvent::ApprovalResolved { source, .. } if source.contains("policy")));
-    }
+    use fastclaw_core::tool_runtime::ToolRuntime;
 
     #[tokio::test]
     async fn check_policy_returns_requirement() {
-        let pending = Arc::new(DashMap::new());
         let mut engine = PolicyEngine::new();
         engine
             .load_str(
@@ -511,7 +425,7 @@ decision = "allow"
             )
             .unwrap();
 
-        let orch = ToolOrchestrator::with_policy(pending, engine);
+        let orch = ToolOrchestrator::with_policy(engine);
         let action = PendingAction::ShellCommand {
             command: "ls -la".into(),
             cwd: ".".into(),
@@ -526,5 +440,222 @@ decision = "allow"
             orch.check_policy(&unknown).await,
             PolicyRequirement::NeedsApproval { .. }
         ));
+    }
+
+    // ─── New pipeline tests ──────────────────────────────────────────────────
+
+    use fastclaw_core::tool_runtime::SandboxPreference as CoreSandboxPref;
+
+    struct MockRuntime {
+        requirement: ExecApprovalRequirement,
+        sandbox_pref: CoreSandboxPref,
+        output: String,
+    }
+
+    impl fastclaw_core::tool_runtime::Approvable for MockRuntime {
+        fn approval_keys(&self, _args: &serde_json::Value) -> Vec<String> {
+            vec!["mock:test".to_string()]
+        }
+        fn exec_requirement(
+            &self,
+            _args: &serde_json::Value,
+            _cwd: &Path,
+        ) -> ExecApprovalRequirement {
+            self.requirement.clone()
+        }
+        fn to_pending_action(
+            &self,
+            _args: &serde_json::Value,
+            cwd: &Path,
+        ) -> PendingAction {
+            PendingAction::ShellCommand {
+                command: "mock".into(),
+                cwd: cwd.display().to_string(),
+            }
+        }
+    }
+
+    impl fastclaw_core::tool_runtime::Sandboxable for MockRuntime {
+        fn sandbox_preference(&self) -> CoreSandboxPref {
+            self.sandbox_pref
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolRuntime for MockRuntime {
+        async fn run(
+            &self,
+            _args: &serde_json::Value,
+            _sandbox: &SandboxAttempt,
+            _ctx: &ToolExecContext,
+        ) -> Result<String, ToolRuntimeError> {
+            Ok(self.output.clone())
+        }
+        fn name(&self) -> &str {
+            "mock"
+        }
+    }
+
+    #[tokio::test]
+    async fn new_pipeline_skip_approval_executes() {
+        let orch = ToolOrchestrator::new();
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        let turn_id = TurnId::new("t1");
+
+        let runtime = MockRuntime {
+            requirement: ExecApprovalRequirement::Skip,
+            sandbox_pref: CoreSandboxPref::Skip,
+            output: "ok".into(),
+        };
+
+        let mut cache = ApprovalCache::new();
+        let mut tracker = DenialTracker::new();
+        let mut ctx = OrchestratorContext {
+            turn_id: &turn_id,
+            cwd: Path::new("/tmp"),
+            approval_cache: &mut cache,
+            approval_strategy: &ApprovalStrategy::DenyAll,
+            interaction_handle: None,
+            event_tx: &tx,
+            denial_tracker: &mut tracker,
+        };
+
+        let result = orch.run(&runtime, &serde_json::json!({}), &mut ctx).await;
+        assert!(result.is_ok());
+        let r = result.unwrap();
+        assert_eq!(r.output, "ok");
+        assert_eq!(r.decision_source, DecisionSource::NotRequired);
+    }
+
+    #[tokio::test]
+    async fn new_pipeline_forbidden_rejects() {
+        let orch = ToolOrchestrator::new();
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        let turn_id = TurnId::new("t1");
+
+        let runtime = MockRuntime {
+            requirement: ExecApprovalRequirement::Forbidden {
+                reason: "dangerous".into(),
+            },
+            sandbox_pref: CoreSandboxPref::Skip,
+            output: "should not run".into(),
+        };
+
+        let mut cache = ApprovalCache::new();
+        let mut tracker = DenialTracker::new();
+        let mut ctx = OrchestratorContext {
+            turn_id: &turn_id,
+            cwd: Path::new("/tmp"),
+            approval_cache: &mut cache,
+            approval_strategy: &ApprovalStrategy::AutoApprove,
+            interaction_handle: None,
+            event_tx: &tx,
+            denial_tracker: &mut tracker,
+        };
+
+        let result = orch.run(&runtime, &serde_json::json!({}), &mut ctx).await;
+        assert!(matches!(
+            result,
+            Err(ToolRuntimeError::Rejected { reason }) if reason == "dangerous"
+        ));
+        assert_eq!(tracker.count(), 1);
+    }
+
+    #[tokio::test]
+    async fn new_pipeline_auto_approve_executes() {
+        let orch = ToolOrchestrator::new();
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        let turn_id = TurnId::new("t1");
+
+        let runtime = MockRuntime {
+            requirement: ExecApprovalRequirement::NeedsApproval {
+                reason: "needs it".into(),
+            },
+            sandbox_pref: CoreSandboxPref::Skip,
+            output: "executed".into(),
+        };
+
+        let mut cache = ApprovalCache::new();
+        let mut tracker = DenialTracker::new();
+        let mut ctx = OrchestratorContext {
+            turn_id: &turn_id,
+            cwd: Path::new("/tmp"),
+            approval_cache: &mut cache,
+            approval_strategy: &ApprovalStrategy::AutoApprove,
+            interaction_handle: None,
+            event_tx: &tx,
+            denial_tracker: &mut tracker,
+        };
+
+        let result = orch.run(&runtime, &serde_json::json!({}), &mut ctx).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().decision_source, DecisionSource::AutoApproved);
+    }
+
+    #[tokio::test]
+    async fn new_pipeline_deny_all_rejects() {
+        let orch = ToolOrchestrator::new();
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        let turn_id = TurnId::new("t1");
+
+        let runtime = MockRuntime {
+            requirement: ExecApprovalRequirement::NeedsApproval {
+                reason: "needs it".into(),
+            },
+            sandbox_pref: CoreSandboxPref::Skip,
+            output: "nope".into(),
+        };
+
+        let mut cache = ApprovalCache::new();
+        let mut tracker = DenialTracker::new();
+        let mut ctx = OrchestratorContext {
+            turn_id: &turn_id,
+            cwd: Path::new("/tmp"),
+            approval_cache: &mut cache,
+            approval_strategy: &ApprovalStrategy::DenyAll,
+            interaction_handle: None,
+            event_tx: &tx,
+            denial_tracker: &mut tracker,
+        };
+
+        let result = orch.run(&runtime, &serde_json::json!({}), &mut ctx).await;
+        assert!(matches!(result, Err(ToolRuntimeError::Rejected { .. })));
+        assert_eq!(tracker.count(), 1);
+    }
+
+    #[tokio::test]
+    async fn new_pipeline_cache_hit_skips_approval() {
+        let orch = ToolOrchestrator::new();
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        let turn_id = TurnId::new("t1");
+
+        let runtime = MockRuntime {
+            requirement: ExecApprovalRequirement::NeedsApproval {
+                reason: "needs it".into(),
+            },
+            sandbox_pref: CoreSandboxPref::Skip,
+            output: "cached".into(),
+        };
+
+        let mut cache = ApprovalCache::new();
+        cache.store(
+            &["mock:test".to_string()],
+            ApprovalDecision::ApprovedForSession,
+        );
+        let mut tracker = DenialTracker::new();
+
+        let mut ctx = OrchestratorContext {
+            turn_id: &turn_id,
+            cwd: Path::new("/tmp"),
+            approval_cache: &mut cache,
+            approval_strategy: &ApprovalStrategy::DenyAll,
+            interaction_handle: None,
+            event_tx: &tx,
+            denial_tracker: &mut tracker,
+        };
+
+        let result = orch.run(&runtime, &serde_json::json!({}), &mut ctx).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().decision_source, DecisionSource::Cached);
     }
 }

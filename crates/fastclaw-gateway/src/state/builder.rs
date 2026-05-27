@@ -54,9 +54,6 @@ struct BuildPhase4 {
     base_skill_registry: Arc<SkillRegistry>,
     stream_event_tx:
         Arc<DashMap<String, tokio::sync::mpsc::Sender<fastclaw_protocol::AgentEvent>>>,
-    /// Internal: passed to builtin tools for non-actor (CLI) path. Not
-    /// exposed on `StreamState` — actor path uses task-local InteractionHandle.
-    ask_question_pending: Arc<DashMap<String, tokio::sync::oneshot::Sender<String>>>,
     tool_orchestrator: Arc<fastclaw_agent::ToolOrchestrator>,
     mcp_status_init: std::collections::HashMap<String, fastclaw_core::types::McpServerStatus>,
     mcp_handles_init: std::collections::HashMap<String, fastclaw_mcp::SharedMcpClient>,
@@ -371,8 +368,7 @@ impl StateBuilder {
 
         let stream_event_tx = Arc::new(DashMap::new());
         let ask_question_pending = Arc::new(DashMap::new());
-        let pending_approvals = Arc::new(DashMap::new());
-        let tool_orchestrator = Arc::new(fastclaw_agent::ToolOrchestrator::new(pending_approvals));
+        let tool_orchestrator = Arc::new(fastclaw_agent::ToolOrchestrator::new());
         p3.tool_registry.register(Arc::new(
             fastclaw_agent::builtin_tools::AskQuestionTool::new(
                 stream_event_tx.clone(),
@@ -403,7 +399,6 @@ impl StateBuilder {
             inbound_rx,
             base_skill_registry,
             stream_event_tx,
-            ask_question_pending,
             tool_orchestrator,
             mcp_status_init,
             mcp_handles_init,
@@ -663,7 +658,6 @@ impl StateBuilder {
         let plan_file_store_for_executor =
             fastclaw_agent::builtin_tools::PlanFileStore::default();
         let tool_orchestrator_for_executor = p5.phase2.phase4.tool_orchestrator.clone();
-        let confirm_pending_for_executor = p5.phase2.phase4.ask_question_pending.clone();
         let session_manager = Arc::new(fastclaw_session_actor::SessionManager::new(
             Arc::new(fastclaw_agent::RuntimeTurnExecutor {
                 runtime: runtime_for_session.clone(),
@@ -677,7 +671,6 @@ impl StateBuilder {
                 stream_event_tx: Some(stream_event_tx_for_executor),
                 subagent_manager: None,
                 tool_orchestrator: Some(tool_orchestrator_for_executor),
-                confirm_pending: Some(confirm_pending_for_executor),
             }),
         ));
         let state = AppState {

@@ -1531,7 +1531,7 @@ impl AppState {
         let (ws_broadcast, _) = tokio::sync::broadcast::channel::<String>(256);
 
         let tool_orchestrator =
-            Arc::new(fastclaw_agent::ToolOrchestrator::new(Arc::new(DashMap::new())));
+            Arc::new(fastclaw_agent::ToolOrchestrator::new());
 
         let config_live_val = serde_json::to_value(&config).unwrap_or_default();
         let channel_inbound_tx = {
@@ -1560,7 +1560,6 @@ impl AppState {
                 stream_event_tx: None,
                 subagent_manager: None,
                 tool_orchestrator: None,
-                confirm_pending: None,
             });
         let session_manager = Arc::new(fastclaw_session_actor::SessionManager::new(executor));
 

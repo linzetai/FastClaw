@@ -52,10 +52,6 @@ impl ObservationStore {
         }
     }
 
-    pub fn record(&mut self, obs: Observation) {
-        self.observations.push(obs);
-    }
-
     pub fn record_tool_call(
         &mut self,
         tool_name: &str,

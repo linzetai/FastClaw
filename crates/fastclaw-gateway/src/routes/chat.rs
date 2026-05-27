@@ -591,12 +591,6 @@ pub(super) async fn resolve_approval(
                 .is_ok();
         }
     }
-    if !resolved {
-        resolved = state
-            .strm
-            .tool_orchestrator
-            .resolve(&body.approval_id, decision);
-    }
 
     Json(json!({"ok": resolved})).into_response()
 }

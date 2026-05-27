@@ -12,6 +12,7 @@ use fastclaw_protocol::{AgentEvent, TokenUsage, TurnId};
 
 use crate::llm::LlmProvider;
 use crate::runtime::AgentRuntime;
+use crate::runtime::orchestrator::ToolOrchestrator;
 
 /// Manages the lifecycle of all sub-agent runs: spawn, cancel, track, query.
 pub struct SubAgentManager {
@@ -20,6 +21,7 @@ pub struct SubAgentManager {
     runs: Arc<DashMap<String, SubAgentRun>>,
     cancel_tokens: Arc<DashMap<String, CancellationToken>>,
     concurrency: Arc<Semaphore>,
+    orchestrator: Arc<ToolOrchestrator>,
     #[allow(dead_code)]
     default_policy: SubAgentPolicy,
 }
@@ -37,6 +39,7 @@ impl SubAgentManager {
             runs: Arc::new(DashMap::new()),
             cancel_tokens: Arc::new(DashMap::new()),
             concurrency: Arc::new(Semaphore::new(max_parallel)),
+            orchestrator: Arc::new(ToolOrchestrator::new()),
             default_policy,
         }
     }
@@ -150,6 +153,7 @@ impl SubAgentManager {
         let cancel_tokens = self.cancel_tokens.clone();
         let runtime = self.runtime.clone();
         let concurrency = self.concurrency.clone();
+        let orchestrator = self.orchestrator.clone();
         let timeout = Duration::from_secs(policy.timeout_seconds);
         let max_depth = policy.max_depth;
         let rid = run_id.clone();
@@ -191,6 +195,7 @@ impl SubAgentManager {
                     &rid,
                     forward_turn_id,
                     llm_override,
+                    orchestrator.clone(),
                 ) => {
                     res
                 }
@@ -280,6 +285,7 @@ impl SubAgentManager {
         run_id: &str,
         turn_id: TurnId,
         llm_override: Option<Arc<dyn LlmProvider>>,
+        orchestrator: Arc<ToolOrchestrator>,
     ) -> anyhow::Result<(String, u32, u32, Option<Usage>)> {
         use fastclaw_core::types::{ChatMessage, ChatRequest, Role};
 
@@ -403,7 +409,20 @@ impl SubAgentManager {
         });
 
         let stream_result = runtime
-            .execute_stream(config, &request, tool_registry, child_tx, llm_override)
+            .execute_unified(
+                config,
+                &request,
+                tool_registry,
+                child_tx,
+                fastclaw_core::tool_runtime::ApprovalStrategy::AutoApprove,
+                llm_override,
+                orchestrator,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .await;
 
         let (accumulated_text, final_usage) = forwarder

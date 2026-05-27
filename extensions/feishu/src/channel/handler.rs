@@ -24,6 +24,7 @@ pub struct FeishuChannel {
     tool_registry: Arc<fastclaw_core::tool::ToolRegistry>,
     session_store: Arc<fastclaw_session::SessionStore>,
     event_log: Arc<fastclaw_session::EventLog>,
+    tool_orchestrator: Arc<fastclaw_agent::runtime::orchestrator::ToolOrchestrator>,
 }
 
 impl FeishuChannel {
@@ -36,6 +37,9 @@ impl FeishuChannel {
     ) -> Self {
         let event_log = Arc::new(fastclaw_session::EventLog::new(session_store.pool()));
         let client = Arc::new(FeishuClient::new(&config.app_id, &config.app_secret));
+        let tool_orchestrator = Arc::new(
+            fastclaw_agent::runtime::orchestrator::ToolOrchestrator::new(),
+        );
         Self {
             client,
             config,
@@ -44,6 +48,7 @@ impl FeishuChannel {
             tool_registry,
             session_store,
             event_log,
+            tool_orchestrator,
         }
     }
 
@@ -138,17 +143,38 @@ impl FeishuMessageHandler for FeishuChannel {
             .cloned()
             .map_err(|e| anyhow::anyhow!("agent resolve failed: {e}"))?;
 
-        let result = self
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<fastclaw_protocol::AgentEvent>(64);
+        let summary = self
             .runtime
-            .execute(&agent_config, &request, &self.tool_registry, None)
+            .execute_unified(
+                &agent_config,
+                &request,
+                &self.tool_registry,
+                tx,
+                fastclaw_core::tool_runtime::ApprovalStrategy::PolicyBased,
+                None,
+                self.tool_orchestrator.clone(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?;
 
-        let reply = result
-            .response
-            .choices
-            .first()
-            .and_then(|c| c.message.text_content())
-            .unwrap_or_else(|| "(no response)".to_string());
+        // Collect the final assistant content from events.
+        let mut reply = String::new();
+        rx.close();
+        while let Some(event) = rx.recv().await {
+            if let fastclaw_protocol::AgentEvent::ContentDelta { delta, .. } = event {
+                if let Some(text) = delta.get("content").and_then(|v| v.as_str()) {
+                    reply.push_str(text);
+                }
+            }
+        }
+        if reply.is_empty() {
+            reply = "(no response)".to_string();
+        }
 
         let assistant_msg = ChatMessage {
             role: Role::Assistant,
@@ -187,8 +213,8 @@ impl FeishuMessageHandler for FeishuChannel {
                 turn_id: turn_id.clone(),
                 summary: fastclaw_protocol::TurnSummary {
                     turn_id,
-                    tool_calls_made: result.tool_calls_made,
-                    iterations: result.iterations,
+                    tool_calls_made: summary.tool_calls_made,
+                    iterations: summary.iterations,
                     usage: None,
                     elapsed_ms: 0,
                     context_tokens: None,
@@ -207,8 +233,8 @@ impl FeishuMessageHandler for FeishuChannel {
         tracing::info!(
             session = %session.id,
             chat_id,
-            tool_calls = result.tool_calls_made,
-            iterations = result.iterations,
+            tool_calls = summary.tool_calls_made,
+            iterations = summary.iterations,
             "Feishu message processed"
         );
 

@@ -7,7 +7,7 @@ pub mod llm;
 pub mod llm_plugin;
 pub mod process_channel;
 pub mod rpc;
-mod runtime;
+pub mod runtime;
 pub mod session_bridge;
 pub mod subagent;
 pub mod subagent_manager;

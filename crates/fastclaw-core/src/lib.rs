@@ -18,6 +18,7 @@ pub use routing::Router;
 pub mod migration;
 pub mod skill;
 pub mod tool;
+pub mod tool_runtime;
 pub mod types;
 pub mod history_compat;
 pub mod workspace;

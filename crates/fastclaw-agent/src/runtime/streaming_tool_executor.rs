@@ -215,7 +215,6 @@ impl StreamingToolExecutor {
                         output: "Tool execution cancelled".to_string(),
                         display_output: None,
                         error_type: None,
-                        needs_confirmation: false,
                         metadata: None,
                         images: Vec::new(),
                     };
@@ -291,7 +290,6 @@ async fn execute_single_tool_with_context(
             output: format!("Unknown tool: {}", tool_name),
             display_output: None,
             error_type: None,
-            needs_confirmation: false,
             metadata: None,
             images: Vec::new(),
         },
@@ -321,7 +319,6 @@ mod tests {
             output: output.into(),
             display_output: None,
             error_type: None,
-            needs_confirmation: false,
             metadata: None,
             images: Vec::new(),
         }
@@ -333,7 +330,6 @@ mod tests {
             output: output.into(),
             display_output: None,
             error_type: None,
-            needs_confirmation: false,
             metadata: None,
             images: Vec::new(),
         }

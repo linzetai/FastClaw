@@ -25,3 +25,4 @@ prost.workspace = true
 tokio-tungstenite = { workspace = true, features = ["native-tls"] }
 rand = "0.8"
 base64 = "0.22"
+dashmap.workspace = true

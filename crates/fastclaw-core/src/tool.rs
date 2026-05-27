@@ -171,9 +171,6 @@ pub struct ToolResult {
     pub display_output: Option<String>,
     /// Structured error classification when `success` is `false`.
     pub error_type: Option<ToolErrorType>,
-    /// When `true`, the runtime should pause and ask the user for confirmation
-    /// before retrying this tool call. Used by the dangerous-ops-policy `confirm` mode.
-    pub needs_confirmation: bool,
     /// Optional structured metadata for the UI (e.g. file info, diff stats).
     /// Not sent to the LLM; consumed by frontend components for richer rendering.
     pub metadata: Option<serde_json::Value>,
@@ -190,7 +187,6 @@ impl ToolResult {
             output: output.into(),
             display_output: None,
             error_type: None,
-            needs_confirmation: false,
             metadata: None,
             images: vec![],
         }
@@ -202,7 +198,6 @@ impl ToolResult {
             output: error.into(),
             display_output: None,
             error_type: Some(ToolErrorType::Unknown),
-            needs_confirmation: false,
             metadata: None,
             images: vec![],
         }
@@ -215,7 +210,6 @@ impl ToolResult {
             output: message.into(),
             display_output: None,
             error_type: Some(error_type),
-            needs_confirmation: false,
             metadata: None,
             images: vec![],
         }
@@ -228,7 +222,6 @@ impl ToolResult {
             output: llm_output.into(),
             display_output: Some(display.into()),
             error_type: None,
-            needs_confirmation: false,
             metadata: None,
             images: vec![],
         }
@@ -241,7 +234,6 @@ impl ToolResult {
             output: output.into(),
             display_output: None,
             error_type: None,
-            needs_confirmation: false,
             metadata: None,
             images,
         }
@@ -250,22 +242,6 @@ impl ToolResult {
     /// Convenience: the content the UI should display (prefers `display_output`).
     pub fn ui_output(&self) -> &str {
         self.display_output.as_deref().unwrap_or(&self.output)
-    }
-
-    /// A dangerous operation was detected and requires user confirmation before proceeding.
-    /// The runtime will automatically present a confirmation dialog to the user.
-    /// If approved, the tool is re-executed with `"confirmed": true` injected.
-    pub fn needs_confirm(description: impl Into<String>) -> Self {
-        let desc = description.into();
-        Self {
-            success: false,
-            output: format!("⚠️ Dangerous operation — awaiting user confirmation.\n{desc}"),
-            display_output: None,
-            error_type: None,
-            needs_confirmation: true,
-            metadata: None,
-            images: vec![],
-        }
     }
 }
 

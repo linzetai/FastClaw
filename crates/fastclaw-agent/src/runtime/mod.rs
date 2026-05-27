@@ -2,12 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use dashmap::DashMap;
 use fastclaw_core::agent_config::AgentConfig;
 use fastclaw_core::tool::ToolRegistry;
 use fastclaw_core::types::{ChatMessage, ChatRequest, ChatResponse, Role, ToolCall};
 use fastclaw_protocol::{
-    AgentEvent, ApprovalDecision, AskQuestionOption, ContextWarningLevel, ErrorCode, ExecutionMode,
+    AgentEvent, ContextWarningLevel, ErrorCode, ExecutionMode,
     TokenUsage, ToolCallData, ToolCallFunction, TurnId, TurnSummary, WarningCategory,
 };
 
@@ -22,12 +21,13 @@ use prompt_engine::{PromptContext, PromptEngine, PromptSection};
 #[cfg(not(feature = "self-iter"))]
 use stream_engine::ToolCallTrace;
 
-use crate::builtin_tools::{with_file_access_mode, with_work_dir};
 use crate::llm::{CompletionParams, LlmProvider};
 use base64::Engine as _;
 
 mod accumulator;
 pub mod api_errors;
+pub mod approval_cache;
+pub mod runtimes;
 #[allow(dead_code)]
 pub mod cache_break_detection;
 #[allow(dead_code)] // TODO(integrate): assemble related files at query start
@@ -35,7 +35,6 @@ pub mod context_assembly;
 pub(crate) mod context_budget;
 pub(crate) mod context_compressor;
 pub mod cost_tracker;
-#[allow(dead_code)]
 pub mod file_persistence;
 pub mod file_state_cache;
 pub mod hook_config;
@@ -47,7 +46,6 @@ pub mod magic_docs;
 #[allow(dead_code)]
 pub mod memory_selection;
 pub mod model_critic;
-#[allow(dead_code)] // TODO(integrate): consolidate trajectory path
 pub(crate) mod observer;
 pub mod orchestrator;
 pub mod permissions;
@@ -316,15 +314,17 @@ pub struct ExecutionParams<'a> {
 /// Additional parameters specific to the streaming execution path.
 pub struct StreamParams {
     pub tx: tokio::sync::mpsc::Sender<AgentEvent>,
-    pub confirm_pending: Option<Arc<DashMap<String, tokio::sync::oneshot::Sender<String>>>>,
     pub orchestrator: Option<Arc<crate::runtime::orchestrator::ToolOrchestrator>>,
-    /// Per-session approval cache from the session actor. When present, the
-    /// orchestrator uses this instead of its own internal DashMap.
-    pub session_approval_cache: Option<crate::runtime::orchestrator::SessionApprovalCache>,
     /// When running inside a Session Actor, this handle lets the orchestrator
     /// wait for approval/answer resolution directly via the actor, bypassing
     /// the legacy DashMap + polling relay.
     pub interaction_handle: Option<fastclaw_session_actor::InteractionHandle>,
+    /// Approval strategy for the unified pipeline. Determines how tool
+    /// approval is resolved (auto-approve, deny-all, policy-based, interactive).
+    pub approval_strategy: fastclaw_core::tool_runtime::ApprovalStrategy,
+    /// Runtime registry for guarded tools. When present, tools registered here
+    /// go through the orchestrator's 5-phase pipeline instead of direct execution.
+    pub runtime_registry: Option<Arc<crate::runtime::runtimes::RuntimeRegistry>>,
 }
 
 fn tool_calls_to_data(calls: Vec<ToolCall>) -> Vec<ToolCallData> {
@@ -1131,59 +1131,36 @@ impl AgentRuntime {
         };
         let stream = StreamParams {
             tx,
-            confirm_pending: None,
             orchestrator: None,
-            session_approval_cache: None,
             interaction_handle: None,
+            approval_strategy: fastclaw_core::tool_runtime::ApprovalStrategy::AutoApprove,
+            runtime_registry: None,
         };
         self.execute_stream_inner(&exec, stream).await
     }
 
-    pub async fn execute_stream_with_subagent_prompt(
-        &self,
-        config: &AgentConfig,
-        request: &ChatRequest,
-        tool_registry: &Arc<ToolRegistry>,
-        tx: tokio::sync::mpsc::Sender<AgentEvent>,
-        llm_override: Option<Arc<dyn LlmProvider>>,
-        subagent_prompt: Option<String>,
-    ) -> anyhow::Result<TurnSummary> {
-        let exec = ExecutionParams {
-            config,
-            request,
-            tool_registry,
-            llm_override,
-            subagent_prompt,
-            mode_state: None,
-            session_store: None,
-            todo_store: None,
-        };
-        let stream = StreamParams {
-            tx,
-            confirm_pending: None,
-            orchestrator: None,
-            session_approval_cache: None,
-            interaction_handle: None,
-        };
-        self.execute_stream_inner(&exec, stream).await
-    }
 
+    /// Unified execution entry point for all callers.
+    ///
+    /// All entry points (Gateway WS, HTTP, CLI, Feishu, Tauri, SubAgent) should
+    /// converge on this method. The `ApprovalStrategy` determines how tool
+    /// approval is handled; the `RuntimeRegistry` is used internally by the
+    /// orchestrator.
     #[allow(clippy::too_many_arguments)]
-    pub async fn execute_stream_with_confirm(
+    pub async fn execute_unified(
         &self,
         config: &AgentConfig,
         request: &ChatRequest,
         tool_registry: &Arc<ToolRegistry>,
         tx: tokio::sync::mpsc::Sender<AgentEvent>,
+        approval_strategy: fastclaw_core::tool_runtime::ApprovalStrategy,
         llm_override: Option<Arc<dyn LlmProvider>>,
-        confirm_pending: Arc<DashMap<String, tokio::sync::oneshot::Sender<String>>>,
+        orchestrator: Arc<crate::runtime::orchestrator::ToolOrchestrator>,
+        interaction_handle: Option<fastclaw_session_actor::InteractionHandle>,
         subagent_prompt: Option<String>,
         mode_state: Option<crate::builtin_tools::ExecutionModeState>,
         session_store: Option<Arc<fastclaw_session::SessionStore>>,
         todo_store: Option<crate::builtin_tools::TodoStore>,
-        orchestrator: Option<Arc<crate::runtime::orchestrator::ToolOrchestrator>>,
-        session_approval_cache: Option<crate::runtime::orchestrator::SessionApprovalCache>,
-        interaction_handle: Option<fastclaw_session_actor::InteractionHandle>,
     ) -> anyhow::Result<TurnSummary> {
         let exec = ExecutionParams {
             config,
@@ -1195,12 +1172,13 @@ impl AgentRuntime {
             session_store,
             todo_store,
         };
+        let runtime_registry = Arc::new(runtimes::register_default_runtimes());
         let stream = StreamParams {
             tx,
-            confirm_pending: Some(confirm_pending),
-            orchestrator,
-            session_approval_cache,
+            orchestrator: Some(orchestrator),
             interaction_handle,
+            approval_strategy,
+            runtime_registry: Some(runtime_registry),
         };
         self.execute_stream_inner(&exec, stream).await
     }
@@ -1222,10 +1200,10 @@ impl AgentRuntime {
         } = *params;
         let StreamParams {
             ref tx,
-            ref confirm_pending,
             ref orchestrator,
-            ref session_approval_cache,
             ref interaction_handle,
+            ref approval_strategy,
+            ref runtime_registry,
         } = stream_params;
         let turn_id = TurnId::generate();
         let max_iterations = config.behavior.max_tool_calls_per_turn;
@@ -1400,6 +1378,10 @@ impl AgentRuntime {
         // ── UndoEngine: file snapshot & rollback on consecutive failures ─
         let undo_config = undo_engine::UndoEngineConfig::default();
         let mut undo_engine = undo_engine::UndoEngine::new(undo_config);
+
+        // ── Orchestrator context: per-turn approval cache + denial tracker ──
+        let mut orch_approval_cache = approval_cache::ApprovalCache::new();
+        let mut orch_denial_tracker = permissions::DenialTracker::new();
 
         // ── Observer: runtime event collection for evolution pipeline ────
         let runtime_observer = observer::RuntimeObserver::new(
@@ -1582,6 +1564,21 @@ impl AgentRuntime {
                     false,
                 ).await;
             }
+            if compact_result.compressed_by_llm || compact_result.pipeline_applied {
+                let method = if compact_result.compressed_by_llm {
+                    "llm"
+                } else {
+                    "pipeline"
+                };
+                runtime_observer
+                    .record_compact(
+                        state.last_estimated_tokens,
+                        compact_result.estimated_tokens,
+                        method,
+                    )
+                    .await;
+            }
+
             // Blocking limit: if tokens >= 95% of context window and
             // auto-compact is off, stop and tell the user to run /compact.
             let just_compacted =
@@ -1866,6 +1863,8 @@ impl AgentRuntime {
                             for tc_delta in tc_deltas {
                                 // In streaming mode: when a new tool index appears, all
                                 // prior tools are fully accumulated and can start executing.
+                                // Guarded tools (in RuntimeRegistry) are NOT submitted here
+                                // — they'll go through orchestrator after stream completes.
                                 if let Some(ref mut executor) = streaming_executor {
                                     let new_idx = tc_delta.index as usize;
                                     let submit_start =
@@ -1874,7 +1873,9 @@ impl AgentRuntime {
                                         for si in submit_start..new_idx {
                                             if let Some(acc) = tool_call_accum.get(si) {
                                                 if !acc.name.is_empty() {
-                                                    executor.add_tool(acc.to_tool_call());
+                                                    if !runtime_registry.as_ref().is_some_and(|r| r.has(&acc.name)) {
+                                                        executor.add_tool(acc.to_tool_call());
+                                                    }
                                                     last_submitted_tool_idx = Some(si);
                                                 }
                                             }
@@ -2272,6 +2273,13 @@ impl AgentRuntime {
                         .await;
                     self.record_completed_trajectory(request, config, &trajectory_steps, true)
                         .await;
+                    let _obs = runtime_observer.summary().await;
+                    runtime_observer
+                        .clone()
+                        .finalize(fastclaw_evolution::TrajectoryOutcome::Success {
+                            user_rating: None,
+                        })
+                        .await;
                     return Ok(make_turn_summary(
                         &turn_id,
                         &state,
@@ -2356,42 +2364,122 @@ impl AgentRuntime {
 
             let mode_before = mode_state.as_ref().map(|ms| ms.current_mode());
 
-            // Choose execution path based on streaming_tool_execution config.
-            let stream_results = if let Some(mut executor) = streaming_executor.take() {
-                // Submit any remaining unsubmitted tools to the streaming executor
-                let submit_start = last_submitted_tool_idx.map(|i| i + 1).unwrap_or(0);
-                for si in submit_start..tool_call_accum.len() {
-                    if let Some(acc) = tool_call_accum.get(si) {
-                        if !acc.name.is_empty() {
-                            executor.add_tool(acc.to_tool_call());
+            // Split tools: guarded tools go through orchestrator, others through legacy path.
+            let stream_results = {
+                let has_registry = runtime_registry.is_some() && orchestrator.is_some();
+
+                // Partition tool calls into guarded (orchestrator) and unguarded (legacy)
+                let (guarded_indices, unguarded_calls): (Vec<usize>, Vec<ToolCall>) = if has_registry {
+                    let reg = runtime_registry.as_ref().unwrap();
+                    let mut guarded = Vec::new();
+                    let mut unguarded = Vec::new();
+                    for (i, tc) in assembled_calls.iter().enumerate() {
+                        if reg.has(&tc.function.name) {
+                            guarded.push(i);
+                        } else {
+                            unguarded.push(tc.clone());
+                        }
+                    }
+                    (guarded, unguarded)
+                } else {
+                    (Vec::new(), assembled_calls.clone())
+                };
+
+                // Execute unguarded tools via existing batch/streaming path
+                let mut all_results: Vec<Option<(String, String, String, fastclaw_core::tool::ToolResult)>> =
+                    vec![None; assembled_calls.len()];
+
+                let unguarded_results = if let Some(mut executor) = streaming_executor.take() {
+                    // Only submit tools not yet submitted during streaming.
+                    // During streaming, guarded tools were skipped but indices still tracked.
+                    let submit_start = last_submitted_tool_idx.map(|i| i + 1).unwrap_or(0);
+                    for tc in &assembled_calls[submit_start..] {
+                        if !runtime_registry.as_ref().is_some_and(|r| r.has(&tc.function.name))
+                            && !tc.function.name.is_empty()
+                        {
+                            executor.add_tool(tc.clone());
+                        }
+                    }
+                    let completed = executor.drain_remaining().await;
+                    completed
+                        .into_iter()
+                        .map(|ct| (ct.tool_name, ct.call_id, ct.result))
+                        .collect::<Vec<_>>()
+                } else if !unguarded_calls.is_empty() {
+                    execute_tool_batch(
+                        &unguarded_calls,
+                        tool_registry,
+                        &config.behavior,
+                        &request.work_dir,
+                        " (stream)",
+                        mode_state.as_ref(),
+                    )
+                    .await
+                    .into_iter()
+                    .map(|(name, id, _args, result)| (name, id, result))
+                    .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
+
+                // Place unguarded results back into their original positions
+                let mut ug_iter = unguarded_results.into_iter();
+                for (i, tc) in assembled_calls.iter().enumerate() {
+                    if !guarded_indices.contains(&i) {
+                        if let Some((name, id, result)) = ug_iter.next() {
+                            all_results[i] = Some((name, id, tc.function.arguments.clone(), result));
                         }
                     }
                 }
 
-                // Drain all results (tools already started during streaming)
-                let completed = executor.drain_remaining().await;
-                completed
-                    .into_iter()
-                    .map(|ct| {
-                        let tc = &assembled_calls[ct.index];
-                        (
-                            ct.tool_name,
-                            ct.call_id,
+                // Execute guarded tools through orchestrator (sequentially for context safety)
+                if !guarded_indices.is_empty() {
+                    let orch = orchestrator.as_ref().unwrap();
+                    let reg = runtime_registry.as_ref().unwrap();
+                    let cwd = request.work_dir.as_ref()
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+                    for &idx in &guarded_indices {
+                        let tc = &assembled_calls[idx];
+                        let tool_name = &tc.function.name;
+                        let args: serde_json::Value =
+                            serde_json::from_str(&tc.function.arguments).unwrap_or_default();
+
+                        let result = if let Some(rt) = reg.get(tool_name) {
+                            let mut orch_ctx = orchestrator::OrchestratorContext {
+                                turn_id: &turn_id,
+                                cwd: &cwd,
+                                approval_cache: &mut orch_approval_cache,
+                                approval_strategy,
+                                interaction_handle: interaction_handle.as_ref(),
+                                event_tx: tx,
+                                denial_tracker: &mut orch_denial_tracker,
+                            };
+                            match orch.run(rt.as_ref(), &args, &mut orch_ctx).await {
+                                Ok(orch_result) => fastclaw_core::tool::ToolResult::ok(orch_result.output),
+                                Err(fastclaw_core::tool_runtime::ToolRuntimeError::Rejected { reason }) => {
+                                    fastclaw_core::tool::ToolResult::err(format!("Denied: {reason}"))
+                                }
+                                Err(fastclaw_core::tool_runtime::ToolRuntimeError::Timeout { elapsed_ms }) => {
+                                    fastclaw_core::tool::ToolResult::err(format!("Timeout after {elapsed_ms}ms"))
+                                }
+                                Err(e) => fastclaw_core::tool::ToolResult::err(e.to_string()),
+                            }
+                        } else {
+                            fastclaw_core::tool::ToolResult::err(format!("runtime not found: {tool_name}"))
+                        };
+
+                        all_results[idx] = Some((
+                            tool_name.clone(),
+                            tc.id.clone(),
                             tc.function.arguments.clone(),
-                            ct.result,
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            } else {
-                execute_tool_batch(
-                    &assembled_calls,
-                    tool_registry,
-                    &config.behavior,
-                    &request.work_dir,
-                    " (stream)",
-                    mode_state.as_ref(),
-                )
-                .await
+                            result,
+                        ));
+                    }
+                }
+
+                all_results.into_iter().flatten().collect::<Vec<_>>()
             };
 
             let mut force_stop_loop = false;
@@ -2498,129 +2586,9 @@ impl AgentRuntime {
                     query_state::ToolRepetitionAction::None => {}
                 }
 
-                // ── Approval flow via ToolOrchestrator (preferred) or legacy confirm ──
-                if result.needs_confirmation {
-                    if let Some(ref orch) = orchestrator {
-                        let action = crate::runtime::orchestrator::map_tool_to_pending_action(
-                            &tool_name,
-                            &arguments,
-                            request.work_dir.as_deref(),
-                        );
-                        let decision = orch
-                            .request_approval(
-                                &turn_id,
-                                action,
-                                result.output.clone(),
-                                tx,
-                                session_approval_cache.as_ref(),
-                                interaction_handle.as_ref(),
-                            )
-                            .await;
-                        match decision {
-                            ApprovalDecision::Approved | ApprovalDecision::ApprovedForSession => {
-                                let mut args: serde_json::Value =
-                                    serde_json::from_str(&arguments).unwrap_or_default();
-                                if let Some(obj) = args.as_object_mut() {
-                                    obj.insert(
-                                        "confirmed".into(),
-                                        serde_json::Value::Bool(true),
-                                    );
-                                }
-                                let confirmed_args =
-                                    serde_json::to_string(&args).unwrap_or_default();
-
-                                if let Some(tool) = tool_registry.get(&tool_name) {
-                                    let work_dir_path =
-                                        request.work_dir.as_ref().map(std::path::PathBuf::from);
-                                    result = with_file_access_mode(
-                                        config.behavior.file_access,
-                                        crate::builtin_tools::with_additional_allowed_paths(
-                                            Vec::new(),
-                                            with_work_dir(
-                                                work_dir_path,
-                                                tool.execute(&confirmed_args),
-                                            ),
-                                        ),
-                                    )
-                                    .await;
-                                }
-                            }
-                            _ => {
-                                result = fastclaw_core::tool::ToolResult::err(
-                                    "User denied the operation.",
-                                );
-                            }
-                        }
-                    } else if let Some(ref pending_map) = confirm_pending {
-                        // Legacy fallback for callers not providing orchestrator
-                        let confirm_request_id = uuid::Uuid::new_v4().to_string();
-                        let (answer_tx, answer_rx) =
-                            tokio::sync::oneshot::channel::<String>();
-                        pending_map.insert(confirm_request_id.clone(), answer_tx);
-
-                        let _ = send_stream_event(
-                            tx,
-                            AgentEvent::AskQuestion {
-                                turn_id: turn_id.clone(),
-                                request_id: confirm_request_id.clone(),
-                                question: result.output.clone(),
-                                options: vec![
-                                    AskQuestionOption {
-                                        id: "allow".into(),
-                                        label: "Allow".into(),
-                                    },
-                                    AskQuestionOption {
-                                        id: "deny".into(),
-                                        label: "Deny".into(),
-                                    },
-                                ],
-                                timeout_secs: 0,
-                                allow_multiple: false,
-                                session_id: None,
-                            },
-                            true,
-                        )
-                        .await;
-
-                        let user_answer = answer_rx.await;
-                        pending_map.remove(&confirm_request_id);
-                        let approved =
-                            matches!(user_answer, Ok(ref a) if a == "allow");
-
-                        if approved {
-                            let mut args: serde_json::Value =
-                                serde_json::from_str(&arguments).unwrap_or_default();
-                            if let Some(obj) = args.as_object_mut() {
-                                obj.insert(
-                                    "confirmed".into(),
-                                    serde_json::Value::Bool(true),
-                                );
-                            }
-                            let confirmed_args =
-                                serde_json::to_string(&args).unwrap_or_default();
-
-                            if let Some(tool) = tool_registry.get(&tool_name) {
-                                let work_dir_path =
-                                    request.work_dir.as_ref().map(std::path::PathBuf::from);
-                                result = with_file_access_mode(
-                                    config.behavior.file_access,
-                                    crate::builtin_tools::with_additional_allowed_paths(
-                                        Vec::new(),
-                                        with_work_dir(
-                                            work_dir_path,
-                                            tool.execute(&confirmed_args),
-                                        ),
-                                    ),
-                                )
-                                .await;
-                            }
-                        } else {
-                            result = fastclaw_core::tool::ToolResult::err(
-                                "User denied the operation.",
-                            );
-                        }
-                    }
-                }
+                // NOTE: The legacy `needs_confirmation` block has been removed.
+                // Guarded tools now go through orchestrator.run() which handles
+                // approval internally before execution.
 
                 if !result.success {
                     state.record_tool_error(&tool_name, &result.output);
