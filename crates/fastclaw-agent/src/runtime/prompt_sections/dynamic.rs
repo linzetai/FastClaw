@@ -189,7 +189,12 @@ Mark tasks complete immediately upon finishing."
 
 You have access to persistent memory. Search memory at the start of complex tasks \
 to check for relevant context from previous sessions. Store important decisions, \
-patterns, and user preferences for future reference."
+patterns, and user preferences for future reference.
+
+IMPORTANT: When the user explicitly asks you to \"remember\", \"memorize\", \"note down\", \
+\"store for later\", or similar phrases indicating they want information persisted across \
+sessions, you MUST call memory_store immediately — do NOT just verbally acknowledge. \
+The user expects durable persistence, not a one-turn acknowledgment."
                 .to_string(),
         );
     }
@@ -353,7 +358,10 @@ fn session_guidance_zh(ctx: &PromptContext) -> String {
 ## 记忆
 
 你可以使用持久化记忆。在复杂任务开始时搜索记忆，\
-检查之前会话中的相关上下文。存储重要决策、模式和用户偏好以供将来参考。"
+检查之前会话中的相关上下文。存储重要决策、模式和用户偏好以供将来参考。
+
+重要：当用户明确说「记住」「记下」「帮我存一下」「以后别忘了」等表示要跨会话持久化信息的指令时，\
+你必须立即调用 memory_store 工具 - 不能只是口头确认。用户期望的是持久化存储，而非一轮对话内的临时记忆。"
                 .to_string(),
         );
     }

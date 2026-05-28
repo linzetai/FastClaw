@@ -24,8 +24,9 @@ impl Approvable for ShellRuntime {
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let cwd = args
-            .get("cwd")
+            .get("working_dir")
             .and_then(|v| v.as_str())
+            .or_else(|| args.get("cwd").and_then(|v| v.as_str()))
             .unwrap_or(".");
         vec![format!("shell:{}:{}", cwd, command)]
     }
@@ -99,8 +100,9 @@ impl ToolRuntime for ShellRuntime {
             .unwrap_or(30_000);
 
         let cwd = args
-            .get("cwd")
+            .get("working_dir")
             .and_then(|v| v.as_str())
+            .or_else(|| args.get("cwd").and_then(|v| v.as_str()))
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| ctx.cwd.clone());
 

@@ -1791,6 +1791,27 @@ impl AgentRuntime {
                                             issues = review.issues.len(),
                                             "model_critic: output rejected, injecting feedback"
                                         );
+                                        if !accumulated_content.is_empty() || !accumulated_reasoning.is_empty() {
+                                            messages.push(ChatMessage {
+                                                role: Role::Assistant,
+                                                content: if accumulated_content.is_empty() {
+                                                    None
+                                                } else {
+                                                    Some(serde_json::Value::String(
+                                                        std::mem::take(&mut accumulated_content),
+                                                    ))
+                                                },
+                                                reasoning_content: if accumulated_reasoning.is_empty() {
+                                                    None
+                                                } else {
+                                                    Some(std::mem::take(&mut accumulated_reasoning))
+                                                },
+                                                name: None,
+                                                tool_calls: None,
+                                                tool_call_id: None,
+                                                compact_metadata: None,
+                                            });
+                                        }
                                         inject_tool_recovery_guidance(&mut messages, &feedback);
                                         continue;
                                     }
@@ -1812,6 +1833,27 @@ impl AgentRuntime {
                                 reason = hook_result.reason,
                                 "stop hook triggered continuation"
                             );
+                            if !accumulated_content.is_empty() || !accumulated_reasoning.is_empty() {
+                                messages.push(ChatMessage {
+                                    role: Role::Assistant,
+                                    content: if accumulated_content.is_empty() {
+                                        None
+                                    } else {
+                                        Some(serde_json::Value::String(
+                                            std::mem::take(&mut accumulated_content),
+                                        ))
+                                    },
+                                    reasoning_content: if accumulated_reasoning.is_empty() {
+                                        None
+                                    } else {
+                                        Some(std::mem::take(&mut accumulated_reasoning))
+                                    },
+                                    name: None,
+                                    tool_calls: None,
+                                    tool_call_id: None,
+                                    compact_metadata: None,
+                                });
+                            }
                             if let Some(msg) = hook_result.continuation_message {
                                 messages.push(ChatMessage {
                                     role: Role::User,

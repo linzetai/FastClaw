@@ -32,12 +32,17 @@ impl FileWriteRuntime {
     }
 }
 
+impl FileWriteRuntime {
+    fn extract_path(args: &serde_json::Value) -> Option<&str> {
+        args.get("file_path")
+            .and_then(|v| v.as_str())
+            .or_else(|| args.get("path").and_then(|v| v.as_str()))
+    }
+}
+
 impl Approvable for FileWriteRuntime {
     fn approval_keys(&self, args: &serde_json::Value) -> Vec<String> {
-        let path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
+        let path = Self::extract_path(args).unwrap_or("unknown");
         vec![format!("file_write:{path}")]
     }
 
@@ -46,10 +51,7 @@ impl Approvable for FileWriteRuntime {
         args: &serde_json::Value,
         cwd: &Path,
     ) -> ExecApprovalRequirement {
-        let path_str = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
+        let path_str = Self::extract_path(args).unwrap_or("unknown");
         let path = Path::new(path_str);
 
         if Self::is_system_path(path) {
@@ -66,11 +68,7 @@ impl Approvable for FileWriteRuntime {
     }
 
     fn to_pending_action(&self, args: &serde_json::Value, _cwd: &Path) -> PendingAction {
-        let path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
+        let path = Self::extract_path(args).unwrap_or("unknown").to_string();
         PendingAction::FileWrite { path }
     }
 }
@@ -89,12 +87,9 @@ impl ToolRuntime for FileWriteRuntime {
         _sandbox: &SandboxAttempt,
         ctx: &ToolExecContext,
     ) -> Result<String, ToolRuntimeError> {
-        let path_str = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolRuntimeError::Internal {
-                message: "missing 'path' argument".into(),
-            })?;
+        let path_str = Self::extract_path(args).ok_or_else(|| ToolRuntimeError::Internal {
+            message: "missing 'file_path' (or 'path') argument".into(),
+        })?;
         let content = args
             .get("content")
             .and_then(|v| v.as_str())
@@ -131,12 +126,17 @@ impl ToolRuntime for FileWriteRuntime {
 /// Runtime for `edit_file` / `multi_edit` tool calls.
 pub struct FileEditRuntime;
 
+impl FileEditRuntime {
+    fn extract_path(args: &serde_json::Value) -> Option<&str> {
+        args.get("file_path")
+            .and_then(|v| v.as_str())
+            .or_else(|| args.get("path").and_then(|v| v.as_str()))
+    }
+}
+
 impl Approvable for FileEditRuntime {
     fn approval_keys(&self, args: &serde_json::Value) -> Vec<String> {
-        let path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
+        let path = Self::extract_path(args).unwrap_or("unknown");
         vec![format!("file_edit:{path}")]
     }
 
@@ -145,10 +145,7 @@ impl Approvable for FileEditRuntime {
         args: &serde_json::Value,
         cwd: &Path,
     ) -> ExecApprovalRequirement {
-        let path_str = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
+        let path_str = Self::extract_path(args).unwrap_or("unknown");
         let path = Path::new(path_str);
 
         if FileWriteRuntime::is_system_path(path) {
@@ -165,11 +162,7 @@ impl Approvable for FileEditRuntime {
     }
 
     fn to_pending_action(&self, args: &serde_json::Value, _cwd: &Path) -> PendingAction {
-        let path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
+        let path = Self::extract_path(args).unwrap_or("unknown").to_string();
         PendingAction::ApplyPatch {
             paths: vec![path],
         }
@@ -190,11 +183,9 @@ impl ToolRuntime for FileEditRuntime {
         _sandbox: &SandboxAttempt,
         ctx: &ToolExecContext,
     ) -> Result<String, ToolRuntimeError> {
-        let path_str = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolRuntimeError::Internal {
-                message: "missing 'path' argument".into(),
+        let path_str =
+            Self::extract_path(args).ok_or_else(|| ToolRuntimeError::Internal {
+                message: "missing 'file_path' (or 'path') argument".into(),
             })?;
         let old_string = args
             .get("old_string")
