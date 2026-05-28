@@ -1447,6 +1447,11 @@ impl AppState {
             runtime.clone(),
             agents,
             fastclaw_core::agent_config::SubAgentPolicy::default(),
+            Arc::new(fastclaw_agent::SpawnController::new(
+                fastclaw_agent::SpawnConfig::from_policy_fallback(
+                    fastclaw_core::agent_config::SubAgentPolicy::default().max_parallel,
+                ),
+            )),
         ));
         let subagent_tool = fastclaw_agent::SubAgentTool::new(
             subagent_manager.clone(),
@@ -1458,6 +1463,9 @@ impl AppState {
             subagent_manager.clone(),
         )));
         tool_registry.register(Arc::new(fastclaw_agent::SubAgentListTool::new(
+            subagent_manager.clone(),
+        )));
+        tool_registry.register(Arc::new(fastclaw_agent::WaitAgentTool::new(
             subagent_manager.clone(),
         )));
         tool_registry.register(Arc::new(fastclaw_agent::ListAgentsTool::new(

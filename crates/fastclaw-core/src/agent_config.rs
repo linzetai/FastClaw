@@ -248,6 +248,41 @@ fn default_subagent_timeout() -> u64 {
     300
 }
 
+/// Top-level concurrency configuration (typically from `[concurrency]` in config.toml).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConcurrencyConfig {
+    #[serde(default = "default_concurrency_max_global")]
+    pub max_global: usize,
+    #[serde(default = "default_concurrency_max_per_session")]
+    pub max_per_session: usize,
+    #[serde(default = "default_true")]
+    pub enforce_rw_isolation: bool,
+    #[serde(default = "default_slot_acquire_timeout")]
+    pub slot_acquire_timeout_seconds: u64,
+}
+
+fn default_concurrency_max_global() -> usize {
+    20
+}
+fn default_concurrency_max_per_session() -> usize {
+    5
+}
+fn default_slot_acquire_timeout() -> u64 {
+    30
+}
+
+impl Default for ConcurrencyConfig {
+    fn default() -> Self {
+        Self {
+            max_global: default_concurrency_max_global(),
+            max_per_session: default_concurrency_max_per_session(),
+            enforce_rw_isolation: true,
+            slot_acquire_timeout_seconds: default_slot_acquire_timeout(),
+        }
+    }
+}
+
 impl Default for SubAgentPolicy {
     fn default() -> Self {
         Self {

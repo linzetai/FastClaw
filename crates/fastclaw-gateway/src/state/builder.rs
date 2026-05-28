@@ -773,6 +773,11 @@ impl StateBuilder {
                     runtime_for_subagent,
                     initial_agents.clone(),
                     fastclaw_core::agent_config::SubAgentPolicy::default(),
+                    std::sync::Arc::new(fastclaw_agent::SpawnController::new(
+                        fastclaw_agent::SpawnConfig::from_policy_fallback(
+                            fastclaw_core::agent_config::SubAgentPolicy::default().max_parallel,
+                        ),
+                    )),
                 )),
                 session_manager: session_manager.clone(),
             },
@@ -895,6 +900,12 @@ impl StateBuilder {
             .rt
             .tool_registry
             .register(Arc::new(fastclaw_agent::SubAgentListTool::new(
+                state.strm.subagent_manager.clone(),
+            )));
+        state
+            .rt
+            .tool_registry
+            .register(Arc::new(fastclaw_agent::WaitAgentTool::new(
                 state.strm.subagent_manager.clone(),
             )));
         state

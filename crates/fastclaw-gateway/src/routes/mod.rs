@@ -130,6 +130,10 @@ pub fn api_routes() -> Router<AppState> {
             get(subagent::get_subagent_run).delete(subagent::cancel_subagent_run),
         )
         .route(
+            "/api/v1/subagents/concurrency",
+            get(subagent::get_concurrency_snapshot),
+        )
+        .route(
             "/api/v1/llm-plugins",
             get(llm_plugin::list_plugins).post(llm_plugin::create_plugin),
         )

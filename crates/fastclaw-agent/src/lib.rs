@@ -9,6 +9,7 @@ pub mod process_channel;
 pub mod rpc;
 pub mod runtime;
 pub mod session_bridge;
+pub mod spawn_controller;
 pub mod subagent;
 pub mod subagent_manager;
 pub mod symbol_index;
@@ -38,5 +39,9 @@ pub use runtime::{
     build_subagent_prompt_block, AgentRuntime, ExecutionResult, SubAgentPromptContext,
 };
 pub use session_bridge::RuntimeTurnExecutor;
-pub use subagent::{SubAgentGetTool, SubAgentListTool, SubAgentTool};
+pub use spawn_controller::{
+    ActiveAgentInfo, ConcurrencySnapshot, RwState, SessionSnapshot, SlotEvent, SpawnConfig,
+    SpawnController, SpawnControllerError,
+};
+pub use subagent::{SubAgentGetTool, SubAgentListTool, SubAgentTool, WaitAgentTool};
 pub use subagent_manager::SubAgentManager;

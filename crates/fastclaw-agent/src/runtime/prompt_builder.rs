@@ -49,7 +49,8 @@ pub fn build_subagent_prompt_block(ctx: &SubAgentPromptContext<'_>) -> Option<St
     block.push_str("\n\n[Sub-Agent Delegation]\n");
     block.push_str(&format!(
         "You can delegate tasks to independent sub-agents via `spawn_subagent`. \
-         Depth budget: {remaining}. Max parallel: {}.\n\n",
+         Depth budget: {remaining}. Max parallel: {} \
+         (read-only/explore agents run concurrently; write/code agents run exclusively per session).\n\n",
         ctx.policy.max_parallel,
     ));
 
@@ -67,11 +68,17 @@ WHEN NOT TO DELEGATE (use tools directly):
 - Sequential steps where each depends on the previous result
 - When only 1 tool call would suffice
 
+CONCURRENCY SEMANTICS:
+- Agents marked concurrency_safe (e.g. explore) acquire a read-lock and run in parallel.
+- Non-concurrency-safe agents (e.g. code) acquire a write-lock and run exclusively.
+- Use `wait_agent` tool (mode='all' or 'any') to await results of background sub-agents.
+
 ",
     );
     block.push_str(
         "WORKFLOW: `list_agents` → pick agent_id → `spawn_subagent`. \
-         Batch multiple spawn calls in one response for parallel execution.\n\n",
+         Batch multiple spawn calls in one response for parallel execution. \
+         Use `wait_agent` to collect results when needed.\n\n",
     );
 
     if !ctx.policy.allowed_types.is_empty() {

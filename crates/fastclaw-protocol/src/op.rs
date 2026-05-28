@@ -213,6 +213,7 @@ pub enum ClientOp {
 
     // ── Sub-Agent definitions ────────────────────────────────────────
     SubAgentsList,
+    SubAgentsConcurrency,
 
     // ── Agent CRUD (deprecated) ───────────────────────────────────
     AgentsList,
@@ -391,6 +392,7 @@ impl ClientOp {
                 id: extract_string(&params, "id")?,
             }),
             "sub_agents.list" => Ok(Self::SubAgentsList),
+            "sub_agents.concurrency" => Ok(Self::SubAgentsConcurrency),
             "agents" | "agents.list" => Ok(Self::AgentsList),
             "agents.get" => Ok(Self::AgentsGet {
                 agent_id: AgentId::new(extract_string(&params, "agentId")

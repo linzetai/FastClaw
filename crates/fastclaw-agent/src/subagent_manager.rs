@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dashmap::DashMap;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use fastclaw_core::agent_config::{AgentConfig, SubAgentDef, SubAgentPolicy};
@@ -13,6 +13,7 @@ use fastclaw_protocol::{AgentEvent, TokenUsage, TurnId};
 use crate::llm::LlmProvider;
 use crate::runtime::AgentRuntime;
 use crate::runtime::orchestrator::ToolOrchestrator;
+use crate::spawn_controller::{SlotEvent, SpawnController};
 
 /// Manages the lifecycle of all sub-agent runs: spawn, cancel, track, query.
 pub struct SubAgentManager {
@@ -22,7 +23,7 @@ pub struct SubAgentManager {
     subagent_defs: Arc<std::sync::RwLock<Vec<SubAgentDef>>>,
     runs: Arc<DashMap<String, SubAgentRun>>,
     cancel_tokens: Arc<DashMap<String, CancellationToken>>,
-    concurrency: Arc<Semaphore>,
+    controller: Arc<SpawnController>,
     orchestrator: Arc<ToolOrchestrator>,
     #[allow(dead_code)]
     default_policy: SubAgentPolicy,
@@ -33,18 +34,22 @@ impl SubAgentManager {
         runtime: Arc<AgentRuntime>,
         available_agents: Vec<AgentConfig>,
         default_policy: SubAgentPolicy,
+        controller: Arc<SpawnController>,
     ) -> Self {
-        let max_parallel = default_policy.max_parallel as usize;
         Self {
             runtime,
             available_agents,
             subagent_defs: Arc::new(std::sync::RwLock::new(Vec::new())),
             runs: Arc::new(DashMap::new()),
             cancel_tokens: Arc::new(DashMap::new()),
-            concurrency: Arc::new(Semaphore::new(max_parallel)),
+            controller,
             orchestrator: Arc::new(ToolOrchestrator::new()),
             default_policy,
         }
+    }
+
+    pub fn controller(&self) -> &Arc<SpawnController> {
+        &self.controller
     }
 
     /// Update the available agents list (e.g. after config reload).
@@ -153,6 +158,7 @@ impl SubAgentManager {
         tool_registry: Arc<ToolRegistry>,
         parent_tx: mpsc::Sender<AgentEvent>,
         llm_override: Option<Arc<dyn LlmProvider>>,
+        concurrency_safe: bool,
     ) -> anyhow::Result<String> {
         if !policy.enabled {
             anyhow::bail!("sub-agent delegation is disabled for this agent");
@@ -205,21 +211,37 @@ impl SubAgentManager {
         let runs = self.runs.clone();
         let cancel_tokens = self.cancel_tokens.clone();
         let runtime = self.runtime.clone();
-        let concurrency = self.concurrency.clone();
+        let controller = self.controller.clone();
         let orchestrator = self.orchestrator.clone();
         let timeout = Duration::from_secs(policy.timeout_seconds);
+        let slot_timeout = controller.config().slot_acquire_timeout;
         let max_depth = policy.max_depth;
         let rid = run_id.clone();
         let forward_turn_id = turn_id.clone();
+        let session_id_owned = parent_session_id.clone();
 
         tokio::spawn(async move {
-            let _permit = match concurrency.acquire().await {
-                Ok(p) => p,
-                Err(_) => {
-                    Self::fail_run(&runs, &cancel_tokens, &rid, "concurrency semaphore closed");
+            let reservation = match controller
+                .reserve(&session_id_owned, &rid, concurrency_safe, slot_timeout)
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    Self::fail_run(
+                        &runs,
+                        &cancel_tokens,
+                        &rid,
+                        &format!("slot acquisition failed: {e}"),
+                    );
                     return;
                 }
             };
+
+            reservation.session_pool().broadcast(SlotEvent::Acquired {
+                run_id: rid.clone(),
+                concurrency_safe,
+                def_id: String::new(),
+            });
 
             if let Some(mut r) = runs.get_mut(&rid) {
                 r.status = SubAgentStatus::Running;
@@ -275,6 +297,11 @@ impl SubAgentManager {
                         })
                         .await;
 
+                    reservation.session_pool().broadcast(SlotEvent::Completed {
+                        run_id: rid.clone(),
+                        result: Some(response_text.clone()),
+                    });
+
                     if let Some(mut r) = runs.get_mut(&rid) {
                         r.status = SubAgentStatus::Completed;
                         r.completed_at = Some(Self::now_ms());
@@ -306,6 +333,11 @@ impl SubAgentManager {
                         })
                         .await;
 
+                    reservation.session_pool().broadcast(SlotEvent::Failed {
+                        run_id: rid.clone(),
+                        error: msg.clone(),
+                    });
+
                     if let Some(mut r) = runs.get_mut(&rid) {
                         if msg.contains("cancelled") {
                             r.status = SubAgentStatus::Cancelled;
@@ -318,16 +350,101 @@ impl SubAgentManager {
                 }
             }
 
+            drop(reservation);
             cancel_tokens.remove(&rid);
         });
 
         Ok(run_id)
     }
 
-    /// Spawn a sub-agent and block until it completes (sync mode).
+    /// Spawn a sub-agent and wait for completion using broadcast events.
     ///
-    /// Returns `(result_text, run_id)` on success. The caller receives the full
-    /// output as a `tool_result` in the same turn — no polling needed.
+    /// Returns `(result_text, run_id)` on success. Uses event-driven notification
+    /// instead of polling for minimal latency.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn_and_wait(
+        &self,
+        agent_config: AgentConfig,
+        subagent_type: SubAgentType,
+        task: String,
+        context: Option<String>,
+        parent_session_id: String,
+        parent_message_id: String,
+        current_depth: u32,
+        policy: &SubAgentPolicy,
+        tool_registry: Arc<ToolRegistry>,
+        parent_tx: mpsc::Sender<AgentEvent>,
+        llm_override: Option<Arc<dyn LlmProvider>>,
+        concurrency_safe: bool,
+    ) -> anyhow::Result<(String, String)> {
+        let session_pool = self
+            .controller
+            .get_or_create_session_pool(&parent_session_id);
+        let mut events_rx = session_pool.subscribe_events();
+
+        let run_id = self
+            .spawn(
+                agent_config,
+                subagent_type,
+                task,
+                context,
+                parent_session_id,
+                parent_message_id,
+                current_depth,
+                policy,
+                tool_registry,
+                parent_tx,
+                llm_override,
+                concurrency_safe,
+            )
+            .await?;
+
+        let timeout = Duration::from_secs(policy.timeout_seconds);
+
+        tokio::select! {
+            _ = tokio::time::sleep(timeout) => {
+                self.cancel(&run_id);
+                anyhow::bail!("sync sub-agent timed out after {}s", policy.timeout_seconds);
+            }
+            result = async {
+                loop {
+                    if let Some(run) = self.get_run(&run_id) {
+                        match &run.status {
+                            SubAgentStatus::Completed => {
+                                return Ok((run.result.unwrap_or_default(), run_id.clone()));
+                            }
+                            SubAgentStatus::Failed(msg) => {
+                                return Err(anyhow::anyhow!("sub-agent failed: {msg}"));
+                            }
+                            SubAgentStatus::Cancelled => {
+                                return Err(anyhow::anyhow!("sub-agent was cancelled"));
+                            }
+                            SubAgentStatus::Pending | SubAgentStatus::Running => {}
+                        }
+                    } else {
+                        return Err(anyhow::anyhow!("sub-agent run {run_id} disappeared"));
+                    }
+
+                    match events_rx.recv().await {
+                        Ok(SlotEvent::Completed { run_id: rid, .. })
+                        | Ok(SlotEvent::Failed { run_id: rid, .. })
+                        | Ok(SlotEvent::Released { run_id: rid })
+                            if rid == run_id => {}
+                        Ok(_) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            return Err(anyhow::anyhow!("event channel closed"));
+                        }
+                    }
+                }
+            } => {
+                result
+            }
+        }
+    }
+
+    /// Spawn a sub-agent and block until it completes (backward-compatible alias).
+    #[deprecated(note = "use spawn_and_wait() instead")]
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn_sync(
         &self,
@@ -342,49 +459,23 @@ impl SubAgentManager {
         tool_registry: Arc<ToolRegistry>,
         parent_tx: mpsc::Sender<AgentEvent>,
         llm_override: Option<Arc<dyn LlmProvider>>,
+        concurrency_safe: bool,
     ) -> anyhow::Result<(String, String)> {
-        let run_id = self
-            .spawn(
-                agent_config,
-                subagent_type,
-                task,
-                context,
-                parent_session_id,
-                parent_message_id,
-                current_depth,
-                policy,
-                tool_registry,
-                parent_tx,
-                llm_override,
-            )
-            .await?;
-
-        let timeout = Duration::from_secs(policy.timeout_seconds);
-        let deadline = tokio::time::Instant::now() + timeout;
-
-        loop {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            if tokio::time::Instant::now() >= deadline {
-                self.cancel(&run_id);
-                anyhow::bail!("sync sub-agent timed out after {}s", policy.timeout_seconds);
-            }
-            if let Some(run) = self.get_run(&run_id) {
-                match &run.status {
-                    SubAgentStatus::Completed => {
-                        return Ok((run.result.unwrap_or_default(), run_id));
-                    }
-                    SubAgentStatus::Failed(msg) => {
-                        anyhow::bail!("sub-agent failed: {msg}");
-                    }
-                    SubAgentStatus::Cancelled => {
-                        anyhow::bail!("sub-agent was cancelled");
-                    }
-                    SubAgentStatus::Pending | SubAgentStatus::Running => {}
-                }
-            } else {
-                anyhow::bail!("sub-agent run {run_id} disappeared");
-            }
-        }
+        self.spawn_and_wait(
+            agent_config,
+            subagent_type,
+            task,
+            context,
+            parent_session_id,
+            parent_message_id,
+            current_depth,
+            policy,
+            tool_registry,
+            parent_tx,
+            llm_override,
+            concurrency_safe,
+        )
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -593,6 +684,12 @@ impl SubAgentManager {
             .collect()
     }
 
+    /// Insert a run directly (for testing).
+    #[cfg(test)]
+    pub(crate) fn insert_run(&self, run: SubAgentRun) {
+        self.runs.insert(run.run_id.clone(), run);
+    }
+
     /// Remove completed/failed/cancelled runs older than `max_age`.
     pub fn gc(&self, max_age: Duration) {
         let cutoff = Self::now_ms().saturating_sub(max_age.as_millis() as u64);
@@ -609,13 +706,15 @@ impl SubAgentManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spawn_controller::{SpawnConfig, SpawnController};
     use fastclaw_core::agent_config::AgentConfig;
 
     fn make_manager(agents: Vec<AgentConfig>) -> SubAgentManager {
         let runtime = Arc::new(crate::AgentRuntime::new(Arc::from(
             crate::OpenAiProvider::new("http://example.com", "fake"),
         )));
-        SubAgentManager::new(runtime, agents, SubAgentPolicy::default())
+        let controller = Arc::new(SpawnController::new(SpawnConfig::default()));
+        SubAgentManager::new(runtime, agents, SubAgentPolicy::default(), controller)
     }
 
     fn test_agent(id: &str) -> AgentConfig {
@@ -684,6 +783,7 @@ mod tests {
                 Arc::new(ToolRegistry::new()),
                 tx,
                 None,
+                false,
             )
             .await;
         assert!(err.is_err());
@@ -713,6 +813,7 @@ mod tests {
                 Arc::new(ToolRegistry::new()),
                 tx,
                 None,
+                false,
             )
             .await;
         assert!(err.is_err());

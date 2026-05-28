@@ -312,10 +312,13 @@ impl Tool for SubAgentTool {
             }
         };
 
+        let concurrency_safe = def.as_ref().is_some_and(|d| d.concurrency_safe);
+
         tracing::info!(
             parent_depth = self.current_depth,
             def_type = %type_id,
             background = use_background,
+            concurrency_safe,
             task_len = params.task.len(),
             "spawning sub-agent"
         );
@@ -343,6 +346,7 @@ impl Tool for SubAgentTool {
                     child_registry,
                     parent_tx,
                     None,
+                    concurrency_safe,
                 )
                 .await
             {
@@ -357,6 +361,7 @@ impl Tool for SubAgentTool {
                 "message": "Sub-agent spawned in background. Use subagent_get with this run_id to check results."
             }).to_string())
         } else {
+            #[allow(deprecated)]
             match self
                 .manager
                 .spawn_sync(
@@ -371,6 +376,7 @@ impl Tool for SubAgentTool {
                     child_registry,
                     parent_tx,
                     None,
+                    concurrency_safe,
                 )
                 .await
             {
@@ -526,6 +532,242 @@ impl Tool for SubAgentListTool {
     }
 }
 
+// ---------------------------------------------------------------------------
+// WaitAgentTool — wait for sub-agent(s) to complete
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct WaitParams {
+    run_ids: Vec<String>,
+    #[serde(default = "default_wait_mode")]
+    mode: String,
+    timeout_seconds: Option<u64>,
+}
+
+fn default_wait_mode() -> String {
+    "all".to_string()
+}
+
+pub struct WaitAgentTool {
+    manager: Arc<SubAgentManager>,
+}
+
+impl WaitAgentTool {
+    pub fn new(manager: Arc<SubAgentManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl Tool for WaitAgentTool {
+    fn name(&self) -> &str {
+        "wait_agent"
+    }
+
+    fn description(&self) -> &str {
+        "Wait for one or more sub-agent runs to complete. Use mode='all' to wait for all, or mode='any' to return as soon as the first one finishes."
+    }
+
+    fn kind(&self) -> ToolKind {
+        ToolKind::Other
+    }
+
+    fn parameters_schema(&self) -> ToolParameterSchema {
+        let mut props = HashMap::new();
+        props.insert(
+            "run_ids".to_string(),
+            serde_json::json!({
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "List of sub-agent run IDs to wait for."
+            }),
+        );
+        props.insert(
+            "mode".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "enum": ["all", "any"],
+                "description": "Wait strategy: 'all' waits for every run to complete; 'any' returns on the first completion. Default: 'all'."
+            }),
+        );
+        props.insert(
+            "timeout_seconds".to_string(),
+            serde_json::json!({
+                "type": "integer",
+                "description": "Maximum seconds to wait. Default: 300."
+            }),
+        );
+        ToolParameterSchema {
+            schema_type: "object".to_string(),
+            properties: props,
+            required: vec!["run_ids".to_string()],
+        }
+    }
+
+    async fn execute(&self, arguments: &str) -> ToolResult {
+        use crate::spawn_controller::SlotEvent;
+        use fastclaw_core::types::SubAgentStatus;
+
+        let params: WaitParams = match serde_json::from_str(arguments) {
+            Ok(p) => p,
+            Err(e) => return ToolResult::err(format!("invalid arguments: {e}")),
+        };
+
+        if params.run_ids.is_empty() {
+            return ToolResult::err("run_ids must not be empty".to_string());
+        }
+
+        let wait_all = params.mode == "all";
+        let timeout = std::time::Duration::from_secs(params.timeout_seconds.unwrap_or(300));
+
+        for rid in &params.run_ids {
+            if self.manager.get_run(rid).is_none() {
+                return ToolResult::err(format!("unknown run_id: {rid}"));
+            }
+        }
+
+        let mut results: HashMap<String, serde_json::Value> = HashMap::new();
+        let mut pending: std::collections::HashSet<String> =
+            params.run_ids.iter().cloned().collect();
+
+        for rid in &params.run_ids {
+            if let Some(run) = self.manager.get_run(rid) {
+                if run.status.is_terminal() {
+                    let entry = match &run.status {
+                        SubAgentStatus::Completed => serde_json::json!({
+                            "status": "completed",
+                            "result": run.result
+                        }),
+                        SubAgentStatus::Failed(msg) => serde_json::json!({
+                            "status": "failed",
+                            "error": msg
+                        }),
+                        SubAgentStatus::Cancelled => serde_json::json!({
+                            "status": "cancelled"
+                        }),
+                        _ => unreachable!(),
+                    };
+                    results.insert(rid.clone(), entry);
+                    pending.remove(rid);
+                }
+            }
+        }
+
+        if !wait_all && !results.is_empty() {
+            return ToolResult::ok(
+                serde_json::json!({
+                    "results": results,
+                    "timed_out": false
+                })
+                .to_string(),
+            );
+        }
+
+        if pending.is_empty() {
+            return ToolResult::ok(
+                serde_json::json!({
+                    "results": results,
+                    "timed_out": false
+                })
+                .to_string(),
+            );
+        }
+
+        let controller = self.manager.controller();
+        let mut receivers: Vec<tokio::sync::broadcast::Receiver<SlotEvent>> = Vec::new();
+        for (_, pool) in controller.snapshot().sessions.iter().map(|s| {
+            (
+                s.session_id.clone(),
+                controller.get_or_create_session_pool(&s.session_id),
+            )
+        }) {
+            receivers.push(pool.subscribe_events());
+        }
+        if receivers.is_empty() {
+            receivers.push(controller.get_or_create_session_pool("__wait__").subscribe_events());
+        }
+
+        let deadline = tokio::time::Instant::now() + timeout;
+
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return ToolResult::ok(
+                    serde_json::json!({
+                        "results": results,
+                        "timed_out": true
+                    })
+                    .to_string(),
+                );
+            }
+
+            tokio::select! {
+                _ = tokio::time::sleep(remaining) => {
+                    return ToolResult::ok(serde_json::json!({
+                        "results": results,
+                        "timed_out": true
+                    }).to_string());
+                }
+                _ = async {
+                    if let Some(rx) = receivers.first_mut() {
+                        let _ = rx.recv().await;
+                    } else {
+                        tokio::time::sleep(remaining).await;
+                    }
+                } => {}
+            }
+
+            let mut newly_done = Vec::new();
+            for rid in &pending {
+                if let Some(run) = self.manager.get_run(rid) {
+                    if run.status.is_terminal() {
+                        let entry = match &run.status {
+                            SubAgentStatus::Completed => serde_json::json!({
+                                "status": "completed",
+                                "result": run.result
+                            }),
+                            SubAgentStatus::Failed(msg) => serde_json::json!({
+                                "status": "failed",
+                                "error": msg
+                            }),
+                            SubAgentStatus::Cancelled => serde_json::json!({
+                                "status": "cancelled"
+                            }),
+                            _ => unreachable!(),
+                        };
+                        results.insert(rid.clone(), entry);
+                        newly_done.push(rid.clone());
+                    }
+                }
+            }
+
+            for rid in &newly_done {
+                pending.remove(rid);
+            }
+
+            if !wait_all && !newly_done.is_empty() {
+                return ToolResult::ok(
+                    serde_json::json!({
+                        "results": results,
+                        "timed_out": false
+                    })
+                    .to_string(),
+                );
+            }
+
+            if pending.is_empty() {
+                return ToolResult::ok(
+                    serde_json::json!({
+                        "results": results,
+                        "timed_out": false
+                    })
+                    .to_string(),
+                );
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -552,10 +794,14 @@ mod tests {
             channels: std::collections::HashMap::new(),
         }];
 
+        let controller = Arc::new(crate::spawn_controller::SpawnController::new(
+            crate::spawn_controller::SpawnConfig::default(),
+        ));
         let manager = Arc::new(SubAgentManager::new(
             runtime,
             agents,
             SubAgentPolicy::default(),
+            controller,
         ));
         manager.set_subagent_defs(builtin_subagent_defs());
         let tool = SubAgentTool::new(manager, tool_reg, SubAgentPolicy::default());
@@ -591,5 +837,146 @@ mod tests {
                 def.function.name
             );
         }
+    }
+
+    // ===== WaitAgentTool tests =====
+
+    use fastclaw_core::types::SubAgentRun;
+
+    fn make_wait_manager() -> Arc<SubAgentManager> {
+        let runtime = Arc::new(crate::AgentRuntime::new(Arc::from(
+            crate::OpenAiProvider::new("http://example.com", "fake"),
+        )));
+        let controller = Arc::new(crate::spawn_controller::SpawnController::new(
+            crate::spawn_controller::SpawnConfig::default(),
+        ));
+        Arc::new(SubAgentManager::new(
+            runtime,
+            vec![],
+            SubAgentPolicy::default(),
+            controller,
+        ))
+    }
+
+    fn completed_run(run_id: &str, result: &str) -> SubAgentRun {
+        SubAgentRun {
+            run_id: run_id.into(),
+            agent_id: "a".into(),
+            subagent_type: SubAgentType::General,
+            task: "t".into(),
+            status: fastclaw_core::types::SubAgentStatus::Completed,
+            parent_session_id: "s1".into(),
+            parent_message_id: "m1".into(),
+            depth: 0,
+            result: Some(result.into()),
+            tool_calls_made: 0,
+            iterations: 0,
+            created_at: 0,
+            completed_at: Some(1),
+            token_usage: None,
+            elapsed_ms: None,
+        }
+    }
+
+    fn running_run(run_id: &str) -> SubAgentRun {
+        SubAgentRun {
+            run_id: run_id.into(),
+            agent_id: "a".into(),
+            subagent_type: SubAgentType::General,
+            task: "t".into(),
+            status: fastclaw_core::types::SubAgentStatus::Running,
+            parent_session_id: "s1".into(),
+            parent_message_id: "m1".into(),
+            depth: 0,
+            result: None,
+            tool_calls_made: 0,
+            iterations: 0,
+            created_at: 0,
+            completed_at: None,
+            token_usage: None,
+            elapsed_ms: None,
+        }
+    }
+
+    // --- 8.1 wait-all returns when all complete ---
+    #[tokio::test]
+    async fn wait_all_returns_when_all_complete() {
+        let mgr = make_wait_manager();
+        mgr.insert_run(completed_run("r1", "res1"));
+        mgr.insert_run(completed_run("r2", "res2"));
+        let tool = WaitAgentTool::new(mgr);
+
+        let result = tool
+            .execute(r#"{"run_ids":["r1","r2"],"mode":"all"}"#)
+            .await;
+        assert!(result.success);
+        let v: serde_json::Value = serde_json::from_str(&result.output).unwrap();
+        assert_eq!(v["timed_out"], false);
+        assert!(v["results"]["r1"]["status"] == "completed");
+        assert!(v["results"]["r2"]["status"] == "completed");
+    }
+
+    // --- 8.2 wait-any returns on first completion ---
+    #[tokio::test]
+    async fn wait_any_returns_on_first_completion() {
+        let mgr = make_wait_manager();
+        mgr.insert_run(completed_run("r1", "first"));
+        mgr.insert_run(running_run("r2"));
+        let tool = WaitAgentTool::new(mgr);
+
+        let result = tool
+            .execute(r#"{"run_ids":["r1","r2"],"mode":"any"}"#)
+            .await;
+        assert!(result.success);
+        let v: serde_json::Value = serde_json::from_str(&result.output).unwrap();
+        assert_eq!(v["timed_out"], false);
+        assert!(v["results"]["r1"]["status"] == "completed");
+        assert!(v["results"]["r2"].is_null());
+    }
+
+    // --- 8.3 wait timeout returns partial ---
+    #[tokio::test]
+    async fn wait_timeout_returns_partial() {
+        let mgr = make_wait_manager();
+        mgr.insert_run(completed_run("r1", "done"));
+        mgr.insert_run(running_run("r2"));
+        let tool = WaitAgentTool::new(mgr);
+
+        let result = tool
+            .execute(r#"{"run_ids":["r1","r2"],"mode":"all","timeout_seconds":1}"#)
+            .await;
+        assert!(result.success);
+        let v: serde_json::Value = serde_json::from_str(&result.output).unwrap();
+        assert_eq!(v["timed_out"], true);
+        assert!(v["results"]["r1"]["status"] == "completed");
+    }
+
+    // --- 8.4 wait already completed returns immediately ---
+    #[tokio::test]
+    async fn wait_already_completed_returns_immediately() {
+        let mgr = make_wait_manager();
+        mgr.insert_run(completed_run("r1", "instant"));
+        let tool = WaitAgentTool::new(mgr);
+
+        let t0 = tokio::time::Instant::now();
+        let result = tool
+            .execute(r#"{"run_ids":["r1"],"mode":"all"}"#)
+            .await;
+        let elapsed = t0.elapsed();
+        assert!(result.success);
+        assert!(elapsed < std::time::Duration::from_millis(50));
+    }
+
+    // --- 8.5 unknown run_id returns error ---
+    #[tokio::test]
+    async fn wait_unknown_run_id_returns_error() {
+        let mgr = make_wait_manager();
+        let tool = WaitAgentTool::new(mgr);
+
+        let result = tool
+            .execute(r#"{"run_ids":["unknown"],"mode":"all"}"#)
+            .await;
+        assert!(!result.success);
+        assert!(result.output.contains("unknown run_id"));
     }
 }

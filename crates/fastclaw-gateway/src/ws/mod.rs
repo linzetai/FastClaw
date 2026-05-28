@@ -335,6 +335,19 @@ async fn dispatch(
             )
             .await;
         }
+        ClientOp::SubAgentsConcurrency => {
+            let snapshot = state.strm.subagent_manager.controller().snapshot();
+            send_resp(
+                sender,
+                &WsResponse {
+                    id,
+                    msg_type: "sub_agents.concurrency".into(),
+                    data: Some(serde_json::to_value(snapshot).unwrap_or_default()),
+                    error: None,
+                },
+            )
+            .await;
+        }
         ClientOp::AgentsList => agents::handle_agents(sender, state, id).await,
         ClientOp::Chat { params } => {
             chat::spawn_chat(

@@ -148,3 +148,10 @@ pub async fn cancel_subagent_run(
         axum::http::StatusCode::NOT_FOUND
     }
 }
+
+/// GET /api/v1/subagents/concurrency — real-time concurrency snapshot
+pub async fn get_concurrency_snapshot(
+    State(state): State<AppState>,
+) -> Json<fastclaw_agent::ConcurrencySnapshot> {
+    Json(state.strm.subagent_manager.controller().snapshot())
+}

@@ -208,10 +208,14 @@ mod tests {
         let runtime = Arc::new(crate::AgentRuntime::new(Arc::from(
             crate::OpenAiProvider::new("http://example.com", "fake"),
         )));
+        let controller = Arc::new(crate::spawn_controller::SpawnController::new(
+            crate::spawn_controller::SpawnConfig::default(),
+        ));
         let mgr = Arc::new(SubAgentManager::new(
             runtime,
             vec![],
             SubAgentPolicy::default(),
+            controller,
         ));
         mgr.set_subagent_defs(builtin_subagent_defs());
         mgr
