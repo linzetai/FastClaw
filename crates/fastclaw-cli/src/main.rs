@@ -1286,6 +1286,9 @@ async fn cmd_sessions(
 // --- Agents ---
 
 fn cmd_agents(action: AgentAction, as_json: bool) -> anyhow::Result<()> {
+    eprintln!("⚠ Note: Multi-agent mode is deprecated. All conversations now use the main agent.");
+    eprintln!("  Sub-agents are managed automatically via tool calls.\n");
+
     let agents_dir = PathBuf::from("config/agents");
     let agents = fastclaw_core::agent_config::load_agent_configs(&agents_dir)?;
 

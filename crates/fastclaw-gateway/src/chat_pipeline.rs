@@ -78,24 +78,31 @@ pub async fn setup_chat(
     let user_messages = request.messages.clone();
 
     let t0 = std::time::Instant::now();
+    if let Some(ref req_agent_id) = request.agent_id {
+        if req_agent_id != "main" {
+            tracing::warn!(
+                requested_agent_id = %req_agent_id,
+                "agentId parameter is deprecated; all requests now route to the main agent"
+            );
+        }
+    }
     let agent_config = {
         let router = state.rt.router.read().await;
         router
-            .resolve(request)
+            .agent_by_id("main")
+            .or_else(|| router.list_agents().into_iter().next())
             .cloned()
-            .map_err(map_router_resolve_err)?
+            .ok_or_else(|| {
+                map_router_resolve_err(anyhow::anyhow!("no main agent configured"))
+            })?
     };
     let agent_id = agent_config.agent_id.clone();
     tracing::info!(
         elapsed_ms = t0.elapsed().as_millis() as u64,
-        "perf: resolve_agent"
+        "perf: resolve_agent (fixed main)"
     );
 
-    let resolve_reason: &'static str = if request.agent_id.is_some() {
-        "explicit"
-    } else {
-        "default"
-    };
+    let resolve_reason: &'static str = "main";
 
     if options.record_chat_observe {
         fastclaw_observe::record_chat_request(&agent_id, options.chat_stream);
@@ -468,14 +475,6 @@ fn apply_prompt_router(
     let cfg = &state.cfg.config.prompt_router;
     if !cfg.enabled {
         return None;
-    }
-
-    if request.agent_id.is_some() {
-        return Some(PromptRouteMeta {
-            intent: "explicit-agent".to_string(),
-            profile: agent_id.to_string(),
-            reason: "explicit-agent",
-        });
     }
 
     let last_user_text = request

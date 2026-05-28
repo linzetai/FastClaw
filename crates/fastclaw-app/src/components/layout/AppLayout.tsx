@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
-import { MoreHorizontal, PanelRightClose, Search } from "lucide-react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
+import { Search } from "lucide-react";
 import { BTN_ICON } from "../../lib/ui-tokens";
 import { useGatewayStore } from "../../lib/store";
 import { useAgentStore } from "../../lib/agent-store";
-import { AgentList } from "../agent-list/AgentList";
+import { SessionList } from "../session-list/SessionList";
 import { MessageStream } from "../message-stream/MessageStream";
 import { TitleBar } from "./TitleBar";
 import { NavRail } from "./NavRail";
@@ -55,9 +55,6 @@ function WindowResizeHandles() {
 
 const OnboardingWizard = lazy(() =>
   import("../onboarding/OnboardingWizard").then((m) => ({ default: m.OnboardingWizard })),
-);
-const AgentDetail = lazy(() =>
-  import("../agent-detail/AgentDetail").then((m) => ({ default: m.AgentDetail })),
 );
 
 const COMING_SOON_TITLES: Partial<Record<NavItem, string>> = {
@@ -129,13 +126,7 @@ function Loading({ error }: { error: string | null }) {
   );
 }
 
-function ContentHeader({
-  detailOpen,
-  onToggleDetail,
-}: {
-  detailOpen: boolean;
-  onToggleDetail: () => void;
-}) {
+function ContentHeader() {
   const handleSearchClick = useCallback(() => {
     window.dispatchEvent(new CustomEvent("fastclaw:toggle-search"));
   }, []);
@@ -171,14 +162,6 @@ function ContentHeader({
         >
           <Search size={16} strokeWidth={1} />
         </button>
-        <button
-          onClick={onToggleDetail}
-          className={BTN_ICON.sm}
-          style={{ color: "var(--fill-quaternary)" }}
-          title={detailOpen ? "收起 Agent 信息" : "展开 Agent 信息"}
-        >
-          {detailOpen ? <PanelRightClose size={16} strokeWidth={1} /> : <MoreHorizontal size={16} strokeWidth={1} />}
-        </button>
       </div>
     </div>
   );
@@ -189,19 +172,9 @@ export function AppLayout() {
   const error = useGatewayStore((s) => s.error);
   const connected = useGatewayStore((s) => s.connected);
 
-  const activeAgentId = useAgentStore((s) => s.activeAgentId);
-  const agents = useAgentStore((s) => s.agents);
-  const detailOpen = useAgentStore((s) => s.detailOpen);
-  const toggleDetail = useAgentStore((s) => s.toggleDetail);
-  const closeDetail = useAgentStore((s) => s.closeDetail);
   const sidebarCollapsed = useAgentStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useAgentStore((s) => s.toggleSidebar);
   const activeNav = useAgentStore((s) => s.activeNav);
-
-  const activeAgent = useMemo(
-    () => agents.find((a) => a.id === activeAgentId) ?? agents[0],
-    [agents, activeAgentId],
-  );
 
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
@@ -269,7 +242,7 @@ export function AppLayout() {
 
   let content: React.ReactNode;
 
-  if (mode === "connecting" || !activeAgent || !onboardingChecked) {
+  if (mode === "connecting" || !onboardingChecked) {
     content = <Loading error={error} />;
   } else if (showOnboarding) {
     content = (
@@ -289,14 +262,10 @@ export function AppLayout() {
           <NavRail />
           {showAgentPane ? (
             <>
-              <AgentList collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} />
+              <SessionList collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} />
               <main className="relative flex min-w-0 flex-1 flex-col">
-                {/* Content Header: tabs + agent indicator + detail toggle */}
-                <ContentHeader
-                  detailOpen={detailOpen}
-                  onToggleDetail={toggleDetail}
-                />
-                <MessageStream onToggleDetail={toggleDetail} detailOpen={detailOpen} />
+                <ContentHeader />
+                <MessageStream />
                 {!connected && mode !== "browser" && (
                   <div
                     className="absolute inset-x-0 top-0 z-20 flex items-center justify-center py-1.5"
@@ -312,15 +281,6 @@ export function AppLayout() {
                   </div>
                 )}
               </main>
-              <Suspense fallback={null}>
-                <AgentDetail
-                  open={detailOpen}
-                  onClose={closeDetail}
-                  agentName={activeAgent.name}
-                  agentInitial={activeAgent.initial}
-                  agentColor={activeAgent.color}
-                />
-              </Suspense>
             </>
           ) : (
             <main className="flex min-w-0 flex-1 flex-col">

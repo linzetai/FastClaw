@@ -28,23 +28,12 @@ pub(crate) async fn handle_slash_command(app: &mut TuiApp, ws_tx: &mut WsTx, tex
             app.scroll_offset = 0;
             app.push_system("New session started.".into());
         }
-        "/agent" if !arg.is_empty() => {
-            if app.agents.iter().any(|a| a.id == arg) {
-                app.agent_id = arg.to_string();
-                app.push_system(format!("Switched to agent: {arg}"));
-            } else {
-                let available: Vec<_> = app.agents.iter().map(|a| a.id.as_str()).collect();
-                app.push_system(format!(
-                    "Agent '{arg}' not found. Available: {}",
-                    available.join(", ")
-                ));
-            }
-        }
-        "/agent" => {
-            app.push_system(format!("Current agent: {}", app.agent_id));
-        }
-        "/agents" => {
-            app.show_popup = Some(PopupKind::Agents);
+        "/agent" | "/agents" => {
+            app.push_system(
+                "Multi-agent switching is deprecated. All conversations now use the main agent. \
+                 Sub-agents are managed automatically via tool calls."
+                    .into(),
+            );
         }
         "/model" if !arg.is_empty() => {
             let resolved = if let Ok(idx) = arg.parse::<usize>() {

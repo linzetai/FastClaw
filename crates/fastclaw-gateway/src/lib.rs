@@ -364,8 +364,14 @@ fn spawn_cron_scheduler(state: AppState) {
                 }
             }
 
+            if agent_id != "main" {
+                tracing::warn!(
+                    cron_agent_id = %agent_id,
+                    "cron job references non-main agent; using main agent instead (multi-agent deprecated)"
+                );
+            }
             let mut request = fastclaw_core::types::ChatRequest {
-                agent_id: Some(agent_id.into()),
+                agent_id: None,
                 session_id: Some(sid.clone().into()),
                 messages: vec![user_msg],
                 model: None,
@@ -378,7 +384,11 @@ fn spawn_cron_scheduler(state: AppState) {
             };
             let agent_config = {
                 let router = self.state.rt.router.read().await;
-                router.resolve(&request)?.clone()
+                router
+                    .agent_by_id("main")
+                    .or_else(|| router.list_agents().into_iter().next())
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("no main agent configured"))?
             };
             let tool_definition_count = crate::routes::filtered_tool_definitions(
                 &self.state.rt.tool_registry,

@@ -108,17 +108,7 @@ async fn handle_slash_command(
     let trimmed = text.trim();
 
     if trimmed == "/skills" || trimmed == "/skills list" {
-        let bindings = state.merged_route_bindings().await;
-        let route = fastclaw_core::routing::resolve_route(
-            &bindings,
-            &state.cfg.config.agents,
-            channel_id,
-            account_id,
-            Some(chat_type),
-            Some(chat_id),
-        );
-        let agent_id = route.agent_id.as_str();
-
+        let agent_id = "main";
         let registry = state.skill_registry_for(agent_id);
 
         let skills = registry.list();
@@ -154,17 +144,7 @@ async fn handle_slash_command(
     }
 
     if trimmed == "/new" || trimmed == "/new session" || trimmed == "/reset" {
-        let bindings = state.merged_route_bindings().await;
-        let route = fastclaw_core::routing::resolve_route(
-            &bindings,
-            &state.cfg.config.agents,
-            channel_id,
-            account_id,
-            Some(chat_type),
-            Some(chat_id),
-        );
-        let agent_id = route.agent_id.as_str();
-
+        let agent_id = "main";
         let dm_scope = state
             .cfg
             .config
@@ -218,7 +198,7 @@ pub(crate) async fn handle_channel_message(
     chat_type: &str,
 ) -> anyhow::Result<()> {
     use fastclaw_core::config::DmScope;
-    use fastclaw_core::routing::{build_session_key, resolve_route};
+    use fastclaw_core::routing::build_session_key;
 
     if let Some(response) =
         handle_slash_command(&state, channel_id, chat_id, text, account_id, chat_type).await
@@ -227,16 +207,7 @@ pub(crate) async fn handle_channel_message(
         return Ok(());
     }
 
-    let bindings = state.merged_route_bindings().await;
-    let route = resolve_route(
-        &bindings,
-        &state.cfg.config.agents,
-        channel_id,
-        account_id,
-        Some(chat_type),
-        Some(chat_id),
-    );
-    let agent_id = route.agent_id.as_str();
+    let agent_id = "main";
 
     if let Some(agent_entry) = state
         .cfg

@@ -211,7 +211,10 @@ pub enum ClientOp {
         id: String,
     },
 
-    // ── Agent CRUD ──────────────────────────────────────────────────
+    // ── Sub-Agent definitions ────────────────────────────────────────
+    SubAgentsList,
+
+    // ── Agent CRUD (deprecated) ───────────────────────────────────
     AgentsList,
     AgentsGet {
         agent_id: AgentId,
@@ -387,6 +390,7 @@ impl ClientOp {
             "mcp.remove" => Ok(Self::McpRemove {
                 id: extract_string(&params, "id")?,
             }),
+            "sub_agents.list" => Ok(Self::SubAgentsList),
             "agents" | "agents.list" => Ok(Self::AgentsList),
             "agents.get" => Ok(Self::AgentsGet {
                 agent_id: AgentId::new(extract_string(&params, "agentId")

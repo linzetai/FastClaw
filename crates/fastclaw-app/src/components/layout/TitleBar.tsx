@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, type MouseEvent as RME } from "react";
 import { useGatewayStore } from "../../lib/store";
-import { useAgentStore } from "../../lib/agent-store";
+// Agent store import removed — single-agent mode
 import { NotificationCenter } from "../notification/NotificationCenter";
 import { NotificationDetailPanel } from "../notification/NotificationDetailPanel";
 import { Minus, Square, Maximize2, X } from "lucide-react";
@@ -130,22 +130,11 @@ function ConnectionDot() {
 }
 
 function AgentLabel() {
-  const agents = useAgentStore((s) => s.agents);
-  const activeAgentId = useAgentStore((s) => s.activeAgentId);
-  const agent = agents.find((a) => a.id === activeAgentId);
-
-  if (!agent) return null;
-
   return (
     <div className="pointer-events-none flex items-center gap-2 pl-4" data-tauri-drag-region="">
       <span className="text-[12px] font-medium" style={{ color: "var(--fill-secondary)" }}>
-        {agent.name}
+        FastClaw
       </span>
-      {agent.model && (
-        <span className="text-[11px] font-mono" style={{ color: "var(--fill-quaternary)" }}>
-          {agent.model}
-        </span>
-      )}
     </div>
   );
 }

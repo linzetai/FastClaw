@@ -36,8 +36,7 @@ function shuffle<T>(arr: T[]): T[] {
 
 export function StreamEmptyState({ onPick }: { onPick: (t: string) => void }) {
   const agents = useAgentStore((s) => s.agents);
-  const activeAgentId = useAgentStore((s) => s.activeAgentId);
-  const agent = agents.find((a) => a.id === activeAgentId) ?? agents[0];
+  const agent = agents.find((a) => a.id === "main") ?? agents[0];
 
   const [seed, setSeed] = useState(0);
   const cards = useMemo(() => shuffle(SUGGESTION_POOL).slice(0, 4), [seed]);

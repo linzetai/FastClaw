@@ -760,7 +760,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal
             .draw(|f| {
-                draw_popup(f, &PopupKind::Help, &app.agents, None);
+                draw_popup(f, &PopupKind::Help, None);
             })
             .unwrap();
         insta::assert_snapshot!("popup_help", terminal.backend().to_string());

@@ -28,10 +28,7 @@ function McpToolsList() {
   useEffect(() => {
     (async () => {
       try {
-        const agents = await transport.listAgents();
-        const agentId = agents[0]?.agentId;
-        if (!agentId) return;
-        const tools = await api.listAgentTools(agentId);
+        const tools = await api.listAgentTools("main");
         const mcpTools = tools.filter((t) => t.name.startsWith("mcp_"));
         const grouped: Record<string, McpToolDef[]> = {};
         for (const t of mcpTools) {

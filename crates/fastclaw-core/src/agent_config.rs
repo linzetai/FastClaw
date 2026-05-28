@@ -367,6 +367,328 @@ impl BehaviorConfig {
     }
 }
 
+/// Definition of a sub-agent type that the main agent can spawn via tool calls.
+///
+/// Sub-agents inherit the main agent's model unless `model` is explicitly set.
+/// Tool access is controlled by `tools.allowed` / `tools.denied` patterns.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubAgentDef {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Model override. `None` means inherit from the main agent.
+    #[serde(default)]
+    pub model: Option<AgentModelConfig>,
+    /// Tool access rules. When `allowed` is non-empty, only matching tools are available.
+    /// `denied` patterns always take precedence over `allowed`.
+    #[serde(default)]
+    pub tools: SubAgentToolFilter,
+    /// System prompt for this sub-agent type. Replaces the main agent's prompt.
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    /// When true, this sub-agent runs in the background (async). The main agent
+    /// receives a `run_id` immediately and can poll or wait for results.
+    /// When false (default), `spawn_agent` blocks until the sub-agent completes.
+    #[serde(default)]
+    pub background: bool,
+    /// Whether this sub-agent type is safe to run concurrently with others.
+    /// Read-only agents (e.g. "explore") should set this to `true`.
+    #[serde(default)]
+    pub concurrency_safe: bool,
+    /// Where this definition was loaded from.
+    #[serde(skip)]
+    pub source: SubAgentDefSource,
+}
+
+/// Tool allow/deny filter for a sub-agent definition.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SubAgentToolFilter {
+    /// Tool name patterns to allow (glob: `read_*`, exact: `grep`).
+    /// Empty = all tools from the main agent are available.
+    #[serde(default)]
+    pub allowed: Vec<String>,
+    /// Tool name patterns to deny (takes precedence over `allowed`).
+    #[serde(default)]
+    pub denied: Vec<String>,
+}
+
+/// Tracks where a SubAgentDef was loaded from (for diagnostics and reload).
+#[derive(Debug, Clone, Default)]
+pub enum SubAgentDefSource {
+    #[default]
+    Builtin,
+    JsonFile(std::path::PathBuf),
+    MarkdownFile(std::path::PathBuf),
+}
+
+impl SubAgentToolFilter {
+    /// Check whether a tool name is permitted by this filter.
+    pub fn is_tool_allowed(&self, tool_name: &str) -> bool {
+        if self.denied.iter().any(|p| tool_pattern_matches(p, tool_name)) {
+            return false;
+        }
+        if self.allowed.is_empty() {
+            return true;
+        }
+        self.allowed.iter().any(|p| tool_pattern_matches(p, tool_name))
+    }
+}
+
+/// Load sub-agent definitions from a directory of JSON files.
+pub fn load_subagent_defs_json(dir: &std::path::Path) -> anyhow::Result<Vec<SubAgentDef>> {
+    let mut defs = Vec::new();
+    if !dir.exists() {
+        return Ok(defs);
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "json") {
+            let text = std::fs::read_to_string(&path)?;
+            match json5::from_str::<SubAgentDef>(&text) {
+                Ok(mut def) => {
+                    def.source = SubAgentDefSource::JsonFile(path.clone());
+                    tracing::info!(id = %def.id, path = %path.display(), "loaded sub-agent def");
+                    defs.push(def);
+                }
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "failed to parse sub-agent def");
+                }
+            }
+        }
+    }
+    Ok(defs)
+}
+
+/// Load sub-agent definitions from Markdown files with YAML frontmatter.
+///
+/// Format:
+/// ```text
+/// ---
+/// id: reviewer
+/// name: Code Reviewer
+/// tools:
+///   allowed: [read_file, grep, search]
+///   denied: [write_file, shell_exec]
+/// model: null
+/// ---
+///
+/// You are a code review specialist...
+/// ```
+pub fn load_subagent_defs_markdown(dir: &std::path::Path) -> anyhow::Result<Vec<SubAgentDef>> {
+    let mut defs = Vec::new();
+    if !dir.exists() {
+        return Ok(defs);
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "md") {
+            let text = std::fs::read_to_string(&path)?;
+            match parse_markdown_subagent_def(&text) {
+                Ok(mut def) => {
+                    def.source = SubAgentDefSource::MarkdownFile(path.clone());
+                    tracing::info!(id = %def.id, path = %path.display(), "loaded sub-agent def (markdown)");
+                    defs.push(def);
+                }
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "failed to parse markdown sub-agent def");
+                }
+            }
+        }
+    }
+    Ok(defs)
+}
+
+/// Parse a Markdown file with YAML frontmatter into a `SubAgentDef`.
+/// The body after the frontmatter becomes the `system_prompt`.
+fn parse_markdown_subagent_def(content: &str) -> anyhow::Result<SubAgentDef> {
+    let trimmed = content.trim();
+    if !trimmed.starts_with("---") {
+        anyhow::bail!("missing YAML frontmatter delimiter");
+    }
+    let after_first = &trimmed[3..];
+    let end = after_first
+        .find("\n---")
+        .ok_or_else(|| anyhow::anyhow!("missing closing frontmatter delimiter"))?;
+    let yaml_str = &after_first[..end];
+    let body = after_first[end + 4..].trim();
+
+    let mut def: SubAgentDef = serde_yaml_ng::from_str(yaml_str)?;
+    if !body.is_empty() {
+        def.system_prompt = Some(body.to_string());
+    }
+    Ok(def)
+}
+
+/// Return the built-in sub-agent definitions that ship with FastClaw.
+pub fn builtin_subagent_defs() -> Vec<SubAgentDef> {
+    vec![
+        SubAgentDef {
+            id: "explore".into(),
+            name: Some("Explorer".into()),
+            description: Some("Read-only exploration and code analysis".into()),
+            model: None,
+            tools: SubAgentToolFilter {
+                allowed: vec![
+                    "read_file".into(),
+                    "list_dir".into(),
+                    "search_files".into(),
+                    "grep".into(),
+                    "web_search".into(),
+                    "web_fetch".into(),
+                    "get_context_window".into(),
+                    "list_skills".into(),
+                    "read_skill".into(),
+                    "mcp_*".into(),
+                ],
+                denied: vec![
+                    "write_file".into(),
+                    "edit_file".into(),
+                    "create_file".into(),
+                    "delete_file".into(),
+                    "shell_exec".into(),
+                    "exec_command".into(),
+                    "spawn_subagent".into(),
+                ],
+            },
+            system_prompt: Some(
+                "You are a code exploration assistant. Analyze code structure, find patterns, \
+                 and answer questions about the codebase. You have read-only access — \
+                 you cannot modify files or run commands."
+                    .into(),
+            ),
+            background: false,
+            concurrency_safe: true,
+            source: SubAgentDefSource::Builtin,
+        },
+        SubAgentDef {
+            id: "code".into(),
+            name: Some("Coder".into()),
+            description: Some("Code editing and file manipulation".into()),
+            model: None,
+            tools: SubAgentToolFilter {
+                allowed: vec![],
+                denied: vec!["spawn_subagent".into()],
+            },
+            system_prompt: Some(
+                "You are a code editing assistant. Implement the requested changes carefully, \
+                 following existing code style and conventions. Test your changes when possible."
+                    .into(),
+            ),
+            background: false,
+            concurrency_safe: false,
+            source: SubAgentDefSource::Builtin,
+        },
+        SubAgentDef {
+            id: "shell".into(),
+            name: Some("Shell".into()),
+            description: Some("Command execution and system operations".into()),
+            model: None,
+            tools: SubAgentToolFilter {
+                allowed: vec![
+                    "shell_exec".into(),
+                    "exec_command".into(),
+                    "read_file".into(),
+                    "write_file".into(),
+                    "edit_file".into(),
+                    "list_dir".into(),
+                    "search_files".into(),
+                    "grep".into(),
+                ],
+                denied: vec!["spawn_subagent".into()],
+            },
+            system_prompt: Some(
+                "You are a shell execution assistant. Run commands, inspect output, \
+                 and perform system operations as instructed. Be careful with destructive commands."
+                    .into(),
+            ),
+            background: false,
+            concurrency_safe: false,
+            source: SubAgentDefSource::Builtin,
+        },
+        SubAgentDef {
+            id: "research".into(),
+            name: Some("Researcher".into()),
+            description: Some("Web search, analysis, and information gathering".into()),
+            model: None,
+            tools: SubAgentToolFilter {
+                allowed: vec![
+                    "web_search".into(),
+                    "web_fetch".into(),
+                    "http_fetch".into(),
+                    "read_file".into(),
+                    "list_dir".into(),
+                    "search_files".into(),
+                    "grep".into(),
+                    "mcp_*".into(),
+                ],
+                denied: vec![
+                    "write_file".into(),
+                    "edit_file".into(),
+                    "shell_exec".into(),
+                    "exec_command".into(),
+                    "spawn_subagent".into(),
+                ],
+            },
+            system_prompt: Some(
+                "You are a research assistant. Search the web, read documents, and synthesize \
+                 information to answer questions thoroughly. Cite sources when possible."
+                    .into(),
+            ),
+            background: false,
+            concurrency_safe: true,
+            source: SubAgentDefSource::Builtin,
+        },
+    ]
+}
+
+/// Load all sub-agent definitions: builtins + JSON files + Markdown files.
+/// Later definitions with the same `id` override earlier ones.
+pub fn load_all_subagent_defs(
+    json_dir: Option<&std::path::Path>,
+    markdown_dir: Option<&std::path::Path>,
+) -> Vec<SubAgentDef> {
+    let mut defs = builtin_subagent_defs();
+
+    if let Some(dir) = json_dir {
+        match load_subagent_defs_json(dir) {
+            Ok(custom) => {
+                for d in custom {
+                    if let Some(existing) = defs.iter_mut().find(|e| e.id == d.id) {
+                        tracing::info!(id = %d.id, "custom sub-agent def overrides builtin");
+                        *existing = d;
+                    } else {
+                        defs.push(d);
+                    }
+                }
+            }
+            Err(e) => tracing::warn!(dir = %dir.display(), error = %e, "failed to load JSON sub-agent defs"),
+        }
+    }
+
+    if let Some(dir) = markdown_dir {
+        match load_subagent_defs_markdown(dir) {
+            Ok(custom) => {
+                for d in custom {
+                    if let Some(existing) = defs.iter_mut().find(|e| e.id == d.id) {
+                        tracing::info!(id = %d.id, "markdown sub-agent def overrides existing");
+                        *existing = d;
+                    } else {
+                        defs.push(d);
+                    }
+                }
+            }
+            Err(e) => tracing::warn!(dir = %dir.display(), error = %e, "failed to load markdown sub-agent defs"),
+        }
+    }
+
+    defs
+}
+
 /// Load agent configs from a directory of JSON files
 pub fn load_agent_configs(dir: &std::path::Path) -> anyhow::Result<Vec<AgentConfig>> {
     let mut agents = Vec::new();
@@ -538,6 +860,98 @@ mod tests {
             r#"{"fileAccess": "workspace", "maxToolCallsPerTurn": 50, "maxConsecutiveErrors": 3}"#;
         let behavior2: BehaviorConfig = json5::from_str(json2).unwrap();
         assert_eq!(behavior2.file_access, FileAccessMode::Workspace);
+    }
+
+    #[test]
+    fn subagent_tool_filter_empty_allows_all() {
+        let f = SubAgentToolFilter::default();
+        assert!(f.is_tool_allowed("anything"));
+        assert!(f.is_tool_allowed("shell_exec"));
+    }
+
+    #[test]
+    fn subagent_tool_filter_allowed_only() {
+        let f = SubAgentToolFilter {
+            allowed: vec!["read_file".into(), "grep".into()],
+            denied: vec![],
+        };
+        assert!(f.is_tool_allowed("read_file"));
+        assert!(f.is_tool_allowed("grep"));
+        assert!(!f.is_tool_allowed("write_file"));
+    }
+
+    #[test]
+    fn subagent_tool_filter_denied_overrides() {
+        let f = SubAgentToolFilter {
+            allowed: vec!["mcp_*".into()],
+            denied: vec!["mcp_dangerous_*".into()],
+        };
+        assert!(f.is_tool_allowed("mcp_chrome_screenshot"));
+        assert!(!f.is_tool_allowed("mcp_dangerous_tool"));
+        assert!(!f.is_tool_allowed("shell_exec"));
+    }
+
+    #[test]
+    fn subagent_def_json_parse() {
+        let json = r#"{
+            "id": "test",
+            "name": "Test Agent",
+            "description": "A test sub-agent",
+            "tools": {
+                "allowed": ["read_file"],
+                "denied": ["shell_exec"]
+            },
+            "systemPrompt": "You are a test agent.",
+            "background": true,
+            "concurrencySafe": true
+        }"#;
+        let def: SubAgentDef = json5::from_str(json).unwrap();
+        assert_eq!(def.id, "test");
+        assert_eq!(def.name.as_deref(), Some("Test Agent"));
+        assert!(def.background);
+        assert!(def.concurrency_safe);
+        assert!(def.tools.is_tool_allowed("read_file"));
+        assert!(!def.tools.is_tool_allowed("shell_exec"));
+    }
+
+    #[test]
+    fn subagent_def_markdown_parse() {
+        let md = r#"---
+id: reviewer
+name: Code Reviewer
+tools:
+  allowed:
+    - read_file
+    - grep
+  denied:
+    - write_file
+---
+
+You are a code review specialist. Analyze the provided code carefully."#;
+        let def = parse_markdown_subagent_def(md).unwrap();
+        assert_eq!(def.id, "reviewer");
+        assert_eq!(def.name.as_deref(), Some("Code Reviewer"));
+        assert!(def.system_prompt.unwrap().contains("code review specialist"));
+        assert!(def.tools.is_tool_allowed("read_file"));
+        assert!(!def.tools.is_tool_allowed("write_file"));
+    }
+
+    #[test]
+    fn builtin_subagent_defs_sanity() {
+        let defs = builtin_subagent_defs();
+        assert!(defs.len() >= 4);
+        let ids: Vec<&str> = defs.iter().map(|d| d.id.as_str()).collect();
+        assert!(ids.contains(&"explore"));
+        assert!(ids.contains(&"code"));
+        assert!(ids.contains(&"shell"));
+        assert!(ids.contains(&"research"));
+
+        let explore = defs.iter().find(|d| d.id == "explore").unwrap();
+        assert!(explore.concurrency_safe);
+        assert!(!explore.background);
+        assert!(explore.tools.is_tool_allowed("read_file"));
+        assert!(!explore.tools.is_tool_allowed("write_file"));
+        assert!(!explore.tools.is_tool_allowed("shell_exec"));
     }
 
     #[test]

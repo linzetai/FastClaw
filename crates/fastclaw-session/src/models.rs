@@ -71,6 +71,8 @@ pub struct SubAgentRunRow {
     pub elapsed_ms: Option<i64>,
     pub created_at: String,
     pub completed_at: Option<String>,
+    /// JSON-serialized sidechain transcript: messages exchanged during the sub-agent run.
+    pub transcript_json: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

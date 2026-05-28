@@ -20,7 +20,6 @@ pub(crate) async fn send_chat(app: &mut TuiApp, ws_tx: &mut WsTx) {
     let id = app.next_id();
     let mut params = json!({
         "messages": [{"role": "user", "content": text}],
-        "agentId": app.agent_id,
     });
     if let Some(sid) = &app.session_id {
         params["sessionId"] = json!(sid);

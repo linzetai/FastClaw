@@ -1,29 +1,28 @@
 import { useAgentStore } from "./index";
+import { DEFAULT_AGENT_ID } from "./chat-helpers";
 
 /**
- * Subscribe only to the active agent's chat data.
- * Other agents' changes won't trigger re-render because the selector
- * returns the same object reference when activeAgentId hasn't changed.
+ * Subscribe to the main agent's chat data (single-agent mode).
  */
 export function useActiveAgentChats() {
-  return useAgentStore((s) => s.agentChats[s.activeAgentId]);
+  return useAgentStore((s) => s.agentChats[DEFAULT_AGENT_ID]);
 }
 
 /**
- * Subscribe only to the active chat's stream for the active agent.
- * Returns undefined if no active chat.
+ * Subscribe to the active chat's stream.
  */
 export function useActiveChatStream() {
   return useAgentStore((s) => {
-    const ac = s.agentChats[s.activeAgentId];
+    const ac = s.agentChats[DEFAULT_AGENT_ID];
     if (!ac) return undefined;
     return ac.chatList.find((c) => c.id === ac.activeChatId);
   });
 }
 
 /**
- * Get just the chatList for a specific agent.
+ * Get the chatList for the main agent.
  */
-export function useAgentChatList(agentId: string) {
-  return useAgentStore((s) => s.agentChats[agentId]?.chatList);
+export function useAgentChatList(agentId?: string) {
+  const id = agentId ?? DEFAULT_AGENT_ID;
+  return useAgentStore((s) => s.agentChats[id]?.chatList);
 }

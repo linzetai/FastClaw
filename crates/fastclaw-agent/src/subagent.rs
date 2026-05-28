@@ -60,16 +60,18 @@ impl SubAgentTool {
 #[derive(Deserialize)]
 struct SpawnParams {
     task: String,
-    #[serde(default = "default_agent")]
-    agent_id: String,
+    /// Sub-agent type ID (maps to a SubAgentDef). Legacy `agent_id` is accepted
+    /// but treated as an alias for `type` in the new model.
+    #[serde(default, alias = "agent_id")]
+    r#type: Option<String>,
+    /// Legacy field — still accepted for backward compatibility.
     #[serde(default)]
     subagent_type: Option<String>,
     #[serde(default)]
     context: Option<String>,
-}
-
-fn default_agent() -> String {
-    "default".to_string()
+    /// Override the def's background setting for this invocation.
+    #[serde(default)]
+    background: Option<bool>,
 }
 
 fn parse_subagent_type(s: Option<&str>) -> SubAgentType {
@@ -165,11 +167,10 @@ impl Tool for SubAgentTool {
     }
 
     fn description(&self) -> &str {
-        "Spawn a sub-agent to handle a delegated task. The sub-agent runs independently \
-         with its own context and tools. agent_id selects the model/behavior config; \
-         subagent_type controls the tool set (e.g. agent_id='main' + subagent_type='explore' \
-         = main model with read-only tools). Types: general (full), explore (read-only), \
-         shell (commands only), browser (web automation)."
+        "Spawn a sub-agent to handle a delegated task. Use the `type` parameter to select \
+         a sub-agent type (e.g. 'explore', 'code', 'shell', 'research'). Use list_agents \
+         to discover available types. By default, runs synchronously and returns the result \
+         directly. Set background=true for async execution."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -182,12 +183,8 @@ impl Tool for SubAgentTool {
             }),
         );
 
-        let agent_descs = self.manager.agent_descriptions();
-        let first_agent_id = agent_descs
-            .first()
-            .map(|(id, _)| id.clone())
-            .unwrap_or_else(|| "default".to_string());
-        let agent_list: Vec<String> = agent_descs
+        let def_descs = self.manager.subagent_def_descriptions();
+        let type_list: Vec<String> = def_descs
             .iter()
             .map(|(id, desc)| {
                 if let Some(d) = desc {
@@ -198,29 +195,15 @@ impl Tool for SubAgentTool {
             })
             .collect();
         props.insert(
-            "agent_id".to_string(),
+            "type".to_string(),
             serde_json::json!({
                 "type": "string",
                 "description": format!(
-                    "Agent identity — determines the model and behavior config used. Available: {}. \
-                     This is independent of subagent_type (tool set).",
-                    agent_list.join(", ")
+                    "Sub-agent type to spawn. Available: {}. \
+                     Each type has a specific tool set and system prompt.",
+                    type_list.join(", ")
                 ),
-                "default": first_agent_id
-            }),
-        );
-        props.insert(
-            "subagent_type".to_string(),
-            serde_json::json!({
-                "type": "string",
-                "enum": ["general", "explore", "shell", "browser"],
-                "description": "Tool set scope for this sub-agent (independent of agent_id). \
-                 'general': full tool set. \
-                 'explore': read-only (read_file, search_in_files, glob, web_search, web_fetch). \
-                 'shell': only shell_exec for build/test. \
-                 'browser': only browser automation tools. \
-                 Example: agent_id='main' + subagent_type='explore' = main model with read-only tools.",
-                "default": "general"
+                "default": "code"
             }),
         );
         props.insert(
@@ -228,6 +211,13 @@ impl Tool for SubAgentTool {
             serde_json::json!({
                 "type": "string",
                 "description": "Optional context or data to pass to the sub-agent that it cannot discover on its own"
+            }),
+        );
+        props.insert(
+            "background".to_string(),
+            serde_json::json!({
+                "type": "boolean",
+                "description": "Run in background (async). Default depends on the sub-agent type definition. When false, blocks until completion and returns the result directly."
             }),
         );
 
@@ -255,60 +245,34 @@ impl Tool for SubAgentTool {
             ));
         }
 
-        let subagent_type = parse_subagent_type(params.subagent_type.as_deref());
+        let type_id = params
+            .r#type
+            .as_deref()
+            .or(params.subagent_type.as_deref())
+            .unwrap_or("code");
 
-        if !self.policy.allowed_types.is_empty() {
-            let type_str = subagent_type.to_string();
-            if !self.policy.allowed_types.contains(&type_str) {
-                return ToolResult::err(format!(
-                    "sub-agent type '{}' not allowed. Allowed: {:?}",
-                    type_str, self.policy.allowed_types
-                ));
-            }
-        }
-
-        if !self.policy.allowed_agents.is_empty()
-            && !self.policy.allowed_agents.contains(&params.agent_id)
-        {
+        if !self.policy.allowed_types.is_empty() && !self.policy.allowed_types.contains(&type_id.to_string()) {
             return ToolResult::err(format!(
-                "agent '{}' not in allowed delegation targets: {:?}",
-                params.agent_id, self.policy.allowed_agents
+                "sub-agent type '{}' not allowed. Allowed: {:?}",
+                type_id, self.policy.allowed_types
             ));
         }
 
-        let agent_config = match self.manager.resolve_agent(&params.agent_id) {
-            Some(c) => c,
-            None if params.agent_id == "default" => {
-                let descs = self.manager.agent_descriptions();
-                if let Some((first_id, _)) = descs.first() {
-                    tracing::info!(
-                        fallback_from = "default",
-                        fallback_to = %first_id,
-                        "agent 'default' not found, falling back to first available agent"
-                    );
-                    match self.manager.resolve_agent(first_id) {
-                        Some(c) => c,
-                        None => return ToolResult::err("no agents available".to_string()),
-                    }
-                } else {
-                    return ToolResult::err("no agents available for delegation".to_string());
-                }
-            }
-            None => {
-                let available: Vec<String> = self
-                    .manager
-                    .agent_descriptions()
-                    .into_iter()
-                    .map(|(id, _)| id)
-                    .collect();
-                return ToolResult::err(format!(
-                    "agent '{}' not found. Available: {:?}",
-                    params.agent_id, available
-                ));
-            }
-        };
+        let def = self.manager.resolve_subagent_def(type_id);
+        let subagent_type = parse_subagent_type(Some(type_id));
 
-        let child_registry = build_child_registry(&self.parent_tool_registry, &subagent_type);
+        let (child_registry, use_background) = if let Some(ref def) = def {
+            let registry = SubAgentManager::build_child_registry_from_def(
+                &self.parent_tool_registry,
+                def,
+            );
+            let bg = params.background.unwrap_or(def.background);
+            (registry, bg)
+        } else {
+            let registry = build_child_registry(&self.parent_tool_registry, &subagent_type);
+            let bg = params.background.unwrap_or(true);
+            (registry, bg)
+        };
 
         if self.current_depth + 1 < self.policy.max_depth {
             let child_subagent = SubAgentTool::new(
@@ -322,10 +286,36 @@ impl Tool for SubAgentTool {
 
         let child_registry = Arc::new(child_registry);
 
+        let agent_config = match self.manager.resolve_agent("main") {
+            Some(mut c) => {
+                if let Some(ref def) = def {
+                    if let Some(ref prompt) = def.system_prompt {
+                        c.system_prompt = Some(prompt.clone());
+                    }
+                }
+                c
+            }
+            None => {
+                let agents = self.manager.available_agents();
+                match agents.first() {
+                    Some(c) => {
+                        let mut c = c.clone();
+                        if let Some(ref def) = def {
+                            if let Some(ref prompt) = def.system_prompt {
+                                c.system_prompt = Some(prompt.clone());
+                            }
+                        }
+                        c
+                    }
+                    None => return ToolResult::err("no agent config available".to_string()),
+                }
+            }
+        };
+
         tracing::info!(
             parent_depth = self.current_depth,
-            child_agent = %params.agent_id,
-            subagent_type = %subagent_type,
+            def_type = %type_id,
+            background = use_background,
             task_len = params.task.len(),
             "spawning sub-agent"
         );
@@ -338,34 +328,63 @@ impl Tool for SubAgentTool {
             }
         };
 
-        let run_id = match self
-            .manager
-            .spawn(
-                agent_config,
-                subagent_type.clone(),
-                params.task.clone(),
-                params.context.clone(),
-                self.parent_session_id.clone(),
-                String::new(),
-                self.current_depth,
-                &self.policy,
-                child_registry,
-                parent_tx,
-                None,
-            )
-            .await
-        {
-            Ok(id) => id,
-            Err(e) => return ToolResult::err(format!("failed to spawn sub-agent: {e}")),
-        };
+        if use_background {
+            let run_id = match self
+                .manager
+                .spawn(
+                    agent_config,
+                    subagent_type.clone(),
+                    params.task.clone(),
+                    params.context.clone(),
+                    self.parent_session_id.clone(),
+                    String::new(),
+                    self.current_depth,
+                    &self.policy,
+                    child_registry,
+                    parent_tx,
+                    None,
+                )
+                .await
+            {
+                Ok(id) => id,
+                Err(e) => return ToolResult::err(format!("failed to spawn sub-agent: {e}")),
+            };
 
-        ToolResult::ok(serde_json::json!({
-            "run_id": run_id,
-            "agent_id": params.agent_id,
-            "subagent_type": subagent_type.to_string(),
-            "status": "running",
-            "message": "Sub-agent spawned and running in background. Use subagent_get with this run_id to check results when ready, or continue with other work."
-        }).to_string())
+            ToolResult::ok(serde_json::json!({
+                "run_id": run_id,
+                "type": type_id,
+                "status": "running",
+                "message": "Sub-agent spawned in background. Use subagent_get with this run_id to check results."
+            }).to_string())
+        } else {
+            match self
+                .manager
+                .spawn_sync(
+                    agent_config,
+                    subagent_type.clone(),
+                    params.task.clone(),
+                    params.context.clone(),
+                    self.parent_session_id.clone(),
+                    String::new(),
+                    self.current_depth,
+                    &self.policy,
+                    child_registry,
+                    parent_tx,
+                    None,
+                )
+                .await
+            {
+                Ok((result, run_id)) => {
+                    ToolResult::ok(serde_json::json!({
+                        "run_id": run_id,
+                        "type": type_id,
+                        "status": "completed",
+                        "result": result,
+                    }).to_string())
+                }
+                Err(e) => ToolResult::err(format!("sub-agent failed: {e}")),
+            }
+        }
     }
 }
 
@@ -510,17 +529,17 @@ impl Tool for SubAgentListTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fastclaw_core::agent_config::{AgentConfig, SubAgentPolicy};
+    use fastclaw_core::agent_config::{AgentConfig, SubAgentPolicy, builtin_subagent_defs};
 
-    #[test]
-    fn subagent_tool_definition() {
+    #[tokio::test]
+    async fn subagent_tool_definition() {
         let runtime = Arc::new(crate::AgentRuntime::new(Arc::from(
             crate::OpenAiProvider::new("http://example.com", "fake"),
         )));
         let tool_reg = Arc::new(ToolRegistry::new());
         let agents = vec![AgentConfig {
-            agent_id: "test".into(),
-            name: Some("Test Agent".into()),
+            agent_id: "main".into(),
+            name: Some("Main Agent".into()),
             description: None,
             model: Default::default(),
             system_prompt: None,
@@ -538,6 +557,7 @@ mod tests {
             agents,
             SubAgentPolicy::default(),
         ));
+        manager.set_subagent_defs(builtin_subagent_defs());
         let tool = SubAgentTool::new(manager, tool_reg, SubAgentPolicy::default());
         let def = tool.to_definition();
         assert_eq!(def.function.name, "spawn_subagent");

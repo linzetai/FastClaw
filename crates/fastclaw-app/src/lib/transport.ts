@@ -400,7 +400,6 @@ export function chatStream(
   const promise = wsClient
     .send("chat", {
       messages: params.messages,
-      agentId: params.agentId,
       sessionId: params.sessionId,
       stream: true,
       ...(params.workDir ? { workDir: params.workDir } : {}),

@@ -25,22 +25,11 @@ let sessionChangedUnsub: (() => void) | null = null;
 
 async function syncBackendData() {
   try {
-    const [agents, sessions] = await Promise.all([
-      transport.listAgents(),
-      transport.listSessions(50),
-    ]);
-    if (agents.length > 0) {
-      useAgentStore.getState().syncAgentsFromBackend(agents);
-      for (const agent of agents) {
-        const agentSessions = sessions.filter(
-          (s) => s.agentId === agent.agentId,
-        );
-        if (agentSessions.length > 0) {
-          useAgentStore
-            .getState()
-            .syncSessionsForAgent(agent.agentId, agentSessions);
-        }
-      }
+    const sessions = await transport.listSessions(50);
+    if (sessions.length > 0) {
+      useAgentStore
+        .getState()
+        .syncSessionsForAgent("main", sessions);
     }
   } catch {
     /* sync failure is non-fatal */
@@ -90,9 +79,7 @@ export const useGatewayStore = create<GatewayState>((set) => ({
           try {
             const session = await transport.getSession(sid);
             if (session?.title) {
-              const store = useAgentStore.getState();
-              const agentId = session.agentId || store.activeAgentId;
-              store.renameChat(agentId, sid, session.title);
+              useAgentStore.getState().renameChat("main", sid, session.title);
             }
           } catch {
             /* ignore */
@@ -125,9 +112,7 @@ export const useGatewayStore = create<GatewayState>((set) => ({
             try {
               const session = await transport.getSession(sid);
               if (session?.title) {
-                const store = useAgentStore.getState();
-                const agentId = session.agentId || store.activeAgentId;
-                store.renameChat(agentId, sid, session.title);
+                useAgentStore.getState().renameChat("main", sid, session.title);
               }
             } catch {
               /* ignore */

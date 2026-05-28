@@ -12,7 +12,7 @@ use crate::subagent_manager::SubAgentManager;
 // ListAgentsTool
 // ---------------------------------------------------------------------------
 
-/// Returns a summary of all available agents for delegation.
+/// Returns a summary of all available sub-agent definitions that can be spawned.
 pub struct ListAgentsTool {
     manager: Arc<SubAgentManager>,
 }
@@ -24,14 +24,22 @@ impl ListAgentsTool {
 }
 
 #[derive(Serialize)]
-struct AgentSummary {
+struct SubAgentDefSummary {
     id: String,
     name: Option<String>,
     description: Option<String>,
-    model: String,
-    tool_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    background: bool,
+    concurrency_safe: bool,
     has_system_prompt: bool,
-    subagent_enabled: bool,
+    tool_filter: ToolFilterSummary,
+}
+
+#[derive(Serialize)]
+struct ToolFilterSummary {
+    allowed_count: usize,
+    denied_count: usize,
 }
 
 #[async_trait]
@@ -41,9 +49,9 @@ impl Tool for ListAgentsTool {
     }
 
     fn description(&self) -> &str {
-        "List all available agents that can be delegated to via spawn_subagent. \
-         Returns each agent's ID, name, description, model, tool count, and capabilities. \
-         Use this before spawn_subagent to discover which agent is best suited for a task."
+        "List all available sub-agent types that can be spawned via spawn_subagent. \
+         Returns each type's ID, name, description, and capabilities. \
+         Use this to discover which sub-agent type is best suited for a task."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
@@ -55,17 +63,21 @@ impl Tool for ListAgentsTool {
     }
 
     async fn execute(&self, _arguments: &str) -> ToolResult {
-        let agents = self.manager.available_agents();
-        let summaries: Vec<AgentSummary> = agents
+        let defs = self.manager.subagent_defs();
+        let summaries: Vec<SubAgentDefSummary> = defs
             .iter()
-            .map(|a| AgentSummary {
-                id: a.agent_id.to_string(),
-                name: a.name.clone(),
-                description: a.description.clone(),
-                model: format!("{}/{}", a.model.provider, a.model.model),
-                tool_count: a.tools.len(),
-                has_system_prompt: a.system_prompt.is_some(),
-                subagent_enabled: a.behavior.subagent.enabled,
+            .map(|d| SubAgentDefSummary {
+                id: d.id.clone(),
+                name: d.name.clone(),
+                description: d.description.clone(),
+                model: d.model.as_ref().map(|m| format!("{}/{}", m.provider, m.model)),
+                background: d.background,
+                concurrency_safe: d.concurrency_safe,
+                has_system_prompt: d.system_prompt.is_some(),
+                tool_filter: ToolFilterSummary {
+                    allowed_count: d.tools.allowed.len(),
+                    denied_count: d.tools.denied.len(),
+                },
             })
             .collect();
 
@@ -80,7 +92,7 @@ impl Tool for ListAgentsTool {
 // GetAgentInfoTool
 // ---------------------------------------------------------------------------
 
-/// Returns detailed configuration for a specific agent by ID.
+/// Returns detailed configuration for a specific sub-agent type by ID.
 pub struct GetAgentInfoTool {
     manager: Arc<SubAgentManager>,
 }
@@ -97,40 +109,17 @@ struct InfoParams {
 }
 
 #[derive(Serialize)]
-struct AgentInfo {
+struct SubAgentDefInfo {
     id: String,
     name: Option<String>,
     description: Option<String>,
-    model: ModelInfo,
-    tools: Vec<ToolInfo>,
-    behavior: BehaviorInfo,
-}
-
-#[derive(Serialize)]
-struct ModelInfo {
-    provider: String,
-    model: String,
-    temperature: f32,
-    max_tokens: Option<u32>,
-    context_window: Option<u32>,
-}
-
-#[derive(Serialize)]
-struct ToolInfo {
-    id: String,
-    name: Option<String>,
-    description: Option<String>,
-    enabled: bool,
-}
-
-#[derive(Serialize)]
-struct BehaviorInfo {
-    max_tool_calls_per_turn: u32,
-    tools_allow: Vec<String>,
-    tools_deny: Vec<String>,
-    subagent_enabled: bool,
-    subagent_max_depth: u32,
-    subagent_max_parallel: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    system_prompt_preview: Option<String>,
+    background: bool,
+    concurrency_safe: bool,
+    tools_allowed: Vec<String>,
+    tools_denied: Vec<String>,
 }
 
 #[async_trait]
@@ -140,21 +129,18 @@ impl Tool for GetAgentInfoTool {
     }
 
     fn description(&self) -> &str {
-        "Get detailed configuration for a specific agent by ID. Returns the agent's model, \
-         tools, behavior settings, and delegation policy. Use after list_agents to inspect \
-         a specific agent before delegating a task to it."
+        "Get detailed configuration for a specific sub-agent type by ID. Returns the type's \
+         model override, tool filters, system prompt preview, and concurrency settings. \
+         Use after list_agents to inspect a specific type before spawning it."
     }
 
     fn parameters_schema(&self) -> ToolParameterSchema {
         let mut props = HashMap::new();
-        let agent_descs = self.manager.agent_descriptions();
-        let ids: Vec<&str> = agent_descs.iter().map(|(id, _)| id.as_str()).collect();
-
         props.insert(
             "agent_id".to_string(),
             serde_json::json!({
                 "type": "string",
-                "description": format!("The agent ID to look up. Available: {}", ids.join(", "))
+                "description": "The sub-agent type ID to look up (e.g. 'explore', 'code', 'shell', 'research')"
             }),
         );
 
@@ -171,51 +157,39 @@ impl Tool for GetAgentInfoTool {
             Err(e) => return ToolResult::err(format!("invalid arguments: {e}")),
         };
 
-        let agent = match self.manager.resolve_agent(&params.agent_id) {
-            Some(a) => a,
+        let def = match self.manager.resolve_subagent_def(&params.agent_id) {
+            Some(d) => d,
             None => {
                 let available: Vec<String> = self
                     .manager
-                    .agent_descriptions()
+                    .subagent_def_descriptions()
                     .into_iter()
                     .map(|(id, _)| id)
                     .collect();
                 return ToolResult::err(format!(
-                    "agent '{}' not found. Available: {:?}",
+                    "sub-agent type '{}' not found. Available: {:?}",
                     params.agent_id, available
                 ));
             }
         };
 
-        let info = AgentInfo {
-            id: agent.agent_id.to_string(),
-            name: agent.name.clone(),
-            description: agent.description.clone(),
-            model: ModelInfo {
-                provider: agent.model.provider.clone(),
-                model: agent.model.model.clone(),
-                temperature: agent.model.temperature,
-                max_tokens: agent.model.max_tokens,
-                context_window: agent.model.context_window,
-            },
-            tools: agent
-                .tools
-                .iter()
-                .map(|t| ToolInfo {
-                    id: t.id.clone(),
-                    name: t.name.clone(),
-                    description: t.description.clone(),
-                    enabled: t.enabled,
-                })
-                .collect(),
-            behavior: BehaviorInfo {
-                max_tool_calls_per_turn: agent.behavior.max_tool_calls_per_turn,
-                tools_allow: agent.behavior.tools_allow.clone(),
-                tools_deny: agent.behavior.tools_deny.clone(),
-                subagent_enabled: agent.behavior.subagent.enabled,
-                subagent_max_depth: agent.behavior.subagent.max_depth,
-                subagent_max_parallel: agent.behavior.subagent.max_parallel,
-            },
+        let info = SubAgentDefInfo {
+            id: def.id.clone(),
+            name: def.name.clone(),
+            description: def.description.clone(),
+            model: def.model.as_ref().map(|m| format!("{}/{}", m.provider, m.model)),
+            system_prompt_preview: def.system_prompt.as_ref().map(|p| {
+                let preview: String = p.chars().take(200).collect();
+                if p.len() > 200 {
+                    format!("{preview}...")
+                } else {
+                    preview
+                }
+            }),
+            background: def.background,
+            concurrency_safe: def.concurrency_safe,
+            tools_allowed: def.tools.allowed.clone(),
+            tools_denied: def.tools.denied.clone(),
         };
 
         match serde_json::to_string_pretty(&info) {
@@ -228,71 +202,46 @@ impl Tool for GetAgentInfoTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fastclaw_core::agent_config::{AgentConfig, SubAgentPolicy};
+    use fastclaw_core::agent_config::{SubAgentPolicy, builtin_subagent_defs};
 
     fn make_manager() -> Arc<SubAgentManager> {
         let runtime = Arc::new(crate::AgentRuntime::new(Arc::from(
             crate::OpenAiProvider::new("http://example.com", "fake"),
         )));
-        let agents = vec![
-            AgentConfig {
-                agent_id: "main".into(),
-                name: Some("Main Agent".into()),
-                description: Some("General-purpose assistant".into()),
-                model: Default::default(),
-                system_prompt: Some("You are helpful.".into()),
-                tools: vec![],
-                behavior: Default::default(),
-                mcp_servers: vec![],
-                min_tier: None,
-                max_tier: None,
-                avatar: None,
-                channels: HashMap::new(),
-            },
-            AgentConfig {
-                agent_id: "code".into(),
-                name: Some("Code Agent".into()),
-                description: Some("Specialized for coding tasks".into()),
-                model: Default::default(),
-                system_prompt: None,
-                tools: vec![],
-                behavior: Default::default(),
-                mcp_servers: vec![],
-                min_tier: None,
-                max_tier: None,
-                avatar: None,
-                channels: HashMap::new(),
-            },
-        ];
-        Arc::new(SubAgentManager::new(
+        let mgr = Arc::new(SubAgentManager::new(
             runtime,
-            agents,
+            vec![],
             SubAgentPolicy::default(),
-        ))
+        ));
+        mgr.set_subagent_defs(builtin_subagent_defs());
+        mgr
     }
 
     #[tokio::test]
-    async fn list_agents_returns_all() {
+    async fn list_agents_returns_builtin_defs() {
         let mgr = make_manager();
         let tool = ListAgentsTool::new(mgr);
         let result = tool.execute("{}").await;
         assert!(result.success);
         let summaries: Vec<serde_json::Value> = serde_json::from_str(&result.output).unwrap();
-        assert_eq!(summaries.len(), 2);
-        assert!(summaries.iter().any(|s| s["id"] == "main"));
+        assert!(summaries.len() >= 4);
+        assert!(summaries.iter().any(|s| s["id"] == "explore"));
         assert!(summaries.iter().any(|s| s["id"] == "code"));
+        assert!(summaries.iter().any(|s| s["id"] == "shell"));
+        assert!(summaries.iter().any(|s| s["id"] == "research"));
     }
 
     #[tokio::test]
-    async fn get_agent_info_returns_details() {
+    async fn get_agent_info_returns_def_details() {
         let mgr = make_manager();
         let tool = GetAgentInfoTool::new(mgr);
-        let result = tool.execute(r#"{"agent_id": "main"}"#).await;
+        let result = tool.execute(r#"{"agent_id": "explore"}"#).await;
         assert!(result.success);
         let info: serde_json::Value = serde_json::from_str(&result.output).unwrap();
-        assert_eq!(info["id"], "main");
-        assert_eq!(info["name"], "Main Agent");
-        assert_eq!(info["description"], "General-purpose assistant");
+        assert_eq!(info["id"], "explore");
+        assert_eq!(info["name"], "Explorer");
+        assert_eq!(info["concurrency_safe"], true);
+        assert_eq!(info["background"], false);
     }
 
     #[tokio::test]

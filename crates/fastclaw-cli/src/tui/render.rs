@@ -28,7 +28,7 @@ pub(crate) fn draw_ui(f: &mut Frame, app: &TuiApp) {
     draw_status_bar(f, app, chunks[3]);
 
     if let Some(popup) = &app.show_popup {
-        draw_popup(f, popup, &app.agents, app.select_state.as_ref());
+        draw_popup(f, popup, app.select_state.as_ref());
     }
 }
 

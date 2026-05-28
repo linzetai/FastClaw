@@ -41,27 +41,23 @@ pub enum MatchTier {
     Peer = 4,
 }
 
-/// Route an inbound message to an agent using the binding rules.
+/// Route an inbound message to the main agent.
 ///
-/// Binding priority (most-specific wins):
-/// 1. peer match (exact DM/group id)
-/// 2. channel match (specific channel)
-/// 3. accountId match
-/// 4. channel-wide match (accountId: "*")
-/// 5. fallback to default agent
+/// Multi-agent routing has been deprecated. This function now always returns
+/// "main" as the agent ID. The binding rules are still evaluated for logging
+/// purposes to aid migration, but the result is always "main".
 pub fn resolve_route(
     bindings: &[BindingConfig],
-    agents: &AgentsConfig,
+    _agents: &AgentsConfig,
     channel: &str,
     account_id: Option<&str>,
     peer_kind: Option<&str>,
     peer_id: Option<&str>,
 ) -> RouteResult {
-    let mut best: Option<(MatchTier, &str)> = None;
-
+    // Evaluate bindings for deprecation logging only
+    let mut legacy_match: Option<(MatchTier, &str)> = None;
     for binding in bindings {
         let m = &binding.match_rule;
-
         if let Some(ref ch) = m.channel {
             if ch != channel {
                 continue;
@@ -91,36 +87,35 @@ pub fn resolve_route(
             (None, None) => MatchTier::Channel,
         };
 
-        if best.as_ref().is_none_or(|(t, _)| tier > *t) {
-            best = Some((tier, &binding.agent_id));
+        if legacy_match.as_ref().is_none_or(|(t, _)| tier > *t) {
+            legacy_match = Some((tier, &binding.agent_id));
         }
     }
 
-    if let Some((tier, agent_id)) = best {
-        return RouteResult {
-            agent_id: agent_id.to_string(),
-            match_tier: tier,
-        };
+    if let Some((_tier, matched_agent)) = &legacy_match {
+        if *matched_agent != "main" {
+            tracing::warn!(
+                matched_agent = %matched_agent,
+                channel = %channel,
+                "deprecated: channel binding matched non-main agent; routing to main instead"
+            );
+        }
     }
 
-    let default_agent = agents
-        .list
-        .iter()
-        .find(|a| a.default)
-        .map(|a| a.id.as_str())
-        .or_else(|| agents.list.first().map(|a| a.id.as_str()))
-        .unwrap_or("main");
-
     RouteResult {
-        agent_id: default_agent.to_string(),
-        match_tier: MatchTier::Default,
+        agent_id: "main".to_string(),
+        match_tier: legacy_match.map(|(t, _)| t).unwrap_or(MatchTier::Default),
     }
 }
 
 /// Build a session key based on DM scope for session isolation.
+///
+/// The `agent_id` parameter is accepted for backward compatibility but is no
+/// longer included in the generated key. All sessions now belong to the single
+/// main agent.
 pub fn build_session_key(
     dm_scope: &DmScope,
-    agent_id: &str,
+    _agent_id: &str,
     channel: &str,
     account_id: Option<&str>,
     peer_id: &str,
@@ -129,22 +124,22 @@ pub fn build_session_key(
     if chat_type == "group" {
         return match dm_scope {
             DmScope::Main | DmScope::PerPeer | DmScope::PerChannelPeer => {
-                format!("agent:{agent_id}:group:{channel}:{peer_id}")
+                format!("group:{channel}:{peer_id}")
             }
             DmScope::PerAccountChannelPeer => {
                 let acc = account_id.unwrap_or("default");
-                format!("agent:{agent_id}:group:{acc}:{channel}:{peer_id}")
+                format!("group:{acc}:{channel}:{peer_id}")
             }
         };
     }
 
     match dm_scope {
-        DmScope::Main => format!("agent:{agent_id}:main:{peer_id}"),
-        DmScope::PerPeer => format!("agent:{agent_id}:peer:{peer_id}"),
-        DmScope::PerChannelPeer => format!("agent:{agent_id}:{channel}:{peer_id}"),
+        DmScope::Main => format!("main:{peer_id}"),
+        DmScope::PerPeer => format!("peer:{peer_id}"),
+        DmScope::PerChannelPeer => format!("{channel}:{peer_id}"),
         DmScope::PerAccountChannelPeer => {
             let acc = account_id.unwrap_or("default");
-            format!("agent:{agent_id}:{acc}:{channel}:{peer_id}")
+            format!("{acc}:{channel}:{peer_id}")
         }
     }
 }
@@ -253,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn peer_match_wins_over_channel() {
+    fn always_routes_to_main() {
         let bindings = vec![
             make_binding("chat", "feishu", None),
             make_binding("opus", "feishu", Some(("direct", "+1234"))),
@@ -268,12 +263,12 @@ mod tests {
             Some("direct"),
             Some("+1234"),
         );
-        assert_eq!(result.agent_id, "opus");
+        assert_eq!(result.agent_id, "main");
         assert_eq!(result.match_tier, MatchTier::Peer);
     }
 
     #[test]
-    fn channel_match_fallback() {
+    fn channel_match_still_returns_main() {
         let bindings = vec![make_binding("chat", "feishu", None)];
         let agents = make_agents(&["chat"], 0);
 
@@ -285,17 +280,17 @@ mod tests {
             Some("direct"),
             Some("+5678"),
         );
-        assert_eq!(result.agent_id, "chat");
+        assert_eq!(result.agent_id, "main");
         assert_eq!(result.match_tier, MatchTier::Channel);
     }
 
     #[test]
-    fn default_agent_fallback() {
+    fn no_binding_match_returns_main() {
         let bindings = vec![make_binding("opus", "telegram", None)];
         let agents = make_agents(&["chat", "opus"], 0);
 
         let result = resolve_route(&bindings, &agents, "feishu", None, None, None);
-        assert_eq!(result.agent_id, "chat");
+        assert_eq!(result.agent_id, "main");
         assert_eq!(result.match_tier, MatchTier::Default);
     }
 
@@ -316,11 +311,11 @@ mod tests {
     fn session_key_dm_scope() {
         assert_eq!(
             build_session_key(&DmScope::Main, "main", "feishu", None, "user1", "p2p"),
-            "agent:main:main:user1"
+            "main:user1"
         );
         assert_eq!(
             build_session_key(&DmScope::PerPeer, "main", "feishu", None, "user1", "p2p"),
-            "agent:main:peer:user1"
+            "peer:user1"
         );
         assert_eq!(
             build_session_key(
@@ -331,11 +326,11 @@ mod tests {
                 "user1",
                 "p2p"
             ),
-            "agent:main:feishu:user1"
+            "feishu:user1"
         );
         assert_eq!(
             build_session_key(&DmScope::Main, "main", "feishu", None, "group1", "group"),
-            "agent:main:group:feishu:group1"
+            "group:feishu:group1"
         );
     }
 }

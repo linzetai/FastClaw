@@ -1,7 +1,8 @@
+import { DEFAULT_AGENT_ID } from "./chat-helpers";
 import type { AgentState } from "./types";
 
 const STORAGE_KEY = "fastclaw:ui-state";
-const UI_STATE_VERSION = 1;
+const UI_STATE_VERSION = 2;
 
 export interface PersistedUIState {
   version: number;
@@ -24,17 +25,12 @@ export function loadUIState(): PersistedUIState | null {
 
 export function saveUIState(state: AgentState) {
   try {
-    const agentActiveChats: Record<string, string> = {};
-    const agentOpenChats: Record<string, string[]> = {};
-    for (const [agentId, ac] of Object.entries(state.agentChats)) {
-      agentActiveChats[agentId] = ac.activeChatId;
-      agentOpenChats[agentId] = ac.chatList.filter((c) => c.open).map((c) => c.id);
-    }
+    const ac = state.agentChats[DEFAULT_AGENT_ID];
     const persisted: PersistedUIState = {
       version: UI_STATE_VERSION,
-      activeAgentId: state.activeAgentId,
-      agentActiveChats,
-      agentOpenChats,
+      activeAgentId: DEFAULT_AGENT_ID,
+      agentActiveChats: ac ? { [DEFAULT_AGENT_ID]: ac.activeChatId } : {},
+      agentOpenChats: ac ? { [DEFAULT_AGENT_ID]: ac.chatList.filter((c) => c.open).map((c) => c.id) } : {},
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
   } catch { /* ignore quota errors */ }

@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use tokio::sync::{mpsc, Semaphore};
 use tokio_util::sync::CancellationToken;
 
-use fastclaw_core::agent_config::{AgentConfig, SubAgentPolicy};
+use fastclaw_core::agent_config::{AgentConfig, SubAgentDef, SubAgentPolicy};
 use fastclaw_core::tool::ToolRegistry;
 use fastclaw_core::types::{SubAgentRun, SubAgentStatus, SubAgentType, Usage};
 use fastclaw_protocol::{AgentEvent, TokenUsage, TurnId};
@@ -18,6 +18,8 @@ use crate::runtime::orchestrator::ToolOrchestrator;
 pub struct SubAgentManager {
     runtime: Arc<AgentRuntime>,
     available_agents: Vec<AgentConfig>,
+    /// Registry of sub-agent type definitions (builtin + custom).
+    subagent_defs: Arc<std::sync::RwLock<Vec<SubAgentDef>>>,
     runs: Arc<DashMap<String, SubAgentRun>>,
     cancel_tokens: Arc<DashMap<String, CancellationToken>>,
     concurrency: Arc<Semaphore>,
@@ -36,6 +38,7 @@ impl SubAgentManager {
         Self {
             runtime,
             available_agents,
+            subagent_defs: Arc::new(std::sync::RwLock::new(Vec::new())),
             runs: Arc::new(DashMap::new()),
             cancel_tokens: Arc::new(DashMap::new()),
             concurrency: Arc::new(Semaphore::new(max_parallel)),
@@ -51,6 +54,56 @@ impl SubAgentManager {
 
     pub fn available_agents(&self) -> &[AgentConfig] {
         &self.available_agents
+    }
+
+    /// Replace the sub-agent definition registry.
+    pub fn set_subagent_defs(&self, defs: Vec<SubAgentDef>) {
+        let mut lock = self.subagent_defs.write().expect("subagent_defs poisoned");
+        *lock = defs;
+    }
+
+    /// Get a snapshot of all sub-agent definitions.
+    pub fn subagent_defs(&self) -> Vec<SubAgentDef> {
+        self.subagent_defs
+            .read()
+            .expect("subagent_defs poisoned")
+            .clone()
+    }
+
+    /// Look up a sub-agent definition by ID.
+    pub fn resolve_subagent_def(&self, def_id: &str) -> Option<SubAgentDef> {
+        self.subagent_defs
+            .read()
+            .expect("subagent_defs poisoned")
+            .iter()
+            .find(|d| d.id == def_id)
+            .cloned()
+    }
+
+    /// Build a child tool registry filtered according to a `SubAgentDef`.
+    pub fn build_child_registry_from_def(
+        parent_registry: &ToolRegistry,
+        def: &SubAgentDef,
+    ) -> ToolRegistry {
+        let child = ToolRegistry::new();
+        for name in parent_registry.tool_names() {
+            if def.tools.is_tool_allowed(&name) {
+                if let Some(tool) = parent_registry.get(&name) {
+                    child.register(tool);
+                }
+            }
+        }
+        child
+    }
+
+    /// Build descriptions for sub-agent defs (for prompt injection / tool schemas).
+    pub fn subagent_def_descriptions(&self) -> Vec<(String, Option<String>)> {
+        self.subagent_defs
+            .read()
+            .expect("subagent_defs poisoned")
+            .iter()
+            .map(|d| (d.id.clone(), d.description.clone()))
+            .collect()
     }
 
     fn now_ms() -> u64 {
@@ -269,6 +322,69 @@ impl SubAgentManager {
         });
 
         Ok(run_id)
+    }
+
+    /// Spawn a sub-agent and block until it completes (sync mode).
+    ///
+    /// Returns `(result_text, run_id)` on success. The caller receives the full
+    /// output as a `tool_result` in the same turn — no polling needed.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn_sync(
+        &self,
+        agent_config: AgentConfig,
+        subagent_type: SubAgentType,
+        task: String,
+        context: Option<String>,
+        parent_session_id: String,
+        parent_message_id: String,
+        current_depth: u32,
+        policy: &SubAgentPolicy,
+        tool_registry: Arc<ToolRegistry>,
+        parent_tx: mpsc::Sender<AgentEvent>,
+        llm_override: Option<Arc<dyn LlmProvider>>,
+    ) -> anyhow::Result<(String, String)> {
+        let run_id = self
+            .spawn(
+                agent_config,
+                subagent_type,
+                task,
+                context,
+                parent_session_id,
+                parent_message_id,
+                current_depth,
+                policy,
+                tool_registry,
+                parent_tx,
+                llm_override,
+            )
+            .await?;
+
+        let timeout = Duration::from_secs(policy.timeout_seconds);
+        let deadline = tokio::time::Instant::now() + timeout;
+
+        loop {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            if tokio::time::Instant::now() >= deadline {
+                self.cancel(&run_id);
+                anyhow::bail!("sync sub-agent timed out after {}s", policy.timeout_seconds);
+            }
+            if let Some(run) = self.get_run(&run_id) {
+                match &run.status {
+                    SubAgentStatus::Completed => {
+                        return Ok((run.result.unwrap_or_default(), run_id));
+                    }
+                    SubAgentStatus::Failed(msg) => {
+                        anyhow::bail!("sub-agent failed: {msg}");
+                    }
+                    SubAgentStatus::Cancelled => {
+                        anyhow::bail!("sub-agent was cancelled");
+                    }
+                    SubAgentStatus::Pending | SubAgentStatus::Running => {}
+                }
+            } else {
+                anyhow::bail!("sub-agent run {run_id} disappeared");
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -519,16 +635,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn resolve_agent_known_and_unknown() {
+    #[tokio::test]
+    async fn resolve_agent_known_and_unknown() {
         let mgr = make_manager(vec![test_agent("alpha"), test_agent("beta")]);
         assert!(mgr.resolve_agent("alpha").is_some());
         assert!(mgr.resolve_agent("beta").is_some());
         assert!(mgr.resolve_agent("gamma").is_none());
     }
 
-    #[test]
-    fn agent_descriptions_lists_all() {
+    #[tokio::test]
+    async fn agent_descriptions_lists_all() {
         let mgr = make_manager(vec![test_agent("a"), test_agent("b")]);
         let descs = mgr.agent_descriptions();
         assert_eq!(descs.len(), 2);
@@ -536,8 +652,8 @@ mod tests {
         assert!(descs.iter().any(|(id, _)| id == "b"));
     }
 
-    #[test]
-    fn set_available_agents_replaces_list() {
+    #[tokio::test]
+    async fn set_available_agents_replaces_list() {
         let mut mgr = make_manager(vec![test_agent("old")]);
         assert!(mgr.resolve_agent("old").is_some());
         mgr.set_available_agents(vec![test_agent("new")]);
@@ -603,8 +719,8 @@ mod tests {
         assert!(err.unwrap_err().to_string().contains("depth limit"));
     }
 
-    #[test]
-    fn list_runs_filters_by_session() {
+    #[tokio::test]
+    async fn list_runs_filters_by_session() {
         let mgr = make_manager(vec![]);
         let run1 = SubAgentRun {
             run_id: "r1".into(),
@@ -635,8 +751,8 @@ mod tests {
         assert_eq!(mgr.list_runs(Some("s999")).len(), 0);
     }
 
-    #[test]
-    fn gc_removes_old_terminal_runs() {
+    #[tokio::test]
+    async fn gc_removes_old_terminal_runs() {
         let mgr = make_manager(vec![]);
         let old_run = SubAgentRun {
             run_id: "old".into(),
@@ -673,8 +789,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn cancel_nonexistent_run_returns_false() {
+    #[tokio::test]
+    async fn cancel_nonexistent_run_returns_false() {
         let mgr = make_manager(vec![]);
         assert!(!mgr.cancel("nonexistent"));
     }

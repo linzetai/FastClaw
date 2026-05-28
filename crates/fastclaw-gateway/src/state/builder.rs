@@ -837,6 +837,46 @@ impl StateBuilder {
             )));
         tracing::info!("registered channel management tools (incl. notify_channel)");
 
+        {
+            let json_dir = PathBuf::from("config/sub-agents");
+            let md_dir = PathBuf::from(".fastclaw/agents");
+            let mut subagent_defs = fastclaw_core::agent_config::load_all_subagent_defs(
+                Some(&json_dir),
+                Some(&md_dir),
+            );
+
+            // Also load user-level sub-agent definitions from ~/.fastclaw/subagents/
+            if let Some(home) = dirs::home_dir() {
+                let user_md_dir = home.join(".fastclaw").join("subagents");
+                if user_md_dir.exists() {
+                    match fastclaw_core::agent_config::load_subagent_defs_markdown(&user_md_dir) {
+                        Ok(user_defs) => {
+                            for d in user_defs {
+                                if let Some(existing) = subagent_defs.iter_mut().find(|e| e.id == d.id) {
+                                    tracing::info!(id = %d.id, "user sub-agent def overrides existing");
+                                    *existing = d;
+                                } else {
+                                    subagent_defs.push(d);
+                                }
+                            }
+                        }
+                        Err(e) => tracing::warn!(
+                            dir = %user_md_dir.display(),
+                            error = %e,
+                            "failed to load user markdown sub-agent defs"
+                        ),
+                    }
+                }
+            }
+
+            let def_count = subagent_defs.len();
+            state
+                .strm
+                .subagent_manager
+                .set_subagent_defs(subagent_defs);
+            tracing::info!(count = def_count, "loaded sub-agent definitions (builtin + custom + user)");
+        }
+
         state
             .rt
             .tool_registry

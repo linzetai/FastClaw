@@ -100,6 +100,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, auth: ApiKeyAuth, pre
                             "cancel", "answer", "set_mode",
                             "models.list", "config.get", "config.set",
                             "mcp.status", "mcp.reload", "mcp.add", "mcp.remove",
+                            "sub_agents.list",
                             "agents.get", "agents.create", "agents.update", "agents.delete",
                             "tools.list", "tools.update", "tools.submit_answer",
                             "skills.list", "skills.refresh",
@@ -312,6 +313,23 @@ async fn dispatch(
                     id,
                     msg_type: "pong".into(),
                     data: Some(json!({"ts": chrono::Utc::now().to_rfc3339()})),
+                    error: None,
+                },
+            )
+            .await;
+        }
+        ClientOp::SubAgentsList => {
+            let defs = state.strm.subagent_manager.subagent_defs();
+            let agents_json: Vec<serde_json::Value> = defs
+                .iter()
+                .map(crate::routes::subagent::subagent_def_to_json)
+                .collect();
+            send_resp(
+                sender,
+                &WsResponse {
+                    id,
+                    msg_type: "sub_agents.list".into(),
+                    data: Some(json!({ "agents": agents_json })),
                     error: None,
                 },
             )

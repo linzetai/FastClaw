@@ -18,10 +18,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 }));
 
 useAgentStore.subscribe((state, prev) => {
-  if (
-    state.activeAgentId !== prev.activeAgentId ||
-    state.agentChats !== prev.agentChats
-  ) {
+  if (state.agentChats !== prev.agentChats) {
     saveUIState(state);
   }
 });

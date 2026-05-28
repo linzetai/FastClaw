@@ -19,25 +19,12 @@ export function SkillsTab() {
 
   const loadAllSkills = useCallback(async () => {
     try {
-      const [globalSkills, agentsResp] = await Promise.all([
+      const [globalSkills, mainSkills] = await Promise.all([
         api.listSkills(),
-        api.getConfig("agents") as Promise<{ key?: string; value?: { list?: { id: string; name: string }[] } } | null>,
+        api.listSkills("main"),
       ]);
       setPublicSkills(globalSkills);
-      const agentList = ((agentsResp?.value ?? agentsResp) as { list?: { id: string; name: string }[] } | null)?.list ?? [];
-      const agentMap: Record<string, api.SkillInfo[]> = {};
-      const results = await Promise.allSettled(
-        agentList.map(async (a) => {
-          const skills = await api.listSkills(a.id);
-          return { id: a.id, skills };
-        })
-      );
-      for (const r of results) {
-        if (r.status === "fulfilled") {
-          agentMap[r.value.id] = r.value.skills;
-        }
-      }
-      setAgentSkillsMap(agentMap);
+      setAgentSkillsMap(mainSkills.length > 0 ? { main: mainSkills } : {});
     } catch { /* silent */ }
   }, []);
 

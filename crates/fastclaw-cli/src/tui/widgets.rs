@@ -8,7 +8,7 @@ use ratatui::{
 
 use super::state::*;
 
-pub(crate) fn draw_popup(f: &mut Frame, popup: &PopupKind, agents: &[AgentInfo], select_state: Option<&super::state::SelectState>) {
+pub(crate) fn draw_popup(f: &mut Frame, popup: &PopupKind, select_state: Option<&super::state::SelectState>) {
     let area = f.area();
     let popup_area = centered_rect(60, 60, area);
 
@@ -69,11 +69,11 @@ pub(crate) fn draw_popup(f: &mut Frame, popup: &PopupKind, agents: &[AgentInfo],
                     ],
                 ),
                 (
-                    "Model & Agent",
+                    "Model",
                     &[
                         ("/model", "Set or show the AI model"),
-                        ("/agent", "Switch agent"),
-                        ("/agents", "List available agents"),
+                        ("/agent", "Deprecated (single-agent mode)"),
+                        ("/agents", "Deprecated (single-agent mode)"),
                     ],
                 ),
                 (
@@ -145,44 +145,6 @@ pub(crate) fn draw_popup(f: &mut Frame, popup: &PopupKind, agents: &[AgentInfo],
                     .block(block)
                     .wrap(Wrap { trim: false }),
                 help_area,
-            );
-        }
-        PopupKind::Agents => {
-            let mut lines = vec![
-                Line::from(Span::styled(
-                    "Available Agents",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::default(),
-            ];
-            for a in agents {
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("  {:<15}", a.id),
-                        Style::default().fg(Color::Yellow),
-                    ),
-                    Span::raw(format!("{} ({})", a.name, a.model)),
-                ]));
-            }
-            lines.push(Line::default());
-            lines.push(Line::from(Span::raw("  Use /agent <id> to switch")));
-            lines.push(Line::default());
-            lines.push(Line::from(Span::styled(
-                " Press Esc/Enter to close ",
-                Style::default().fg(Color::DarkGray),
-            )));
-
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan))
-                .title(" Agents ");
-            f.render_widget(
-                Paragraph::new(lines)
-                    .block(block)
-                    .wrap(Wrap { trim: false }),
-                popup_area,
             );
         }
         PopupKind::AskQuestion {

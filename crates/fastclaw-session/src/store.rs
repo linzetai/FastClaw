@@ -319,6 +319,38 @@ impl SessionStore {
             tracing::info!("migrated sessions table: added source column with backfill");
         }
 
+        // Migration: add transcript_json column to subagent_runs for sidechain transcript
+        let has_transcript: bool = sqlx::query_scalar::<_, i32>(
+            "SELECT COUNT(*) FROM pragma_table_info('subagent_runs') WHERE name = 'transcript_json'",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map(|c| c > 0)
+        .unwrap_or(false);
+        if !has_transcript {
+            sqlx::query("ALTER TABLE subagent_runs ADD COLUMN transcript_json TEXT")
+                .execute(&self.pool)
+                .await?;
+            tracing::info!("migrated subagent_runs table: added transcript_json column");
+        }
+
+        // Migration: normalize all sessions.agent_id to "main" (single-agent refactoring)
+        let non_main_count: i32 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sessions WHERE agent_id != 'main'",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
+        if non_main_count > 0 {
+            sqlx::query("UPDATE sessions SET agent_id = 'main' WHERE agent_id != 'main'")
+                .execute(&self.pool)
+                .await?;
+            tracing::info!(
+                count = non_main_count,
+                "migrated sessions: normalized agent_id to 'main'"
+            );
+        }
+
         // history_items: canonical HistoryItem persistence (Sprint 7)
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS history_items (
@@ -381,6 +413,16 @@ impl SessionStore {
         work_dir: Option<&str>,
         source: Option<&str>,
     ) -> anyhow::Result<SessionCreateOutcome> {
+        let effective_agent_id = if agent_id != "main" {
+            tracing::debug!(
+                original = %agent_id,
+                "normalizing session agent_id to 'main'"
+            );
+            "main"
+        } else {
+            agent_id
+        };
+
         let mut tx = self.pool.begin().await?;
 
         let existed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE id = ?")
@@ -393,7 +435,7 @@ impl SessionStore {
              ON CONFLICT(id) DO UPDATE SET updated_at = datetime('now')",
         )
         .bind(session_id)
-        .bind(agent_id)
+        .bind(effective_agent_id)
         .bind(title)
         .bind(work_dir)
         .bind(source.unwrap_or("client"))
@@ -930,8 +972,8 @@ impl SessionStore {
                 run_id, parent_session_id, parent_message_id, agent_id,
                 subagent_type, task, status, result,
                 tool_calls_made, iterations, token_usage_json,
-                depth, elapsed_ms, created_at, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                depth, elapsed_ms, created_at, completed_at, transcript_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id) DO UPDATE SET
                 status = excluded.status,
                 result = excluded.result,
@@ -939,7 +981,8 @@ impl SessionStore {
                 iterations = excluded.iterations,
                 token_usage_json = excluded.token_usage_json,
                 elapsed_ms = excluded.elapsed_ms,
-                completed_at = excluded.completed_at",
+                completed_at = excluded.completed_at,
+                transcript_json = excluded.transcript_json",
         )
         .bind(&run.run_id)
         .bind(&run.parent_session_id)
@@ -956,6 +999,7 @@ impl SessionStore {
         .bind(run.elapsed_ms)
         .bind(&run.created_at)
         .bind(&run.completed_at)
+        .bind(&run.transcript_json)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -1374,7 +1418,7 @@ mod tests {
         let store = SessionStore::open_memory().await.unwrap();
         assert_eq!(
             store
-                .create_session("dup", "a1", Some("first"))
+                .create_session("dup", "main", Some("first"))
                 .await
                 .unwrap(),
             SessionCreateOutcome::Created
@@ -1391,14 +1435,14 @@ mod tests {
 
         assert_eq!(
             store
-                .create_session("dup", "a2", Some("second"))
+                .create_session("dup", "main", Some("second"))
                 .await
                 .unwrap(),
             SessionCreateOutcome::AlreadyExisted
         );
 
         let s = store.get_session("dup").await.unwrap().unwrap();
-        assert_eq!(s.agent_id, "a1");
+        assert_eq!(s.agent_id, "main");
         assert_eq!(s.title.as_deref(), Some("first"));
         assert_ne!(
             s.updated_at, stale_updated_at,
@@ -1496,6 +1540,7 @@ mod tests {
             elapsed_ms: Some(1500),
             created_at: "2025-01-01T00:00:00Z".into(),
             completed_at: Some("2025-01-01T00:00:01Z".into()),
+            transcript_json: None,
         }
     }
 

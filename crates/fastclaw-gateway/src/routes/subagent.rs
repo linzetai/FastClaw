@@ -69,6 +69,31 @@ impl From<fastclaw_core::types::SubAgentRun> for SubAgentRunResponse {
     }
 }
 
+/// Serialize a `SubAgentDef` to a JSON value for API responses.
+pub fn subagent_def_to_json(d: &fastclaw_core::agent_config::SubAgentDef) -> serde_json::Value {
+    serde_json::json!({
+        "id": d.id,
+        "name": d.name,
+        "description": d.description,
+        "background": d.background,
+        "concurrency_safe": d.concurrency_safe,
+        "tools": {
+            "allowed": d.tools.allowed,
+            "denied": d.tools.denied,
+        },
+        "source": format!("{:?}", d.source),
+    })
+}
+
+/// GET /api/v1/subagents/defs — list all sub-agent definitions
+pub async fn list_subagent_defs(
+    State(state): State<AppState>,
+) -> Json<serde_json::Value> {
+    let defs = state.strm.subagent_manager.subagent_defs();
+    let agents: Vec<serde_json::Value> = defs.iter().map(subagent_def_to_json).collect();
+    Json(serde_json::json!({ "agents": agents }))
+}
+
 /// GET /api/v1/subagents/runs?sessionId=...
 pub async fn list_subagent_runs(
     State(state): State<AppState>,

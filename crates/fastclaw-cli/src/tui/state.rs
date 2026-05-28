@@ -226,7 +226,6 @@ pub struct TuiApp {
 #[derive(Clone, Debug)]
 pub(crate) enum PopupKind {
     Help,
-    Agents,
     Sessions(Vec<Value>),
     AskQuestion {
         request_id: String,

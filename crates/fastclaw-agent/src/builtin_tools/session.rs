@@ -280,7 +280,7 @@ mod session_tools_tests {
         assert!(!sid.is_empty());
 
         let s = store.get_session(sid).await.unwrap().unwrap();
-        assert_eq!(s.agent_id, "agent-a");
+        assert_eq!(s.agent_id, "main");
         assert_eq!(s.title.as_deref(), Some("t1"));
     }
 
