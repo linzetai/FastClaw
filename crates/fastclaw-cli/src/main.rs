@@ -113,6 +113,8 @@ enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+    /// Initialize .fastclaw/ project configuration in the current directory
+    Init,
 }
 
 #[derive(Subcommand)]
@@ -446,6 +448,7 @@ async fn main() -> anyhow::Result<()> {
             | Commands::Health
             | Commands::Doctor
             | Commands::Exec { .. }
+            | Commands::Init
     );
 
     if !quiet {
@@ -562,6 +565,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Setup => {
             cmd_setup(&mode)?;
+        }
+        Commands::Init => {
+            cmd_init()?;
         }
         Commands::Onboard => {
             cmd_onboard(&mode)?;
@@ -1498,6 +1504,86 @@ fn prompt_line(msg: &str) -> String {
     let mut buf = String::new();
     std::io::stdin().read_line(&mut buf).unwrap_or_default();
     buf.trim().to_string()
+}
+
+fn cmd_init() -> anyhow::Result<()> {
+    let cwd = std::env::current_dir()?;
+    let ws_root = fastclaw_core::workspace::detect_workspace_root(&cwd);
+    let fastclaw_dir = ws_root.join(".fastclaw");
+
+    if fastclaw_dir.exists() {
+        println!("✓ .fastclaw/ already exists at {}", ws_root.display());
+        return Ok(());
+    }
+
+    println!("Initializing .fastclaw/ in {}", ws_root.display());
+
+    std::fs::create_dir_all(fastclaw_dir.join("skills"))?;
+    std::fs::create_dir_all(fastclaw_dir.join("rules"))?;
+
+    let config_template = serde_json::json!({
+        "// FastClaw project-level configuration": "Override user/global settings for this project.",
+        "// Docs": "https://github.com/user/FastClaw#configuration",
+    });
+    let config_path = fastclaw_dir.join("config.json");
+    std::fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&config_template)? + "\n",
+    )?;
+
+    let mcp_template = serde_json::json!({
+        "mcpServers": {}
+    });
+    let mcp_path = fastclaw_dir.join("mcp.json");
+    std::fs::write(
+        &mcp_path,
+        serde_json::to_string_pretty(&mcp_template)? + "\n",
+    )?;
+
+    println!("  Created .fastclaw/config.json");
+    println!("  Created .fastclaw/mcp.json");
+    println!("  Created .fastclaw/skills/");
+    println!("  Created .fastclaw/rules/");
+
+    let gitignore = ws_root.join(".gitignore");
+    if gitignore.exists() {
+        let content = std::fs::read_to_string(&gitignore)?;
+        if !content.contains(".fastclaw/") {
+            print!("Add .fastclaw/ to .gitignore? [Y/n] ");
+            use std::io::Write;
+            std::io::stdout().flush()?;
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input)?;
+            let input = input.trim().to_lowercase();
+            if input.is_empty() || input == "y" || input == "yes" {
+                let mut f = std::fs::OpenOptions::new().append(true).open(&gitignore)?;
+                writeln!(f, "\n# FastClaw project config")?;
+                writeln!(f, ".fastclaw/")?;
+                println!("  Added .fastclaw/ to .gitignore");
+            }
+        }
+    }
+
+    let project_hints: Vec<&str> = [
+        ("Cargo.toml", "Rust"),
+        ("package.json", "Node.js"),
+        ("pyproject.toml", "Python"),
+        ("go.mod", "Go"),
+        ("pom.xml", "Java/Maven"),
+    ]
+    .iter()
+    .filter(|(file, _)| ws_root.join(file).exists())
+    .map(|(_, lang)| *lang)
+    .collect();
+
+    if !project_hints.is_empty() {
+        println!("  Detected project type: {}", project_hints.join(", "));
+    }
+
+    println!("\n✓ Initialization complete!");
+    println!("  You can now add skills to .fastclaw/skills/");
+    println!("  and rules to .fastclaw/rules/");
+    Ok(())
 }
 
 fn cmd_setup(mode: &fastclaw_core::config::ConfigMode) -> anyhow::Result<()> {

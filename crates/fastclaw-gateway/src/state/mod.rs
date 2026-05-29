@@ -281,7 +281,7 @@ impl AppState {
         use fastclaw_core::agent_config::McpServerConfig;
         use fastclaw_core::types::{McpServerStatus, McpStatus};
 
-        let desired: Vec<McpServerConfig> = {
+        let mut desired: Vec<McpServerConfig> = {
             let live = self.cfg.config_live.load();
             let mcp_val = live
                 .get("mcpServers")
@@ -289,6 +289,26 @@ impl AppState {
                 .unwrap_or(serde_json::Value::Array(vec![]));
             serde_json::from_value(mcp_val).unwrap_or_default()
         };
+
+        if let Ok(cwd) = std::env::current_dir() {
+            let ws_root = fastclaw_core::workspace::detect_workspace_root(&cwd);
+            if let Some(project_mcp) =
+                fastclaw_core::agent_config::load_project_mcp_config(&ws_root)
+            {
+                let project_configs = project_mcp.to_mcp_server_configs();
+                let existing_ids: std::collections::HashSet<String> =
+                    desired.iter().map(|c| c.id.clone()).collect();
+                for cfg in project_configs {
+                    if existing_ids.contains(&cfg.id) {
+                        if cfg.enabled == Some(false) {
+                            desired.retain(|c| c.id != cfg.id);
+                        }
+                    } else {
+                        desired.push(cfg);
+                    }
+                }
+            }
+        }
 
         let desired_map: std::collections::HashMap<String, &McpServerConfig> =
             desired.iter().map(|c| (c.id.clone(), c)).collect();
@@ -1208,16 +1228,19 @@ impl AppState {
 
         let paths_cfg = &self.cfg.config.paths;
         let skills_dir = helpers::resolve_skills_dir(paths_cfg);
-        let global_skills_dir = fastclaw_core::skill::resolve_global_skills_dir();
 
-        let project_registry =
+        let workspace_root = std::env::current_dir()
+            .ok()
+            .map(|cwd| fastclaw_core::workspace::detect_workspace_root(&cwd));
+
+        let legacy_project_registry =
             load_skills_from_dirs_with_layer(&[skills_dir.as_path()], SkillLayer::Project);
-        let global_registry =
-            load_skills_from_dirs_with_layer(&[global_skills_dir.as_path()], SkillLayer::Global);
+        let cross_tool_registry =
+            fastclaw_core::skill::load_skills_cross_tool(workspace_root.as_deref());
 
         let mut base = SkillRegistry::new();
-        base.merge_from(project_registry);
-        base.merge_from(global_registry);
+        base.merge_from(legacy_project_registry);
+        base.merge_from(cross_tool_registry);
 
         let filtered_base = Arc::new(base.filtered(
             &self.cfg.config.skills.allow,

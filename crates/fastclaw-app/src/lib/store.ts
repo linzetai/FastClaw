@@ -78,8 +78,10 @@ export const useGatewayStore = create<GatewayState>((set) => ({
         sessionChangedUnsub = transport.onSessionChanged(async (sid) => {
           try {
             const session = await transport.getSession(sid);
-            if (session?.title) {
-              useAgentStore.getState().renameChat("main", sid, session.title);
+            if (session) {
+              const store = useAgentStore.getState();
+              if (session.title) store.renameChat("main", sid, session.title);
+              if (session.workDir !== undefined) store.setWorkDir("main", sid, session.workDir ?? null);
             }
           } catch {
             /* ignore */
@@ -111,8 +113,10 @@ export const useGatewayStore = create<GatewayState>((set) => ({
           sessionChangedUnsub = transport.onSessionChanged(async (sid) => {
             try {
               const session = await transport.getSession(sid);
-              if (session?.title) {
-                useAgentStore.getState().renameChat("main", sid, session.title);
+              if (session) {
+                const store = useAgentStore.getState();
+                if (session.title) store.renameChat("main", sid, session.title);
+                if (session.workDir !== undefined) store.setWorkDir("main", sid, session.workDir ?? null);
               }
             } catch {
               /* ignore */

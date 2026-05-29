@@ -151,25 +151,32 @@ impl StateBuilder {
 
         use fastclaw_core::skill::{load_skills_from_dirs_with_layer, SkillLayer};
 
+        let workspace_root = std::env::current_dir()
+            .ok()
+            .map(|cwd| fastclaw_core::workspace::detect_workspace_root(&cwd));
+
         let skills_dir = helpers::resolve_skills_dir(paths_cfg);
-        let global_skills_dir = fastclaw_core::skill::resolve_global_skills_dir();
 
         let ext_registry = SkillRegistry::new();
-        let project_registry =
-            load_skills_from_dirs_with_layer(&[skills_dir.as_path()], SkillLayer::Project);
-        let global_registry =
-            load_skills_from_dirs_with_layer(&[global_skills_dir.as_path()], SkillLayer::Global);
+        let cross_tool_registry =
+            fastclaw_core::skill::load_skills_cross_tool(workspace_root.as_deref());
+
+        let legacy_project_registry = fastclaw_core::skill::load_skills_from_dirs_with_layer(
+            &[skills_dir.as_path()],
+            SkillLayer::Project,
+        );
 
         let mut base_skill_registry = SkillRegistry::new();
+        fastclaw_core::skill::register_builtin_skills(&mut base_skill_registry);
         base_skill_registry.merge_from(ext_registry);
-        base_skill_registry.merge_from(project_registry);
-        base_skill_registry.merge_from(global_registry);
+        base_skill_registry.merge_from(legacy_project_registry);
+        base_skill_registry.merge_from(cross_tool_registry);
 
         tracing::info!(
             base_skills = base_skill_registry.count(),
             skills_dir = %skills_dir.display(),
-            global_dir = %global_skills_dir.display(),
-            "base skill registry loaded (extension + project + global)"
+            workspace_root = ?workspace_root.as_deref().map(|p| p.display().to_string()),
+            "base skill registry loaded (extension + legacy-project + cross-tool)"
         );
 
         // Sanitize skills deny list: remove entries for skills that no longer exist on disk.
@@ -291,9 +298,34 @@ impl StateBuilder {
         config: &FastClawConfig,
         p3: BuildPhase3,
     ) -> anyhow::Result<BuildPhase4> {
+        let mut all_mcp_servers = config.mcp_servers.clone();
+        if let Ok(cwd) = std::env::current_dir() {
+            let ws_root = fastclaw_core::workspace::detect_workspace_root(&cwd);
+            if let Some(project_mcp) =
+                fastclaw_core::agent_config::load_project_mcp_config(&ws_root)
+            {
+                let project_configs = project_mcp.to_mcp_server_configs();
+                let existing_ids: std::collections::HashSet<String> =
+                    all_mcp_servers.iter().map(|c| c.id.clone()).collect();
+                for cfg in project_configs {
+                    if existing_ids.contains(&cfg.id) {
+                        if cfg.enabled == Some(false) {
+                            all_mcp_servers.retain(|c| c.id != cfg.id);
+                            tracing::info!(
+                                mcp_id = %cfg.id,
+                                "project MCP config disabled global server"
+                            );
+                        }
+                    } else {
+                        all_mcp_servers.push(cfg);
+                    }
+                }
+            }
+        }
+
         let (mcp_status_init, mcp_handles_init) = super::AppState::register_mcp_and_subagent_tools(
             &p3.phase1.agents,
-            &config.mcp_servers,
+            &all_mcp_servers,
             p3.runtime.clone(),
             &p3.tool_registry,
         )

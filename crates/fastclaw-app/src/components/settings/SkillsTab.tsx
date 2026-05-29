@@ -33,7 +33,7 @@ export function SkillsTab() {
     const loadAll = async () => {
       const [, toolList] = await Promise.all([
         loadAllSkills(),
-        api.listTools(),
+        api.listTools().catch(() => null),
       ]);
       if (toolList) setTools(toolList);
       setLoading(false);
@@ -91,18 +91,20 @@ export function SkillsTab() {
 
   const SkillRow = ({ skill, isLast }: { skill: api.SkillInfo; isLast: boolean }) => (
     <div
-      className="px-4 py-3 transition-colors duration-100 hover:bg-[var(--bg-hover)]"
+      className="px-4 py-2.5 transition-colors duration-100 hover:bg-[var(--bg-hover)]"
       style={!isLast ? { borderBottom: "0.5px solid var(--separator)" } : undefined}
     >
-      <div className="flex items-center justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 truncate text-[13px] font-semibold" style={{ color: "var(--fill-primary)" }} title={skill.name}>{skill.name}</span>
+      <div className="min-w-0">
+        <div className="min-w-0 overflow-hidden">
+          <div className="flex items-baseline gap-2">
+            <span className="break-all text-[13px] font-semibold leading-snug" style={{ color: "var(--fill-primary)" }}>{skill.name}</span>
             {skill.version && <span className="shrink-0 text-[10px]" style={{ color: "var(--fill-quaternary)" }}>v{skill.version}</span>}
           </div>
-          <div className="mt-0.5 line-clamp-2 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>{skill.description}</div>
+          {skill.description && (
+            <div className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed" style={{ color: "var(--fill-tertiary)" }}>{skill.description}</div>
+          )}
           {skill.tags && skill.tags.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1">
+            <div className="mt-1 flex flex-wrap gap-1">
               {skill.tags.map((tag) => (
                 <span key={tag} className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: "var(--bg-tertiary)", color: "var(--fill-tertiary)" }}>
                   {tag}
@@ -116,7 +118,7 @@ export function SkillsTab() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4 overflow-hidden">
       <div className="flex items-center justify-between">
         <SectionTitle>能力管理</SectionTitle>
         <div className="flex items-center gap-2">

@@ -62,6 +62,108 @@ fn default_transport() -> String {
     "stdio".to_string()
 }
 
+/// Cursor-compatible project-level MCP configuration.
+///
+/// File: `<workspace_root>/.fastclaw/mcp.json` or `<workspace_root>/.cursor/mcp.json`
+///
+/// Format (Cursor-compatible):
+/// ```json
+/// {
+///   "mcpServers": {
+///     "server-id": {
+///       "command": "npx",
+///       "args": ["-y", "@some/mcp-server"],
+///       "env": { "KEY": "value" },
+///       "disabled": true
+///     }
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMcpConfig {
+    #[serde(default)]
+    pub mcp_servers: HashMap<String, ProjectMcpServerEntry>,
+}
+
+/// A single MCP server entry in the project-level config.
+/// Compatible with Cursor's `.cursor/mcp.json` format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMcpServerEntry {
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub disabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default = "default_transport")]
+    pub transport: String,
+}
+
+impl ProjectMcpConfig {
+    /// Convert to a flat list of `McpServerConfig`, compatible with the global config format.
+    pub fn to_mcp_server_configs(&self) -> Vec<McpServerConfig> {
+        self.mcp_servers
+            .iter()
+            .map(|(id, entry)| McpServerConfig {
+                id: id.clone(),
+                command: entry.command.clone(),
+                args: entry.args.clone(),
+                enabled: entry.disabled.map(|d| !d),
+                env: entry.env.clone(),
+                url: entry.url.clone(),
+                transport: entry.transport.clone(),
+            })
+            .collect()
+    }
+}
+
+/// Load project-level MCP config from the workspace root.
+///
+/// Searches: `.fastclaw/mcp.json` (preferred), then `.cursor/mcp.json` (compatibility).
+pub fn load_project_mcp_config(workspace_root: &std::path::Path) -> Option<ProjectMcpConfig> {
+    let candidates = [
+        workspace_root.join(".fastclaw/mcp.json"),
+        workspace_root.join(".cursor/mcp.json"),
+    ];
+    for path in &candidates {
+        if path.exists() {
+            match std::fs::read_to_string(path) {
+                Ok(content) => match serde_json::from_str::<ProjectMcpConfig>(&content) {
+                    Ok(cfg) => {
+                        tracing::info!(
+                            path = %path.display(),
+                            server_count = cfg.mcp_servers.len(),
+                            "loaded project-level MCP config"
+                        );
+                        return Some(cfg);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %path.display(),
+                            error = %e,
+                            "failed to parse project MCP config"
+                        );
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "failed to read project MCP config"
+                    );
+                }
+            }
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentModelConfig {

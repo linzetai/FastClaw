@@ -551,6 +551,64 @@ pub fn resolve_workspace_root(
     }
 }
 
+/// Project-root marker files, ordered by priority (highest first).
+///
+/// `.fastclaw/` is the strongest signal; `.git/` is the de-facto standard for
+/// version-controlled projects; language-specific manifest files act as fallback.
+const ROOT_MARKERS_HIGH: &[&str] = &[".fastclaw", ".git"];
+const ROOT_MARKERS_LANG: &[&str] = &[
+    "Cargo.toml",
+    "package.json",
+    "pyproject.toml",
+    "go.mod",
+    "pom.xml",
+    "build.gradle",
+    "Makefile",
+    ".hg",
+    ".svn",
+];
+
+/// Walk up from `start` looking for project-root markers.
+///
+/// Priority: `.fastclaw/` > `.git/` > language manifests.
+/// If nothing is found, returns `start` unchanged.
+pub fn detect_workspace_root(start: &Path) -> PathBuf {
+    let start = start
+        .canonicalize()
+        .unwrap_or_else(|_| start.to_path_buf());
+
+    let mut best: Option<(PathBuf, u8)> = None; // (path, priority) — lower is higher
+
+    let mut dir = start.as_path();
+    loop {
+        for (prio, marker) in ROOT_MARKERS_HIGH.iter().enumerate() {
+            if dir.join(marker).exists() {
+                let p = prio as u8;
+                if best.as_ref().is_none_or(|(_, bp)| p < *bp) {
+                    best = Some((dir.to_path_buf(), p));
+                }
+                if p == 0 {
+                    return dir.to_path_buf();
+                }
+            }
+        }
+        for marker in ROOT_MARKERS_LANG {
+            if dir.join(marker).exists() {
+                let p = ROOT_MARKERS_HIGH.len() as u8;
+                if best.is_none() {
+                    best = Some((dir.to_path_buf(), p));
+                }
+            }
+        }
+        match dir.parent() {
+            Some(parent) if parent != dir => dir = parent,
+            _ => break,
+        }
+    }
+
+    best.map(|(p, _)| p).unwrap_or(start)
+}
+
 /// Write a SKILL.md file into the global shared skills directory (`~/.fastclaw/skills/`).
 pub fn write_global_skill(skill_id: &str, content: &str) -> anyhow::Result<PathBuf> {
     validate_skill_id(skill_id)?;

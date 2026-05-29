@@ -236,6 +236,16 @@ export async function setSessionWorkDir(sessionId: string, workDir: string | nul
   await wsClient.send("sessions.set_work_dir", { sessionId, workDir });
 }
 
+export async function workspaceInit(workDir?: string): Promise<{
+  alreadyExists: boolean;
+  root: string;
+  message: string;
+  created?: string[];
+}> {
+  const resp = await wsClient.send("workspace.init", workDir ? { workDir } : {}) as { data?: Record<string, unknown> };
+  return (resp?.data ?? resp) as { alreadyExists: boolean; root: string; message: string; created?: string[] };
+}
+
 export interface ModelInfo {
   agentId: string;
   model: string;

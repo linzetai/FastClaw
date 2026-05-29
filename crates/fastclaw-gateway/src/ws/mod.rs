@@ -495,6 +495,9 @@ async fn dispatch(
             )
             .await;
         }
+        ClientOp::WorkspaceInit { work_dir } => {
+            session::handle_workspace_init(sender, state, id, work_dir).await
+        }
         ClientOp::Subscribe { events } => {
             for e in &events {
                 subscriptions.insert(e.clone());

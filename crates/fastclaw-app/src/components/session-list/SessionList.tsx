@@ -119,8 +119,9 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
   }, [chatList, query]);
 
   const handleNewChat = useCallback(() => {
-    newChat(DEFAULT_AGENT_ID);
-  }, [newChat]);
+    const activeChat = chatList.find((c) => c.id === activeChatId);
+    newChat(DEFAULT_AGENT_ID, activeChat?.workDir ?? undefined);
+  }, [newChat, chatList, activeChatId]);
 
   const handleSelectChat = useCallback((chatId: string) => {
     setActiveChat(DEFAULT_AGENT_ID, chatId);
@@ -138,25 +139,29 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
     setRenameValue("");
   }, [renamingChatId, renameValue, renameChat]);
 
-  const formatDate = (date: Date) => {
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffDays = Math.floor(diffMs / 86400000);
-    if (diffDays === 0) return "今天";
-    if (diffDays === 1) return "昨天";
-    if (diffDays < 7) return `${diffDays}天前`;
-    return date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
-  };
+  const extractProjectName = useCallback((workDir: string) => {
+    const parts = workDir.replace(/\\/g, "/").split("/");
+    return parts[parts.length - 1] || workDir;
+  }, []);
 
   const groupedChats = useMemo(() => {
-    const groups: Record<string, Chat[]> = {};
+    const groups: Record<string, { workDir: string | null; chats: Chat[] }> = {};
     for (const chat of filteredChats) {
-      const label = formatDate(chat.createdAt);
-      if (!groups[label]) groups[label] = [];
-      groups[label].push(chat);
+      const label = chat.workDir
+        ? extractProjectName(chat.workDir)
+        : "未关联项目";
+      if (!groups[label]) groups[label] = { workDir: chat.workDir ?? null, chats: [] };
+      groups[label].chats.push(chat);
+    }
+    for (const group of Object.values(groups)) {
+      group.chats.sort((a, b) => {
+        const ta = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+        const tb = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+        return tb - ta;
+      });
     }
     return groups;
-  }, [filteredChats]);
+  }, [filteredChats, extractProjectName]);
 
   return (
     <aside
@@ -252,13 +257,22 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
             </button>
           ))
         ) : (
-          Object.entries(groupedChats).map(([label, chats]) => (
+          Object.entries(groupedChats).map(([label, { workDir: groupWorkDir, chats }]) => (
             <div key={label} className="mb-1">
               <div
-                className="px-2.5 pb-1 pt-2 text-[11px] font-medium"
+                className="group/grp flex items-center gap-1.5 px-2.5 pb-1 pt-2 text-[11px] font-medium"
                 style={{ color: "var(--fill-quaternary)" }}
               >
-                {label}
+                <span className="truncate">{label}</span>
+                <span className="shrink-0 opacity-60">{chats.length}</span>
+                <button
+                  onClick={() => newChat(DEFAULT_AGENT_ID, groupWorkDir ?? undefined)}
+                  className="ml-auto shrink-0 rounded p-0.5 opacity-0 transition-opacity duration-100 hover:bg-[var(--bg-hover)] group-hover/grp:opacity-100"
+                  style={{ color: "var(--fill-tertiary)" }}
+                  title={groupWorkDir ? `在 ${label} 新建对话` : "新建对话"}
+                >
+                  <Plus size={12} strokeWidth={2} />
+                </button>
               </div>
               {chats.map((chat) => {
                 const active = activeChatId === chat.id;

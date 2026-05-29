@@ -86,7 +86,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             </button>
           ))}
         </div>
-        <div className="flex flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex shrink-0 items-center justify-between px-6 py-4" style={{ borderBottom: `0.5px solid var(--separator)` }}>
             <h2 className="text-[15px] font-semibold" style={{ color: "var(--fill-primary)" }}>
               {TABS.find((t) => t.id === tab)?.label}
@@ -95,7 +95,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
               <X {...ICON.md} />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto px-6 py-5">
+          <div className="min-w-0 flex-1 overflow-y-auto px-6 py-5">
             <Suspense fallback={<div className="h-full" style={{ background: "var(--bg-elevated)" }} />}>
               <div key={tab} style={{ animation: "tab-crossfade var(--duration-normal) var(--ease-out)" }}>
                 {tab === "general" && <GeneralTab />}

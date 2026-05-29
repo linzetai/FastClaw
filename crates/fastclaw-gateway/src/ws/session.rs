@@ -24,6 +24,7 @@ pub async fn handle_sessions_list(
             let count = sessions.len();
             let data: Vec<_> = sessions.iter().map(|s| json!({
                 "id": s.id, "agentId": s.agent_id, "title": s.title,
+                "workDir": s.work_dir, "source": s.source,
                 "messageCount": s.message_count, "createdAt": s.created_at, "updatedAt": s.updated_at,
                 "totalPromptTokens": s.total_prompt_tokens,
                 "totalCompletionTokens": s.total_completion_tokens,
@@ -80,6 +81,7 @@ pub async fn handle_sessions_get(
                 id: req_id, msg_type: "sessions.get".into(),
                 data: Some(json!({
                     "id": s.id, "agentId": s.agent_id, "title": s.title,
+                    "workDir": s.work_dir, "source": s.source,
                     "messageCount": s.message_count, "createdAt": s.created_at, "updatedAt": s.updated_at,
                     "totalPromptTokens": s.total_prompt_tokens,
                     "totalCompletionTokens": s.total_completion_tokens,
@@ -241,11 +243,24 @@ pub async fn handle_sessions_new(
         .map(|a| a.as_str())
         .unwrap_or("main");
     let new_id = uuid::Uuid::new_v4().to_string();
-    let work_dir = state
-        .rt
-        .workspaces
-        .get(agent_id)
-        .map(|ws| ws.root.to_string_lossy().to_string());
+    let work_dir = params
+        .work_dir
+        .clone()
+        .or_else(|| {
+            let cwd = std::env::current_dir().ok()?;
+            Some(
+                fastclaw_core::workspace::detect_workspace_root(&cwd)
+                    .to_string_lossy()
+                    .to_string(),
+            )
+        })
+        .or_else(|| {
+            state
+                .rt
+                .workspaces
+                .get(agent_id)
+                .map(|ws| ws.root.to_string_lossy().to_string())
+        });
     match state
         .store
         .session_store
@@ -461,6 +476,193 @@ pub async fn handle_session_scoped(
         "messages" => handle_sessions_messages(sender, state, req_id, params).await,
         "delete" => handle_sessions_delete(sender, state, req_id, params).await,
         "update_title" => handle_sessions_update_title(sender, state, req_id, params).await,
+        "set_work_dir" => {
+            handle_sessions_set_work_dir(sender, state, req_id, params).await
+        }
         _ => {}
+    }
+}
+
+pub async fn handle_sessions_set_work_dir(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    state: &AppState,
+    req_id: Option<String>,
+    params: serde_json::Value,
+) {
+    let Some(sid) = params.get("sessionId").and_then(|v| v.as_str()) else {
+        send_resp(
+            sender,
+            &WsResponse {
+                id: req_id,
+                msg_type: "error".into(),
+                data: None,
+                error: Some(json!({"code": -32602, "message": "sessionId required"})),
+            },
+        )
+        .await;
+        return;
+    };
+    let work_dir = params
+        .get("workDir")
+        .and_then(|v| if v.is_null() { None } else { v.as_str() });
+
+    match state
+        .store
+        .session_store
+        .update_work_dir(sid, work_dir)
+        .await
+    {
+        Ok(()) => {
+            let _ = state.strm.ws_broadcast.send(
+                json!({"type":"event","event":"sessions.changed","data":{"sessionId": sid}})
+                    .to_string(),
+            );
+            send_resp(
+                sender,
+                &WsResponse {
+                    id: req_id,
+                    msg_type: "sessions.set_work_dir".into(),
+                    data: Some(json!({"updated": true})),
+                    error: None,
+                },
+            )
+            .await;
+        }
+        Err(e) => {
+            send_resp(
+                sender,
+                &WsResponse {
+                    id: req_id,
+                    msg_type: "error".into(),
+                    data: None,
+                    error: Some(json!({"message": format!("{e}")})),
+                },
+            )
+            .await;
+        }
+    }
+}
+
+pub async fn handle_workspace_init(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    state: &AppState,
+    req_id: Option<String>,
+    work_dir: Option<String>,
+) {
+    use std::path::PathBuf;
+
+    let target = work_dir
+        .as_deref()
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok());
+    let Some(target) = target else {
+        send_resp(
+            sender,
+            &WsResponse {
+                id: req_id,
+                msg_type: "error".into(),
+                data: None,
+                error: Some(json!({"message": "no workDir provided and cannot determine cwd"})),
+            },
+        )
+        .await;
+        return;
+    };
+
+    let ws_root = fastclaw_core::workspace::detect_workspace_root(&target);
+    let fastclaw_dir = ws_root.join(".fastclaw");
+
+    if fastclaw_dir.exists() {
+        send_resp(
+            sender,
+            &WsResponse {
+                id: req_id,
+                msg_type: "workspace.init".into(),
+                data: Some(json!({
+                    "alreadyExists": true,
+                    "root": ws_root.display().to_string(),
+                    "message": format!(".fastclaw/ already exists at {}", ws_root.display()),
+                })),
+                error: None,
+            },
+        )
+        .await;
+        return;
+    }
+
+    let result = (|| -> anyhow::Result<Vec<String>> {
+        let mut created = Vec::new();
+        std::fs::create_dir_all(fastclaw_dir.join("skills"))?;
+        created.push(".fastclaw/skills/".into());
+        std::fs::create_dir_all(fastclaw_dir.join("rules"))?;
+        created.push(".fastclaw/rules/".into());
+
+        let config_template = serde_json::json!({
+            "// FastClaw project-level configuration": "Override user/global settings for this project.",
+        });
+        std::fs::write(
+            fastclaw_dir.join("config.json"),
+            serde_json::to_string_pretty(&config_template)? + "\n",
+        )?;
+        created.push(".fastclaw/config.json".into());
+
+        let mcp_template = serde_json::json!({ "mcpServers": {} });
+        std::fs::write(
+            fastclaw_dir.join("mcp.json"),
+            serde_json::to_string_pretty(&mcp_template)? + "\n",
+        )?;
+        created.push(".fastclaw/mcp.json".into());
+
+        let gitignore = ws_root.join(".gitignore");
+        if gitignore.exists() {
+            if let Ok(content) = std::fs::read_to_string(&gitignore) {
+                if !content.contains(".fastclaw/") {
+                    if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(&gitignore) {
+                        use std::io::Write;
+                        let _ = writeln!(f, "\n# FastClaw project config");
+                        let _ = writeln!(f, ".fastclaw/");
+                        created.push(".gitignore (appended)".into());
+                    }
+                }
+            }
+        }
+
+        Ok(created)
+    })();
+
+    match result {
+        Ok(created) => {
+            let _ = state.strm.ws_broadcast.send(
+                json!({"type":"event","event":"workspace.changed","data":{"root": ws_root.display().to_string()}})
+                    .to_string(),
+            );
+            send_resp(
+                sender,
+                &WsResponse {
+                    id: req_id,
+                    msg_type: "workspace.init".into(),
+                    data: Some(json!({
+                        "alreadyExists": false,
+                        "root": ws_root.display().to_string(),
+                        "created": created,
+                        "message": format!("Initialized .fastclaw/ in {}", ws_root.display()),
+                    })),
+                    error: None,
+                },
+            )
+            .await;
+        }
+        Err(e) => {
+            send_resp(
+                sender,
+                &WsResponse {
+                    id: req_id,
+                    msg_type: "error".into(),
+                    data: None,
+                    error: Some(json!({"message": format!("init failed: {e}")})),
+                },
+            )
+            .await;
+        }
     }
 }

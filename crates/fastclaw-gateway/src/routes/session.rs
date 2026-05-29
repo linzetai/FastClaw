@@ -122,11 +122,19 @@ pub async fn resolve_session_context(
         .map(String::from)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    let work_dir = state
-        .rt
-        .workspaces
-        .get(agent_id)
-        .map(|ws| ws.root.to_string_lossy().to_string());
+    let work_dir = {
+        let cwd = std::env::current_dir().ok();
+        let detected = cwd.as_deref().map(fastclaw_core::workspace::detect_workspace_root);
+        detected
+            .map(|p| p.to_string_lossy().to_string())
+            .or_else(|| {
+                state
+                    .rt
+                    .workspaces
+                    .get(agent_id)
+                    .map(|ws| ws.root.to_string_lossy().to_string())
+            })
+    };
     state
         .store
         .session_store

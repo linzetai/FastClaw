@@ -3,12 +3,39 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Where a skill was loaded from (lower ordinal = lower priority).
+///
+/// Loading order: Extension < SharedAgents < UserCodex < UserCursor < UserFastclaw(Global)
+/// < ProjectCursor < ProjectFastclaw < AgentWorkspace.
+/// Skills from higher-priority layers override those from lower layers with the same ID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SkillLayer {
     Extension = 0,
-    Project = 1,
-    Global = 2,
-    AgentWorkspace = 3,
+    SharedAgents = 1,
+    UserCodex = 2,
+    UserCursor = 3,
+    Project = 4,
+    Global = 5,
+    ProjectCursor = 6,
+    ProjectFastclaw = 7,
+    AgentWorkspace = 8,
+}
+
+/// Origin tool that owns a skill directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SkillOrigin {
+    FastClaw,
+    Cursor,
+    Codex,
+    SharedAgents,
+    Extension,
+}
+
+/// Provenance metadata attached to every discovered skill.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillSource {
+    pub origin: SkillOrigin,
+    pub layer: SkillLayer,
+    pub path: PathBuf,
 }
 
 /// A parsed SKILL.md entry with optional YAML frontmatter.
@@ -24,6 +51,8 @@ pub struct SkillEntry {
     pub frontmatter: SkillFrontmatter,
     #[serde(default = "default_layer")]
     pub layer: SkillLayer,
+    #[serde(default)]
+    pub source: Option<SkillSource>,
 }
 
 fn default_layer() -> SkillLayer {
@@ -86,6 +115,11 @@ impl SkillRegistry {
     /// Return true if the registry contains a skill with the given ID.
     pub fn contains(&self, id: &str) -> bool {
         self.skills.contains_key(id)
+    }
+
+    /// Consume the registry and return all skill entries.
+    pub fn into_entries(self) -> Vec<SkillEntry> {
+        self.skills.into_values().collect()
     }
 
     /// Sanitize a deny list by removing IDs that don't exist in this registry.
@@ -268,13 +302,219 @@ pub fn resolve_global_skills_dir() -> PathBuf {
     state_dir.join("skills")
 }
 
+/// Scan path descriptor for cross-tool skill discovery.
+#[derive(Debug)]
+pub struct SkillScanPath {
+    pub path: PathBuf,
+    pub layer: SkillLayer,
+    pub origin: SkillOrigin,
+}
+
+/// Build the full list of skill scan paths (user-level + project-level).
+///
+/// Scan order (lowest priority first → highest last):
+/// 1. `~/.agents/skills/`       (SharedAgents)
+/// 2. `~/.codex/skills/`        (UserCodex)
+/// 3. `~/.cursor/skills/`       (UserCursor)
+/// 4. `~/.cursor/skills-cursor/` (UserCursor — Cursor built-in skills)
+/// 5. `~/.fastclaw/skills/`     (Global / UserFastclaw)
+/// 6. `<ws>/.cursor/skills/`    (ProjectCursor)
+/// 7. `<ws>/.fastclaw/skills/`  (ProjectFastclaw)
+pub fn build_skill_scan_paths(workspace_root: Option<&Path>) -> Vec<SkillScanPath> {
+    let mut paths = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        paths.push(SkillScanPath {
+            path: home.join(".agents/skills"),
+            layer: SkillLayer::SharedAgents,
+            origin: SkillOrigin::SharedAgents,
+        });
+        paths.push(SkillScanPath {
+            path: home.join(".codex/skills"),
+            layer: SkillLayer::UserCodex,
+            origin: SkillOrigin::Codex,
+        });
+        paths.push(SkillScanPath {
+            path: home.join(".cursor/skills"),
+            layer: SkillLayer::UserCursor,
+            origin: SkillOrigin::Cursor,
+        });
+        paths.push(SkillScanPath {
+            path: home.join(".cursor/skills-cursor"),
+            layer: SkillLayer::UserCursor,
+            origin: SkillOrigin::Cursor,
+        });
+    }
+    let global_dir = resolve_global_skills_dir();
+    paths.push(SkillScanPath {
+        path: global_dir,
+        layer: SkillLayer::Global,
+        origin: SkillOrigin::FastClaw,
+    });
+    if let Some(ws) = workspace_root {
+        paths.push(SkillScanPath {
+            path: ws.join(".cursor/skills"),
+            layer: SkillLayer::ProjectCursor,
+            origin: SkillOrigin::Cursor,
+        });
+        paths.push(SkillScanPath {
+            path: ws.join(".fastclaw/skills"),
+            layer: SkillLayer::ProjectFastclaw,
+            origin: SkillOrigin::FastClaw,
+        });
+    }
+    paths
+}
+
+/// Built-in skill: teaches agents how to manage `.fastclaw/` project configuration.
+const BUILTIN_CONFIG_MANAGER_SKILL: &str = r#"---
+name: FastClaw Config Manager
+description: Manage .fastclaw/ project configuration (skills, MCP servers, rules, config)
+---
+
+# FastClaw Config Manager
+
+You can help users manage their FastClaw project configuration. The `.fastclaw/` directory in the workspace root contains project-level settings.
+
+## Directory Structure
+
+```
+<workspace_root>/.fastclaw/
+├── config.json          # Project-level configuration (overrides user/global config)
+├── mcp.json             # Project-level MCP server definitions (Cursor-compatible format)
+├── skills/              # Project-level skills (SKILL.md files)
+│   └── <skill-id>/
+│       └── SKILL.md
+└── rules/               # Project-level rules (Markdown with YAML frontmatter)
+    └── *.md
+```
+
+## Configuration Layers (highest to lowest priority)
+
+1. `.fastclaw/config.json` — project-level (workspace root)
+2. `config/default.json` — local project config (cwd-relative)
+3. `~/.fastclaw/config/default.json` — user-level
+4. `~/.openclaw/openclaw.json` — legacy compatibility
+
+## MCP Server Format
+
+`.fastclaw/mcp.json` uses the same format as Cursor's `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "server-id": {
+      "command": "npx",
+      "args": ["-y", "@some/mcp-server"],
+      "env": { "API_KEY": "..." },
+      "disabled": false
+    }
+  }
+}
+```
+
+Set `"disabled": true` to disable a user-level MCP server for this project.
+
+## Rules Format
+
+`.fastclaw/rules/*.md` files support YAML frontmatter:
+
+```yaml
+---
+alwaysApply: true        # Always inject into system prompt
+name: my-rule            # Display name
+description: Rule desc
+globs:                   # Only inject when matching files are involved
+  - "*.rs"
+  - "src/**/*.ts"
+---
+# Rule content here
+```
+
+## Skill Discovery
+
+Skills are loaded from multiple sources (lower to higher priority):
+- `~/.agents/skills/` (shared agents)
+- `~/.codex/skills/` (Codex user-level)
+- `~/.cursor/skills/` (Cursor user-level)
+- `~/.fastclaw/skills/` (FastClaw user-level)
+- `<workspace>/.cursor/skills/` (Cursor project-level, read-only)
+- `<workspace>/.fastclaw/skills/` (FastClaw project-level)
+
+When creating skills, always write to `.fastclaw/skills/` — never modify other tools' directories.
+
+## Actions
+
+- **Create skill**: Write `<workspace>/.fastclaw/skills/<id>/SKILL.md`
+- **Add MCP server**: Edit `.fastclaw/mcp.json`
+- **Add rule**: Create `.fastclaw/rules/<name>.md`
+- **Override config**: Edit `.fastclaw/config.json`
+"#;
+
+/// Register the built-in config manager skill into a registry.
+pub fn register_builtin_skills(registry: &mut SkillRegistry) {
+    registry.register(SkillEntry {
+        id: "fastclaw-config-manager".to_string(),
+        name: "FastClaw Config Manager".to_string(),
+        description: Some(
+            "Manage .fastclaw/ project configuration (skills, MCP servers, rules, config)"
+                .to_string(),
+        ),
+        content: BUILTIN_CONFIG_MANAGER_SKILL.to_string(),
+        source_path: PathBuf::from("(builtin)"),
+        frontmatter: SkillFrontmatter {
+            name: Some("FastClaw Config Manager".to_string()),
+            description: Some(
+                "Manage .fastclaw/ project configuration".to_string(),
+            ),
+            ..Default::default()
+        },
+        layer: SkillLayer::Extension,
+        source: Some(SkillSource {
+            origin: SkillOrigin::FastClaw,
+            layer: SkillLayer::Extension,
+            path: PathBuf::from("(builtin)"),
+        }),
+    });
+}
+
+/// Load skills from all cross-tool scan paths and merge into a single registry.
+pub fn load_skills_cross_tool(workspace_root: Option<&Path>) -> SkillRegistry {
+    let scan_paths = build_skill_scan_paths(workspace_root);
+    let mut registry = SkillRegistry::new();
+    for sp in &scan_paths {
+        if !sp.path.exists() || !sp.path.is_dir() {
+            continue;
+        }
+        let layer_reg = load_skills_from_dirs_with_layer(&[sp.path.as_path()], sp.layer);
+        let count = layer_reg.count();
+        if count > 0 {
+            tracing::info!(
+                count,
+                layer = ?sp.layer,
+                origin = ?sp.origin,
+                path = %sp.path.display(),
+                "discovered skills from cross-tool directory"
+            );
+        }
+        for skill in layer_reg.into_entries() {
+            let mut s = skill;
+            s.source = Some(SkillSource {
+                origin: sp.origin,
+                layer: sp.layer,
+                path: sp.path.clone(),
+            });
+            registry.register(s);
+        }
+    }
+    registry
+}
+
 /// Build a per-agent SkillRegistry by merging layers in priority order.
 ///
 /// Loading order (later overrides earlier):
 /// 1. Extension plugin skills
-/// 2. Project-level `./skills/`
-/// 3. Global `~/.fastclaw/skills/`
-/// 4. Agent workspace `workspace/<agent>/skills/`
+/// 2. Cross-tool skills (SharedAgents, UserCodex, UserCursor, Global, ProjectCursor, ProjectFastclaw)
+/// 3. Agent workspace `workspace/<agent>/skills/`
 pub struct SkillRegistryBuilder {
     base: SkillRegistry,
 }
@@ -346,6 +586,7 @@ fn parse_skill_file(path: &Path, dir: &Path) -> anyhow::Result<SkillEntry> {
         source_path: path.to_path_buf(),
         frontmatter,
         layer: SkillLayer::Project,
+        source: None,
     })
 }
 
@@ -531,6 +772,7 @@ mod tests {
                 ..Default::default()
             },
             layer: SkillLayer::Project,
+            source: None,
         }
     }
 

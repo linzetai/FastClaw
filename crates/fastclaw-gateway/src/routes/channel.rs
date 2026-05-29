@@ -132,9 +132,14 @@ async fn handle_slash_command(
             let first_line = desc.lines().next().unwrap_or(desc);
             let layer = match skill.layer {
                 fastclaw_core::skill::SkillLayer::Extension => "extension",
-                fastclaw_core::skill::SkillLayer::Project => "project",
+                fastclaw_core::skill::SkillLayer::Project
+                | fastclaw_core::skill::SkillLayer::ProjectCursor
+                | fastclaw_core::skill::SkillLayer::ProjectFastclaw => "project",
                 fastclaw_core::skill::SkillLayer::Global => "global",
                 fastclaw_core::skill::SkillLayer::AgentWorkspace => "workspace",
+                fastclaw_core::skill::SkillLayer::SharedAgents => "shared",
+                fastclaw_core::skill::SkillLayer::UserCodex
+                | fastclaw_core::skill::SkillLayer::UserCursor => "user",
             };
             buf.push_str(&format!(
                 "• **{}** (`{}`) [{}]\n  {}\n",
@@ -239,9 +244,108 @@ async fn handle_slash_command(
         return Some(format!("🤖 已切换到模型: **{model_name}**"));
     }
 
+    if trimmed == "/workspace" {
+        let agent_id = "main";
+        let dm_scope = state
+            .cfg
+            .config
+            .session
+            .dm_scope
+            .clone()
+            .unwrap_or(fastclaw_core::config::DmScope::PerChannelPeer);
+        let session_key = fastclaw_core::routing::build_session_key(
+            &dm_scope, agent_id, channel_id, account_id, chat_id, chat_type,
+        );
+        if let Ok(Some(session)) = state.store.session_store.get_session(&session_key).await {
+            if let Some(wd) = session.work_dir.as_deref() {
+                return Some(format!("📂 当前工作区: `{wd}`"));
+            }
+        }
+        return Some("📂 当前没有设置工作区。\n\n用法: `/workspace /path/to/project` 设置工作区".to_string());
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("/workspace ") {
+        let path = rest.trim();
+        if path.is_empty() {
+            return Some("❌ 请提供路径。用法: `/workspace /path/to/project`".to_string());
+        }
+        let target = std::path::Path::new(path);
+        if !target.exists() {
+            return Some(format!("❌ 路径不存在: `{path}`"));
+        }
+        let ws_root = fastclaw_core::workspace::detect_workspace_root(target);
+        let ws_str = ws_root.display().to_string();
+
+        let agent_id = "main";
+        let dm_scope = state
+            .cfg
+            .config
+            .session
+            .dm_scope
+            .clone()
+            .unwrap_or(fastclaw_core::config::DmScope::PerChannelPeer);
+        let session_key = fastclaw_core::routing::build_session_key(
+            &dm_scope, agent_id, channel_id, account_id, chat_id, chat_type,
+        );
+        let _ = state.store.session_store.update_work_dir(&session_key, Some(&ws_str)).await;
+        let _ = state.strm.ws_broadcast.send(
+            serde_json::json!({"type":"event","event":"sessions.changed","data":{"sessionId": &session_key}}).to_string(),
+        );
+        return Some(format!("📂 工作区已设置为: `{ws_str}`"));
+    }
+
+    if trimmed == "/init" || trimmed.starts_with("/init ") {
+        let path = trimmed.strip_prefix("/init").unwrap().trim();
+        let target = if path.is_empty() {
+            std::env::current_dir().ok()
+        } else {
+            let p = std::path::PathBuf::from(path);
+            if p.exists() { Some(p) } else { None }
+        };
+        let Some(target) = target else {
+            return Some(format!("❌ 路径不存在: `{path}`"));
+        };
+        let ws_root = fastclaw_core::workspace::detect_workspace_root(&target);
+        let fastclaw_dir = ws_root.join(".fastclaw");
+        if fastclaw_dir.exists() {
+            return Some(format!("✅ `.fastclaw/` 已存在于 `{}`", ws_root.display()));
+        }
+        let result = (|| -> anyhow::Result<Vec<String>> {
+            let mut created = Vec::new();
+            std::fs::create_dir_all(fastclaw_dir.join("skills"))?;
+            created.push(".fastclaw/skills/".into());
+            std::fs::create_dir_all(fastclaw_dir.join("rules"))?;
+            created.push(".fastclaw/rules/".into());
+            let cfg = serde_json::json!({
+                "// FastClaw project-level configuration": "Override user/global settings for this project.",
+            });
+            std::fs::write(fastclaw_dir.join("config.json"), serde_json::to_string_pretty(&cfg)? + "\n")?;
+            created.push(".fastclaw/config.json".into());
+            let mcp = serde_json::json!({ "mcpServers": {} });
+            std::fs::write(fastclaw_dir.join("mcp.json"), serde_json::to_string_pretty(&mcp)? + "\n")?;
+            created.push(".fastclaw/mcp.json".into());
+            Ok(created)
+        })();
+        return match result {
+            Ok(created) => Some(format!(
+                "✅ 已在 `{}` 初始化 .fastclaw/\n\n创建:\n{}",
+                ws_root.display(),
+                created.iter().map(|f| format!("• `{f}`")).collect::<Vec<_>>().join("\n")
+            )),
+            Err(e) => Some(format!("❌ 初始化失败: {e}")),
+        };
+    }
+
     if trimmed == "/help" {
         return Some(
-            "可用命令:\n• `/new` — 开启新对话（清除上下文）\n• `/stop` — 停止当前正在处理的回复\n• `/model` — 查看/切换模型\n• `/skills` — 列出当前 agent 的所有 Skill\n• `/help` — 显示帮助"
+            "可用命令:\n\
+             • `/new` — 开启新对话（清除上下文）\n\
+             • `/stop` — 停止当前正在处理的回复\n\
+             • `/model` — 查看/切换模型\n\
+             • `/workspace` — 查看/设置工作区\n\
+             • `/init` — 初始化 FastClaw 项目配置\n\
+             • `/skills` — 列出当前 agent 的所有 Skill\n\
+             • `/help` — 显示帮助"
                 .to_string(),
         );
     }

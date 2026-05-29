@@ -16,6 +16,7 @@ pub mod routing;
 
 pub use routing::Router;
 pub mod migration;
+pub mod rules;
 pub mod skill;
 pub mod tool;
 pub mod tool_runtime;

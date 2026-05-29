@@ -57,6 +57,7 @@ export const updateSessionTitle = transport.updateSessionTitle;
 export const deleteSession = transport.deleteSession;
 export const createSession = transport.createSession;
 export const setSessionWorkDir = transport.setSessionWorkDir;
+export const workspaceInit = transport.workspaceInit;
 
 export type { ExportFormat } from "./transport";
 

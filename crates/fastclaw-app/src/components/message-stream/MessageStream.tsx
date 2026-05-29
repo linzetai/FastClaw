@@ -58,7 +58,7 @@ export function MessageStream(_props: MessageStreamProps) {
       return;
     }
     if (loadingChats.current.has(activeChat.id)) return;
-    if (loadedChats.current.has(activeChat.id) && activeChat.stream.length > 0) {
+    if (loadedChats.current.has(activeChat.id)) {
       setAnimateMessages(true);
       return;
     }

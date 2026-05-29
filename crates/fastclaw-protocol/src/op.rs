@@ -67,6 +67,8 @@ pub struct SessionsListParams {
 pub struct SessionsNewParams {
     #[serde(default, alias = "agentId", skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<AgentId>,
+    #[serde(default, alias = "workDir", skip_serializing_if = "Option::is_none")]
+    pub work_dir: Option<String>,
 }
 
 /// Typed parameters for McpAdd.
@@ -187,6 +189,10 @@ pub enum ClientOp {
         session_id: SessionId,
         title: String,
     },
+    SessionsSetWorkDir {
+        session_id: SessionId,
+        work_dir: Option<String>,
+    },
 
     // ── Configuration ───────────────────────────────────────────────
     ModelsList,
@@ -295,6 +301,12 @@ pub enum ClientOp {
         session_id: Option<String>,
     },
 
+    // ── Workspace ────────────────────────────────────────────────────
+    WorkspaceInit {
+        #[serde(alias = "workDir", skip_serializing_if = "Option::is_none")]
+        work_dir: Option<String>,
+    },
+
     // ── Keepalive ───────────────────────────────────────────────────
     Ping,
 }
@@ -369,6 +381,12 @@ impl ClientOp {
             "sessions.update_title" => Ok(Self::SessionsUpdateTitle {
                 session_id: extract_session_id(&params)?,
                 title: extract_string(&params, "title")?,
+            }),
+            "sessions.set_work_dir" => Ok(Self::SessionsSetWorkDir {
+                session_id: extract_session_id(&params)?,
+                work_dir: params
+                    .get("workDir")
+                    .and_then(|v| if v.is_null() { None } else { v.as_str().map(String::from) }),
             }),
             "models.list" => Ok(Self::ModelsList),
             "config.get" => Ok(Self::ConfigGet {
@@ -492,6 +510,13 @@ impl ClientOp {
                     session_id,
                 })
             }
+            "workspace.init" => Ok(Self::WorkspaceInit {
+                work_dir: params
+                    .get("workDir")
+                    .or_else(|| params.get("work_dir"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            }),
             other => Err(format!("unknown method: {other}")),
         }
     }

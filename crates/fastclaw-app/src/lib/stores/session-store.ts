@@ -234,7 +234,7 @@ export function buildSessionSlice({ set, get }: SetGet) {
           if (backend) {
             const updates: Partial<Chat> = {};
             if (backend.messageCount > c.messageCount) updates.messageCount = backend.messageCount;
-            if (backend.workDir && !c.workDir) updates.workDir = backend.workDir;
+            if (backend.workDir !== undefined && backend.workDir !== c.workDir) updates.workDir = backend.workDir ?? null;
             if (backend.source && backend.source !== c.source) updates.source = backend.source;
             if (Object.keys(updates).length > 0) return { ...c, ...updates };
           }

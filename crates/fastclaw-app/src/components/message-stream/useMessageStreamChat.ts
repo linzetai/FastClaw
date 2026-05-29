@@ -712,9 +712,44 @@ export function useMessageStreamChat({
   const streamingRef = useRef(streaming);
   streamingRef.current = streaming;
 
+  const handleSlashCommand = useCallback(
+    async (command: string): Promise<boolean> => {
+      const trimmed = command.trim();
+      if (trimmed === "/init") {
+        const wd = workDir ?? undefined;
+        addMessage(activeAgentId, { role: "user", content: "/init", timestamp: new Date() });
+        try {
+          const result = await transport.workspaceInit(wd);
+          addMessage(activeAgentId, {
+            role: "assistant",
+            content: result.alreadyExists
+              ? `\u2705 ${result.message}`
+              : `\u2705 ${result.message}\n\nCreated:\n${(result.created ?? []).map(f => `- \`${f}\``).join("\n")}`,
+            timestamp: new Date(),
+          });
+        } catch (e) {
+          addMessage(activeAgentId, {
+            role: "assistant",
+            content: `\u274c init failed: ${e instanceof Error ? e.message : String(e)}`,
+            timestamp: new Date(),
+          });
+        }
+        return true;
+      }
+      return false;
+    },
+    [activeAgentId, workDir, addMessage],
+  );
+
   const handleMentionSend = useCallback(
     (txt: string, _mentions: InlineMention[]) => {
       if (!txt.trim()) return;
+      const SLASH_COMMANDS = ["/init"];
+      if (SLASH_COMMANDS.some(cmd => txt.trim() === cmd || txt.trim().startsWith(cmd + " "))) {
+        mentionInputRef.current?.clear();
+        handleSlashCommand(txt.trim());
+        return;
+      }
       mentionInputRef.current?.clear();
 
       if (streamingRef.current) {
@@ -739,7 +774,7 @@ export function useMessageStreamChat({
       });
       sendRef.current(txt.trim(), _mentions);
     },
-    [activeAgentId, activeChat?.id, enqueueMessage],
+    [activeAgentId, activeChat?.id, enqueueMessage, handleSlashCommand],
   );
 
   const stopStream = useCallback(() => {

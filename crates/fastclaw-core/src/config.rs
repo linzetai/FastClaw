@@ -1540,7 +1540,16 @@ fn build_search_paths(mode: &ConfigMode) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let mut fastclaw = Vec::new();
     let mut legacy = Vec::new();
 
-    // 1. Local project config (highest priority)
+    // 0. Workspace-root project config (highest priority)
+    if let Ok(cwd) = std::env::current_dir() {
+        let ws_root = crate::workspace::detect_workspace_root(&cwd);
+        let ws_config = ws_root.join(".fastclaw/config.json");
+        if ws_config.exists() {
+            fastclaw.push(ws_config);
+        }
+    }
+
+    // 1. Local project config
     fastclaw.push(PathBuf::from("config/default.json"));
 
     // 2. Home directory user config
