@@ -16,6 +16,7 @@ fastclaw-agent = { path = "../fastclaw-agent" }
 fastclaw-protocol = { path = "../fastclaw-protocol" }
 fastclaw-mcp = { path = "../fastclaw-mcp" }
 fastclaw-hardening = { path = "../fastclaw-hardening" }
+fastclaw-wechat = { path = "../../extensions/wechat" }
 clap.workspace = true
 clap_complete.workspace = true
 tokio.workspace = true

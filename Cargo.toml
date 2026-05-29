@@ -23,6 +23,7 @@ members = [
     "crates/fastclaw-network-proxy",
     "crates/fastclaw-linux-sandbox",
     "extensions/feishu",
+    "extensions/wechat",
     "crates/fastclaw-protocol",
     "crates/fastclaw-session-actor",
     "crates/fastclaw-app/src-tauri",

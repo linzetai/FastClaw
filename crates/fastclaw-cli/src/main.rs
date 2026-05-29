@@ -103,10 +103,39 @@ enum Commands {
         #[arg(long)]
         deny_all: bool,
     },
+    /// Channel management (login, list accounts)
+    Channel {
+        #[command(subcommand)]
+        action: ChannelAction,
+    },
     /// Generate shell completions (bash, zsh, fish, powershell, elvish)
     Completions {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
+    },
+}
+
+#[derive(Subcommand)]
+enum ChannelAction {
+    /// Login to a channel (e.g. WeChat QR scan)
+    Login {
+        /// Channel name (e.g. "wechat")
+        #[arg(long)]
+        channel: String,
+    },
+    /// List connected accounts for a channel
+    List {
+        /// Channel name (e.g. "wechat")
+        #[arg(long)]
+        channel: String,
+    },
+    /// Delete (disconnect) a channel account
+    Delete {
+        /// Channel name (e.g. "wechat")
+        #[arg(long)]
+        channel: String,
+        /// Account ID to delete
+        account_id: String,
     },
 }
 
@@ -413,6 +442,7 @@ async fn main() -> anyhow::Result<()> {
             | Commands::Tools { .. }
             | Commands::Trace { .. }
             | Commands::Backup { .. }
+            | Commands::Channel { .. }
             | Commands::Health
             | Commands::Doctor
             | Commands::Exec { .. }
@@ -536,6 +566,20 @@ async fn main() -> anyhow::Result<()> {
         Commands::Onboard => {
             cmd_onboard(&mode)?;
         }
+        Commands::Channel { action } => match action {
+            ChannelAction::Login { channel } => {
+                cmd_channel_login(&channel, &mode).await?;
+            }
+            ChannelAction::List { channel } => {
+                cmd_channel_list(&channel);
+            }
+            ChannelAction::Delete {
+                channel,
+                account_id,
+            } => {
+                cmd_channel_delete(&channel, &account_id);
+            }
+        },
         Commands::Gateway { action } => match action {
             GatewayAction::Run => {
                 let config = fastclaw_core::config::load_config(&mode)?;
@@ -1836,6 +1880,136 @@ async fn cmd_trace(
     }
 
     Ok(())
+}
+
+// --- Channel commands ---
+
+async fn cmd_channel_login(channel: &str, mode: &fastclaw_core::config::ConfigMode) -> anyhow::Result<()> {
+    match channel {
+        "wechat" | "weixin" => {
+            use fastclaw_wechat::auth::{credential, qr_login};
+
+            let existing_tokens: Vec<String> = credential::list_credentials()
+                .into_iter()
+                .map(|(_, c)| c.token)
+                .collect();
+
+            let mut session = qr_login::start_login(&existing_tokens).await?;
+
+            println!("请使用微信扫描以下二维码：\n");
+            qr_login::display_qr_terminal(&session.qr_url);
+            println!();
+
+            let result = qr_login::wait_for_login(
+                &mut session,
+                std::time::Duration::from_secs(480),
+                |new_url| {
+                    println!("\n二维码已过期，已自动刷新：\n");
+                    qr_login::display_qr_terminal(new_url);
+                    println!();
+                },
+            )
+            .await;
+
+            match result.status {
+                qr_login::LoginStatus::Confirmed { account_id, base_url, .. } => {
+                    println!("✓ 登录成功！账号: {account_id}");
+
+                    // Write wechat channel config to disk
+                    let config_val = serde_json::json!({
+                        "enabled": true,
+                        "connectionMode": "longpoll",
+                        "domain": base_url,
+                    });
+                    if let Err(e) = fastclaw_core::config_access::persist_config_key(
+                        "channels.wechat",
+                        &config_val,
+                    ) {
+                        eprintln!("  ⚠ 无法写入配置: {e}");
+                    } else {
+                        println!("  ✓ 已写入 channels.wechat 配置。");
+                    }
+
+                    // Try hot-reload via the running gateway API
+                    let config = fastclaw_core::config::load_config(mode).unwrap_or_default();
+                    let port = config.gateway.port;
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(5))
+                        .build()
+                        .unwrap_or_else(|_| reqwest::Client::new());
+                    match client
+                        .post(format!("http://127.0.0.1:{port}/api/v1/channels/wechat/reload"))
+                        .send()
+                        .await
+                    {
+                        Ok(resp) if resp.status().is_success() => {
+                            println!("  ✓ 微信通道已热加载，无需重启 gateway。");
+                        }
+                        _ => {
+                            println!("  请重启 gateway 或执行 `fastclaw gateway restart` 以启用微信通道。");
+                        }
+                    }
+                }
+                qr_login::LoginStatus::NeedVerifyCode => {
+                    println!("{}", result.message);
+                    println!("注意: CLI 暂不支持交互式输入配对码。请使用 Tauri UI 完成登录。");
+                }
+                _ => {
+                    eprintln!("{}", result.message);
+                    std::process::exit(1);
+                }
+            }
+        }
+        other => {
+            eprintln!("不支持的 channel: {other}。目前支持: wechat");
+            std::process::exit(1);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_channel_list(channel: &str) {
+    match channel {
+        "wechat" | "weixin" => {
+            let creds = fastclaw_wechat::auth::credential::list_credentials();
+            if creds.is_empty() {
+                println!("没有已连接的微信账号。使用 `fastclaw channel login --channel wechat` 登录。");
+            } else {
+                println!("微信已连接账号 ({} 个)：\n", creds.len());
+                for (id, cred) in &creds {
+                    println!("  ID: {id}");
+                    println!("    Base URL: {}", cred.base_url);
+                    if let Some(ref uid) = cred.user_id {
+                        println!("    User ID: {uid}");
+                    }
+                    if let Some(ref at) = cred.created_at {
+                        println!("    Created: {at}");
+                    }
+                    println!();
+                }
+            }
+        }
+        other => {
+            eprintln!("不支持的 channel: {other}。目前支持: wechat");
+        }
+    }
+}
+
+fn cmd_channel_delete(channel: &str, account_id: &str) {
+    match channel {
+        "wechat" | "weixin" => {
+            if fastclaw_wechat::auth::credential::delete_credential(account_id) {
+                println!("✓ 已删除微信账号: {account_id}");
+            } else {
+                eprintln!("未找到微信账号: {account_id}");
+                std::process::exit(1);
+            }
+        }
+        other => {
+            eprintln!("不支持的 channel: {other}。目前支持: wechat");
+            std::process::exit(1);
+        }
+    }
 }
 
 // --- MCP Server ---

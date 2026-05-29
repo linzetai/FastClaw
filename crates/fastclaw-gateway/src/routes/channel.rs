@@ -63,6 +63,7 @@ pub(super) async fn channel_webhook(
                 let channel_clone = channel.clone();
                 let account_id = msg.account_id.clone();
                 let chat_type = msg.chat_type.clone();
+                let attachments = msg.attachments.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_channel_message(
                         state_clone,
@@ -73,6 +74,7 @@ pub(super) async fn channel_webhook(
                         &msg.text,
                         account_id.as_deref(),
                         &chat_type,
+                        attachments,
                     )
                     .await
                     {
@@ -170,9 +172,76 @@ async fn handle_slash_command(
         }
     }
 
+    if trimmed == "/stop" {
+        return Some("⏹ 已停止当前处理。".to_string());
+    }
+
+    if trimmed == "/model" || trimmed == "/model list" {
+        let current_override = state.ext.chat_model_overrides.get(chat_id).map(|v| v.clone());
+        let agent_id_local = "main";
+        let default_model = state
+            .cfg
+            .config
+            .agents
+            .list
+            .iter()
+            .find(|a| a.id == agent_id_local)
+            .and_then(|a| a.model.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let available: Vec<String> = state.cfg.config.models.keys().cloned().collect();
+
+        let mut buf = format!("🤖 当前模型: **{}**\n", current_override.as_deref().unwrap_or(&default_model));
+        if current_override.is_some() {
+            buf.push_str(&format!("   (默认: {})\n", default_model));
+        }
+        buf.push_str(&format!("\n可用模型 ({} 个):\n", available.len()));
+        for name in &available {
+            let marker = if Some(name.as_str()) == current_override.as_deref()
+                || (current_override.is_none() && name == &default_model)
+            {
+                " ← 当前"
+            } else {
+                ""
+            };
+            buf.push_str(&format!("• `{name}`{marker}\n"));
+        }
+        buf.push_str("\n用法: `/model <模型名>` 切换模型\n用法: `/model reset` 恢复默认");
+        return Some(buf);
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("/model ") {
+        let model_name = rest.trim();
+        if model_name == "reset" || model_name == "default" {
+            state.ext.chat_model_overrides.remove(chat_id);
+            let default_model = state
+                .cfg
+                .config
+                .agents
+                .list
+                .iter()
+                .find(|a| a.id == "main")
+                .and_then(|a| a.model.clone())
+                .unwrap_or_else(|| "unknown".to_string());
+            return Some(format!("🤖 已恢复默认模型: **{default_model}**"));
+        }
+        if !state.cfg.config.models.contains_key(model_name) {
+            let available: Vec<String> = state.cfg.config.models.keys().cloned().collect();
+            return Some(format!(
+                "❌ 未知模型 `{model_name}`\n\n可用模型: {}",
+                available.join(", ")
+            ));
+        }
+        state
+            .ext
+            .chat_model_overrides
+            .insert(chat_id.to_string(), model_name.to_string());
+        return Some(format!("🤖 已切换到模型: **{model_name}**"));
+    }
+
     if trimmed == "/help" {
         return Some(
-            "可用命令:\n• `/new` — 开启新对话（清除上下文）\n• `/skills` — 列出当前 agent 的所有 Skill\n• `/help` — 显示帮助"
+            "可用命令:\n• `/new` — 开启新对话（清除上下文）\n• `/stop` — 停止当前正在处理的回复\n• `/model` — 查看/切换模型\n• `/skills` — 列出当前 agent 的所有 Skill\n• `/help` — 显示帮助"
                 .to_string(),
         );
     }
@@ -196,6 +265,7 @@ pub(crate) async fn handle_channel_message(
     text: &str,
     account_id: Option<&str>,
     chat_type: &str,
+    attachments: Vec<fastclaw_core::channel::Attachment>,
 ) -> anyhow::Result<()> {
     use fastclaw_core::config::DmScope;
     use fastclaw_core::routing::build_session_key;
@@ -256,9 +326,46 @@ pub(crate) async fn handle_channel_message(
             .await?;
     }
 
+    let user_content = if attachments.is_empty() {
+        serde_json::Value::String(text.to_string())
+    } else {
+        let mut parts = Vec::new();
+        for att in &attachments {
+            if att
+                .mime_type
+                .as_deref()
+                .is_some_and(|m| m.starts_with("image/"))
+            {
+                if let Ok(bytes) = tokio::fs::read(&att.file_path).await {
+                    let mime = att.mime_type.as_deref().unwrap_or("image/png");
+                    use base64::Engine as _;
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                    parts.push(serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": format!("data:{mime};base64,{b64}")
+                        }
+                    }));
+                }
+            } else {
+                let name = att.file_name.as_deref().unwrap_or("file");
+                parts.push(serde_json::json!({
+                    "type": "text",
+                    "text": format!("[Attachment: {} ({})]", name, att.mime_type.as_deref().unwrap_or("unknown"))
+                }));
+            }
+        }
+        if !text.is_empty() {
+            parts.push(serde_json::json!({
+                "type": "text",
+                "text": text
+            }));
+        }
+        serde_json::Value::Array(parts)
+    };
     let user_msg = ChatMessage {
         role: Role::User,
-        content: Some(serde_json::Value::String(text.to_string())),
+        content: Some(user_content),
         reasoning_content: None,
         name: None,
         tool_calls: None,
@@ -297,10 +404,16 @@ pub(crate) async fn handle_channel_message(
     // Build a ChatRequest and run through the shared setup_chat() pipeline.
     // This gives IM channels the same enrichment as HTTP/WS: Runtime Paths,
     // context engine (memory/RAG), model routing, prompt routing, skills, and budget.
+    let model_override = state
+        .ext
+        .chat_model_overrides
+        .get(chat_id)
+        .map(|v| v.clone());
+
     let request = ChatRequest {
         messages: vec![user_msg],
         stream: use_streaming,
-        model: None,
+        model: model_override,
         temperature: None,
         max_tokens: None,
         agent_id: Some(agent_id.into()),
@@ -339,6 +452,8 @@ pub(crate) async fn handle_channel_message(
     if !ch_tools.is_empty() {
         enriched_request.tools = Some(ch_tools);
     }
+
+    channel.on_processing_start(chat_id, message_id).await;
 
     if use_streaming {
         let reply_text = handle_channel_streaming(
@@ -409,6 +524,8 @@ pub(crate) async fn handle_channel_message(
             .map_err(|e| anyhow::anyhow!("channel after_chat failed: {e}"))?;
     }
 
+    channel.on_processing_end(chat_id, message_id).await;
+
     tracing::info!(
         channel_id,
         chat_id,
@@ -443,7 +560,14 @@ fn inject_channel_context(
          - The user may ask you to fix code, run builds, check tests, etc. — use your tools.\n\
          - Keep responses concise and IM-friendly. Use short summaries instead of full file dumps.\n\
          - When you perform file edits or run commands, report a brief summary of what changed.\n\
-         - For compile/test results, report pass/fail status and key metrics."
+         - For compile/test results, report pass/fail status and key metrics.\n\n\
+         Media Capabilities:\n\
+         - You can SEND images and files to the user via the notify_channel tool.\n\
+         - To send a file/image: first save it to disk, then call notify_channel with \
+           channel_id=\"{channel_id}\", target_id=\"{chat_id}\", and attachments=[{{\"file_path\": \"/absolute/path/to/file\"}}].\n\
+         - The user may also send you images or files. When they do, the images will appear inline \
+           in the message content. Describe what you see or process the file as requested.\n\
+         - Supported media: images (PNG, JPEG, GIF), documents, and other files."
     );
     messages.insert(
         0,

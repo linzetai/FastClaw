@@ -38,7 +38,7 @@ pub fn set_config_mode(mode: ConfigMode) {
 }
 
 /// Get the current config mode, defaulting to Production.
-fn get_config_mode() -> &'static ConfigMode {
+pub fn get_config_mode() -> &'static ConfigMode {
     GATEWAY_CONFIG_MODE.get_or_init(|| ConfigMode::Production)
 }
 
@@ -470,6 +470,7 @@ fn spawn_cron_scheduler(state: AppState) {
                             text: reply.clone(),
                             reply_to: None,
                             image_key: None,
+                            attachments: vec![],
                         };
                         if let Err(e) = channel.send_message(&msg).await {
                             tracing::warn!(
@@ -644,6 +645,7 @@ fn spawn_cron_scheduler(state: AppState) {
                     text: text.to_string(),
                     reply_to: None,
                     image_key: None,
+                    attachments: vec![],
                 };
                 if let Err(e) = channel.send_message(&msg).await {
                     tracing::warn!(

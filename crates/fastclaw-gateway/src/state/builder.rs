@@ -759,6 +759,9 @@ impl StateBuilder {
                 llm_plugin_registry: Arc::new(tokio::sync::RwLock::new(
                     p5.phase2.phase4.phase3.llm_plugin_registry,
                 )),
+                chat_locks: Arc::new(dashmap::DashMap::new()),
+                chat_cancels: Arc::new(dashmap::DashMap::new()),
+                chat_model_overrides: Arc::new(dashmap::DashMap::new()),
             },
             obs: super::ObserveState {
                 metrics_collector: Arc::new(fastclaw_observe::MetricsCollector::new()),

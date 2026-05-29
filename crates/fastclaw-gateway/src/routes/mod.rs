@@ -13,6 +13,7 @@ mod memory;
 mod session;
 pub(crate) mod subagent;
 mod traces;
+mod wechat;
 
 use axum::routing::{delete, get, post, put};
 use axum::Router;
@@ -146,5 +147,30 @@ pub fn api_routes() -> Router<AppState> {
         .route(
             "/api/v1/llm-plugins/:id/test",
             post(llm_plugin::test_plugin),
+        )
+        // WeChat channel login
+        .route(
+            "/api/v1/channels/wechat/login/start",
+            post(wechat::login_start),
+        )
+        .route(
+            "/api/v1/channels/wechat/login/status/:session_key",
+            get(wechat::login_status),
+        )
+        .route(
+            "/api/v1/channels/wechat/login/verify/:session_key",
+            post(wechat::login_verify),
+        )
+        .route(
+            "/api/v1/channels/wechat/accounts",
+            get(wechat::list_accounts),
+        )
+        .route(
+            "/api/v1/channels/wechat/accounts/:account_id",
+            delete(wechat::delete_account),
+        )
+        .route(
+            "/api/v1/channels/wechat/reload",
+            post(wechat::reload_channel),
         )
 }

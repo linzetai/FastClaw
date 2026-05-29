@@ -131,6 +131,7 @@ fn parse_card_action_payload(evt: &WsEvent) -> Option<InboundMessage> {
         chat_type: String::new(),
         bot_mentioned: false,
         extra,
+        attachments: vec![],
     })
 }
 
@@ -235,6 +236,7 @@ fn parse_event_payload(evt: &WsEvent, bot_open_id: Option<&str>) -> Option<Inbou
         chat_type,
         bot_mentioned,
         extra: event.clone(),
+        attachments: vec![],
     })
 }
 

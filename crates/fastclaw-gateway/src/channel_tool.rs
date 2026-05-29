@@ -9,7 +9,7 @@ use serde_json::json;
 use crate::state::AppState;
 
 const SUPPORTED_CHANNELS: &[&str] = &[
-    "feishu", "slack", "discord", "telegram", "whatsapp", "matrix", "msteams",
+    "feishu", "slack", "discord", "telegram", "whatsapp", "matrix", "msteams", "wechat",
 ];
 
 pub struct ListChannelsTool {
@@ -381,14 +381,15 @@ impl Tool for NotifyChannelTool {
     }
 
     fn description(&self) -> &str {
-        "Send a message to an IM channel (Feishu, Slack, Discord, etc.). \
-         Use this to push notifications, build results, test reports, or any status update \
+        "Send a message to an IM channel (Feishu, Slack, Discord, WeChat, etc.). \
+         Use this to push notifications, build results, test reports, images, files, or any content \
          to a team chat. Requires a running channel plugin.\n\n\
          Parameters:\n\
-         - channel_id: The channel plugin id (e.g. \"feishu\", \"slack\")\n\
+         - channel_id: The channel plugin id (e.g. \"feishu\", \"wechat\", \"slack\")\n\
          - target_id: The chat/group/user id to send to (platform-specific)\n\
          - message: The text message to send (supports the channel's native formatting)\n\
-         - target_type: \"p2p\" for direct message, \"group\" for group chat (default: \"p2p\")\n\n\
+         - target_type: \"p2p\" for direct message, \"group\" for group chat (default: \"p2p\")\n\
+         - attachments: Optional array of file attachments to send. Each item has \"file_path\" (absolute path) and optional \"mime_type\". Use this to send images, files, documents etc.\n\n\
          Use list_channels first if you don't know which channels are available."
     }
 
@@ -398,7 +399,7 @@ impl Tool for NotifyChannelTool {
             "channel_id".to_string(),
             json!({
                 "type": "string",
-                "description": "Channel plugin id (e.g. \"feishu\", \"slack\", \"discord\")"
+                "description": "Channel plugin id (e.g. \"feishu\", \"wechat\", \"slack\")"
             }),
         );
         props.insert(
@@ -421,6 +422,27 @@ impl Tool for NotifyChannelTool {
                 "type": "string",
                 "enum": ["p2p", "group"],
                 "description": "Message target type: \"p2p\" for direct message, \"group\" for group chat. Default: \"p2p\""
+            }),
+        );
+        props.insert(
+            "attachments".to_string(),
+            json!({
+                "type": "array",
+                "description": "Optional file attachments to send (images, documents, etc.)",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Absolute path to the file to send"
+                        },
+                        "mime_type": {
+                            "type": "string",
+                            "description": "MIME type (e.g. \"image/png\"). Auto-detected from extension if omitted."
+                        }
+                    },
+                    "required": ["file_path"]
+                }
             }),
         );
         ToolParameterSchema {
@@ -486,14 +508,40 @@ impl Tool for NotifyChannelTool {
         };
         drop(registry);
 
+        let attachments: Vec<fastclaw_core::channel::Attachment> = args
+            .get("attachments")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| {
+                        let file_path = item.get("file_path")?.as_str()?.to_string();
+                        let mime_type = item
+                            .get("mime_type")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
+                        let file_name = std::path::Path::new(&file_path)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string());
+                        Some(fastclaw_core::channel::Attachment {
+                            file_path,
+                            mime_type,
+                            file_name,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let outbound = fastclaw_core::channel::OutboundMessage {
             target_id: target_id.clone(),
             target_type: target_type.clone(),
             text: message.clone(),
             reply_to: None,
             image_key: None,
+            attachments,
         };
 
+        let attachment_count = outbound.attachments.len();
         match channel.send_message(&outbound).await {
             Ok(_) => {
                 tracing::info!(
@@ -501,6 +549,7 @@ impl Tool for NotifyChannelTool {
                     target = %target_id,
                     target_type = %target_type,
                     msg_len = message.len(),
+                    attachment_count,
                     "notify_channel: message sent"
                 );
                 ToolResult::ok(format!(

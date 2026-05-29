@@ -209,6 +209,12 @@ pub struct ExtensionState {
     pub channel_inbound_tx:
         tokio::sync::mpsc::UnboundedSender<fastclaw_core::channel::InboundMessage>,
     pub llm_plugin_registry: Arc<tokio::sync::RwLock<fastclaw_agent::LlmPluginRegistry>>,
+    /// Per-chat semaphore to serialize message processing within the same chat_id.
+    pub chat_locks: Arc<dashmap::DashMap<String, Arc<tokio::sync::Semaphore>>>,
+    /// Per-chat cancellation tokens for in-flight processing (used by `/stop`).
+    pub chat_cancels: Arc<dashmap::DashMap<String, tokio_util::sync::CancellationToken>>,
+    /// Per-chat model overrides set via `/model <name>`.
+    pub chat_model_overrides: Arc<dashmap::DashMap<String, String>>,
 }
 
 /// Observability.
@@ -605,6 +611,23 @@ impl AppState {
             );
         } else {
             tracing::debug!("feishu channel not configured, plugin not loaded");
+        }
+
+        // Load built-in WeChat plugin (requires "wechat" entry in config.channels).
+        let wechat_config = config
+            .channels
+            .get("wechat")
+            .and_then(fastclaw_wechat::WechatChannelConfig::from_channel_config);
+        if let Some(wechat_cfg) = wechat_config {
+            let wechat_plugin = Arc::new(fastclaw_wechat::WechatPlugin::new(wechat_cfg));
+            let mode = wechat_plugin.connection_mode().to_string();
+            if let Err(e) = wechat_plugin.start(inbound_tx.clone()).await {
+                tracing::error!(error = %e, "failed to start WeChat channel plugin");
+            }
+            channel_registry.register(wechat_plugin);
+            tracing::info!(mode, "WeChat channel plugin registered");
+        } else {
+            tracing::debug!("wechat channel not configured, plugin not loaded");
         }
 
         // Load process-based channel plugins from config files.
@@ -1073,6 +1096,7 @@ impl AppState {
                 let text = msg.text.clone();
                 let account_id = msg.account_id.clone();
                 let chat_type = msg.chat_type.clone();
+                let attachments = msg.attachments.clone();
 
                 let registry = state.ext.channel_registry.read().await;
                 let channel = match registry.get(&channel_id) {
@@ -1084,20 +1108,78 @@ impl AppState {
                 };
                 drop(registry);
 
+                let trimmed = text.trim();
+                let cancels_inflight = matches!(trimmed, "/stop" | "/new" | "/new session" | "/reset");
+                let is_slash = trimmed.starts_with('/') && trimmed.len() > 1;
+
+                if cancels_inflight {
+                    if let Some((_, token)) = state.ext.chat_cancels.remove(&chat_id) {
+                        token.cancel();
+                        tracing::info!(chat_id = %chat_id, cmd = trimmed, "cancelled in-flight processing");
+                    }
+                    let state_clone = state.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = crate::routes::handle_channel_message(
+                            state_clone, channel, &channel_id, &chat_id,
+                            &message_id, &text, account_id.as_deref(), &chat_type,
+                            vec![],
+                        ).await {
+                            tracing::debug!(error = %e, "command reply failed");
+                        }
+                    });
+                    continue;
+                }
+
+                if is_slash {
+                    let state_clone = state.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = crate::routes::handle_channel_message(
+                            state_clone, channel, &channel_id, &chat_id,
+                            &message_id, &text, account_id.as_deref(), &chat_type,
+                            vec![],
+                        ).await {
+                            tracing::error!(
+                                error = %e, channel = %channel_id, chat_id = %chat_id,
+                                "slash command handling failed"
+                            );
+                        }
+                    });
+                    continue;
+                }
+
+                let sem = state
+                    .ext
+                    .chat_locks
+                    .entry(chat_id.clone())
+                    .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)))
+                    .clone();
+
+                let cancel = tokio_util::sync::CancellationToken::new();
+                state.ext.chat_cancels.insert(chat_id.clone(), cancel.clone());
+
                 let state_clone = state.clone();
+                let chat_id_for_cleanup = chat_id.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = crate::routes::handle_channel_message(
-                        state_clone,
-                        channel,
-                        &channel_id,
-                        &chat_id,
-                        &message_id,
-                        &text,
-                        account_id.as_deref(),
-                        &chat_type,
-                    )
-                    .await
-                    {
+                    let _permit = sem.acquire().await;
+                    let result = tokio::select! {
+                        r = crate::routes::handle_channel_message(
+                            state_clone.clone(),
+                            channel,
+                            &channel_id,
+                            &chat_id,
+                            &message_id,
+                            &text,
+                            account_id.as_deref(),
+                            &chat_type,
+                            attachments,
+                        ) => r,
+                        () = cancel.cancelled() => {
+                            tracing::info!(chat_id = %chat_id, "message processing cancelled by /stop");
+                            Ok(())
+                        }
+                    };
+                    state_clone.ext.chat_cancels.remove(&chat_id_for_cleanup);
+                    if let Err(e) = result {
                         tracing::error!(
                             error = %e,
                             channel = %channel_id,
@@ -1293,6 +1375,15 @@ impl AppState {
                     tracing::warn!("feishu: config missing required fields (appId/appSecret)");
                     false
                 }
+            }
+            "wechat" => {
+                let wechat_cfg = fastclaw_wechat::WechatChannelConfig::from_channel_config(ch)
+                    .unwrap_or_default();
+                let plugin = Arc::new(fastclaw_wechat::WechatPlugin::new(wechat_cfg));
+                plugin.start(tx).await?;
+                self.ext.channel_registry.write().await.register(plugin);
+                tracing::info!("wechat channel hot-reloaded");
+                true
             }
             other => return Err(anyhow::anyhow!("unknown channel type: {other}")),
         };
@@ -1618,6 +1709,9 @@ impl AppState {
                 llm_plugin_registry: Arc::new(tokio::sync::RwLock::new(
                     fastclaw_agent::LlmPluginRegistry::new(),
                 )),
+                chat_locks: Arc::new(dashmap::DashMap::new()),
+                chat_cancels: Arc::new(dashmap::DashMap::new()),
+                chat_model_overrides: Arc::new(dashmap::DashMap::new()),
             },
             obs: ObserveState {
                 metrics_collector: Arc::new(fastclaw_observe::MetricsCollector::new()),

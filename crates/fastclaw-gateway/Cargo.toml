@@ -18,6 +18,7 @@ fastclaw-observe = { path = "../fastclaw-observe" }
 fastclaw-cron = { path = "../fastclaw-cron" }
 fastclaw-mcp = { path = "../fastclaw-mcp" }
 fastclaw-feishu = { path = "../../extensions/feishu" }
+fastclaw-wechat = { path = "../../extensions/wechat" }
 fastclaw-model-router = { path = "../fastclaw-model-router" }
 tokio.workspace = true
 axum.workspace = true
@@ -35,11 +36,13 @@ futures.workspace = true
 chrono.workspace = true
 sqlx.workspace = true
 async-stream = "0.3"
+tokio-stream = "0.1"
 async-trait.workspace = true
 tokio-util = "0.7.18"
 notify.workspace = true
 reqwest.workspace = true
 url = "2"
+base64 = "0.22"
 cron = "0.12"
 utoipa.workspace = true
 

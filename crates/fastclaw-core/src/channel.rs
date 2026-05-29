@@ -34,6 +34,16 @@ pub struct ChannelCapabilities {
     pub streaming: bool,
 }
 
+/// A file attachment (local path + MIME type).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Attachment {
+    pub file_path: String,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub file_name: Option<String>,
+}
+
 /// Inbound message from a channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InboundMessage {
@@ -55,6 +65,8 @@ pub struct InboundMessage {
     pub bot_mentioned: bool,
     #[serde(default)]
     pub extra: serde_json::Value,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 /// Outbound message to send through a channel.
@@ -68,6 +80,8 @@ pub struct OutboundMessage {
     /// Image key for channels that support image messages (e.g., Feishu image_key).
     #[serde(default)]
     pub image_key: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 /// Result of handling a webhook.
@@ -200,6 +214,15 @@ pub trait ChannelPlugin: Send + Sync {
     fn supports_interactive_questions(&self) -> bool {
         false
     }
+
+    /// Called when the gateway starts processing an inbound message (e.g. before
+    /// the LLM call). Channels can use this to send a "typing" indicator.
+    /// `chat_id` is the conversation, `message_id` the triggering inbound message.
+    async fn on_processing_start(&self, _chat_id: &str, _message_id: &str) {}
+
+    /// Called when the gateway finishes processing an inbound message (after the
+    /// reply has been sent). Channels can cancel the "typing" indicator here.
+    async fn on_processing_end(&self, _chat_id: &str, _message_id: &str) {}
 
     /// Connection mode this channel uses. Informational.
     fn connection_mode(&self) -> &str {

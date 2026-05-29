@@ -312,6 +312,7 @@ impl FeishuPlugin {
             chat_type: String::new(),
             bot_mentioned: false,
             extra,
+            attachments: vec![],
         }]))
     }
 }
@@ -463,6 +464,7 @@ impl ChannelPlugin for FeishuPlugin {
             chat_type,
             bot_mentioned: false,
             extra: event.clone(),
+            attachments: vec![],
         }]))
     }
 
