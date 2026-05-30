@@ -159,7 +159,7 @@ export const StepGroup = memo(function StepGroup({
   tools: ToolCall[];
   streaming?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(!streaming);
   const summary = useMemo(() => computeSummary(tools), [tools]);
   const semanticSummary = useMemo(() => generateSemanticSummary(tools), [tools]);
   const handleToggle = useCallback(() => setExpanded((v) => !v), []);

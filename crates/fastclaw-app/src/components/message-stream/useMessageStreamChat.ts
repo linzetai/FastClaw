@@ -287,12 +287,23 @@ export function useMessageStreamChat({
             } | undefined;
             const ds = detachedStreams.get(capturedChatId);
             const finalContent = isActive() ? streamAccRef.current : ds?.acc ?? streamAccRef.current;
-            const savedToolCalls = (isActive() ? segmentsRef.current : [])
+            const currentSegments = isActive() ? [...segmentsRef.current] : [];
+            const savedToolCalls = currentSegments
               .filter((s) => s.type === "tool" && s.toolCall)
               .map((s) => {
                 const tc = s.toolCall!;
                 return { id: tc.id, name: tc.name, status: tc.status, args: tc.args, result: tc.result, duration: tc.duration };
               });
+
+            if (currentSegments.length > 0) {
+              const setChatLastSegments = useAgentStore.getState().setChatLastSegments;
+              setChatLastSegments(capturedAgentId, capturedChatId, currentSegments.map((s) => ({
+                id: s.id,
+                type: s.type,
+                content: s.content,
+                toolCall: s.toolCall ? { id: s.toolCall.id, name: s.toolCall.name, status: s.toolCall.status, args: s.toolCall.args, result: s.toolCall.result, duration: s.toolCall.duration } : undefined,
+              })));
+            }
 
             if (isActive()) {
               cancelAnimationFrame(rafIdRef.current);

@@ -4,6 +4,7 @@ import * as api from "../../lib/api";
 import { useAgentStore } from "../../lib/stores";
 import { SectionTitle } from "./SettingsShared";
 import { ICON } from "../../lib/ui-tokens";
+import { inputCls as sharedInputCls, inputStyle as sharedInputStyle } from "../common/FormElements";
 
 type DangerousOpsPolicy = "deny" | "allow" | "confirm";
 type ExecutionMode = "plan" | "default" | "auto-edit" | "yolo";
@@ -183,8 +184,8 @@ export function SecurityTab() {
     }
   };
 
-  const inputCls = "w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] font-mono outline-none transition-all focus:ring-2 focus:ring-[var(--tint)]";
-  const inputStyle: React.CSSProperties = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
+  const inputCls = sharedInputCls + " font-mono";
+  const inputStyle = sharedInputStyle;
 
   if (loading) {
     return (

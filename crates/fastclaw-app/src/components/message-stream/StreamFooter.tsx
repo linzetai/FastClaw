@@ -12,6 +12,7 @@ import { QueueIndicator } from "./QueueIndicator";
 import { QueuePanel } from "./QueuePanel";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
+import { useConfigStore } from "../../lib/stores/config-store";
 import type { Chat } from "../../lib/agent-store";
 import { openLightbox } from "../common/ImageLightbox";
 
@@ -223,7 +224,9 @@ const PROVIDER_COLORS: Record<string, string> = {
 };
 
 function ModelSelector() {
-  const [models, setModels] = useState<api.ModelInfo[]>([]);
+  const models = useConfigStore((s) => s.models);
+  const modelsLoaded = useConfigStore((s) => s.modelsLoaded);
+  const refreshModels = useConfigStore((s) => s.refreshModels);
   const [open, setOpen] = useState(false);
   const activeAgentId = useAgentStore((s) => s.activeAgentId);
   const agents = useAgentStore((s) => s.agents);
@@ -233,8 +236,8 @@ function ModelSelector() {
   const btnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    api.listModels().then(setModels).catch(() => {});
-  }, []);
+    if (!modelsLoaded) refreshModels();
+  }, [modelsLoaded, refreshModels]);
 
   const currentMeta = models.find((m) => m.model === currentModel);
   const dotColor = PROVIDER_COLORS[currentMeta?.provider ?? ""] ?? PROVIDER_COLORS.default;
@@ -244,7 +247,7 @@ function ModelSelector() {
     <div className="relative">
       <button
         ref={btnRef}
-        onClick={() => setOpen(!open)}
+        onClick={() => { if (!open) refreshModels(); setOpen(!open); }}
         className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)]"
         style={{ color: "var(--fill-tertiary)" }}
       >

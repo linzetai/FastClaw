@@ -11,6 +11,7 @@ import type {
   ChatMessage,
   ChatMessageImage,
   ChatMessageToolCall,
+  ChatStreamSegment,
   ChatUsage,
   ExecutionMode,
   QueuedMessage,
@@ -456,6 +457,24 @@ export function buildSessionSlice({ set, get }: SetGet) {
               ...ac,
               chatList: ac.chatList.map((c) =>
                 c.id === chatId ? { ...c, planFilePath: path, planFileExists: exists } : c,
+              ),
+            },
+          },
+        };
+      });
+    },
+
+    setChatLastSegments: (agentId: string, chatId: string, segments: ChatStreamSegment[]) => {
+      set((state) => {
+        const ac = state.agentChats[agentId];
+        if (!ac) return state;
+        return {
+          agentChats: {
+            ...state.agentChats,
+            [agentId]: {
+              ...ac,
+              chatList: ac.chatList.map((c) =>
+                c.id === chatId ? { ...c, lastSegments: segments } : c,
               ),
             },
           },

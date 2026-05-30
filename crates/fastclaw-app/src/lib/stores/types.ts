@@ -73,6 +73,13 @@ export interface SubAgentRunUI {
   elapsedMs?: number;
 }
 
+export interface ChatStreamSegment {
+  id: string;
+  type: "text" | "tool";
+  content?: string;
+  toolCall?: ChatMessageToolCall;
+}
+
 export type StreamItem = { type: "message"; data: ChatMessage };
 
 export interface ChatUsage {
@@ -101,6 +108,7 @@ export interface Chat {
   executionMode: ExecutionMode;
   planFilePath?: string;
   planFileExists?: boolean;
+  lastSegments?: ChatStreamSegment[];
 }
 
 export interface AgentChats {
@@ -154,6 +162,7 @@ export interface AgentState {
 
   setChatExecutionMode: (agentId: string, chatId: string, mode: ExecutionMode) => void;
   setChatPlanFile: (agentId: string, chatId: string, path: string, exists: boolean) => void;
+  setChatLastSegments: (agentId: string, chatId: string, segments: ChatStreamSegment[]) => void;
 
   subAgentStart: (agentId: string, chatId: string, run: SubAgentRunUI) => void;
   subAgentDelta: (agentId: string, chatId: string, runId: string, content: string) => void;

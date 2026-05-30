@@ -167,13 +167,15 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
     <aside
       className="flex shrink-0 flex-col"
       style={{
-        width: collapsed ? "52px" : "240px",
+        width: collapsed ? "0px" : "240px",
         background: "var(--bg-sidebar)",
-        borderRight: "0.5px solid var(--separator)",
+        borderRight: collapsed ? "none" : "0.5px solid var(--separator)",
         transition: "width var(--duration-slow) var(--ease-in-out)",
         overflow: "hidden",
+        opacity: collapsed ? 0 : 1,
+        pointerEvents: collapsed ? "none" : "auto",
       }}
-      tabIndex={0}
+      tabIndex={collapsed ? -1 : 0}
     >
       <div className={`flex flex-col gap-2 pb-2 pt-2 ${collapsed ? "items-center px-2" : "px-3"}`}>
         {collapsed ? (

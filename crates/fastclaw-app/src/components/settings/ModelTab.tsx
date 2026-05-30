@@ -5,6 +5,7 @@ import { SectionTitle } from "./SettingsShared";
 import { inferContextWindow, takeModelSnapshot, popModelSnapshot, hasModelSnapshots } from "../../lib/model-registry";
 import { useModelTest } from "../../lib/model-utils";
 import { ICON } from "../../lib/ui-tokens";
+import { inputCls as sharedInputCls, inputStyle as sharedInputStyle, labelCls as sharedLabelCls, labelStyle as sharedLabelStyle, FormButton } from "../common/FormElements";
 
 
 /* ━━━ Models Tab ━━━ */
@@ -72,10 +73,10 @@ function ModelFormModal({
     runTest(baseUrl, cred.apiKey, form.model || undefined);
   };
 
-  const inputCls = "w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-all focus:ring-2 focus:ring-[var(--tint)]";
-  const inputStyle: React.CSSProperties = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
-  const labelCls = "mb-1.5 block text-[11px] font-medium";
-  const labelStyle: React.CSSProperties = { color: "var(--fill-tertiary)" };
+  const inputCls = sharedInputCls;
+  const inputStyle = sharedInputStyle;
+  const labelCls = sharedLabelCls;
+  const labelStyle = sharedLabelStyle;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center" onClick={onCancel}>
@@ -302,17 +303,16 @@ function ModelFormModal({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={onCancel} disabled={saving} className="cursor-pointer rounded-[var(--radius-xs)] px-3 py-1.5 text-[12px] font-medium transition-colors hover:bg-[var(--bg-hover)]" style={{ color: "var(--fill-secondary)" }}>
+            <FormButton variant="ghost" onClick={onCancel} disabled={saving}>
               取消
-            </button>
-            <button
+            </FormButton>
+            <FormButton
+              variant="primary"
               onClick={() => onSave(form, cred)}
               disabled={saving || !form.key || !form.model}
-              className="rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              style={{ background: "var(--tint)", cursor: saving || !form.key || !form.model ? "not-allowed" : "pointer" }}
             >
               {saving ? "保存中..." : "保存"}
-            </button>
+            </FormButton>
           </div>
         </div>
       </div>

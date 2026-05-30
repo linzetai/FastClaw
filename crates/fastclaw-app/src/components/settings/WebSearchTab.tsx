@@ -3,6 +3,7 @@ import { Eye, EyeOff, Zap, CheckCircle, XCircle, Loader2, Search } from "lucide-
 import * as api from "../../lib/api";
 import { SectionTitle } from "./SettingsShared";
 import { ICON } from "../../lib/ui-tokens";
+import { inputCls as sharedInputCls, inputStyle as sharedInputStyle, labelCls as sharedLabelCls, labelStyle as sharedLabelStyle } from "../common/FormElements";
 
 
 type TestStatus = "idle" | "testing" | "success" | "error";
@@ -149,10 +150,10 @@ export function WebSearchTab() {
     );
   }
 
-  const inputCls = "w-full rounded-[var(--radius-xs)] px-3 py-2 text-[13px] outline-none transition-all focus:ring-2 focus:ring-[var(--tint)]";
-  const inputStyle: React.CSSProperties = { background: "var(--bg-base)", color: "var(--fill-primary)", border: "0.5px solid var(--separator-opaque)" };
-  const labelCls = "mb-1.5 block text-[11px] font-medium";
-  const labelStyle: React.CSSProperties = { color: "var(--fill-tertiary)" };
+  const inputCls = sharedInputCls;
+  const inputStyle = sharedInputStyle;
+  const labelCls = sharedLabelCls;
+  const labelStyle = sharedLabelStyle;
 
   return (
     <div className="space-y-6">

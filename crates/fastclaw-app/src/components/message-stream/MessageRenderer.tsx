@@ -143,14 +143,23 @@ const AiReactionBar = memo(function AiReactionBar({ content }: { content: string
   );
 });
 
-const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onToggleSelect }: { msg: ChatMessage; usage?: ChatUsage; copyable?: boolean; selected?: boolean; onToggleSelect?: () => void }) {
+const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onToggleSelect, savedSegments }: { msg: ChatMessage; usage?: ChatUsage; copyable?: boolean; selected?: boolean; onToggleSelect?: () => void; savedSegments?: StreamSegment[] }) {
   const toolCalls = msg.toolCalls;
   const aiThreshold = useConfigStore((s) => s.display.toolCallGroupThreshold);
+
+  const hasSegments = savedSegments && savedSegments.length > 0;
+  const groupedSegments = useMemo(() => {
+    if (!hasSegments) return null;
+    return groupConsecutiveSegments(savedSegments!, aiThreshold);
+  }, [hasSegments, savedSegments, aiThreshold]);
+
   const groupedToolCalls = useMemo(() => {
+    if (hasSegments) return null;
     if (!toolCalls || toolCalls.length === 0) return null;
     const typed = toolCalls.map((tc) => ({ ...tc, status: tc.status as "running" | "success" | "error" }));
     return groupConsecutiveToolCalls(typed, aiThreshold);
-  }, [toolCalls, aiThreshold]);
+  }, [hasSegments, toolCalls, aiThreshold]);
+
   return (
     <div className="pb-3 group/message" style={{ animation: "fade-in var(--duration-fast) var(--ease-out)" }}>
       <div className="flex items-start gap-[14px]">
@@ -168,7 +177,6 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
         )}
         <MessageAvatar role="assistant" />
         <div className="flex-1 min-w-0">
-      {/* Message head: name + time + duration pill */}
       <div className="flex items-center gap-2 mb-1">
         <span className="text-[13px] font-semibold" style={{ color: "var(--fill-primary)" }}>FastClaw</span>
         <span className="text-[11px] tabular-nums" style={{ color: "var(--fill-quaternary)" }}>
@@ -185,27 +193,56 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
           </span>
         )}
       </div>
-      {groupedToolCalls && groupedToolCalls.length > 0 && (
+      {groupedSegments ? (
         <div className="mb-2">
-          {groupedToolCalls.map((item) => {
-            if (item.type === "single") {
-              return <StepIndicator key={item.tool.id} tool={item.tool} />;
+          {groupedSegments.map((group) => {
+            if (group.type === "text" && group.segment.content) {
+              return (
+                <div key={group.segment.id} className="pb-1" style={{ maxWidth: "720px" }}>
+                  <Suspense fallback={<div className="animate-pulse rounded py-1" style={{ background: "var(--bg-tertiary)", height: 16 }} />}>
+                    <MarkdownContent content={group.segment.content} />
+                  </Suspense>
+                </div>
+              );
             }
-            return (
-              <StepGroup
-                key={item.tools[0].id}
-                tools={item.tools}
-              />
-            );
+            if (group.type === "single-tool" && group.segment.toolCall) {
+              return <StepIndicator key={group.segment.id} tool={group.segment.toolCall} />;
+            }
+            if (group.type === "tool-group") {
+              const tools = group.segments
+                .map((s) => s.toolCall)
+                .filter((tc): tc is NonNullable<typeof tc> => !!tc);
+              return <StepGroup key={group.segments[0].id} tools={tools} />;
+            }
+            return null;
           })}
         </div>
+      ) : (
+        <>
+          {groupedToolCalls && groupedToolCalls.length > 0 && (
+            <div className="mb-2">
+              {groupedToolCalls.map((item) => {
+                if (item.type === "single") {
+                  return <StepIndicator key={item.tool.id} tool={item.tool} />;
+                }
+                return (
+                  <StepGroup
+                    key={item.tools[0].id}
+                    tools={item.tools}
+                  />
+                );
+              })}
+            </div>
+          )}
+          <div style={{ maxWidth: "720px" }}>
+            <Suspense fallback={<div className="animate-pulse rounded py-2" style={{ background: "var(--bg-tertiary)", height: 20 }} />}>
+              <MarkdownContent content={msg.content} />
+            </Suspense>
+          </div>
+        </>
       )}
-      <div style={{ maxWidth: "720px" }}>
-        <Suspense fallback={<div className="animate-pulse rounded py-2" style={{ background: "var(--bg-tertiary)", height: 20 }} />}>
-          <MarkdownContent content={msg.content} />
-        </Suspense>
-      </div>
-      {copyable && <AiReactionBar content={msg.content} />}
+      {!groupedSegments && copyable && <AiReactionBar content={msg.content} />}
+      {groupedSegments && copyable && <AiReactionBar content={msg.content} />}
         </div>
       </div>
     </div>
@@ -471,6 +508,7 @@ export interface MessageRendererRowProps {
   isSelected?: boolean;
   onToggleSelect?: (fullIdx: number) => void;
   animate?: boolean;
+  lastSegments?: StreamSegment[];
 }
 
 export function MessageRendererRow({
@@ -487,6 +525,7 @@ export function MessageRendererRow({
   isSelected,
   onToggleSelect,
   animate = true,
+  lastSegments,
 }: MessageRendererRowProps) {
   const m = item.data as StreamableMsg;
   const threshold = useConfigStore((s) => s.display.toolCallGroupThreshold);
@@ -636,6 +675,7 @@ export function MessageRendererRow({
           copyable
           selected={selectMode ? isSelected : undefined}
           onToggleSelect={selectMode ? () => onToggleSelect?.(fullIdx) : undefined}
+          savedSegments={lastSegments}
         />
       )}
     </div>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from "react";
-import { Search } from "lucide-react";
+import { Search, PanelLeftOpen } from "lucide-react";
 import { BTN_ICON } from "../../lib/ui-tokens";
 import { useGatewayStore } from "../../lib/store";
 import { useAgentStore } from "../../lib/agent-store";
@@ -127,6 +127,9 @@ function Loading({ error }: { error: string | null }) {
 }
 
 function ContentHeader() {
+  const sidebarCollapsed = useAgentStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useAgentStore((s) => s.toggleSidebar);
+
   const handleSearchClick = useCallback(() => {
     window.dispatchEvent(new CustomEvent("fastclaw:toggle-search"));
   }, []);
@@ -140,7 +143,17 @@ function ContentHeader() {
         background: "var(--bg-primary)",
       }}
     >
-      <div className="flex items-center">
+      <div className="flex items-center gap-1">
+        {sidebarCollapsed && (
+          <button
+            onClick={toggleSidebar}
+            className={BTN_ICON.sm}
+            style={{ color: "var(--fill-tertiary)" }}
+            title="展开侧边栏"
+          >
+            <PanelLeftOpen size={18} strokeWidth={1.2} />
+          </button>
+        )}
         <span
           className="relative px-3 py-2 text-[13px] font-semibold"
           style={{ color: "var(--fill-primary)" }}

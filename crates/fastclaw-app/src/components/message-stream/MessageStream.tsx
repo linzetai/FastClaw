@@ -625,6 +625,7 @@ export function MessageStream(_props: MessageStreamProps) {
                 subAgentRuns={activeChat?.subAgentRuns}
                 bottomRef={bottomRef}
                 animate={animateMessages}
+                lastSegments={activeChat?.lastSegments as import("./types").StreamSegment[] | undefined}
               />
             )}
             increaseViewportBy={VIEWPORT_INCREASE}
