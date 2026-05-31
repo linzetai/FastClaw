@@ -450,6 +450,15 @@ impl SubAgentManager {
 
             drop(reservation);
             cancel_tokens.remove(&rid);
+
+            // Auto-GC: remove the run from the map after a short retention period.
+            // This prevents unbounded growth of the `runs` DashMap.
+            let runs_for_gc = runs.clone();
+            let rid_for_gc = rid.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(300)).await;
+                runs_for_gc.remove(&rid_for_gc);
+            });
         });
 
         Ok(run_id)
@@ -798,6 +807,26 @@ impl SubAgentManager {
                 true
             }
         });
+
+        // Also prune completion channels whose broadcast senders have no receivers
+        // and no active runs referencing that session.
+        self.completion_channels.retain(|session_id, tx| {
+            if tx.receiver_count() > 0 {
+                return true;
+            }
+            // Keep the channel if there are still active runs for this session
+            self.runs
+                .iter()
+                .any(|r| r.parent_session_id == *session_id && !r.status.is_terminal())
+        });
+    }
+
+    /// Clean up all resources associated with a session.
+    /// Should be called when a session is destroyed or the session actor is dropped.
+    pub fn cleanup_session(&self, session_id: &str) {
+        self.completion_channels.remove(session_id);
+        self.runs
+            .retain(|_, r| r.parent_session_id != session_id || !r.status.is_terminal());
     }
 }
 

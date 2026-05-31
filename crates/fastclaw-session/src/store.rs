@@ -14,6 +14,9 @@ use crate::models::{
 };
 
 const MSG_CACHE_MAX_SESSIONS: usize = 32;
+/// Per-session message count cap for the in-memory cache.
+/// Older messages are evicted from the cache (not from SQLite).
+const MSG_CACHE_MAX_MESSAGES_PER_SESSION: usize = 200;
 
 pub struct SessionStore {
     pool: Pool<Sqlite>,
@@ -521,6 +524,10 @@ impl SessionStore {
         let mut cache = self.msg_cache.write().await;
         if let Some(cached) = cache.get_mut(session_id) {
             cached.push(msg.clone());
+            if cached.len() > MSG_CACHE_MAX_MESSAGES_PER_SESSION {
+                let excess = cached.len() - MSG_CACHE_MAX_MESSAGES_PER_SESSION;
+                cached.drain(..excess);
+            }
         }
 
         Ok(())
@@ -595,6 +602,10 @@ impl SessionStore {
         let mut cache = self.msg_cache.write().await;
         if let Some(cached) = cache.get_mut(session_id) {
             cached.extend_from_slice(messages);
+            if cached.len() > MSG_CACHE_MAX_MESSAGES_PER_SESSION {
+                let excess = cached.len() - MSG_CACHE_MAX_MESSAGES_PER_SESSION;
+                cached.drain(..excess);
+            }
         }
 
         Ok(())
@@ -694,7 +705,12 @@ impl SessionStore {
                     cache.remove(&oldest);
                 }
             }
-            cache.insert(session_id.to_string(), messages.clone());
+            let cached = if messages.len() > MSG_CACHE_MAX_MESSAGES_PER_SESSION {
+                messages[messages.len() - MSG_CACHE_MAX_MESSAGES_PER_SESSION..].to_vec()
+            } else {
+                messages.clone()
+            };
+            cache.insert(session_id.to_string(), cached);
         }
 
         Ok(messages)

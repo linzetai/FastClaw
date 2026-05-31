@@ -1239,6 +1239,10 @@ impl AppState {
         self.ext.chat_cancels.retain(|k, _| active_ids.contains(k));
         let cancels_removed = cancels_before - self.ext.chat_cancels.len();
 
+        // GC SubAgentManager: remove terminal runs older than 5 minutes and
+        // prune completion channels for dead sessions.
+        self.strm.subagent_manager.gc(std::time::Duration::from_secs(300));
+
         let total_removed = locks_removed + overrides_removed + streams_removed + cancels_removed;
         if gc_stats.removed > 0 || total_removed > 0 {
             tracing::info!(

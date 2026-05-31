@@ -186,8 +186,21 @@ pub async fn setup_chat(
 
     context_messages.extend_from_slice(&user_messages);
 
-    let mut enriched_request = request.clone();
-    enriched_request.messages = context_messages;
+    // Build enriched_request without cloning request.messages (which would be
+    // immediately discarded). This avoids a large allocation for sessions with
+    // extensive message histories.
+    let mut enriched_request = ChatRequest {
+        messages: context_messages,
+        model: request.model.clone(),
+        agent_id: request.agent_id.clone(),
+        session_id: request.session_id.clone(),
+        stream: request.stream,
+        temperature: request.temperature,
+        max_tokens: request.max_tokens,
+        tools: request.tools.clone(),
+        slash_intent: request.slash_intent.clone(),
+        work_dir: request.work_dir.clone(),
+    };
     let t0 = std::time::Instant::now();
     state
         .store

@@ -513,6 +513,7 @@ pub struct AgentRuntime {
     self_iter_max_recovery_attempts: u32,
     skill_store: ArcSwap<Option<Arc<SkillStore>>>,
     trajectory_store: ArcSwap<Option<Arc<TrajectoryStore>>>,
+    cached_runtime_registry: Arc<runtimes::RuntimeRegistry>,
 }
 
 impl AgentRuntime {
@@ -536,6 +537,7 @@ impl AgentRuntime {
             self_iter_max_recovery_attempts: 3,
             skill_store: ArcSwap::new(Arc::new(None)),
             trajectory_store: ArcSwap::new(Arc::new(None)),
+            cached_runtime_registry: Arc::new(runtimes::register_default_runtimes()),
         }
     }
 
@@ -821,7 +823,7 @@ impl AgentRuntime {
             session_store,
             todo_store,
         };
-        let runtime_registry = Arc::new(runtimes::register_default_runtimes());
+        let runtime_registry = self.cached_runtime_registry.clone();
         let stream = StreamParams {
             tx,
             orchestrator: Some(orchestrator),
@@ -908,7 +910,10 @@ impl AgentRuntime {
             .unwrap_or_default();
 
         // ── Task Decomposer: decompose complex requests ─────────────────
-        if last_user_msg.len() >= 80 {
+        // This block runs once before the tool-call loop, so it naturally
+        // only fires on the first iteration. We raise the threshold from 80
+        // to 200 chars to avoid unnecessary LLM calls for routine messages.
+        if last_user_msg.len() >= 200 {
             let decomp_provider = self.provider();
             let decomp_config = task_decomposer::TaskDecomposerConfig {
                 model: config.model.model.clone(),

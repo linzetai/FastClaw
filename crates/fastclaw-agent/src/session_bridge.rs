@@ -275,21 +275,45 @@ impl RuntimeTurnExecutor {
             let notification_text =
                 reactive_loop::build_completion_notification(&completions, remaining_active as usize);
 
-            // Load current messages, append notification, and re-prompt.
-            let mut reprompt_request = request.clone();
-            if let Some(ref store) = session_store {
+            // Build a lightweight reprompt request: only clone the notification
+            // message instead of the entire message history, and load from the
+            // session store which already caches messages in memory.
+            let reprompt_messages = if let Some(ref store) = session_store {
                 if let Some(ref sid) = request.session_id {
-                    if let Ok(mut messages) = store.load_chat_messages(&sid.to_string()).await {
-                        messages.push(reactive_loop::notification_as_system_message(&notification_text));
-                        reprompt_request.messages = messages;
+                    match store.load_chat_messages(&sid.to_string()).await {
+                        Ok(mut messages) => {
+                            messages.push(reactive_loop::notification_as_system_message(&notification_text));
+                            messages
+                        }
+                        Err(_) => {
+                            let mut msgs = request.messages.clone();
+                            msgs.push(reactive_loop::notification_as_system_message(&notification_text));
+                            msgs
+                        }
                     }
+                } else {
+                    let mut msgs = request.messages.clone();
+                    msgs.push(reactive_loop::notification_as_system_message(&notification_text));
+                    msgs
                 }
             } else {
-                // Fallback: append to request messages.
-                reprompt_request
-                    .messages
-                    .push(reactive_loop::notification_as_system_message(&notification_text));
-            }
+                let mut msgs = request.messages.clone();
+                msgs.push(reactive_loop::notification_as_system_message(&notification_text));
+                msgs
+            };
+
+            let reprompt_request = ChatRequest {
+                messages: reprompt_messages,
+                session_id: request.session_id.clone(),
+                agent_id: request.agent_id.clone(),
+                model: request.model.clone(),
+                max_tokens: request.max_tokens,
+                temperature: request.temperature,
+                stream: request.stream,
+                tools: None,
+                work_dir: request.work_dir.clone(),
+                slash_intent: None,
+            };
 
             // Re-prompt LLM.
             let runtime = self.runtime.clone();
