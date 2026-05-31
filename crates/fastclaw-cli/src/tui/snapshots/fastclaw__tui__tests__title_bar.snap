@@ -1,5 +1,0 @@
----
-source: crates/fastclaw-cli/src/tui/mod.rs
-expression: terminal.backend().to_string()
----
-" FastClaw ●  default  sess-abc                                                  "

@@ -98,9 +98,10 @@ fi
 
 ok "Tauri 构建完成"
 
-#── DMG Fallback ──────────────────────────────────────────────────────
+#── 创建 DMG（含 Applications 快捷方式）───────────────────────────────
 
-# 如果 Tauri 没有生成 DMG（AppleScript 失败），用 hdiutil 手动创建
+log "创建 DMG..."
+
 APP_PATH=""
 for BUNDLE_DIR in "$PROJECT_ROOT/target/tauri/release/bundle" "$PROJECT_ROOT/target/release/bundle"; do
   [ -d "$BUNDLE_DIR/macos" ] || continue
@@ -109,35 +110,46 @@ for BUNDLE_DIR in "$PROJECT_ROOT/target/tauri/release/bundle" "$PROJECT_ROOT/tar
 done
 
 if [ -n "$APP_PATH" ] && [ -d "$APP_PATH" ]; then
-  DMG_EXISTS=false
+  # Remove Tauri-generated DMGs and recreate with Applications shortcut
   for BUNDLE_DIR in "$PROJECT_ROOT/target/tauri/release/bundle" "$PROJECT_ROOT/target/release/bundle"; do
     [ -d "$BUNDLE_DIR/dmg" ] || continue
-    if find "$BUNDLE_DIR/dmg" -name "*.dmg" ! -name "rw.*" -type f 2>/dev/null | grep -q .; then
-      DMG_EXISTS=true
-      break
-    fi
+    find "$BUNDLE_DIR/dmg" -name "*.dmg" -type f -exec rm -f {} \; 2>/dev/null || true
   done
 
-  if [ "$DMG_EXISTS" = false ]; then
-    log "Tauri DMG 打包未成功，使用 hdiutil 手动创建..."
-    DMG_NAME="FastClaw_${VERSION}_$(uname -m).dmg"
-    DMG_PATH="$PROJECT_ROOT/target/tauri/release/bundle/dmg/$DMG_NAME"
-    mkdir -p "$(dirname "$DMG_PATH")"
-    hdiutil create -volname "FastClaw" -srcfolder "$APP_PATH" -ov -format UDZO -imagekey zlib-level=9 "$DMG_PATH"
-    ok "DMG 已创建: $DMG_NAME"
+  DMG_NAME="FastClaw_${VERSION}_$(uname -m).dmg"
+  DMG_DIR="$PROJECT_ROOT/target/tauri/release/bundle/dmg"
+  mkdir -p "$DMG_DIR"
+
+  DMG_STAGING="$PROJECT_ROOT/target/tauri/release/bundle/.dmg-staging"
+  rm -rf "$DMG_STAGING"
+  mkdir -p "$DMG_STAGING"
+  cp -R "$APP_PATH" "$DMG_STAGING/"
+  ln -s /Applications "$DMG_STAGING/Applications"
+
+  hdiutil create -volname "FastClaw" -srcfolder "$DMG_STAGING" -ov -format UDZO -imagekey zlib-level=9 "$DMG_DIR/$DMG_NAME"
+  rm -rf "$DMG_STAGING"
+  ok "DMG 已创建: $DMG_NAME"
+
+  # Create .app.tar.gz updater artifact
+  log "创建 .app.tar.gz..."
+  APP_BASENAME=$(basename "$APP_PATH")
+  APP_PARENT=$(dirname "$APP_PATH")
+  TARGZ_NAME="${APP_BASENAME%.app}_${VERSION}_$(uname -m).app.tar.gz"
+  for BUNDLE_DIR in "$PROJECT_ROOT/target/tauri/release/bundle" "$PROJECT_ROOT/target/release/bundle"; do
+    [ -d "$BUNDLE_DIR/macos" ] || continue
+    find "$BUNDLE_DIR/macos" -name "*.app.tar.gz" -type f -exec rm -f {} \; 2>/dev/null || true
+    find "$BUNDLE_DIR/macos" -name "*.app.tar.gz.sig" -type f -exec rm -f {} \; 2>/dev/null || true
+  done
+  (cd "$APP_PARENT" && tar czf "$APP_PARENT/$TARGZ_NAME" "$APP_BASENAME")
+
+  if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+    log "签名 .app.tar.gz..."
+    (cd "$APP_DIR" && pnpm exec -- tauri signer sign -k "$TAURI_SIGNING_PRIVATE_KEY" "$APP_PARENT/$TARGZ_NAME") || true
   fi
-fi
-
-#── 构建 CLI 二进制 ──────────────────────────────────────────────────
-
-log "构建 FastClaw CLI (fastclaw)..."
-if [ "$UNIVERSAL" = true ]; then
-  (cd "$PROJECT_ROOT" && cargo build --release --package fastclaw-cli --target aarch64-apple-darwin)
-  (cd "$PROJECT_ROOT" && cargo build --release --package fastclaw-cli --target x86_64-apple-darwin)
+  ok ".app.tar.gz 已创建: $TARGZ_NAME"
 else
-  (cd "$PROJECT_ROOT" && cargo build --release --package fastclaw-cli)
+  err "未找到 .app bundle"
 fi
-ok "CLI 构建完成"
 
 #── 收集产物 ──────────────────────────────────────────────────────────
 
@@ -145,7 +157,6 @@ log "收集构建产物..."
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
-# Tauri 2.10+ uses target/tauri/release/bundle/
 for BUNDLE_DIR in "$PROJECT_ROOT/target/tauri/release/bundle" "$PROJECT_ROOT/target/release/bundle"; do
   [ -d "$BUNDLE_DIR" ] || continue
 
@@ -153,43 +164,14 @@ for BUNDLE_DIR in "$PROJECT_ROOT/target/tauri/release/bundle" "$PROJECT_ROOT/tar
   find "$BUNDLE_DIR" -name "*.app" -type d -exec cp -R {} "$DIST_DIR/" \; 2>/dev/null || true
 
   # macOS .dmg
-  for pattern in "*.dmg" "*.dmg.sig"; do
-    find "$BUNDLE_DIR" -maxdepth 2 -name "$pattern" -exec cp {} "$DIST_DIR/" \; 2>/dev/null || true
+  find "$BUNDLE_DIR" -maxdepth 2 -name "*.dmg" ! -name "rw.*" -exec cp {} "$DIST_DIR/" \; 2>/dev/null || true
+  find "$BUNDLE_DIR" -maxdepth 2 -name "*.dmg.sig" -exec cp {} "$DIST_DIR/" \; 2>/dev/null || true
+
+  # Updater artifacts (.app.tar.gz)
+  for pattern in "*.app.tar.gz" "*.app.tar.gz.sig"; do
+    find "$BUNDLE_DIR" -maxdepth 3 -name "$pattern" -exec cp {} "$DIST_DIR/" \; 2>/dev/null || true
   done
-
-  # Universal binary targets
-  if [ "$UNIVERSAL" = true ]; then
-    for pattern in "*.app.tar.gz" "*.app.tar.gz.sig"; do
-      find "$BUNDLE_DIR" -maxdepth 3 -name "$pattern" -exec cp {} "$DIST_DIR/" \; 2>/dev/null || true
-    done
-  fi
 done
-
-# CLI binary
-if [ "$UNIVERSAL" = true ]; then
-  AARCH64_BIN="$PROJECT_ROOT/target/aarch64-apple-darwin/release/fastclaw"
-  X86_BIN="$PROJECT_ROOT/target/x86_64-apple-darwin/release/fastclaw"
-  if [ -f "$AARCH64_BIN" ] && [ -f "$X86_BIN" ]; then
-    lipo -create "$AARCH64_BIN" "$X86_BIN" -output "$DIST_DIR/fastclaw"
-    chmod +x "$DIST_DIR/fastclaw"
-    (cd "$DIST_DIR" && tar czf "fastclaw-cli-${VERSION}-darwin-universal.tar.gz" fastclaw)
-    ok "CLI 已打包: fastclaw-cli-${VERSION}-darwin-universal.tar.gz (universal)"
-  else
-    err "CLI 二进制未找到 (universal targets)"
-  fi
-else
-  CLI_BIN="$PROJECT_ROOT/target/release/fastclaw"
-  if [ -f "$CLI_BIN" ]; then
-    cp "$CLI_BIN" "$DIST_DIR/fastclaw"
-    chmod +x "$DIST_DIR/fastclaw"
-    ARCH="x86_64"
-    if [ "$(uname -m)" = "arm64" ]; then ARCH="aarch64"; fi
-    (cd "$DIST_DIR" && tar czf "fastclaw-cli-${VERSION}-darwin-${ARCH}.tar.gz" fastclaw)
-    ok "CLI 已打包: fastclaw-cli-${VERSION}-darwin-${ARCH}.tar.gz"
-  else
-    err "CLI 二进制未找到: $CLI_BIN"
-  fi
-fi
 
 ok "产物已收集到 $DIST_DIR/"
 ls -lh "$DIST_DIR/"
@@ -199,12 +181,10 @@ ls -lh "$DIST_DIR/"
 if [ "$RELEASE_MODE" = true ]; then
   log "生成 latest.json..."
 
-  # macOS .dmg
   MACOS_ARCHIVE=$(find "$DIST_DIR" -name "*.dmg" ! -name "*.sig" | head -1)
   MACOS_SIG=$(find "$DIST_DIR" -name "*.dmg.sig" | head -1)
 
   if [ -z "$MACOS_ARCHIVE" ]; then
-    # Fallback to .app.tar.gz for universal builds
     MACOS_ARCHIVE=$(find "$DIST_DIR" -name "*.app.tar.gz" ! -name "*.sig" | head -1)
     MACOS_SIG=$(find "$DIST_DIR" -name "*.app.tar.gz.sig" | head -1)
   fi
@@ -218,7 +198,6 @@ if [ "$RELEASE_MODE" = true ]; then
   MACOS_SIG_CONTENT=$(cat "$MACOS_SIG")
   PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-  # Detect architecture
   ARCH="x86_64"
   if [ "$UNIVERSAL" = true ]; then
     ARCH="universal"

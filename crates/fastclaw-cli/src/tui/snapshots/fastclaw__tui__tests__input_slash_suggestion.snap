@@ -1,9 +1,0 @@
----
-source: crates/fastclaw-cli/src/tui/mod.rs
-expression: terminal.backend().to_string()
----
-"┌──────────────────────────────────────────────────────────┐────────────────────"
-"│ /help         Show help and available commands           │                    "
-"└──────────────────────────────────────────────────────────┘                    "
-"                                                                                "
-"                                                                                "

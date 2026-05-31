@@ -1,5 +1,0 @@
----
-source: crates/fastclaw-cli/src/tui/mod.rs
-expression: terminal.backend().to_string()
----
-" │ plan │ 39% [━━━━────────] 50k/128k  ? help                                                       "

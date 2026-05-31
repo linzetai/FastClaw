@@ -22,22 +22,17 @@ use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
-use fastclaw_core::config::{ConfigMode, FastClawConfig, GatewayState};
+use fastclaw_core::config::{ConfigMode, FastClawConfig};
 use fastclaw_security::{ApiKeyAuth, RateLimitConfig, RateLimiter};
 
 pub use state::AppState;
 
-/// Configuration mode for gateway state file.
-/// This is passed from the caller to determine where to write gateway.json.
 static GATEWAY_CONFIG_MODE: std::sync::OnceLock<ConfigMode> = std::sync::OnceLock::new();
 
-/// Set the config mode for gateway state file management.
-/// Must be called before gateway starts if state file is needed.
 pub fn set_config_mode(mode: ConfigMode) {
     let _ = GATEWAY_CONFIG_MODE.set(mode);
 }
 
-/// Get the current config mode, defaulting to Production.
 pub fn get_config_mode() -> &'static ConfigMode {
     GATEWAY_CONFIG_MODE.get_or_init(|| ConfigMode::Production)
 }
@@ -152,17 +147,8 @@ pub async fn run(config: FastClawConfig) -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
     let local_addr = listener.local_addr()?;
-    let port = local_addr.port();
     eprintln!("  ✓  Gateway ready on http://{local_addr}/");
     eprintln!();
-
-    // Write gateway state file for client discovery
-    let gateway_state = GatewayState::new(port);
-    if let Err(e) = gateway_state.write(get_config_mode()) {
-        tracing::warn!(error = %e, "failed to write gateway state file");
-    } else {
-        tracing::info!(port, pid = gateway_state.pid, "wrote gateway state file");
-    }
 
     let shutdown = shutdown_signal();
     let serve = axum::serve(
@@ -176,20 +162,13 @@ pub async fn run(config: FastClawConfig) -> anyhow::Result<()> {
         );
     });
 
-    let result = match serve.await {
+    match serve.await {
         Ok(()) => {
             tracing::info!("gateway stopped after graceful shutdown");
             Ok(())
         }
         Err(e) => Err(e.into()),
-    };
-
-    // Clean up gateway state file on shutdown
-    if let Err(e) = GatewayState::remove(get_config_mode()) {
-        tracing::warn!(error = %e, "failed to remove gateway state file");
     }
-
-    result
 }
 
 /// Start the gateway with a pre-bound TCP listener and an external shutdown signal.
@@ -228,16 +207,7 @@ pub async fn serve_with_state(
     let app = build_app(state, auth);
 
     let local_addr = listener.local_addr()?;
-    let port = local_addr.port();
     tracing::info!(%local_addr, "embedded gateway starting");
-
-    // Write gateway state file for client discovery
-    let gateway_state = GatewayState::new(port);
-    if let Err(e) = gateway_state.write(get_config_mode()) {
-        tracing::warn!(error = %e, "failed to write gateway state file");
-    } else {
-        tracing::info!(port, pid = gateway_state.pid, "wrote gateway state file");
-    }
 
     let serve = axum::serve(
         listener,
@@ -248,14 +218,7 @@ pub async fn serve_with_state(
         tracing::info!("embedded gateway: graceful shutdown requested");
     });
 
-    let result = serve.await;
-
-    // Clean up gateway state file on shutdown
-    if let Err(e) = GatewayState::remove(get_config_mode()) {
-        tracing::warn!(error = %e, "failed to remove gateway state file");
-    }
-
-    result?;
+    serve.await?;
     Ok(())
 }
 

@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "crates/fastclaw-cli",
     "crates/fastclaw-core",
     "crates/fastclaw-gateway",
     "crates/fastclaw-agent",
