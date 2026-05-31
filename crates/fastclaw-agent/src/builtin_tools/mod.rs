@@ -5,7 +5,6 @@ mod confirm;
 pub mod coordinator;
 pub mod exec_command;
 mod filesystem;
-mod git;
 pub mod goal;
 mod identity;
 mod lsp_manager;
@@ -60,7 +59,6 @@ pub use filesystem::{
     ApplyPatchTool, EditFileTool, GlobTool, ListDirectoryTool, MultiEditTool, ReadFileTool,
     SearchInFilesTool, WriteFileTool,
 };
-pub use git::GitTool;
 pub use goal::{CreateGoalTool, GetGoalTool, GoalStore, UpdateGoalTool};
 pub use identity::{GetIdentityTool, SetIdentityTool, UnifiedIdentityTool};
 pub use media::{ImageGenerateTool, TtsTool};
@@ -118,7 +116,6 @@ pub fn register_builtin_tools_full(
     network_proxy: Option<fastclaw_network_proxy::NetworkProxy>,
 ) {
     // ── Core eager tools (~15) ──────────────────────────────────────────────
-    registry.register(Arc::new(GitTool));
     registry.register(Arc::new(HttpFetchTool::new()));
     registry.register(Arc::new(WebSearchTool::unconfigured()));
     registry.register(Arc::new(WebFetchTool::with_defaults()));
