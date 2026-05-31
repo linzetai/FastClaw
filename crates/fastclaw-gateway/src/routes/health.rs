@@ -16,7 +16,11 @@ pub(super) async fn serve_ui() -> impl IntoResponse {
 }
 
 pub(super) async fn health() -> impl IntoResponse {
-    Json(json!({ "status": "ok" }))
+    let mut resp = json!({ "status": "ok" });
+    if let Some(rss_bytes) = crate::memory_monitor::get_process_rss_bytes() {
+        resp["memory_rss_mb"] = json!(rss_bytes / (1024 * 1024));
+    }
+    Json(resp)
 }
 
 pub(super) async fn readiness(

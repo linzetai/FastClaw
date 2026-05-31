@@ -1213,6 +1213,46 @@ impl AppState {
         });
     }
 
+    /// Garbage-collect stale resources tied to dead sessions.
+    /// Call periodically (e.g., every 60s) to prevent unbounded memory growth.
+    pub async fn gc_stale_resources(&self) {
+        let gc_stats = self.strm.session_manager.gc_with_stats().await;
+        let active_ids = self.strm.session_manager.active_session_id_set().await;
+
+        // Clean chat_locks for sessions that no longer exist
+        let locks_before = self.ext.chat_locks.len();
+        self.ext.chat_locks.retain(|k, _| active_ids.contains(k));
+        let locks_removed = locks_before - self.ext.chat_locks.len();
+
+        // Clean chat_model_overrides
+        let overrides_before = self.ext.chat_model_overrides.len();
+        self.ext.chat_model_overrides.retain(|k, _| active_ids.contains(k));
+        let overrides_removed = overrides_before - self.ext.chat_model_overrides.len();
+
+        // Clean stream_event_tx (remove closed senders)
+        let streams_before = self.strm.stream_event_tx.len();
+        self.strm.stream_event_tx.retain(|_, tx| !tx.is_closed());
+        let streams_removed = streams_before - self.strm.stream_event_tx.len();
+
+        // Clean chat_cancels for sessions that no longer exist
+        let cancels_before = self.ext.chat_cancels.len();
+        self.ext.chat_cancels.retain(|k, _| active_ids.contains(k));
+        let cancels_removed = cancels_before - self.ext.chat_cancels.len();
+
+        let total_removed = locks_removed + overrides_removed + streams_removed + cancels_removed;
+        if gc_stats.removed > 0 || total_removed > 0 {
+            tracing::info!(
+                sessions_removed = gc_stats.removed,
+                sessions_alive = gc_stats.alive,
+                locks_removed,
+                overrides_removed,
+                streams_removed,
+                cancels_removed,
+                "resource GC completed"
+            );
+        }
+    }
+
     /// Get the skill registry for a specific agent, falling back to base.
     pub fn skill_registry_for(&self, agent_id: &str) -> Arc<SkillRegistry> {
         let registries = self.rt.agent_skill_registries.load();

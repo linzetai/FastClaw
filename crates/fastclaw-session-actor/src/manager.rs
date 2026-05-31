@@ -11,6 +11,13 @@ use crate::handle::{SessionHandle, SubmitError};
 use crate::submission::SessionOp;
 use crate::turn::TurnExecutor;
 
+/// Statistics returned by garbage collection.
+#[derive(Debug, Clone, Copy)]
+pub struct GcStats {
+    pub removed: usize,
+    pub alive: usize,
+}
+
 /// Manages the lifecycle of session actors.
 ///
 /// Aligned with Codex's `ThreadManager` — responsible for creating, resuming,
@@ -150,6 +157,29 @@ impl SessionManager {
         if removed > 0 {
             debug!(removed, "garbage collected dead sessions");
         }
+    }
+
+    /// Remove dead sessions and return stats for monitoring.
+    pub async fn gc_with_stats(&self) -> GcStats {
+        let mut sessions = self.state.sessions.write().await;
+        let before = sessions.len();
+        sessions.retain(|_, h| h.is_alive());
+        let removed = before - sessions.len();
+        let alive = sessions.len();
+        if removed > 0 {
+            info!(removed, alive, "session GC: cleaned dead sessions");
+        }
+        GcStats { removed, alive }
+    }
+
+    /// Get all active session IDs (for use by resource cleanup).
+    pub async fn active_session_id_set(&self) -> std::collections::HashSet<String> {
+        let sessions = self.state.sessions.read().await;
+        sessions
+            .iter()
+            .filter(|(_, h)| h.is_alive())
+            .map(|(id, _)| id.to_string())
+            .collect()
     }
 
     /// Gracefully shut down all sessions.
@@ -292,5 +322,39 @@ mod tests {
 
         mgr.shutdown_all().await;
         assert_eq!(mgr.active_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn gc_with_stats_reports_alive_sessions() {
+        let (mgr, _) = test_manager();
+        mgr.get_or_create(SessionId::new("s1"), "agent").await;
+        mgr.get_or_create(SessionId::new("s2"), "agent").await;
+        assert_eq!(mgr.active_count().await, 2);
+
+        // No dead sessions, GC should report 0 removed, 2 alive
+        let stats = mgr.gc_with_stats().await;
+        assert_eq!(stats.removed, 0);
+        assert_eq!(stats.alive, 2);
+    }
+
+    #[tokio::test]
+    async fn active_session_id_set_returns_live_ids() {
+        let (mgr, _) = test_manager();
+        mgr.get_or_create(SessionId::new("s1"), "agent").await;
+        mgr.get_or_create(SessionId::new("s2"), "agent").await;
+
+        let ids = mgr.active_session_id_set().await;
+        assert!(ids.contains("s1"));
+        assert!(ids.contains("s2"));
+        assert_eq!(ids.len(), 2);
+
+        mgr.unload(&SessionId::new("s1")).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        mgr.gc().await;
+
+        let ids = mgr.active_session_id_set().await;
+        assert!(!ids.contains("s1"));
+        assert!(ids.contains("s2"));
+        assert_eq!(ids.len(), 1);
     }
 }

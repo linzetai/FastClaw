@@ -7,6 +7,7 @@ pub mod cron_tool;
 pub mod error;
 pub mod extract;
 pub mod mcp_tool;
+pub mod memory_monitor;
 mod memory_scope;
 pub mod notification_store;
 pub mod routes;

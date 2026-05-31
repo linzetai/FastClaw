@@ -593,10 +593,22 @@ pub async fn spawn_chat(
         let mut stream_ended = false;
         let mut current_turn_id: Option<fastclaw_protocol::TurnId> = None;
 
+        const MAX_CONTENT_BYTES: usize = 2 * 1024 * 1024; // 2MB safety cap
+        let turn_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(600); // 10min
+
         loop {
-            let event = match event_rx.recv().await {
-                Some(se) => se.msg,
-                None => break,
+            let event = match tokio::time::timeout_at(turn_deadline, event_rx.recv()).await {
+                Ok(Some(se)) => se.msg,
+                Ok(None) => break,
+                Err(_elapsed) => {
+                    tracing::error!(
+                        session_id = %session_id,
+                        content_len = assistant_content.len(),
+                        "turn exceeded 10-minute deadline, forcing cancellation"
+                    );
+                    turn_cancel.cancel();
+                    break;
+                }
             };
             if let AgentEvent::TurnStart { turn_id, .. } = &event {
                 current_turn_id = Some(turn_id.clone());
@@ -667,6 +679,15 @@ pub async fn spawn_chat(
                     .and_then(|c| c.as_str())
                 {
                     assistant_content.push_str(text);
+                    if assistant_content.len() > MAX_CONTENT_BYTES {
+                        tracing::error!(
+                            session_id = %session_id,
+                            content_len = assistant_content.len(),
+                            "assistant content exceeded 2MB cap, forcing cancellation"
+                        );
+                        turn_cancel.cancel();
+                        break;
+                    }
                 }
             }
             let is_done = matches!(&event, AgentEvent::TurnEnd { .. });

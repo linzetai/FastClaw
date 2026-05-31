@@ -961,6 +961,33 @@ impl StateBuilder {
 
         state.spawn_inbound_dispatcher(inbound_rx);
 
+        // Spawn periodic resource GC loop (60s interval)
+        {
+            let gc_state = state.clone();
+            tokio::spawn(async move {
+                let mut interval =
+                    tokio::time::interval(std::time::Duration::from_secs(60));
+                interval.tick().await; // skip first immediate tick
+                loop {
+                    interval.tick().await;
+                    gc_state.gc_stale_resources().await;
+
+                    // Memory monitoring
+                    if let Some(rss_bytes) = crate::memory_monitor::get_process_rss_bytes() {
+                        let rss_mb = rss_bytes / (1024 * 1024);
+                        if rss_mb > 4096 {
+                            tracing::error!(rss_mb, "CRITICAL: process RSS exceeds 4GB");
+                        } else if rss_mb > 1024 {
+                            tracing::warn!(rss_mb, "process RSS exceeds 1GB");
+                        } else {
+                            tracing::debug!(rss_mb, "process RSS");
+                        }
+                    }
+                }
+            });
+            tracing::info!("resource GC background task started (60s interval)");
+        }
+
         let dream_secs = state.cfg.config.memory.dreaming_interval_secs;
         if state.cfg.config.memory.enabled && dream_secs > 0 && !state.mem.agent_episodic.is_empty()
         {
