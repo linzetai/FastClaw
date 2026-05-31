@@ -127,7 +127,13 @@ pub async fn setup_chat(
         None
     };
 
-    if request.work_dir.is_none() {
+    if let Some(ref wd) = request.work_dir {
+        let _ = state
+            .store
+            .session_store
+            .update_work_dir(&session_id, Some(wd))
+            .await;
+    } else {
         auto_detect_work_dir(state, &session_id, &user_messages).await;
     }
 

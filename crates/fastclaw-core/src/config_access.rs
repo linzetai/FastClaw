@@ -38,6 +38,7 @@ pub const CONFIG_WRITABLE_KEYS: &[&str] = &[
     "mcpServers",
     "onboarding",
     "security",
+    "agents",
 ];
 
 pub fn filter_config_for_read(full: &serde_json::Value) -> serde_json::Value {

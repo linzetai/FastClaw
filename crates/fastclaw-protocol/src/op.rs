@@ -301,6 +301,37 @@ pub enum ClientOp {
         session_id: Option<String>,
     },
 
+    // ── Cron ─────────────────────────────────────────────────────────
+    CronListJobs {
+        agent_id: Option<String>,
+    },
+    CronGetJob {
+        job_id: String,
+    },
+    CronUpsertJob {
+        params: serde_json::Value,
+    },
+    CronDeleteJob {
+        job_id: String,
+    },
+    CronListRuns {
+        job_id: String,
+        limit: Option<i64>,
+    },
+
+    // ── Notifications ────────────────────────────────────────────────
+    NotificationsUnreadCount,
+    NotificationsList {
+        limit: Option<i64>,
+    },
+    NotificationsMarkRead {
+        notification_id: String,
+    },
+    NotificationsMarkAllRead,
+    NotificationsDelete {
+        notification_id: String,
+    },
+
     // ── Workspace ────────────────────────────────────────────────────
     WorkspaceInit {
         #[serde(alias = "workDir", skip_serializing_if = "Option::is_none")]
@@ -510,6 +541,60 @@ impl ClientOp {
                     session_id,
                 })
             }
+            "tools.submit_answer" => Ok(Self::ToolsSubmitAnswer {
+                request_id: extract_string(&params, "requestId")
+                    .or_else(|_| extract_string(&params, "request_id"))?,
+                answer: params
+                    .get("answer")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                selected_ids: params
+                    .get("selectedIds")
+                    .or_else(|| params.get("selected_ids"))
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default(),
+                session_id: params
+                    .get("sessionId")
+                    .or_else(|| params.get("session_id"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            }),
+            "cron.list_jobs" => Ok(Self::CronListJobs {
+                agent_id: params
+                    .get("agentId")
+                    .or_else(|| params.get("agent_id"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            }),
+            "cron.get_job" => Ok(Self::CronGetJob {
+                job_id: extract_string(&params, "jobId")
+                    .or_else(|_| extract_string(&params, "job_id"))?,
+            }),
+            "cron.upsert_job" => Ok(Self::CronUpsertJob { params }),
+            "cron.delete_job" => Ok(Self::CronDeleteJob {
+                job_id: extract_string(&params, "jobId")
+                    .or_else(|_| extract_string(&params, "job_id"))?,
+            }),
+            "cron.list_runs" => Ok(Self::CronListRuns {
+                job_id: extract_string(&params, "jobId")
+                    .or_else(|_| extract_string(&params, "job_id"))?,
+                limit: params
+                    .get("limit")
+                    .and_then(|v| v.as_i64()),
+            }),
+            "notifications.unread_count" => Ok(Self::NotificationsUnreadCount),
+            "notifications.list" => Ok(Self::NotificationsList {
+                limit: params.get("limit").and_then(|v| v.as_i64()),
+            }),
+            "notifications.mark_read" => Ok(Self::NotificationsMarkRead {
+                notification_id: extract_string(&params, "notificationId")
+                    .or_else(|_| extract_string(&params, "notification_id"))?,
+            }),
+            "notifications.mark_all_read" => Ok(Self::NotificationsMarkAllRead),
+            "notifications.delete" => Ok(Self::NotificationsDelete {
+                notification_id: extract_string(&params, "notificationId")
+                    .or_else(|_| extract_string(&params, "notification_id"))?,
+            }),
             "workspace.init" => Ok(Self::WorkspaceInit {
                 work_dir: params
                     .get("workDir")

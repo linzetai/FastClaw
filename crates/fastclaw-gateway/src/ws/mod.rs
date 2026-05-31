@@ -1,8 +1,10 @@
 mod agents;
 mod chat;
 mod config;
+mod cron;
 mod execution;
 mod mcp;
+mod notifications;
 mod session;
 mod skills;
 mod types;
@@ -527,6 +529,36 @@ async fn dispatch(
                 },
             )
             .await;
+        }
+        ClientOp::CronListJobs { agent_id } => {
+            cron::handle_cron_list_jobs(sender, state, id, agent_id).await;
+        }
+        ClientOp::CronGetJob { job_id } => {
+            cron::handle_cron_get_job(sender, state, id, &job_id).await;
+        }
+        ClientOp::CronUpsertJob { params } => {
+            cron::handle_cron_upsert_job(sender, state, id, params).await;
+        }
+        ClientOp::CronDeleteJob { job_id } => {
+            cron::handle_cron_delete_job(sender, state, id, &job_id).await;
+        }
+        ClientOp::CronListRuns { job_id, limit } => {
+            cron::handle_cron_list_runs(sender, state, id, &job_id, limit).await;
+        }
+        ClientOp::NotificationsUnreadCount => {
+            notifications::handle_unread_count(sender, state, id).await;
+        }
+        ClientOp::NotificationsList { limit } => {
+            notifications::handle_list(sender, state, id, limit).await;
+        }
+        ClientOp::NotificationsMarkRead { notification_id } => {
+            notifications::handle_mark_read(sender, state, id, &notification_id).await;
+        }
+        ClientOp::NotificationsMarkAllRead => {
+            notifications::handle_mark_all_read(sender, state, id).await;
+        }
+        ClientOp::NotificationsDelete { notification_id } => {
+            notifications::handle_delete(sender, state, id, &notification_id).await;
         }
         _ => {
             send_resp(

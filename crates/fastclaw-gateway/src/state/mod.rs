@@ -1443,7 +1443,7 @@ impl AppState {
         Ok(count)
     }
 
-    fn refresh_runtime_agent_providers(&self, agents: &[AgentConfig]) {
+    pub(crate) fn refresh_runtime_agent_providers(&self, agents: &[AgentConfig]) {
         self.rt.runtime.clear_registered_providers();
         let credentials = self.current_credentials_snapshot();
 

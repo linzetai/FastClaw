@@ -242,6 +242,11 @@ pub async fn handle_config_set(
                         tracing::warn!(key, error = %e, "config.set: failed to hot-reload web search");
                     }
                 }
+                if top_key == "credentials" || top_key == "models" {
+                    let agents = state.cfg.last_good_agents.read().await.clone();
+                    state.refresh_runtime_agent_providers(&agents);
+                    tracing::info!(key, "config.set: hot-reloaded LLM providers");
+                }
             }
             send_resp(
                 sender,
