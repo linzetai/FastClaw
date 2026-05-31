@@ -8,6 +8,10 @@ use fastclaw_protocol::ApprovalDecision;
 /// derived from tool-specific approval keys. The orchestrator checks this
 /// cache before prompting the user — if all keys match a prior approval,
 /// the tool call is silently allowed.
+///
+/// Also supports tool-level approval: when a tool-level key like
+/// `"tool_session:shell_exec"` is stored, ALL subsequent calls to that
+/// tool type are auto-approved for the session.
 #[derive(Debug, Default)]
 pub struct ApprovalCache {
     decisions: HashMap<String, ApprovalDecision>,
@@ -18,12 +22,25 @@ impl ApprovalCache {
         Self::default()
     }
 
-    /// Check if all provided keys have a cached `ApprovedForSession` decision.
-    /// Returns `Some(ApprovedForSession)` only if every key is present and approved.
+    /// Check if all provided keys have a cached `ApprovedForSession` decision,
+    /// OR if a tool-level key covers this tool type.
     pub fn check(&self, keys: &[String]) -> Option<ApprovalDecision> {
         if keys.is_empty() {
             return None;
         }
+        // Check tool-level approval first (e.g., "tool_session:shell_exec")
+        for k in keys {
+            if let Some(tool_type) = k.split(':').next() {
+                let tool_key = format!("tool_session:{tool_type}");
+                if matches!(
+                    self.decisions.get(&tool_key),
+                    Some(ApprovalDecision::ApprovedForSession)
+                ) {
+                    return Some(ApprovalDecision::ApprovedForSession);
+                }
+            }
+        }
+        // Check specific key approval
         let all_approved = keys.iter().all(|k| {
             matches!(
                 self.decisions.get(k),
@@ -43,6 +60,12 @@ impl ApprovalCache {
         if decision == ApprovalDecision::ApprovedForSession {
             for key in keys {
                 self.decisions.insert(key.clone(), decision.clone());
+                // Also store tool-level key so future calls to the same tool type
+                // are auto-approved (e.g., "shell:/path:cmd" → "tool_session:shell")
+                if let Some(tool_type) = key.split(':').next() {
+                    let tool_key = format!("tool_session:{tool_type}");
+                    self.decisions.insert(tool_key, decision.clone());
+                }
             }
         }
     }
@@ -90,10 +113,20 @@ mod tests {
     }
 
     #[test]
-    fn partial_key_match_returns_none() {
+    fn tool_level_approval_covers_same_tool_type() {
         let mut cache = ApprovalCache::new();
-        let keys = vec!["cmd:a".to_string(), "cmd:b".to_string()];
         cache.store(&["cmd:a".to_string()], ApprovalDecision::ApprovedForSession);
+        // After approving "cmd:a", all "cmd:*" keys are covered by tool-level key
+        let keys = vec!["cmd:b".to_string()];
+        assert_eq!(cache.check(&keys), Some(ApprovalDecision::ApprovedForSession));
+    }
+
+    #[test]
+    fn different_tool_types_not_covered() {
+        let mut cache = ApprovalCache::new();
+        cache.store(&["shell:ls".to_string()], ApprovalDecision::ApprovedForSession);
+        // "file_write:..." has a different tool type and should NOT be covered
+        let keys = vec!["file_write:/tmp/foo".to_string()];
         assert_eq!(cache.check(&keys), None);
     }
 
@@ -101,10 +134,11 @@ mod tests {
     fn clear_removes_all() {
         let mut cache = ApprovalCache::new();
         cache.store(
-            &["key1".to_string()],
+            &["shell:ls".to_string()],
             ApprovalDecision::ApprovedForSession,
         );
-        assert_eq!(cache.len(), 1);
+        // Stores both "shell:ls" and "tool_session:shell"
+        assert_eq!(cache.len(), 2);
         cache.clear();
         assert!(cache.is_empty());
     }

@@ -128,6 +128,10 @@ impl SeatbeltAccessRoot {
 ///
 /// Returns a vector of `(param_name, param_value)` for `-D` args and a
 /// policy string containing the S-expression rules.
+///
+/// Note: paths are inlined directly as `(subpath "/path")` because the policy
+/// is passed via `-p` (inline string) rather than `-f` (file), and `(param ...)`
+/// references don't resolve without corresponding `-D` arguments.
 pub fn build_seatbelt_access_policy(
     action: &str,
     param_prefix: &str,
@@ -143,15 +147,15 @@ pub fn build_seatbelt_access_policy(
             format!("{param_prefix}_{i}")
         };
         let path = root.root.display().to_string();
-        params.push((param_name.clone(), path));
+        params.push((param_name.clone(), path.clone()));
 
         if root.excluded_subpaths.is_empty() && root.protected_metadata_names.is_empty() {
             rules.push(format!(
-                "(allow {action} (subpath (param \"{param_name}\")))"
+                "(allow {action} (subpath \"{path}\"))"
             ));
         } else {
             let mut conditions = vec![format!(
-                "(subpath (param \"{param_name}\"))"
+                "(subpath \"{path}\")"
             )];
 
             for excl in &root.excluded_subpaths {
@@ -790,8 +794,6 @@ mod tests {
         let fs = restricted_fs(&["/tmp"], &["/usr"], &[]);
         let policy = build_seatbelt_policy(&fs, NetworkSandboxPolicy::Restricted, &test_cwd());
         assert!(policy.contains("(deny default)"));
-        assert!(policy.contains("WRITABLE_ROOT"));
-        assert!(policy.contains("READABLE_ROOT"));
         assert!(policy.contains("file-read* file-write*"));
         assert!(policy.contains("file-read*"));
         assert!(!policy.contains("(allow network-outbound)"));
@@ -810,8 +812,8 @@ mod tests {
         assert_eq!(params.len(), 2);
         assert_eq!(params[0].0, "WRITABLE_ROOT_0");
         assert_eq!(params[1].0, "WRITABLE_ROOT_1");
-        assert!(policy.contains("WRITABLE_ROOT_0"));
-        assert!(policy.contains("WRITABLE_ROOT_1"));
+        assert!(policy.contains("/home/user"));
+        assert!(policy.contains("/tmp"));
     }
 
     #[test]
@@ -1157,7 +1159,7 @@ mod tests {
         };
         let cmd = transform_with_proxy(&params);
         let policy = &cmd.args[1];
-        assert!(policy.contains("WRITABLE_ROOT"));
+        assert!(policy.contains("/tmp"));
         assert!(policy.contains("deny file-read*"));
         assert!(policy.contains("localhost:3128"));
         assert!(policy.contains("localhost:1080"));
@@ -1186,7 +1188,7 @@ mod tests {
             build_seatbelt_access_policy("file-read*", "ROOT", &roots);
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].0, "ROOT");
-        assert!(!policy.contains("ROOT_0"));
+        assert!(policy.contains("/home/user"));
     }
 
     #[test]
@@ -1199,16 +1201,16 @@ mod tests {
     fn restricted_fs_writable_only() {
         let fs = restricted_fs(&["/home/user/project"], &[], &[]);
         let policy = build_seatbelt_policy(&fs, NetworkSandboxPolicy::Restricted, &test_cwd());
-        assert!(policy.contains("WRITABLE_ROOT"));
-        assert!(!policy.contains("READABLE_ROOT"));
+        assert!(policy.contains("/home/user/project"));
+        assert!(policy.contains("file-read* file-write*"));
     }
 
     #[test]
     fn restricted_fs_readable_only() {
         let fs = restricted_fs(&[], &["/usr/local"], &[]);
         let policy = build_seatbelt_policy(&fs, NetworkSandboxPolicy::Restricted, &test_cwd());
-        assert!(policy.contains("READABLE_ROOT"));
-        assert!(!policy.contains("WRITABLE_ROOT"));
+        assert!(policy.contains("/usr/local"));
+        assert!(policy.contains("file-read*"));
     }
 
     #[test]
