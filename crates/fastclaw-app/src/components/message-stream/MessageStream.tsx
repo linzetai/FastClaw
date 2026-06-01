@@ -6,6 +6,7 @@ import type { MentionInputHandle, MentionOption } from "./MentionInput";
 import { MessageRendererRow } from "./MessageRenderer";
 
 import { StreamFooter, type AttachedFile } from "./StreamFooter";
+import { PlanPanel } from "./PlanPanel";
 import { useStreamScroll, STREAM_PAGE_SIZE } from "./useStreamScroll";
 import { useMessageStreamChat } from "./useMessageStreamChat";
 import { X, ChevronUp, ChevronDown, Upload, Search, ArrowDown } from "lucide-react";
@@ -487,8 +488,15 @@ export function MessageStream(_props: MessageStreamProps) {
   }, [lastUserMessage, handleMentionSend]);
 
   const isEmpty = stream.length === 0 && !streaming;
+  const [showPlanPanel, setShowPlanPanel] = useState(false);
+  const togglePlanPanel = useCallback(() => setShowPlanPanel((v) => !v), []);
+
+  const chatSessionId = activeChat?.id ?? "";
+  const planFilePath = activeChat?.planFilePath;
+  const planFileExists = activeChat?.planFileExists ?? false;
 
   return (
+    <div className="flex min-h-0 flex-1">
     <div
       className="relative flex min-h-0 flex-1 flex-col"
       style={{ background: "var(--bg-primary)" }}
@@ -679,7 +687,20 @@ export function MessageStream(_props: MessageStreamProps) {
         pendingQuestion={pendingQuestion}
         setPendingQuestion={setPendingQuestion}
         stopStream={stopStream}
+        onTogglePlanPanel={togglePlanPanel}
       />
+    </div>
+
+    {showPlanPanel && chatSessionId && (
+      <div style={{ width: 360, minWidth: 360 }} className="shrink-0">
+        <PlanPanel
+          sessionId={chatSessionId}
+          planFilePath={planFilePath}
+          planFileExists={planFileExists}
+          onClose={() => setShowPlanPanel(false)}
+        />
+      </div>
+    )}
     </div>
   );
 }

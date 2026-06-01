@@ -292,7 +292,7 @@ export function useMessageStreamChat({
               .filter((s) => s.type === "tool" && s.toolCall)
               .map((s) => {
                 const tc = s.toolCall!;
-                return { id: tc.id, name: tc.name, status: tc.status, args: tc.args, result: tc.result, duration: tc.duration };
+                return { id: tc.id, name: tc.name, status: tc.status, args: tc.args, result: tc.result, duration: tc.duration, metadata: tc.metadata };
               });
 
             if (currentSegments.length > 0) {
@@ -301,7 +301,7 @@ export function useMessageStreamChat({
                 id: s.id,
                 type: s.type,
                 content: s.content,
-                toolCall: s.toolCall ? { id: s.toolCall.id, name: s.toolCall.name, status: s.toolCall.status, args: s.toolCall.args, result: s.toolCall.result, duration: s.toolCall.duration } : undefined,
+                toolCall: s.toolCall ? { id: s.toolCall.id, name: s.toolCall.name, status: s.toolCall.status, args: s.toolCall.args, result: s.toolCall.result, duration: s.toolCall.duration, metadata: s.toolCall.metadata } : undefined,
               })));
             }
 
@@ -385,7 +385,7 @@ export function useMessageStreamChat({
                 .filter((s) => s.type === "tool" && s.toolCall)
                 .map((s) => {
                   const tc = s.toolCall!;
-                  return { id: tc.id, name: tc.name, status: tc.status, args: tc.args, result: tc.result, duration: tc.duration };
+                  return { id: tc.id, name: tc.name, status: tc.status, args: tc.args, result: tc.result, duration: tc.duration, metadata: tc.metadata };
                 });
               streamAccRef.current = "";
               segmentsRef.current = [];
@@ -443,12 +443,14 @@ export function useMessageStreamChat({
             if (!d?.tool_name) return;
             const callId = (d.call_id ?? d.tool_name) as string;
             const output = (d.display_output ?? d.output) as string | undefined;
+            const meta = (d.metadata ?? null) as Record<string, unknown> | null;
             if (isActive()) {
               const seg = segmentsRef.current.find((s) => s.type === "tool" && s.toolCall?.id === callId);
               if (seg?.toolCall) {
                 seg.toolCall.status = d.success ? "success" : "error";
                 seg.toolCall.result = output;
                 seg.toolCall.duration = seg.toolCall.startTime ? Date.now() - seg.toolCall.startTime : undefined;
+                seg.toolCall.metadata = meta;
               }
               flushSegments();
             } else {
@@ -456,7 +458,7 @@ export function useMessageStreamChat({
               if (ds) {
                 ds.toolCalls = ds.toolCalls.map((t) =>
                   t.id === callId
-                    ? { ...t, status: d.success ? "success" : "error", result: output, duration: t.startTime ? Date.now() - t.startTime : undefined }
+                    ? { ...t, status: d.success ? "success" : "error", result: output, duration: t.startTime ? Date.now() - t.startTime : undefined, metadata: meta }
                     : t,
                 );
               }
@@ -798,7 +800,7 @@ export function useMessageStreamChat({
       .filter((s) => s.type === "tool" && s.toolCall)
       .map((s) => {
         const tc = s.toolCall!;
-        return { id: tc.id, name: tc.name, status: tc.status, args: tc.args, result: tc.result, duration: tc.duration };
+        return { id: tc.id, name: tc.name, status: tc.status, args: tc.args, result: tc.result, duration: tc.duration, metadata: tc.metadata };
       });
     cancelAnimationFrame(rafIdRef.current);
     rafIdRef.current = 0;

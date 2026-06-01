@@ -435,9 +435,8 @@ impl Tool for ExitPlanModeTool {
         let ms = CURRENT_SESSION_MODE
             .try_with(|s| s.clone())
             .unwrap_or_else(|_| self.mode_state.clone());
-        let (from, _to) = ms.transition(ExecutionMode::Agent);
 
-        if from == ExecutionMode::Agent {
+        if ms.current_mode() == ExecutionMode::Agent {
             return ToolResult::ok("Already in agent mode.");
         }
 
@@ -452,39 +451,56 @@ impl Tool for ExitPlanModeTool {
             String::new()
         };
 
-        let plan_ref = if let Some(pc) = current_plan_context() {
-            let path = pc.store.plan_path(&pc.session_id);
-            if pc.store.plan_exists(&pc.session_id) {
-                let plan_content = pc.store.read_plan(&pc.session_id).unwrap_or_default();
-                let preview = if plan_content.len() > 500 {
-                    let end = plan_content.floor_char_boundary(500);
-                    format!(
-                        "{}...\n(truncated, read full file for details)",
-                        &plan_content[..end]
-                    )
+        let (plan_path_str, plan_exists, plan_preview) =
+            if let Some(pc) = current_plan_context() {
+                let path = pc.store.plan_path(&pc.session_id);
+                let exists = pc.store.plan_exists(&pc.session_id);
+                let preview = if exists {
+                    let content = pc.store.read_plan(&pc.session_id).unwrap_or_default();
+                    if content.len() > 500 {
+                        let end = content.floor_char_boundary(500);
+                        format!(
+                            "{}...\n(truncated, read full file for details)",
+                            &content[..end]
+                        )
+                    } else {
+                        content
+                    }
                 } else {
-                    plan_content
+                    String::new()
                 };
+                (path.display().to_string(), exists, preview)
+            } else {
+                (String::new(), false, String::new())
+            };
+
+        let plan_ref = if !plan_path_str.is_empty() {
+            if plan_exists {
                 format!(
-                    "\n\n## Plan File\nSaved at: {}\n\n{}\n\n\
-                     You can refer back to this file during implementation.",
-                    path.display(),
-                    preview,
+                    "\n\n## Plan File\nSaved at: {plan_path_str}\n\n{plan_preview}\n\n\
+                     The user will review this plan and decide the next step."
                 )
             } else {
-                format!(
-                    "\n\nNo plan file was written. Plan file path: {}",
-                    path.display()
-                )
+                format!("\n\nNo plan file was written. Plan file path: {plan_path_str}")
             }
         } else {
             String::new()
         };
 
-        ToolResult::ok(format!(
-            "Exited plan mode → agent mode. All tools are now available.\
-             {verify_msg}{plan_ref}\n\nYou can now proceed with implementation."
-        ))
+        let metadata = serde_json::json!({
+            "approval_pending": true,
+            "plan_path": plan_path_str,
+            "plan_exists": plan_exists,
+        });
+
+        let mut result = ToolResult::ok(format!(
+            "Plan complete — waiting for user approval.\
+             {verify_msg}{plan_ref}\n\n\
+             The user can choose to start implementation (switch to Agent mode) \
+             or continue planning (stay in Plan mode)."
+        ));
+        result.metadata = Some(metadata);
+        result
     }
 }
 

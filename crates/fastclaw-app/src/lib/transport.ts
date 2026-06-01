@@ -674,6 +674,20 @@ export async function setExecutionMode(
   };
 }
 
+export async function approvePlan(
+  sessionId: string,
+  mode: "agent" | "plan" = "agent",
+): Promise<{ ok: boolean; from: string; to: string }> {
+  const resp = (await wsClient.send("execution.approve_plan", { sessionId, mode })) as {
+    data?: { ok?: boolean; from?: string; to?: string };
+  };
+  return {
+    ok: resp?.data?.ok ?? false,
+    from: resp?.data?.from ?? "",
+    to: resp?.data?.to ?? "",
+  };
+}
+
 export async function getPlanFile(sessionId?: string): Promise<{ path: string; content: string | null; exists: boolean }> {
   const resp = (await wsClient.send("execution.get_plan", { sessionId })) as {
     data?: { path?: string; content?: string | null; exists?: boolean };

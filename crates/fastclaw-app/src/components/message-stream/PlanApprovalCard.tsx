@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
-import { Compass, Code2, ChevronDown, ChevronUp, FileText } from "lucide-react";
+import { Compass, Code2, ChevronDown, ChevronUp, FileText, RefreshCw } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAgentStore } from "../../lib/agent-store";
@@ -8,33 +8,44 @@ import { ICON } from "../../lib/ui-tokens";
 
 const remarkPlugins = [remarkGfm];
 
-export function isPlanExitResult(toolName: string, result: string): boolean {
+export interface PlanApprovalMetadata {
+  approval_pending?: boolean;
+  plan_path?: string;
+  plan_exists?: boolean;
+}
+
+export function isPlanExitResult(toolName: string, result: string, metadata?: PlanApprovalMetadata | null): boolean {
   if (toolName !== "exit_plan_mode") return false;
-  return result.includes("agent mode") && result.includes("Plan File");
+  if (metadata?.approval_pending) return true;
+  return result.includes("approval") || result.includes("agent mode");
 }
 
 export function PlanApprovalCard({
   result,
-  onImplement,
+  metadata,
+  onApprove,
 }: {
   result: string;
-  onImplement?: () => void;
+  metadata?: PlanApprovalMetadata | null;
+  onApprove?: (mode: "agent" | "plan") => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [planContent, setPlanContent] = useState<string | null>(null);
+  const [approving, setApproving] = useState(false);
 
   const planPath = useMemo(() => {
+    if (metadata?.plan_path) return metadata.plan_path;
     const match = result.match(/Saved at:\s*(.+?)[\n\r]/);
     return match?.[1]?.trim() ?? null;
-  }, [result]);
+  }, [result, metadata]);
 
   const inlinePreview = useMemo(() => {
     const idx = result.indexOf("## Plan File");
     if (idx < 0) return null;
     const afterHeader = result.slice(idx);
     const lines = afterHeader.split("\n").slice(2);
-    const content = lines.join("\n").replace(/\n\nYou can refer back.*$/, "").trim();
+    const content = lines.join("\n").replace(/\n\nThe user will review.*$/, "").replace(/\n\nYou can refer back.*$/, "").trim();
     return content || null;
   }, [result]);
 
@@ -51,7 +62,7 @@ export function PlanApprovalCard({
       const agentId = state.activeAgentId;
       const ac = state.agentChats[agentId];
       const chatId = ac?.activeChatId;
-      const resp = await transport.getPlanFileIpc(chatId ?? undefined);
+      const resp = await transport.getPlanFile(chatId ?? undefined);
       setPlanContent(resp.content ?? inlinePreview ?? "(计划文件为空)");
     } catch {
       setPlanContent(inlinePreview ?? "(无法读取计划文件)");
@@ -60,7 +71,27 @@ export function PlanApprovalCard({
     }
   }, [expanded, planContent, inlinePreview]);
 
+  const handleApprove = useCallback(async (mode: "agent" | "plan") => {
+    if (approving) return;
+    setApproving(true);
+    try {
+      if (onApprove) {
+        onApprove(mode);
+      } else {
+        const state = useAgentStore.getState();
+        const agentId = state.activeAgentId;
+        const ac = state.agentChats[agentId];
+        const sessionId = ac?.activeChatId ?? "default";
+        await transport.approvePlan(sessionId, mode);
+        useAgentStore.getState().setChatExecutionMode(agentId, sessionId, mode);
+      }
+    } finally {
+      setApproving(false);
+    }
+  }, [approving, onApprove]);
+
   const displayPath = planPath?.replace(/^\/home\/[^/]+\//, "~/") ?? "";
+  const isPending = metadata?.approval_pending ?? false;
 
   return (
     <div
@@ -74,7 +105,7 @@ export function PlanApprovalCard({
       <div className="flex items-center gap-2 px-3 py-2">
         <Compass {...ICON.md} style={{ color: "var(--tint, #4299E1)" }} className="shrink-0" />
         <span className="text-[12px] font-semibold" style={{ color: "var(--tint, #4299E1)" }}>
-          计划已完成
+          {isPending ? "计划等待审批" : "计划已完成"}
         </span>
         {planPath && (
           <span
@@ -133,14 +164,15 @@ export function PlanApprovalCard({
         </div>
       )}
 
-      {onImplement && (
+      {isPending && (
         <div
           className="flex items-center gap-2 px-3 py-2"
           style={{ borderTop: "0.5px solid var(--separator)" }}
         >
           <button
-            onClick={onImplement}
-            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-all duration-150 hover:scale-[1.02] active:scale-95"
+            onClick={() => handleApprove("agent")}
+            disabled={approving}
+            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-all duration-150 hover:scale-[1.02] active:scale-95 disabled:opacity-50"
             style={{
               background: "var(--green, #48BB78)",
               color: "#fff",
@@ -149,8 +181,20 @@ export function PlanApprovalCard({
             <Code2 {...ICON.sm} />
             开始实现
           </button>
+          <button
+            onClick={() => handleApprove("plan")}
+            disabled={approving}
+            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-all duration-150 hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+            style={{
+              background: "color-mix(in srgb, var(--tint, #4299E1) 15%, transparent)",
+              color: "var(--tint, #4299E1)",
+            }}
+          >
+            <RefreshCw {...ICON.sm} />
+            继续规划
+          </button>
           <span className="text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
-            切换到 Agent 模式并执行计划
+            选择下一步操作
           </span>
         </div>
       )}

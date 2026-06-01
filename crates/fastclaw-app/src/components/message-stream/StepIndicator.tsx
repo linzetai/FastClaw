@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { TodoCard, isTodoResult } from "./TodoCard";
 import { DiffCard, isEditResult } from "./DiffCard";
-import { PlanApprovalCard, isPlanExitResult } from "./PlanApprovalCard";
+import { PlanApprovalCard, isPlanExitResult, type PlanApprovalMetadata } from "./PlanApprovalCard";
 import { ICON } from "../../lib/ui-tokens";
 
 export interface ToolCall {
@@ -18,6 +18,7 @@ export interface ToolCall {
   result?: string;
   duration?: number;
   startTime?: number;
+  metadata?: Record<string, unknown> | null;
 }
 
 export type ToolCategory = "shell" | "read" | "write" | "edit" | "search" | "web" | "mcp" | "default";
@@ -393,7 +394,7 @@ export const StepIndicator = memo(function StepIndicator({ tool, compact }: { to
   const hasSpecialResult = tool.result && (
     isTodoResult(tool.name, tool.result) ||
     isEditResult(tool.name, tool.result) ||
-    isPlanExitResult(tool.name, tool.result)
+    isPlanExitResult(tool.name, tool.result, tool.metadata as PlanApprovalMetadata | undefined)
   );
 
   return (
@@ -515,9 +516,9 @@ export const StepIndicator = memo(function StepIndicator({ tool, compact }: { to
           <DiffCard result={tool.result} args={tool.args} />
         </div>
       )}
-      {!isRunning && tool.result && isPlanExitResult(tool.name, tool.result) && (
+      {!isRunning && tool.result && isPlanExitResult(tool.name, tool.result, tool.metadata as PlanApprovalMetadata | undefined) && (
         <div className="px-2.5 pb-2">
-          <PlanApprovalCard result={tool.result} />
+          <PlanApprovalCard result={tool.result} metadata={tool.metadata as PlanApprovalMetadata | undefined} />
         </div>
       )}
 

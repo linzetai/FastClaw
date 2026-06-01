@@ -42,6 +42,7 @@ pub struct DispatchContext<'a> {
     pub behavior: &'a BehaviorConfig,
     pub work_dir: &'a Option<String>,
     pub mode_state: Option<&'a ExecutionModeState>,
+    pub plan_file_path: Option<PathBuf>,
     pub event_tx: &'a tokio::sync::mpsc::Sender<AgentEvent>,
     pub approval_strategy: &'a ApprovalStrategy,
     pub interaction_handle: Option<&'a InteractionHandle>,
@@ -194,6 +195,7 @@ impl ToolDispatcher {
                     let work_dir = ctx.work_dir.clone();
                     let mode_state_current =
                         ctx.mode_state.map(|ms| ms.current_mode());
+                    let plan_fp = ctx.plan_file_path.clone();
                     async move {
                         let result =
                             Self::execute_unguarded_standalone(
@@ -202,6 +204,7 @@ impl ToolDispatcher {
                                 &behavior,
                                 &work_dir,
                                 mode_state_current,
+                                plan_fp.as_ref(),
                             )
                             .await;
                         let result = Self::truncate_result_static(&tc.function.name, result);
@@ -320,16 +323,33 @@ impl ToolDispatcher {
         if let Some(ms) = ctx.mode_state {
             let kind = self.tool_kind(tool_name);
             if ms.is_blocked_for_tool(tool_name, kind) {
-                tracing::info!(tool = %tool_name, kind = ?kind, "tool blocked by plan mode");
-                return Some((
-                    tool_name.clone(),
-                    call_id.clone(),
-                    arguments.clone(),
-                    ToolResult::typed_err(
-                        fastclaw_core::tool::ToolErrorType::ExecutionDenied,
-                        ExecutionModeState::blocked_message(tool_name),
-                    ),
-                ));
+                if let Some(ref plan_path) = ctx.plan_file_path {
+                    if is_plan_file_write(tool_name, arguments, plan_path) {
+                        tracing::info!(tool = %tool_name, "plan file write allowed in plan mode");
+                    } else {
+                        tracing::info!(tool = %tool_name, kind = ?kind, "tool blocked by plan mode");
+                        return Some((
+                            tool_name.clone(),
+                            call_id.clone(),
+                            arguments.clone(),
+                            ToolResult::typed_err(
+                                fastclaw_core::tool::ToolErrorType::ExecutionDenied,
+                                ExecutionModeState::blocked_message(tool_name),
+                            ),
+                        ));
+                    }
+                } else {
+                    tracing::info!(tool = %tool_name, kind = ?kind, "tool blocked by plan mode");
+                    return Some((
+                        tool_name.clone(),
+                        call_id.clone(),
+                        arguments.clone(),
+                        ToolResult::typed_err(
+                            fastclaw_core::tool::ToolErrorType::ExecutionDenied,
+                            ExecutionModeState::blocked_message(tool_name),
+                        ),
+                    ));
+                }
             }
             if tool_name == "shell_exec"
                 && ms.current_mode() == fastclaw_core::types::ExecutionMode::Plan
@@ -443,6 +463,7 @@ impl ToolDispatcher {
         behavior: &BehaviorConfig,
         work_dir: &Option<String>,
         mode_state_mode: Option<fastclaw_core::types::ExecutionMode>,
+        plan_file_path: Option<&PathBuf>,
     ) -> ToolResult {
         let tool_name = &tc.function.name;
 
@@ -454,17 +475,32 @@ impl ToolDispatcher {
         }
 
         if let Some(mode) = mode_state_mode {
-            if mode == fastclaw_core::types::ExecutionMode::Plan
-                && tool_name == "shell_exec"
-            {
-                if let Some(cmd) = extract_command_from_args(&tc.function.arguments) {
-                    if let Err(reason) = crate::builtin_tools::validate_readonly_command(&cmd) {
+            if mode == fastclaw_core::types::ExecutionMode::Plan {
+                let kind = tool_registry
+                    .get(tool_name)
+                    .map(|t| t.kind())
+                    .unwrap_or(ToolKind::Other);
+
+                if tool_name == "shell_exec" {
+                    if let Some(cmd) = extract_command_from_args(&tc.function.arguments) {
+                        if let Err(reason) = crate::builtin_tools::validate_readonly_command(&cmd) {
+                            return ToolResult::typed_err(
+                                fastclaw_core::tool::ToolErrorType::ExecutionDenied,
+                                format!(
+                                    "Plan mode (read-only) blocks this command: {reason}. \
+                                     Only read-only commands are allowed."
+                                ),
+                            );
+                        }
+                    }
+                } else if matches!(kind, ToolKind::Edit | ToolKind::Execute) {
+                    let allowed = plan_file_path.is_some_and(|pfp|
+                        is_plan_file_write(tool_name, &tc.function.arguments, pfp)
+                    );
+                    if !allowed {
                         return ToolResult::typed_err(
                             fastclaw_core::tool::ToolErrorType::ExecutionDenied,
-                            format!(
-                                "Plan mode (read-only) blocks this command: {reason}. \
-                                 Only read-only commands are allowed."
-                            ),
+                            ExecutionModeState::blocked_message(tool_name),
                         );
                     }
                 }
@@ -583,6 +619,32 @@ fn extract_command_from_args(arguments: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(arguments)
         .ok()
         .and_then(|v| v.get("command").and_then(|c| c.as_str()).map(String::from))
+}
+
+fn extract_path_from_args(arguments: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(arguments)
+        .ok()
+        .and_then(|v| {
+            v.get("file_path")
+                .or_else(|| v.get("path"))
+                .and_then(|p| p.as_str())
+                .map(String::from)
+        })
+}
+
+/// Check if a file-editing tool targets the plan file, which is allowed even in Plan mode.
+fn is_plan_file_write(tool_name: &str, arguments: &str, plan_file_path: &std::path::Path) -> bool {
+    let write_tools = ["write_file", "edit_file"];
+    if !write_tools.contains(&tool_name) {
+        return false;
+    }
+    let Some(target_path) = extract_path_from_args(arguments) else {
+        return false;
+    };
+    let target = PathBuf::from(&target_path);
+    let canonical_target = target.canonicalize().unwrap_or(target);
+    let canonical_plan = plan_file_path.canonicalize().unwrap_or_else(|_| plan_file_path.to_path_buf());
+    canonical_target == canonical_plan
 }
 
 fn extract_target_key(tool_name: &str, arguments: &str) -> Option<String> {

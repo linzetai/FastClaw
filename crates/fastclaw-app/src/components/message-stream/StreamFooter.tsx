@@ -372,6 +372,7 @@ export interface StreamFooterProps {
   pendingQuestion: PendingToolQuestion;
   setPendingQuestion: React.Dispatch<React.SetStateAction<PendingToolQuestion>>;
   stopStream: () => void;
+  onTogglePlanPanel?: () => void;
 }
 
 export function StreamFooter({
@@ -390,6 +391,7 @@ export function StreamFooter({
   pendingQuestion,
   setPendingQuestion,
   stopStream,
+  onTogglePlanPanel,
 }: StreamFooterProps) {
   const [inputHasContent, setInputHasContent] = useState(false);
   const [sendPending, setSendPending] = useState(false);
@@ -621,8 +623,10 @@ export function StreamFooter({
         )}
 
         {executionMode === "plan" && (
-          <div
-            className="flex items-center gap-2 px-4 py-2 text-[11px]"
+          <button
+            type="button"
+            onClick={onTogglePlanPanel}
+            className="flex w-full items-center gap-2 px-4 py-2 text-left text-[11px] transition-colors hover:brightness-110"
             style={{
               background: "color-mix(in srgb, var(--tint, #4299E1) 6%, transparent)",
               borderBottom: "0.5px solid color-mix(in srgb, var(--tint, #4299E1) 15%, transparent)",
@@ -640,7 +644,26 @@ export function StreamFooter({
                 </span>
               )}
             </span>
-          </div>
+            <FileText {...ICON.sm} className="ml-auto shrink-0" style={{ opacity: 0.6 }} />
+          </button>
+        )}
+
+        {executionMode === "agent" && planFileExists && planFilePath && (
+          <button
+            type="button"
+            onClick={onTogglePlanPanel}
+            className="flex w-full items-center gap-2 px-4 py-1.5 text-left text-[10px] transition-colors hover:brightness-110"
+            style={{
+              background: "color-mix(in srgb, var(--tint, #4299E1) 3%, transparent)",
+              borderBottom: "0.5px solid color-mix(in srgb, var(--tint, #4299E1) 10%, transparent)",
+              color: "var(--fill-tertiary)",
+            }}
+          >
+            <FileText {...ICON.sm} className="shrink-0" style={{ color: "var(--tint, #4299E1)", opacity: 0.7 }} />
+            <span className="min-w-0 truncate">
+              计划文件: {planFilePath.replace(/^\/home\/[^/]+\//, "~/")}
+            </span>
+          </button>
         )}
 
         <MentionInput

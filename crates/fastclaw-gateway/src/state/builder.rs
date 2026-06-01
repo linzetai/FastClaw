@@ -760,7 +760,7 @@ impl StateBuilder {
         let stream_event_tx_for_executor = p5.phase2.phase4.stream_event_tx.clone();
         let mode_registry_for_executor = p5.phase2.phase4.session_modes.clone();
         let todo_store_for_executor = p5.phase2.phase4.phase3.todo_store.clone();
-        let plan_file_store_for_executor =
+        let plan_file_store =
             fastclaw_agent::builtin_tools::PlanFileStore::default();
         let tool_orchestrator_for_executor = p5.phase2.phase4.tool_orchestrator.clone();
 
@@ -783,7 +783,7 @@ impl StateBuilder {
                 session_store: Some(session_store_for_session.clone()),
                 mode_registry: Some(mode_registry_for_executor),
                 todo_store: Some(todo_store_for_executor),
-                plan_file_store: Some(plan_file_store_for_executor),
+                plan_file_store: Some(plan_file_store.clone()),
                 stream_event_tx: Some(stream_event_tx_for_executor),
                 subagent_manager: None,
                 tool_orchestrator: Some(tool_orchestrator_for_executor),
@@ -808,7 +808,7 @@ impl StateBuilder {
                 prompt_guard: prompt_guard.clone(),
                 session_modes: p5.phase2.phase4.session_modes,
                 todo_store: p5.phase2.phase4.phase3.todo_store,
-                plan_file_store: fastclaw_agent::builtin_tools::PlanFileStore::default(),
+                plan_file_store,
             },
             store: super::StorageState {
                 session_store: p5.phase2.phase4.phase3.phase1.session_store,

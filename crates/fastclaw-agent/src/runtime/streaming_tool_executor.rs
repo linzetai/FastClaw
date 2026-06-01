@@ -51,6 +51,8 @@ pub struct StreamingExecutorConfig {
     pub behavior: BehaviorConfig,
     /// Current execution mode (Plan vs Agent) for policy checks.
     pub execution_mode: Option<ExecutionMode>,
+    /// Plan file path allowed for writes even in Plan mode.
+    pub plan_file_path: Option<std::path::PathBuf>,
 }
 
 impl Default for StreamingExecutorConfig {
@@ -60,6 +62,7 @@ impl Default for StreamingExecutorConfig {
             work_dir: None,
             behavior: BehaviorConfig::default(),
             execution_mode: None,
+            plan_file_path: None,
         }
     }
 }
@@ -120,6 +123,7 @@ impl StreamingToolExecutor {
         let work_dir = self.config.work_dir.clone();
         let behavior = self.config.behavior.clone();
         let execution_mode = self.config.execution_mode;
+        let plan_file_path = self.config.plan_file_path.clone();
 
         let handle = tokio::spawn(async move {
             if cancel.is_cancelled() {
@@ -168,7 +172,7 @@ impl StreamingToolExecutor {
                     }
                     return;
                 }
-                r = execute_single_tool_with_context(&call, &registry, &behavior, &work_dir, execution_mode) => r,
+                r = execute_single_tool_with_context(&call, &registry, &behavior, &work_dir, execution_mode, plan_file_path.as_ref()) => r,
             };
 
             // Store result
@@ -270,6 +274,7 @@ async fn execute_single_tool_with_context(
     behavior: &BehaviorConfig,
     work_dir: &Option<String>,
     execution_mode: Option<ExecutionMode>,
+    plan_file_path: Option<&std::path::PathBuf>,
 ) -> ToolResult {
     let result = super::dispatcher::ToolDispatcher::execute_unguarded_standalone(
         call,
@@ -277,6 +282,7 @@ async fn execute_single_tool_with_context(
         behavior,
         work_dir,
         execution_mode,
+        plan_file_path,
     )
     .await;
     super::dispatcher::ToolDispatcher::truncate_result_static(&call.function.name, result)
@@ -679,6 +685,7 @@ mod tests {
             work_dir: Some("/tmp/test-workspace".to_string()),
             behavior,
             execution_mode: None,
+            plan_file_path: None,
         };
         let mut executor = StreamingToolExecutor::new(registry, config);
 

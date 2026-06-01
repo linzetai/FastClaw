@@ -22,6 +22,18 @@ use crate::llm::LlmProvider;
 use crate::reactive_loop;
 use crate::AgentRuntime;
 
+fn derive_approval_strategy(
+    behavior: &fastclaw_core::agent_config::BehaviorConfig,
+) -> fastclaw_core::tool_runtime::ApprovalStrategy {
+    let no_ask = behavior.tools_ask.is_empty()
+        && behavior.require_confirmation_for.is_empty();
+    if no_ask && behavior.file_access == fastclaw_core::agent_config::FileAccessMode::Full {
+        fastclaw_core::tool_runtime::ApprovalStrategy::AutoApprove
+    } else {
+        fastclaw_core::tool_runtime::ApprovalStrategy::Interactive
+    }
+}
+
 /// Adapter implementing `TurnExecutor` by delegating to `AgentRuntime`.
 ///
 /// `InteractionHandle` is threaded into two places:
@@ -386,7 +398,7 @@ impl RuntimeTurnExecutor {
                 &reprompt_request,
                 &tool_registry,
                 tx.clone(),
-                fastclaw_core::tool_runtime::ApprovalStrategy::Interactive,
+                derive_approval_strategy(&config.behavior),
                 llm.clone(),
                 orchestrator.clone(),
                 Some(interaction.clone()),
@@ -607,7 +619,7 @@ impl TurnExecutor for RuntimeTurnExecutor {
                 &request,
                 &tool_registry,
                 inner_tx.clone(),
-                fastclaw_core::tool_runtime::ApprovalStrategy::Interactive,
+                derive_approval_strategy(&config.behavior),
                 llm.clone(),
                 orchestrator.clone(),
                 Some(interaction.clone()),
@@ -704,12 +716,79 @@ impl TurnExecutor for RuntimeTurnExecutor {
 
 #[cfg(test)]
 mod tests {
+    use super::derive_approval_strategy;
     use crate::ToolOrchestrator;
+    use fastclaw_core::agent_config::{BehaviorConfig, FileAccessMode};
+    use fastclaw_core::tool_runtime::ApprovalStrategy;
 
     #[test]
     fn default_orchestrator_construction() {
         let orch = ToolOrchestrator::new();
         let _default: ToolOrchestrator = Default::default();
         drop(orch);
+    }
+
+    #[test]
+    fn yolo_mode_returns_auto_approve() {
+        let behavior = BehaviorConfig {
+            tools_ask: vec![],
+            require_confirmation_for: vec![],
+            file_access: FileAccessMode::Full,
+            ..Default::default()
+        };
+        assert!(matches!(
+            derive_approval_strategy(&behavior),
+            ApprovalStrategy::AutoApprove
+        ));
+    }
+
+    #[test]
+    fn default_mode_returns_interactive() {
+        let behavior = BehaviorConfig {
+            tools_ask: vec![
+                "write_file".into(),
+                "edit_file".into(),
+                "shell_exec".into(),
+            ],
+            require_confirmation_for: vec![
+                "write_file".into(),
+                "edit_file".into(),
+                "shell_exec".into(),
+            ],
+            file_access: FileAccessMode::Workspace,
+            ..Default::default()
+        };
+        assert!(matches!(
+            derive_approval_strategy(&behavior),
+            ApprovalStrategy::Interactive
+        ));
+    }
+
+    #[test]
+    fn workspace_file_access_alone_returns_interactive() {
+        let behavior = BehaviorConfig {
+            tools_ask: vec![],
+            require_confirmation_for: vec![],
+            file_access: FileAccessMode::Workspace,
+            ..Default::default()
+        };
+        assert!(matches!(
+            derive_approval_strategy(&behavior),
+            ApprovalStrategy::Interactive
+        ));
+    }
+
+    #[test]
+    fn tools_ask_with_full_access_returns_interactive() {
+        let behavior = BehaviorConfig {
+            tools_ask: vec!["shell_exec".into()],
+            require_confirmation_for: vec![],
+            file_access: FileAccessMode::Full,
+            ..Default::default()
+        };
+        assert!(matches!(
+            derive_approval_strategy(&behavior),
+            ApprovalStrategy::Interactive
+        ));
     }
 }

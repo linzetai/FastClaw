@@ -276,6 +276,10 @@ pub enum ClientOp {
     ExecutionGetPlan {
         session_id: SessionId,
     },
+    ExecutionApprovePlan {
+        session_id: SessionId,
+        mode: ExecutionMode,
+    },
 
     // ── Pub/Sub ─────────────────────────────────────────────────────
     Subscribe {
@@ -521,6 +525,16 @@ impl ClientOp {
             }),
             "execution.get_plan" => Ok(Self::ExecutionGetPlan {
                 session_id: extract_session_id(&params)?,
+            }),
+            "execution.approve_plan" => Ok(Self::ExecutionApprovePlan {
+                session_id: extract_session_id(&params)?,
+                mode: serde_json::from_value(
+                    params
+                        .get("mode")
+                        .cloned()
+                        .unwrap_or(serde_json::json!("agent")),
+                )
+                .map_err(|e| e.to_string())?,
             }),
             "subscribe" => Ok(Self::Subscribe {
                 events: params

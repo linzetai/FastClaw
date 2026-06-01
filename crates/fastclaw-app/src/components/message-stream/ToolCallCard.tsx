@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { TodoCard, isTodoResult } from "./TodoCard";
 import { DiffCard, isEditResult } from "./DiffCard";
-import { PlanApprovalCard, isPlanExitResult } from "./PlanApprovalCard";
+import { PlanApprovalCard, isPlanExitResult, type PlanApprovalMetadata } from "./PlanApprovalCard";
 import { ICON } from "../../lib/ui-tokens";
 
 export interface ToolCall {
@@ -22,6 +22,7 @@ export interface ToolCall {
   result?: string;
   duration?: number;
   startTime?: number;
+  metadata?: Record<string, unknown> | null;
 }
 
 const TOOL_META: Record<string, { icon: ReactNode; label?: string }> = {
@@ -479,9 +480,9 @@ export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCal
           <DiffCard result={tool.result} args={tool.args} />
         </div>
       )}
-      {!isRunning && tool.result && isPlanExitResult(tool.name, tool.result) && (
+      {!isRunning && tool.result && isPlanExitResult(tool.name, tool.result, tool.metadata as PlanApprovalMetadata | undefined) && (
         <div className="px-3 pb-2">
-          <PlanApprovalCard result={tool.result} />
+          <PlanApprovalCard result={tool.result} metadata={tool.metadata as PlanApprovalMetadata | undefined} />
         </div>
       )}
 

@@ -53,11 +53,11 @@ fn session_guidance_en(ctx: &PromptContext) -> String {
             "\
 ## Plan Mode (Read-Only)
 
-Plan mode is active. You MUST NOT make any edits (except the plan file), run non-readonly tools, or make changes to the system. This supersedes any other instructions.
+Plan mode is active. All edit and execute tools are blocked except writing to the plan file. You may use `write_file` or `edit_file` targeting the plan file path below — those calls will be allowed through. All other write operations are blocked by the dispatcher.
 
 ### Plan File
 {plan_file_info}
-You should build your plan incrementally by writing to or editing this file. This is the ONLY file you may edit — all other actions must be READ-ONLY.
+Build your plan incrementally by writing to this file using `write_file` or `edit_file`. This is the ONLY file you may write to — all other actions must be READ-ONLY.
 
 ### Plan Workflow
 
@@ -224,11 +224,11 @@ fn session_guidance_zh(ctx: &PromptContext) -> String {
             "\
 ## 计划模式（只读）
 
-计划模式已激活。你**不得**进行任何编辑（计划文件除外）、运行非只读工具或对系统做任何更改。此规则优先于其他任何指令。
+计划模式已激活。所有编辑和执行工具均被阻塞，**唯一例外**是使用 `write_file` 或 `edit_file` 写入下方的计划文件路径——这些调用会被放行。其他所有写操作都会被 dispatcher 阻塞。
 
 ### 计划文件
 {plan_file_info}
-你应当通过写入或编辑此文件来逐步构建计划。这是你**唯一**可以编辑的文件——其他操作必须为只读。
+通过 `write_file` 或 `edit_file` 写入此文件来逐步构建计划。这是你**唯一**可以写入的文件——其他操作必须为只读。
 
 ### 计划工作流
 

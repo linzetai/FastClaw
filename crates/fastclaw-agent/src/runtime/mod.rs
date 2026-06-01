@@ -936,6 +936,11 @@ impl AgentRuntime {
 
         let mut trajectory_steps: Vec<TrajectoryStep> = Vec::new();
         let t0 = std::time::Instant::now();
+        if let Some(ref ms) = mode_state {
+            if ms.current_mode() == ExecutionMode::Plan {
+                tool_registry.activate_deferred("exit_plan_mode");
+            }
+        }
         let mut all_tool_defs = tool_registry.eager_definitions();
         if let Some(extra) = &request.tools {
             all_tool_defs.extend(extra.iter().cloned());
@@ -1349,11 +1354,14 @@ impl AgentRuntime {
             // A new executor is created per iteration since it's consumed via drain_remaining().
             let streaming_exec_enabled = config.behavior.streaming_tool_execution;
             let mut streaming_executor = if streaming_exec_enabled {
+                let streaming_plan_fp = crate::builtin_tools::plan_mode::current_plan_context()
+                    .map(|pc| pc.store.plan_path(&pc.session_id));
                 let exec_config = streaming_tool_executor::StreamingExecutorConfig {
                     sibling_cancel_on_error: true,
                     work_dir: request.work_dir.clone(),
                     behavior: config.behavior.clone(),
                     execution_mode: mode_state.as_ref().map(|ms| ms.current_mode()),
+                    plan_file_path: streaming_plan_fp,
                 };
                 Some(streaming_tool_executor::StreamingToolExecutor::new(
                     Arc::clone(tool_registry),
@@ -2117,6 +2125,8 @@ impl AgentRuntime {
                 }
 
                 // Dispatch guarded tools through ToolDispatcher
+                let plan_file_path_for_ctx = crate::builtin_tools::plan_mode::current_plan_context()
+                    .map(|pc| pc.store.plan_path(&pc.session_id));
                 for (i, tc) in assembled_calls.iter().enumerate() {
                     if dispatcher.is_guarded(&tc.function.name) {
                         let mut dispatch_ctx = dispatcher::DispatchContext {
@@ -2124,6 +2134,7 @@ impl AgentRuntime {
                             behavior: &config.behavior,
                             work_dir: &request.work_dir,
                             mode_state: mode_state.as_ref(),
+                            plan_file_path: plan_file_path_for_ctx.clone(),
                             event_tx: tx,
                             approval_strategy,
                             interaction_handle: interaction_handle.as_ref(),
@@ -2139,11 +2150,14 @@ impl AgentRuntime {
                 all_results.into_iter().flatten().collect::<Vec<_>>()
             } else {
                 // Non-streaming path: dispatch_batch handles everything.
+                let plan_file_path_batch = crate::builtin_tools::plan_mode::current_plan_context()
+                    .map(|pc| pc.store.plan_path(&pc.session_id));
                 let mut dispatch_ctx = dispatcher::DispatchContext {
                     turn_id: &turn_id,
                     behavior: &config.behavior,
                     work_dir: &request.work_dir,
                     mode_state: mode_state.as_ref(),
+                    plan_file_path: plan_file_path_batch,
                     event_tx: tx,
                     approval_strategy,
                     interaction_handle: interaction_handle.as_ref(),
@@ -2160,6 +2174,7 @@ impl AgentRuntime {
             );
 
             let mut force_stop_loop = false;
+            let mut plan_approval_pending = false;
             for (tool_name, call_id, arguments, mut result) in stream_results {
                 let tool_start_time = std::time::Instant::now();
                 state.total_tool_calls += 1;
@@ -2367,6 +2382,15 @@ impl AgentRuntime {
                     success: Some(result.success),
                 });
 
+                if result.metadata.as_ref().and_then(|m| m.get("approval_pending")).and_then(|v| v.as_bool()) == Some(true) {
+                    tracing::info!(
+                        agent_id = %config.agent_id,
+                        tool = %tool_name,
+                        "plan approval pending — ending turn to wait for user decision"
+                    );
+                    plan_approval_pending = true;
+                }
+
                 let content = tool_result_content(&llm_out, &result);
                 messages.push(ChatMessage {
                     role: Role::Tool,
@@ -2460,6 +2484,27 @@ impl AgentRuntime {
                     });
                     break;
                 }
+            }
+
+            if plan_approval_pending {
+                tracing::info!(
+                    agent_id = %config.agent_id,
+                    "breaking execution loop — plan approval pending, waiting for user"
+                );
+                let _ = send_stream_event(
+                    tx,
+                    make_turn_end_event(&turn_id, request, &state, stream_start, context_window, None),
+                    false,
+                )
+                .await;
+                self.finalize_injected_skills(&injected_skill_ids, true)
+                    .await;
+                return Ok(make_turn_summary(
+                    &turn_id,
+                    &state,
+                    stream_start,
+                    context_window,
+                ));
             }
 
             if force_stop_loop {
