@@ -372,7 +372,6 @@ Model Context Protocol 双向实现。
 ```
 fastclaw/
 ├── crates/
-│   ├── fastclaw-cli/          # CLI 入口（fastclaw 二进制）
 │   ├── fastclaw-core/         # 核心类型、配置、路由、工具 trait
 │   ├── fastclaw-gateway/      # HTTP/WebSocket 网关
 │   ├── fastclaw-agent/        # Agent 运行时、30+ 内置工具
