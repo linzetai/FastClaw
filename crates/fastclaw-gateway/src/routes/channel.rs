@@ -1487,18 +1487,32 @@ async fn handle_channel_streaming(
 
 pub(super) async fn list_channels(State(state): State<AppState>) -> impl IntoResponse {
     let registry = state.ext.channel_registry.read().await;
-    let channels: Vec<_> = registry
-        .list()
-        .into_iter()
-        .map(|m| -> Value {
-            json!({
-                "id": m.id,
-                "name": m.name,
-                "description": m.description,
-                "aliases": m.aliases,
-            })
-        })
-        .collect();
+    let mut channels: Vec<Value> = Vec::new();
+
+    for ch in registry.all_plugins() {
+        let meta = ch.meta();
+        let caps = ch.capabilities();
+        let mode = ch.connection_mode();
+        let healthy = ch.probe().await.unwrap_or(false);
+
+        channels.push(json!({
+            "id": meta.id,
+            "name": meta.name,
+            "description": meta.description,
+            "aliases": meta.aliases,
+            "status": if healthy { "connected" } else { "disconnected" },
+            "connectionMode": mode,
+            "capabilities": {
+                "directMessage": caps.direct_message,
+                "groupChat": caps.group_chat,
+                "media": caps.media,
+                "streaming": caps.streaming,
+                "reactions": caps.reactions,
+                "threads": caps.threads,
+            },
+        }));
+    }
+
     Json(json!({ "channels": channels, "count": channels.len() }))
 }
 

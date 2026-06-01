@@ -236,6 +236,7 @@ impl SessionActor {
     }
 
     /// Start a new user turn. Aborts any active turn first (Codex invariant).
+    #[allow(clippy::too_many_arguments)]
     async fn handle_user_turn(
         &mut self,
         sub_id: SubmissionId,

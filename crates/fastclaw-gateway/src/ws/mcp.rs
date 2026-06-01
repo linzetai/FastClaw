@@ -10,6 +10,14 @@ use fastclaw_protocol::McpAddParams;
 use super::send_resp;
 use super::types::WsResponse;
 
+fn mask_value(s: &str) -> String {
+    if s.len() <= 4 {
+        "****".to_string()
+    } else {
+        format!("{}****", &s[..4])
+    }
+}
+
 // ─── MCP WS handlers ───
 
 pub async fn handle_mcp_status(
@@ -194,4 +202,117 @@ pub async fn handle_mcp_remove(
             .await;
         }
     }
+}
+
+pub async fn handle_mcp_detail(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    state: &AppState,
+    req_id: Option<String>,
+    server_id: &str,
+) {
+    let status = state.ext.mcp_status.load().get(server_id).cloned();
+    if status.is_none() {
+        send_resp(
+            sender,
+            &WsResponse {
+                id: req_id,
+                msg_type: "error".into(),
+                data: None,
+                error: Some(json!({"message": "server not found"})),
+            },
+        )
+        .await;
+        return;
+    }
+    let status = status.unwrap();
+
+    let live = state.cfg.config_live.load();
+    let config_from_live = live
+        .get("mcpServers")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| {
+            arr.iter()
+                .find(|s| s.get("id").and_then(|i| i.as_str()) == Some(server_id))
+        })
+        .cloned();
+
+    let (config_json, config_source) = if let Some(cfg) = config_from_live {
+        (cfg, "user")
+    } else if let Ok(cwd) = std::env::current_dir() {
+        let ws_root = fastclaw_core::workspace::detect_workspace_root(&cwd);
+        if let Some(project_mcp) =
+            fastclaw_core::agent_config::load_project_mcp_config(&ws_root)
+        {
+            let cfgs = project_mcp.to_mcp_server_configs();
+            if let Some(c) = cfgs.into_iter().find(|c| c.id == server_id) {
+                (serde_json::to_value(&c).unwrap_or_default(), "project")
+            } else {
+                (json!({}), "unknown")
+            }
+        } else {
+            (json!({}), "unknown")
+        }
+    } else {
+        (json!({}), "unknown")
+    };
+
+    let masked_env: serde_json::Map<String, serde_json::Value> = config_json
+        .get("env")
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            obj.iter()
+                .map(|(k, v)| {
+                    let masked = v.as_str().map(mask_value).unwrap_or_default();
+                    (k.clone(), json!(masked))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let config = json!({
+        "command": config_json.get("command").and_then(|v| v.as_str()).unwrap_or(""),
+        "args": config_json.get("args").cloned().unwrap_or(json!([])),
+        "transport": config_json.get("transport").and_then(|v| v.as_str()).unwrap_or("stdio"),
+        "url": config_json.get("url"),
+        "env": masked_env,
+        "source": config_source,
+    });
+
+    let tools = {
+        let handles = state.ext.mcp_handles.lock().await;
+        if let Some(client) = handles.get(server_id) {
+            let client_guard = client.lock().await;
+            client_guard
+                .tools()
+                .iter()
+                .map(|t| {
+                    json!({
+                        "name": t.name,
+                        "description": t.description.as_deref().unwrap_or(""),
+                    })
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        }
+    };
+
+    send_resp(
+        sender,
+        &WsResponse {
+            id: req_id,
+            msg_type: "mcp.detail".into(),
+            data: Some(json!({
+                "id": status.id,
+                "status": status.status,
+                "error": status.error,
+                "toolCount": status.tool_count,
+                "connectedAt": status.connected_at,
+                "config": config,
+                "tools": tools,
+            })),
+            error: None,
+        },
+    )
+    .await;
 }

@@ -53,7 +53,7 @@ pub fn estimate_messages_tokens(messages: &[ChatMessage]) -> usize {
 }
 
 fn estimate_single_message_tokens(msg: &ChatMessage) -> usize {
-    let content_chars = msg.content.as_ref().map_or(0, |c| value_char_count(c));
+    let content_chars = msg.content.as_ref().map_or(0, value_char_count);
     let tool_chars = msg.tool_calls.as_ref().map_or(0, |tc| {
         tc.iter()
             .map(|t| t.function.name.len() + t.function.arguments.len())

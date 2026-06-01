@@ -422,6 +422,39 @@ export async function reloadChannel(channelId: string): Promise<boolean> {
   }
 }
 
+// ─── Channels ───
+
+export type { ChannelStatus as ChannelInfo, ChannelDetailResult } from "./transport";
+
+export const channelsDetail = transport.channelsDetail;
+
+export async function listChannels() {
+  try {
+    return await transport.channelsList();
+  } catch (e) {
+    console.warn("[api] listChannels error:", e);
+    return [];
+  }
+}
+
+export const channelsWechatLogin = transport.channelsWechatLogin;
+export const channelsWechatPoll = transport.channelsWechatPoll;
+export const channelsWechatVerify = transport.channelsWechatVerify;
+export const channelsConnect = transport.channelsConnect;
+export const channelsDisconnect = transport.channelsDisconnect;
+export type { ChannelsUpdateResult } from "./transport";
+export const channelsUpdate = transport.channelsUpdate;
+export const channelsRestore = transport.channelsRestore;
+
+// ─── MCP Servers ───
+
+export type { McpServerStatus, McpDetailResult } from "./transport";
+export const getMcpStatus = transport.getMcpStatus;
+export const reloadMcpServers = transport.reloadMcpServers;
+export const addMcpServer = transport.addMcpServer;
+export const removeMcpServer = transport.removeMcpServer;
+export const mcpDetail = transport.mcpDetail;
+
 // ─── Cron jobs ───
 
 export type { CronJob, CronJobAction, CronJobRun } from "./transport";

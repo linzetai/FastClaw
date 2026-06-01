@@ -841,6 +841,7 @@ impl StateBuilder {
                 chat_locks: Arc::new(dashmap::DashMap::new()),
                 chat_cancels: Arc::new(dashmap::DashMap::new()),
                 chat_model_overrides: Arc::new(dashmap::DashMap::new()),
+                wechat_login_sessions: Arc::new(dashmap::DashMap::new()),
             },
             obs: super::ObserveState {
                 metrics_collector: Arc::new(fastclaw_observe::MetricsCollector::new()),

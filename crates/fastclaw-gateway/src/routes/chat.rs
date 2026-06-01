@@ -189,7 +189,7 @@ async fn handle_non_stream(
         .first()
         .and_then(|c| c.message.text_content())
     {
-        maybe_spawn_smart_title_background(&state, &setup, &*assistant_text);
+        maybe_spawn_smart_title_background(&state, &setup, &assistant_text);
     }
 
     fastclaw_observe::record_chat_latency(&setup.agent_id, request_start);

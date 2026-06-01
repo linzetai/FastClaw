@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from "react";
-import { Settings2, Box, Wrench, Server, Info, Search, Shield, Plug, X, RotateCcw, Bot } from "lucide-react";
+import { Settings2, Box, Wrench, Server, Info, Search, Shield, X, RotateCcw, Bot } from "lucide-react";
 import { ICON, BTN_ICON } from "../../lib/ui-tokens";
 
 const GeneralTab = lazy(() => import("./GeneralTab").then((m) => ({ default: m.GeneralTab })));
@@ -7,7 +7,6 @@ const ModelTab = lazy(() => import("./ModelTab").then((m) => ({ default: m.Model
 const WebSearchTab = lazy(() => import("./WebSearchTab").then((m) => ({ default: m.WebSearchTab })));
 const SkillsTab = lazy(() => import("./SkillsTab").then((m) => ({ default: m.SkillsTab })));
 const SubAgentsTab = lazy(() => import("./SubAgentsTab").then((m) => ({ default: m.SubAgentsTab })));
-const McpTab = lazy(() => import("./McpTab").then((m) => ({ default: m.McpTab })));
 const SecurityTab = lazy(() => import("./SecurityTab").then((m) => ({ default: m.SecurityTab })));
 const GatewayTab = lazy(() => import("./GatewayTab").then((m) => ({ default: m.GatewayTab })));
 const AboutTab = lazy(() => import("./AboutTab").then((m) => ({ default: m.AboutTab })));
@@ -18,7 +17,7 @@ interface SettingsPanelProps {
   onClose: () => void;
 }
 
-type SettingsTab = "general" | "models" | "web-search" | "skills" | "sub-agents" | "mcp" | "security" | "gateway" | "about" | "migration";
+type SettingsTab = "general" | "models" | "web-search" | "skills" | "sub-agents" | "security" | "gateway" | "about" | "migration";
 
 const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
   { id: "general", label: "通用", icon: <Settings2 {...ICON.md} /> },
@@ -26,7 +25,6 @@ const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
   { id: "web-search", label: "联网搜索", icon: <Search {...ICON.md} /> },
   { id: "skills", label: "Skills", icon: <Wrench {...ICON.md} /> },
   { id: "sub-agents", label: "Sub-Agents", icon: <Bot {...ICON.md} /> },
-  { id: "mcp", label: "MCP", icon: <Plug {...ICON.md} /> },
   { id: "security", label: "安全", icon: <Shield {...ICON.md} /> },
   { id: "gateway", label: "网关", icon: <Server {...ICON.md} /> },
   { id: "migration", label: "迁移", icon: <RotateCcw {...ICON.md} /> },
@@ -103,7 +101,6 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 {tab === "web-search" && <WebSearchTab />}
                 {tab === "skills" && <SkillsTab />}
                 {tab === "sub-agents" && <SubAgentsTab />}
-                {tab === "mcp" && <McpTab />}
                 {tab === "security" && <SecurityTab />}
                 {tab === "gateway" && <GatewayTab />}
                 {tab === "migration" && <MigrationTab />}

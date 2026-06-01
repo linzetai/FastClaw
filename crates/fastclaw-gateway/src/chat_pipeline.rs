@@ -837,7 +837,7 @@ pub async fn after_chat(
         maybe_spawn_smart_title_background(
             state,
             setup,
-            &*assistant.text_content().unwrap_or_default(),
+            &assistant.text_content().unwrap_or_default(),
         );
     }
 

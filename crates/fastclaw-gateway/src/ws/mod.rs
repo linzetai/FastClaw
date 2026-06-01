@@ -1,4 +1,5 @@
 mod agents;
+mod channels;
 mod chat;
 mod config;
 mod cron;
@@ -101,7 +102,9 @@ async fn handle_socket(socket: WebSocket, state: AppState, auth: ApiKeyAuth, pre
                             "sessions.new", "sessions.claim", "sessions.update_title",
                             "cancel", "answer", "set_mode",
                             "models.list", "config.get", "config.set",
-                            "mcp.status", "mcp.reload", "mcp.add", "mcp.remove",
+                            "mcp.status", "mcp.reload", "mcp.add", "mcp.remove", "mcp.detail",
+                            "channels.list", "channels.detail", "channels.connect", "channels.update", "channels.restore",
+                            "channels.wechat_login", "channels.wechat_poll", "channels.wechat_verify", "channels.disconnect",
                             "sub_agents.list",
                             "agents.get", "agents.create", "agents.update", "agents.delete",
                             "tools.list", "tools.update", "tools.submit_answer",
@@ -427,6 +430,9 @@ async fn dispatch(
         ClientOp::McpRemove { .. } => {
             mcp::handle_mcp_remove(sender, state, id, req.params).await
         }
+        ClientOp::McpDetail { id: server_id } => {
+            mcp::handle_mcp_detail(sender, state, id, &server_id).await
+        }
         ClientOp::AgentsGet { .. } => {
             agents::handle_agents_get(sender, state, id, req.params).await
         }
@@ -496,6 +502,33 @@ async fn dispatch(
                 },
             )
             .await;
+        }
+        ClientOp::ChannelsList => {
+            channels::handle_channels_list(sender, state, id).await;
+        }
+        ClientOp::ChannelsDetail { id: channel_id } => {
+            channels::handle_channels_detail(sender, state, id, &channel_id).await;
+        }
+        ClientOp::ChannelsConnect { id: channel_id } => {
+            channels::handle_channels_connect(sender, state, id, &channel_id).await;
+        }
+        ClientOp::ChannelsUpdate { id: channel_id, config } => {
+            channels::handle_channels_update(sender, state, id, &channel_id, config).await;
+        }
+        ClientOp::ChannelsRestore { id: channel_id } => {
+            channels::handle_channels_restore(sender, state, id, &channel_id).await;
+        }
+        ClientOp::ChannelsWechatLogin => {
+            channels::handle_wechat_login(sender, state, id).await;
+        }
+        ClientOp::ChannelsWechatPoll { session_key } => {
+            channels::handle_wechat_poll(sender, state, id, &session_key).await;
+        }
+        ClientOp::ChannelsWechatVerify { session_key, code } => {
+            channels::handle_wechat_verify(sender, state, id, &session_key, &code).await;
+        }
+        ClientOp::ChannelsDisconnect { channel_id, account_id } => {
+            channels::handle_channels_disconnect(sender, state, id, &channel_id, account_id.as_deref()).await;
         }
         ClientOp::WorkspaceInit { work_dir } => {
             session::handle_workspace_init(sender, state, id, work_dir).await

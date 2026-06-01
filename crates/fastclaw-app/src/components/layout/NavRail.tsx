@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from "react";
-import { MessageSquare, Users, Layout, ListTodo, FolderOpen, Link2, Settings } from "lucide-react";
+import { MessageSquare, Layout, ListTodo, FolderOpen, Link2, Settings } from "lucide-react";
 import { useAgentStore } from "../../lib/agent-store";
 import { ClawIcon } from "./ClawIcon";
 import { ICON, BTN_ICON } from "../../lib/ui-tokens";
@@ -17,7 +17,6 @@ interface NavEntry {
 
 const TOP_ITEMS: NavEntry[] = [
   { id: "chat", icon: MessageSquare, label: "对话" },
-  { id: "experts", icon: Users, label: "专家" },
   { id: "workspace", icon: Layout, label: "工作室" },
   { id: "tasks", icon: ListTodo, label: "任务" },
   { id: "files", icon: FolderOpen, label: "文件" },

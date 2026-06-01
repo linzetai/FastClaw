@@ -1,6 +1,6 @@
 import type { AgentState } from "./types";
 
-export type NavItem = "chat" | "experts" | "workspace" | "tasks" | "files" | "connections";
+export type NavItem = "chat" | "workspace" | "tasks" | "files" | "connections";
 
 /* Zustand setState is compatible; keep loose to match StoreApi. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

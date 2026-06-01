@@ -215,6 +215,9 @@ pub struct ExtensionState {
     pub chat_cancels: Arc<dashmap::DashMap<String, tokio_util::sync::CancellationToken>>,
     /// Per-chat model overrides set via `/model <name>`.
     pub chat_model_overrides: Arc<dashmap::DashMap<String, String>>,
+    /// Active WeChat QR login sessions (session_key → QrLoginSession).
+    pub wechat_login_sessions:
+        Arc<dashmap::DashMap<String, fastclaw_wechat::auth::qr_login::QrLoginSession>>,
 }
 
 /// Observability.

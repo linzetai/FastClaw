@@ -57,13 +57,16 @@ function WindowResizeHandles() {
 const OnboardingWizard = lazy(() =>
   import("../onboarding/OnboardingWizard").then((m) => ({ default: m.OnboardingWizard })),
 );
+const ConnectionsPage = lazy(() =>
+  import("../connections/ConnectionsPage").then((m) => ({ default: m.ConnectionsPage })),
+);
+const TasksPage = lazy(() =>
+  import("../tasks/TasksPage").then((m) => ({ default: m.TasksPage })),
+);
 
 const COMING_SOON_TITLES: Partial<Record<NavItem, string>> = {
-  experts: "专家",
   workspace: "工作室",
-  tasks: "任务",
   files: "文件",
-  connections: "连接",
 };
 
 function SkeletonPulse({ className = "", style = {} }: { className?: string; style?: React.CSSProperties }) {
@@ -252,6 +255,8 @@ export function AppLayout() {
   }, []);
 
   const showAgentPane = activeNav === "chat";
+  const showConnections = activeNav === "connections";
+  const showTasks = activeNav === "tasks";
   const comingSoonTitle = COMING_SOON_TITLES[activeNav];
 
   let content: React.ReactNode;
@@ -301,6 +306,18 @@ export function AppLayout() {
                 )}
               </main>
             </>
+          ) : showConnections ? (
+            <main className="flex min-w-0 flex-1 flex-col">
+              <Suspense fallback={<div className="flex-1" style={{ background: "var(--bg-primary)" }} />}>
+                <ConnectionsPage />
+              </Suspense>
+            </main>
+          ) : showTasks ? (
+            <main className="flex min-w-0 flex-1 flex-col">
+              <Suspense fallback={<div className="flex-1" style={{ background: "var(--bg-primary)" }} />}>
+                <TasksPage />
+              </Suspense>
+            </main>
           ) : (
             <main className="flex min-w-0 flex-1 flex-col">
               <ComingSoon title={comingSoonTitle} />

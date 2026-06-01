@@ -464,13 +464,13 @@ export interface McpServerStatus {
 }
 
 export async function getMcpStatus(): Promise<McpServerStatus[]> {
-  const resp = await wsClient.send("mcp.status");
-  return (resp as { servers?: McpServerStatus[] }).servers ?? [];
+  const resp = (await wsClient.send("mcp.status")) as { data?: { servers?: McpServerStatus[] } };
+  return resp?.data?.servers ?? [];
 }
 
 export async function reloadMcpServers(): Promise<McpServerStatus[]> {
-  const resp = await wsClient.send("mcp.reload");
-  return (resp as { servers?: McpServerStatus[] }).servers ?? [];
+  const resp = (await wsClient.send("mcp.reload")) as { data?: { servers?: McpServerStatus[] } };
+  return resp?.data?.servers ?? [];
 }
 
 export async function addMcpServer(
@@ -478,18 +478,159 @@ export async function addMcpServer(
   command: string,
   args?: string[],
 ): Promise<{ ok: boolean; id: string; status?: McpServerStatus }> {
-  return wsClient.send("mcp.add", { id, command, args: args ?? [] }) as Promise<{
-    ok: boolean;
-    id: string;
-    status?: McpServerStatus;
-  }>;
+  const resp = (await wsClient.send("mcp.add", { id, command, args: args ?? [] })) as {
+    data?: { ok?: boolean; id?: string; status?: McpServerStatus };
+  };
+  return { ok: resp?.data?.ok ?? false, id: resp?.data?.id ?? id, status: resp?.data?.status };
 }
 
 export async function removeMcpServer(id: string): Promise<{ ok: boolean; id: string }> {
-  return wsClient.send("mcp.remove", { id }) as Promise<{
-    ok: boolean;
-    id: string;
-  }>;
+  const resp = (await wsClient.send("mcp.remove", { id })) as {
+    data?: { ok?: boolean; id?: string };
+  };
+  return { ok: resp?.data?.ok ?? false, id: resp?.data?.id ?? id };
+}
+
+export interface McpDetailResult {
+  id: string;
+  status: string;
+  error?: string | null;
+  toolCount: number;
+  connectedAt?: string | null;
+  config: {
+    command: string;
+    args: string[];
+    transport: string;
+    url?: string | null;
+    env: Record<string, string>;
+    source?: "user" | "project" | "unknown";
+  };
+  tools: Array<{ name: string; description: string }>;
+}
+
+export async function mcpDetail(id: string): Promise<McpDetailResult | null> {
+  const resp = (await wsClient.send("mcp.detail", { id })) as { data?: McpDetailResult };
+  return resp?.data ?? null;
+}
+
+// ─── Channel Management ───
+
+export interface ChannelStatus {
+  id: string;
+  name: string;
+  description: string;
+  aliases: string[];
+  status: "connected" | "disconnected" | "configured" | "available";
+  connectionMode: string;
+  capabilities: {
+    directMessage?: boolean;
+    groupChat?: boolean;
+    media?: boolean;
+    streaming?: boolean;
+    reactions?: boolean;
+    threads?: boolean;
+  };
+}
+
+export interface ChannelDetailResult extends ChannelStatus {
+  tools: Array<{ name: string; description: string }>;
+  config: Record<string, unknown>;
+  hasBackup?: boolean;
+}
+
+export async function channelsDetail(id: string): Promise<ChannelDetailResult | null> {
+  const resp = (await wsClient.send("channels.detail", { id })) as { data?: ChannelDetailResult };
+  return resp?.data ?? null;
+}
+
+export async function channelsList(): Promise<ChannelStatus[]> {
+  const resp = (await wsClient.send("channels.list")) as {
+    data?: { channels?: ChannelStatus[] };
+  };
+  return resp?.data?.channels ?? [];
+}
+
+export async function channelsWechatLogin(): Promise<{
+  sessionKey: string;
+  qrUrl: string;
+  status: string;
+}> {
+  const resp = (await wsClient.send("channels.wechat_login")) as {
+    data?: { sessionKey?: string; qrUrl?: string; status?: string };
+  };
+  return {
+    sessionKey: resp?.data?.sessionKey ?? "",
+    qrUrl: resp?.data?.qrUrl ?? "",
+    status: resp?.data?.status ?? "error",
+  };
+}
+
+export async function channelsWechatPoll(sessionKey: string): Promise<{
+  status: string;
+  qrUrl?: string;
+  accountId?: string;
+  message?: string;
+}> {
+  const resp = (await wsClient.send("channels.wechat_poll", { sessionKey })) as {
+    data?: { status?: string; qrUrl?: string; accountId?: string; message?: string };
+  };
+  return {
+    status: resp?.data?.status ?? "error",
+    qrUrl: resp?.data?.qrUrl,
+    accountId: resp?.data?.accountId,
+    message: resp?.data?.message,
+  };
+}
+
+export async function channelsWechatVerify(
+  sessionKey: string,
+  code: string,
+): Promise<{ ok: boolean; message?: string }> {
+  const resp = (await wsClient.send("channels.wechat_verify", { sessionKey, code })) as {
+    data?: { ok?: boolean; message?: string };
+  };
+  return { ok: resp?.data?.ok ?? false, message: resp?.data?.message };
+}
+
+export async function channelsConnect(id: string): Promise<{ ok: boolean }> {
+  const resp = (await wsClient.send("channels.connect", { id })) as {
+    data?: { ok?: boolean };
+  };
+  return { ok: resp?.data?.ok ?? false };
+}
+
+export async function channelsDisconnect(
+  channelId: string,
+  accountId?: string,
+): Promise<{ ok: boolean }> {
+  const resp = (await wsClient.send("channels.disconnect", { channelId, accountId })) as {
+    data?: { ok?: boolean };
+  };
+  return { ok: resp?.data?.ok ?? false };
+}
+
+export interface ChannelsUpdateResult {
+  ok: boolean;
+  channelId: string;
+  reloadError?: string | null;
+  hasBackup: boolean;
+}
+
+export async function channelsUpdate(
+  id: string,
+  config: Record<string, unknown>,
+): Promise<ChannelsUpdateResult> {
+  const resp = (await wsClient.send("channels.update", { id, config })) as {
+    data?: ChannelsUpdateResult;
+  };
+  return resp?.data ?? { ok: false, channelId: id, hasBackup: false };
+}
+
+export async function channelsRestore(id: string): Promise<{ ok: boolean; reloadError?: string | null }> {
+  const resp = (await wsClient.send("channels.restore", { id })) as {
+    data?: { ok?: boolean; reloadError?: string | null };
+  };
+  return { ok: resp?.data?.ok ?? false, reloadError: resp?.data?.reloadError };
 }
 
 // ─── Tools ───

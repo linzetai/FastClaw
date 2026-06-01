@@ -216,6 +216,9 @@ pub enum ClientOp {
     McpRemove {
         id: String,
     },
+    McpDetail {
+        id: String,
+    },
 
     // ── Sub-Agent definitions ────────────────────────────────────────
     SubAgentsList,
@@ -332,6 +335,36 @@ pub enum ClientOp {
         notification_id: String,
     },
 
+    // ── Channels ──────────────────────────────────────────────────────
+    ChannelsList,
+    ChannelsDetail {
+        id: String,
+    },
+    ChannelsWechatLogin,
+    ChannelsWechatPoll {
+        session_key: String,
+    },
+    ChannelsWechatVerify {
+        session_key: String,
+        code: String,
+    },
+    ChannelsConnect {
+        id: String,
+    },
+    ChannelsUpdate {
+        id: String,
+        #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]
+        config: serde_json::Value,
+    },
+    ChannelsRestore {
+        id: String,
+    },
+    ChannelsDisconnect {
+        channel_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account_id: Option<String>,
+    },
+
     // ── Workspace ────────────────────────────────────────────────────
     WorkspaceInit {
         #[serde(alias = "workDir", skip_serializing_if = "Option::is_none")]
@@ -438,6 +471,9 @@ impl ClientOp {
                 Ok(Self::McpAdd { params: mcp_params })
             }
             "mcp.remove" => Ok(Self::McpRemove {
+                id: extract_string(&params, "id")?,
+            }),
+            "mcp.detail" => Ok(Self::McpDetail {
                 id: extract_string(&params, "id")?,
             }),
             "sub_agents.list" => Ok(Self::SubAgentsList),
@@ -594,6 +630,42 @@ impl ClientOp {
             "notifications.delete" => Ok(Self::NotificationsDelete {
                 notification_id: extract_string(&params, "notificationId")
                     .or_else(|_| extract_string(&params, "notification_id"))?,
+            }),
+            "channels.list" => Ok(Self::ChannelsList),
+            "channels.detail" => Ok(Self::ChannelsDetail {
+                id: extract_string(&params, "id")?,
+            }),
+            "channels.wechat_login" => Ok(Self::ChannelsWechatLogin),
+            "channels.wechat_poll" => Ok(Self::ChannelsWechatPoll {
+                session_key: extract_string(&params, "sessionKey")
+                    .or_else(|_| extract_string(&params, "session_key"))?,
+            }),
+            "channels.wechat_verify" => Ok(Self::ChannelsWechatVerify {
+                session_key: extract_string(&params, "sessionKey")
+                    .or_else(|_| extract_string(&params, "session_key"))?,
+                code: extract_string(&params, "code")?,
+            }),
+            "channels.connect" => Ok(Self::ChannelsConnect {
+                id: extract_string(&params, "id")?,
+            }),
+            "channels.update" => Ok(Self::ChannelsUpdate {
+                id: extract_string(&params, "id")?,
+                config: params
+                    .get("config")
+                    .cloned()
+                    .ok_or("missing 'config'")?,
+            }),
+            "channels.restore" => Ok(Self::ChannelsRestore {
+                id: extract_string(&params, "id")?,
+            }),
+            "channels.disconnect" => Ok(Self::ChannelsDisconnect {
+                channel_id: extract_string(&params, "channelId")
+                    .or_else(|_| extract_string(&params, "channel_id"))?,
+                account_id: params
+                    .get("accountId")
+                    .or_else(|| params.get("account_id"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
             }),
             "workspace.init" => Ok(Self::WorkspaceInit {
                 work_dir: params

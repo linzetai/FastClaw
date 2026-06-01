@@ -265,6 +265,10 @@ impl ChannelRegistry {
         self.channels.values().map(|c| c.meta()).collect()
     }
 
+    pub fn all_plugins(&self) -> Vec<&Arc<dyn ChannelPlugin>> {
+        self.channels.values().collect()
+    }
+
     pub fn all_tools(&self) -> Vec<Arc<dyn Tool>> {
         self.channels.values().flat_map(|ch| ch.tools()).collect()
     }
