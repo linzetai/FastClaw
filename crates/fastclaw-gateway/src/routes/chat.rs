@@ -263,6 +263,7 @@ async fn handle_stream(
     use fastclaw_protocol::{AgentEvent, SessionId};
     use fastclaw_session_actor::SessionOp;
 
+    let request_start = std::time::Instant::now();
     let setup = setup_chat(
         &state,
         &request,
@@ -408,6 +409,10 @@ async fn handle_stream(
                     ref final_tool_calls,
                     ..
                 } => {
+                    tracing::info!(
+                        elapsed_ms = request_start.elapsed().as_millis() as u64,
+                        "perf: http_stream_total"
+                    );
                     let usage = summary.usage.as_ref();
                     let elapsed_ms = summary.elapsed_ms;
                     record_chat_budget_stream_estimate(
@@ -496,6 +501,10 @@ async fn handle_stream(
                     break;
                 }
                 AgentEvent::Error { .. } => {
+                    tracing::info!(
+                        elapsed_ms = request_start.elapsed().as_millis() as u64,
+                        "perf: http_stream_total"
+                    );
                     if reserved > 0.0 {
                         let _ = state_budget.obs.budget_tracker.release_reservation(reserved);
                     }

@@ -252,15 +252,24 @@ fn truncate_for_user(s: &str, max_len: usize) -> &str {
 
 async fn acquire_llm_semaphore_permit(
     sem: &Option<Arc<tokio::sync::Semaphore>>,
+    model: &str,
+    stream: bool,
 ) -> anyhow::Result<Option<tokio::sync::OwnedSemaphorePermit>> {
     match sem {
         None => Ok(None),
         Some(s) => {
+            let t0 = std::time::Instant::now();
             let permit = s
                 .clone()
                 .acquire_owned()
                 .await
                 .map_err(|e| anyhow::anyhow!("LLM concurrency semaphore closed: {e}"))?;
+            tracing::info!(
+                elapsed_ms = t0.elapsed().as_millis() as u64,
+                model = %model,
+                stream,
+                "perf: llm_semaphore_wait"
+            );
             Ok(Some(permit))
         }
     }
@@ -362,12 +371,20 @@ impl OpenAiProvider {
         } else {
             &self.client
         };
-        client
+        let t0 = std::time::Instant::now();
+        let resp = client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&body)
             .send()
-            .await
+            .await;
+        tracing::info!(
+            elapsed_ms = t0.elapsed().as_millis() as u64,
+            model = %params.model,
+            stream,
+            "perf: llm_http_request"
+        );
+        resp
     }
 
     /// Establish a streaming chat completion response, retrying only connection / early HTTP failures.
@@ -475,7 +492,8 @@ struct OpenAiUsage {
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
     async fn chat_completion(&self, params: &CompletionParams<'_>) -> anyhow::Result<ChatResponse> {
-        let _llm_permit = acquire_llm_semaphore_permit(&self.concurrency_semaphore).await?;
+        let _llm_permit =
+            acquire_llm_semaphore_permit(&self.concurrency_semaphore, params.model, false).await?;
 
         let max_attempts = (self.retry.max_retries as usize).saturating_add(1).max(1);
 
@@ -577,7 +595,8 @@ impl LlmProvider for OpenAiProvider {
     ) -> anyhow::Result<futures::stream::BoxStream<'static, anyhow::Result<StreamDelta>>> {
         use futures::stream::{self, StreamExt};
 
-        let llm_permit = acquire_llm_semaphore_permit(&self.concurrency_semaphore).await?;
+        let llm_permit =
+            acquire_llm_semaphore_permit(&self.concurrency_semaphore, params.model, true).await?;
         let resp = self.connect_openai_chat_stream(params).await?;
 
         let byte_stream = resp.bytes_stream();
@@ -1042,7 +1061,8 @@ impl AnthropicProvider {
 #[async_trait]
 impl LlmProvider for AnthropicProvider {
     async fn chat_completion(&self, params: &CompletionParams<'_>) -> anyhow::Result<ChatResponse> {
-        let _llm_permit = acquire_llm_semaphore_permit(&self.concurrency_semaphore).await?;
+        let _llm_permit =
+            acquire_llm_semaphore_permit(&self.concurrency_semaphore, params.model, false).await?;
 
         let url = format!("{}/v1/messages", self.base_url);
         let (system, messages) = Self::convert_messages(params.messages);
@@ -1085,7 +1105,8 @@ impl LlmProvider for AnthropicProvider {
     ) -> anyhow::Result<futures::stream::BoxStream<'static, anyhow::Result<StreamDelta>>> {
         use futures::stream::{self, StreamExt};
 
-        let llm_permit = acquire_llm_semaphore_permit(&self.concurrency_semaphore).await?;
+        let llm_permit =
+            acquire_llm_semaphore_permit(&self.concurrency_semaphore, params.model, true).await?;
 
         let url = format!("{}/v1/messages", self.base_url);
         let (system, messages) = Self::convert_messages(params.messages);
@@ -1786,7 +1807,7 @@ mod semaphore_tests {
             let peak = peak.clone();
             let active = active.clone();
             handles.push(tokio::spawn(async move {
-                let _p = acquire_llm_semaphore_permit(&sem)
+                let _p = acquire_llm_semaphore_permit(&sem, "test", false)
                     .await
                     .expect("semaphore acquire");
                 let v = active.fetch_add(1, Ordering::SeqCst) + 1;

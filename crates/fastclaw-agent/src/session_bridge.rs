@@ -126,7 +126,12 @@ impl RuntimeTurnExecutor {
         params: &TurnParams,
         tx: &mpsc::Sender<AgentEvent>,
     ) {
+        let compact_t0 = std::time::Instant::now();
         let Some(ref store) = self.session_store else {
+            tracing::info!(
+                elapsed_ms = compact_t0.elapsed().as_millis() as u64,
+                "perf: auto_compact_check"
+            );
             return;
         };
         let context_window = self
@@ -141,11 +146,21 @@ impl RuntimeTurnExecutor {
 
         let messages_arc = match store.load_chat_messages(&session_id).await {
             Ok(m) => m,
-            Err(_) => return,
+            Err(_) => {
+                tracing::info!(
+                    elapsed_ms = compact_t0.elapsed().as_millis() as u64,
+                    "perf: auto_compact_check"
+                );
+                return;
+            }
         };
 
         let estimated = fastclaw_context::compressor::estimate_messages_tokens(&messages_arc);
         if estimated <= threshold {
+            tracing::info!(
+                elapsed_ms = compact_t0.elapsed().as_millis() as u64,
+                "perf: auto_compact_check"
+            );
             return;
         }
 
@@ -188,6 +203,11 @@ impl RuntimeTurnExecutor {
                 })
                 .await;
         }
+
+        tracing::info!(
+            elapsed_ms = compact_t0.elapsed().as_millis() as u64,
+            "perf: auto_compact_check"
+        );
     }
 }
 
@@ -445,6 +465,7 @@ impl TurnExecutor for RuntimeTurnExecutor {
         tx: mpsc::Sender<AgentEvent>,
         cancel: CancellationToken,
     ) -> Result<TurnResult, TurnError> {
+        let execute_t0 = std::time::Instant::now();
         let is_compact = params
             .extra
             .get("_compact")
@@ -452,9 +473,12 @@ impl TurnExecutor for RuntimeTurnExecutor {
             .unwrap_or(false);
 
         if is_compact {
-            return self
-                .execute_compact(&params, &tx)
-                .await;
+            let result = self.execute_compact(&params, &tx).await;
+            tracing::info!(
+                elapsed_ms = execute_t0.elapsed().as_millis() as u64,
+                "perf: bridge_execute_total"
+            );
+            return result;
         }
 
         // Auto-compact: check message token count before starting the turn.
@@ -654,6 +678,10 @@ impl TurnExecutor for RuntimeTurnExecutor {
             map.remove(&stream_context_key);
         }
 
+        tracing::info!(
+            elapsed_ms = execute_t0.elapsed().as_millis() as u64,
+            "perf: bridge_execute_total"
+        );
         match result {
             Ok(summary) => Ok(TurnResult {
                 tool_calls_made: summary.tool_calls_made,

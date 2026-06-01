@@ -1151,6 +1151,7 @@ impl AgentRuntime {
             }
 
             // ── Unified context compaction (via QueryDeps) ─────────────────
+            let compact_t0 = std::time::Instant::now();
             let compact_result = deps
                 .pre_query_compact(
                     &mut messages,
@@ -1165,6 +1166,11 @@ impl AgentRuntime {
                     state.session_memory.as_ref(),
                 )
                 .await;
+            tracing::info!(
+                elapsed_ms = compact_t0.elapsed().as_millis() as u64,
+                iteration = state.iteration,
+                "perf: pre_query_compact"
+            );
             state.last_estimated_tokens = compact_result.estimated_tokens;
             let estimated_tokens = compact_result.estimated_tokens;
 
@@ -1358,6 +1364,7 @@ impl AgentRuntime {
             };
             let mut last_submitted_tool_idx: Option<usize> = None;
 
+            let stream_consume_t0 = std::time::Instant::now();
             'stream_try: loop {
                 let params = CompletionParams {
                     model: &model,
@@ -1665,6 +1672,7 @@ impl AgentRuntime {
             }
 
             tracing::info!(
+                elapsed_ms = stream_consume_t0.elapsed().as_millis() as u64,
                 agent_id = %config.agent_id,
                 iteration = state.iteration,
                 accumulated_content_len = accumulated_content.len(),
@@ -2080,6 +2088,8 @@ impl AgentRuntime {
             // When a streaming executor exists, drain it for tools already submitted
             // and route remaining guarded tools through dispatch_one.
             // When no streaming executor, dispatch_batch handles everything.
+            let tool_dispatch_t0 = std::time::Instant::now();
+            let tool_count = assembled_calls.len();
             let stream_results = if let Some(mut executor) = streaming_executor.take() {
                 // Streaming path: some tools were already submitted during streaming.
                 let submit_start = last_submitted_tool_idx.map(|i| i + 1).unwrap_or(0);
@@ -2140,6 +2150,11 @@ impl AgentRuntime {
                 };
                 dispatcher.dispatch_batch(&assembled_calls, &mut dispatch_ctx).await
             };
+            tracing::info!(
+                elapsed_ms = tool_dispatch_t0.elapsed().as_millis() as u64,
+                tool_count,
+                "perf: tool_dispatch"
+            );
 
             let mut force_stop_loop = false;
             for (tool_name, call_id, arguments, mut result) in stream_results {
