@@ -1,3 +1,11 @@
+# =============================================================================
+# WIP: This K8s deployment requires the xiaolin server binary which is
+# not yet implemented. Port (18789), volume mounts, and config paths
+# need to be verified when the server mode is available.
+#
+# Current recommended usage: cargo tauri dev (desktop application)
+# =============================================================================
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,25 +29,28 @@ spec:
             - containerPort: 18789
               name: http
           env:
-            - name: XIAOLIN_PORT
-              value: "18789"
+            - name: RUST_LOG
+              value: "info"
+            - name: XIAOLIN_STATE_DIR
+              value: "/app"
           volumeMounts:
             - name: data
-              mountPath: /data
+              mountPath: /app/data
             - name: config
-              mountPath: /etc/xiaolin
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: http
-            initialDelaySeconds: 3
-            periodSeconds: 5
+              mountPath: /app/config
+          # TODO: Uncomment when server binary is available
+          # livenessProbe:
+          #   httpGet:
+          #     path: /health
+          #     port: http
+          #   initialDelaySeconds: 5
+          #   periodSeconds: 10
+          # readinessProbe:
+          #   httpGet:
+          #     path: /ready
+          #     port: http
+          #   initialDelaySeconds: 3
+          #   periodSeconds: 5
           resources:
             requests:
               memory: "256Mi"

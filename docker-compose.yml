@@ -1,3 +1,10 @@
+# =============================================================================
+# WIP: This docker-compose file requires the xiaolin CLI binary which is
+# not yet implemented. See Dockerfile for details.
+#
+# Current recommended usage: cargo tauri dev (desktop application)
+# =============================================================================
+
 version: "3.9"
 
 services:
@@ -11,20 +18,21 @@ services:
       - ./config:/app/config:ro
     environment:
       - RUST_LOG=info
+      - XIAOLIN_STATE_DIR=/app
       # LLM API keys — set via .env file or environment
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       # Gateway auth
       - XIAOLIN_API_KEYS=${XIAOLIN_API_KEYS:-}
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "xiaolin", "health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+    # TODO: Uncomment when CLI binary is available
+    # healthcheck:
+    #   test: ["CMD", "xiaolin", "health"]
+    #   interval: 30s
+    #   timeout: 5s
+    #   retries: 3
 
 volumes:
   xiaolin-data:
