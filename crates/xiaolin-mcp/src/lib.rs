@@ -534,9 +534,11 @@ fn extract_sse_data_lines(block: &str) -> Vec<String> {
 
 enum McpTransport {
     Stdio {
-        process: Box<tokio::process::Child>,
-        stdin: tokio::process::ChildStdin,
-        reader: tokio::io::BufReader<tokio::process::ChildStdout>,
+        process: Arc<std::sync::Mutex<Box<tokio::process::Child>>>,
+        stdin: Arc<tokio::sync::Mutex<tokio::process::ChildStdin>>,
+        pending:
+            Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<JsonRpcResponse>>>>,
+        reader_task: tokio::task::JoinHandle<()>,
     },
     Sse {
         client: reqwest::Client,
@@ -625,13 +627,23 @@ impl McpClient {
             .ok_or_else(|| anyhow::anyhow!("failed to open stdout"))?;
         let reader = tokio::io::BufReader::new(stdout);
 
+        let pending: Arc<
+            tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<JsonRpcResponse>>>,
+        > = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+
+        let pending_reader = pending.clone();
+        let reader_task = tokio::spawn(async move {
+            Self::stdio_reader_loop(reader, pending_reader).await;
+        });
+
         let mut client = Self {
             server_name: command.to_string(),
             tools: Vec::new(),
             transport: McpTransport::Stdio {
-                process: Box::new(process),
-                stdin,
-                reader,
+                process: Arc::new(std::sync::Mutex::new(Box::new(process))),
+                stdin: Arc::new(tokio::sync::Mutex::new(stdin)),
+                pending,
+                reader_task,
             },
             next_id: std::sync::atomic::AtomicU64::new(1),
         };
@@ -684,6 +696,48 @@ impl McpClient {
         Ok(mcp)
     }
 
+    async fn stdio_reader_loop(
+        mut reader: tokio::io::BufReader<tokio::process::ChildStdout>,
+        pending: Arc<
+            tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<JsonRpcResponse>>>,
+        >,
+    ) {
+        use tokio::io::AsyncBufReadExt;
+
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) => break,
+                Ok(_) => {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    if let Ok(resp) = serde_json::from_str::<JsonRpcResponse>(trimmed) {
+                        let key = json_rpc_id_key(&resp.id);
+                        if let Some(tx) = pending.lock().await.remove(&key) {
+                            let _ = tx.send(resp);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("MCP stdio reader error: {e}");
+                    break;
+                }
+            }
+        }
+
+        let mut guard = pending.lock().await;
+        for (_, tx) in guard.drain() {
+            let _ = tx.send(JsonRpcResponse::error(
+                serde_json::Value::Null,
+                -32603,
+                "MCP subprocess exited",
+            ));
+        }
+    }
+
     async fn sse_reader_loop(
         client: &reqwest::Client,
         sse_url: &str,
@@ -726,12 +780,12 @@ impl McpClient {
     }
 
     async fn send_request(
-        &mut self,
+        &self,
         method: &str,
         params: Option<serde_json::Value>,
     ) -> anyhow::Result<JsonRpcResponse> {
         use std::sync::atomic::Ordering;
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        use tokio::io::AsyncWriteExt;
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let id_val = serde_json::Value::Number(id.into());
@@ -742,42 +796,25 @@ impl McpClient {
             params,
         };
 
-        match &mut self.transport {
-            McpTransport::Stdio {
-                stdin,
-                reader,
-                process,
-                ..
-            } => {
-                let json = serde_json::to_string(&request)?;
-                stdin.write_all(json.as_bytes()).await?;
-                stdin.write_all(b"\n").await?;
-                stdin.flush().await?;
+        let id_key = json_rpc_id_key(&id_val);
+        let (tx, rx) = tokio::sync::oneshot::channel();
 
-                let mut line = String::new();
-                let n = reader.read_line(&mut line).await?;
-                if n == 0 {
-                    let stderr_msg = if let Some(mut stderr) = process.stderr.take() {
-                        use tokio::io::AsyncReadExt;
-                        let mut buf = vec![0u8; 4096];
-                        let bytes_read = stderr.read(&mut buf).await.unwrap_or(0);
-                        String::from_utf8_lossy(&buf[..bytes_read]).to_string()
-                    } else {
-                        String::new()
-                    };
-                    anyhow::bail!(
-                        "MCP subprocess produced no output for method '{}' (process may have crashed). stderr: {}",
-                        method,
-                        if stderr_msg.is_empty() { "(empty)" } else { stderr_msg.trim() }
-                    );
+        match &self.transport {
+            McpTransport::Stdio { stdin, pending, .. } => {
+                {
+                    let mut g = pending.lock().await;
+                    g.insert(id_key.clone(), tx);
                 }
-                serde_json::from_str(&line).map_err(|e| {
-                    anyhow::anyhow!(
-                        "MCP server response is not valid JSON for method '{}': {e}. Raw line: {:?}",
-                        method,
-                        line.chars().take(200).collect::<String>()
-                    )
-                })
+
+                let json = serde_json::to_string(&request)?;
+                {
+                    let mut stdin_guard = stdin.lock().await;
+                    stdin_guard.write_all(json.as_bytes()).await?;
+                    stdin_guard.write_all(b"\n").await?;
+                    stdin_guard.flush().await?;
+                }
+
+                Self::await_pending_response(pending, &id_key, rx, "stdio").await
             }
             McpTransport::Sse {
                 client,
@@ -785,8 +822,6 @@ impl McpClient {
                 pending,
                 ..
             } => {
-                let id_key = json_rpc_id_key(&id_val);
-                let (tx, rx) = tokio::sync::oneshot::channel();
                 {
                     let mut g = pending.lock().await;
                     g.insert(id_key.clone(), tx);
@@ -807,17 +842,28 @@ impl McpClient {
                     anyhow::bail!("MCP POST {status}: {body}");
                 }
 
-                match tokio::time::timeout(Duration::from_secs(60), rx).await {
-                    Ok(Ok(resp)) => Ok(resp),
-                    Ok(Err(_)) => {
-                        let _ = pending.lock().await.remove(&id_key);
-                        anyhow::bail!("MCP SSE reply channel closed")
-                    }
-                    Err(_) => {
-                        let _ = pending.lock().await.remove(&id_key);
-                        anyhow::bail!("MCP SSE response timed out")
-                    }
-                }
+                Self::await_pending_response(pending, &id_key, rx, "SSE").await
+            }
+        }
+    }
+
+    async fn await_pending_response(
+        pending: &Arc<
+            tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<JsonRpcResponse>>>,
+        >,
+        id_key: &str,
+        rx: tokio::sync::oneshot::Receiver<JsonRpcResponse>,
+        transport_label: &str,
+    ) -> anyhow::Result<JsonRpcResponse> {
+        match tokio::time::timeout(Duration::from_secs(30), rx).await {
+            Ok(Ok(resp)) => Ok(resp),
+            Ok(Err(_)) => {
+                let _ = pending.lock().await.remove(id_key);
+                anyhow::bail!("MCP {transport_label} reply channel closed")
+            }
+            Err(_) => {
+                let _ = pending.lock().await.remove(id_key);
+                anyhow::bail!("MCP {transport_label} response timed out")
             }
         }
     }
@@ -848,13 +894,14 @@ impl McpClient {
             method: "notifications/initialized".into(),
             params: None,
         };
-        match &mut self.transport {
+        match &self.transport {
             McpTransport::Stdio { stdin, .. } => {
                 use tokio::io::AsyncWriteExt;
                 let json = serde_json::to_string(&notification)?;
-                stdin.write_all(json.as_bytes()).await?;
-                stdin.write_all(b"\n").await?;
-                stdin.flush().await?;
+                let mut stdin_guard = stdin.lock().await;
+                stdin_guard.write_all(json.as_bytes()).await?;
+                stdin_guard.write_all(b"\n").await?;
+                stdin_guard.flush().await?;
             }
             McpTransport::Sse {
                 client, post_url, ..
@@ -889,7 +936,7 @@ impl McpClient {
 
     /// Call a tool on the remote MCP server.
     pub async fn call_tool(
-        &mut self,
+        &self,
         name: &str,
         arguments: serde_json::Value,
     ) -> anyhow::Result<CallToolResult> {
@@ -918,8 +965,15 @@ impl McpClient {
 impl Drop for McpClient {
     fn drop(&mut self) {
         match &mut self.transport {
-            McpTransport::Stdio { process, .. } => {
-                let _ = process.start_kill();
+            McpTransport::Stdio {
+                process,
+                reader_task,
+                ..
+            } => {
+                reader_task.abort();
+                if let Ok(mut proc) = process.lock() {
+                    let _ = proc.start_kill();
+                }
             }
             McpTransport::Sse { reader_task, .. } => {
                 reader_task.abort();
@@ -969,10 +1023,8 @@ pub fn create_xiaolin_mcp_server(
 
 // --- MCP Tool Bridge: expose remote MCP tools as XiaoLin Tools ---
 
-use tokio::sync::Mutex;
-
-/// Wraps an McpClient behind a Mutex so it can be shared across tool instances.
-pub type SharedMcpClient = Arc<Mutex<McpClient>>;
+/// Shared handle to an MCP client; safe for concurrent tool calls.
+pub type SharedMcpClient = Arc<McpClient>;
 
 /// A XiaoLin `Tool` that delegates execution to a remote MCP server via `McpClient`.
 pub struct McpToolBridge {
@@ -1047,10 +1099,7 @@ impl xiaolin_core::tool::Tool for McpToolBridge {
             .strip_prefix(&self.server_prefix)
             .unwrap_or(&self.tool_name);
 
-        let call_result = {
-            let mut client = self.client.lock().await;
-            client.call_tool(original_name, args).await
-        };
+        let call_result = self.client.call_tool(original_name, args).await;
 
         match call_result {
             Ok(result) => {
@@ -1090,7 +1139,7 @@ pub async fn register_mcp_tools<S: std::hash::BuildHasher>(
 ) -> anyhow::Result<SharedMcpClient> {
     let client = McpClient::connect_stdio(command, args, extra_env).await?;
     let tools = client.tools().to_vec();
-    let shared = Arc::new(Mutex::new(client));
+    let shared = Arc::new(client);
 
     let mut registered = 0usize;
     let mut seen = std::collections::HashSet::new();
@@ -1124,7 +1173,7 @@ pub async fn register_mcp_tools_sse(
 ) -> anyhow::Result<SharedMcpClient> {
     let client = McpClient::connect_sse(url).await?;
     let tools = client.tools().to_vec();
-    let shared = Arc::new(Mutex::new(client));
+    let shared = Arc::new(client);
 
     let mut registered = 0usize;
     let mut seen = std::collections::HashSet::new();

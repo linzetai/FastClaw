@@ -915,10 +915,7 @@ impl AppState {
                         "MCP client connected"
                     );
                     let now = chrono::Utc::now().to_rfc3339();
-                    let tool_count = {
-                        let client = handle.lock().await;
-                        client.tools().len()
-                    };
+                    let tool_count = handle.tools().len();
                     status_map.insert(
                         id.clone(),
                         McpServerStatus {
@@ -1809,6 +1806,7 @@ impl AppState {
                 chat_locks: Arc::new(dashmap::DashMap::new()),
                 chat_cancels: Arc::new(dashmap::DashMap::new()),
                 chat_model_overrides: Arc::new(dashmap::DashMap::new()),
+                wechat_login_sessions: Arc::new(dashmap::DashMap::new()),
             },
             obs: ObserveState {
                 metrics_collector: Arc::new(xiaolin_observe::MetricsCollector::new()),

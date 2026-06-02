@@ -281,8 +281,7 @@ pub async fn handle_mcp_detail(
     let tools = {
         let handles = state.ext.mcp_handles.lock().await;
         if let Some(client) = handles.get(server_id) {
-            let client_guard = client.lock().await;
-            client_guard
+            client
                 .tools()
                 .iter()
                 .map(|t| {
