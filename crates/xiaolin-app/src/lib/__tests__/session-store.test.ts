@@ -1,9 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { create } from "zustand";
-import { buildSessionSlice } from "../stores/session-store";
-import { buildAgentSlice } from "../stores/agent-store";
-import { buildUISlice } from "../stores/ui-store";
-import type { AgentState } from "../stores/types";
+import { useChatMetaStore } from "../stores/chat-meta-store";
+import { useStreamStore } from "../stores/stream-store";
+import { idCounter } from "../stores/chat-helpers";
 
 vi.mock("../api", () => ({
   deleteSession: vi.fn(() => Promise.resolve()),
@@ -15,176 +13,123 @@ vi.mock("../api", () => ({
 
 vi.mock("../stores/persistence", () => ({
   _persisted: null,
-  saveUIState: vi.fn(),
+  saveUIStateFromMeta: vi.fn(),
 }));
 
-function createStore() {
-  return create<AgentState>((set, get) => ({
-    ...buildSessionSlice({ set, get }),
-    ...buildAgentSlice({ set, get }),
-    ...buildUISlice(set),
-  }));
+function resetStores() {
+  idCounter.nextId = 1;
+  const initChat = { id: `new-${Date.now()}-reset`, localKey: `new-${Date.now()}-reset`, title: "新对话", workDir: null, source: "client", createdAt: new Date(), messageCount: 0, open: true, executionMode: "agent" as const };
+  useChatMetaStore.setState({
+    chats: { [initChat.id]: initChat },
+    chatOrder: [initChat.id],
+    activeChatId: initChat.id,
+    agents: [{ id: "main", name: "Main Agent", initial: "M", color: "var(--tint)", tagline: "通用智能助手", online: true, model: "" }],
+    activeAgentId: "main",
+    unread: 0,
+    lastMsg: null,
+    lastTime: null,
+  });
+  useStreamStore.setState({
+    streams: { [initChat.id]: [] },
+    usage: {},
+    lastSegments: {},
+    subAgentRuns: {},
+  });
 }
 
-describe("session store integration", () => {
-  let store: ReturnType<typeof createStore>;
-
+describe("store integration (new multi-store)", () => {
   beforeEach(() => {
-    store = createStore();
+    resetStores();
   });
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Multi-session switching (AC3: 切换会话后消息列表正确)
-  // ═══════════════════════════════════════════════════════════════════
 
   describe("multi-session switching", () => {
     it("creates new chats and switches between them with correct message lists", () => {
-      const agentId = "main";
+      const firstChatId = useChatMetaStore.getState().activeChatId;
 
-      // Initial state: one chat
-      const initialAc = store.getState().agentChats[agentId];
-      expect(initialAc.chatList).toHaveLength(1);
-      const firstChatId = initialAc.activeChatId;
-
-      // Add message to first chat
-      store.getState().addMessage(agentId, {
-        role: "user",
-        content: "Hello in chat 1",
-        timestamp: new Date(),
+      useStreamStore.getState().addMessage(firstChatId, {
+        role: "user", content: "Hello in chat 1", timestamp: new Date(),
       });
+      useChatMetaStore.getState().incrementMessageCount(firstChatId, "Hello in chat 1");
 
-      // Create second chat
-      store.getState().newChat(agentId);
-      const afterNew = store.getState().agentChats[agentId];
-      expect(afterNew.chatList).toHaveLength(2);
-      const secondChatId = afterNew.activeChatId;
+      useChatMetaStore.getState().newChat();
+      const secondChatId = useChatMetaStore.getState().activeChatId;
       expect(secondChatId).not.toBe(firstChatId);
 
-      // Add message to second chat
-      store.getState().addMessage(agentId, {
-        role: "user",
-        content: "Hello in chat 2",
-        timestamp: new Date(),
+      useStreamStore.getState().addMessage(secondChatId, {
+        role: "user", content: "Hello in chat 2", timestamp: new Date(),
       });
+      useChatMetaStore.getState().incrementMessageCount(secondChatId, "Hello in chat 2");
 
-      // Verify second chat has its own message
-      const secondChat = store.getState().agentChats[agentId].chatList.find(
-        (c) => c.id === secondChatId,
-      )!;
-      expect(secondChat.stream).toHaveLength(1);
-      expect(secondChat.stream[0].data.content).toBe("Hello in chat 2");
+      const secondStream = useStreamStore.getState().streams[secondChatId];
+      expect(secondStream).toHaveLength(1);
+      expect(secondStream[0].data.content).toBe("Hello in chat 2");
 
-      // Switch back to first chat
-      store.getState().setActiveChat(agentId, firstChatId);
-      expect(store.getState().agentChats[agentId].activeChatId).toBe(firstChatId);
+      useChatMetaStore.getState().setActiveChat(firstChatId);
+      expect(useChatMetaStore.getState().activeChatId).toBe(firstChatId);
 
-      // Verify first chat still has its original message
-      const firstChat = store.getState().agentChats[agentId].chatList.find(
-        (c) => c.id === firstChatId,
-      )!;
-      expect(firstChat.stream).toHaveLength(1);
-      expect(firstChat.stream[0].data.content).toBe("Hello in chat 1");
+      const firstStream = useStreamStore.getState().streams[firstChatId];
+      expect(firstStream).toHaveLength(1);
+      expect(firstStream[0].data.content).toBe("Hello in chat 1");
     });
 
     it("maintains independent message history per chat", () => {
-      const agentId = "main";
       const chatIds: string[] = [];
 
-      // Create 5 chats, each with different messages
       for (let i = 0; i < 5; i++) {
-        if (i > 0) store.getState().newChat(agentId);
-        const chatId = store.getState().agentChats[agentId].activeChatId;
+        if (i > 0) useChatMetaStore.getState().newChat();
+        const chatId = useChatMetaStore.getState().activeChatId;
         chatIds.push(chatId);
         for (let j = 0; j <= i; j++) {
-          store.getState().addMessage(agentId, {
-            role: "user",
-            content: `Chat ${i} message ${j}`,
-            timestamp: new Date(),
+          useStreamStore.getState().addMessage(chatId, {
+            role: "user", content: `Chat ${i} message ${j}`, timestamp: new Date(),
           });
         }
       }
 
-      // Verify each chat has the correct number of messages
       for (let i = 0; i < 5; i++) {
-        const chat = store.getState().agentChats[agentId].chatList.find(
-          (c) => c.id === chatIds[i],
-        )!;
-        expect(chat.stream).toHaveLength(i + 1);
-        expect(chat.stream[0].data.content).toBe(`Chat ${i} message 0`);
+        const stream = useStreamStore.getState().streams[chatIds[i]];
+        expect(stream).toHaveLength(i + 1);
+        expect(stream[0].data.content).toBe(`Chat ${i} message 0`);
       }
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Message accumulation
-  // ═══════════════════════════════════════════════════════════════════
-
   describe("message accumulation", () => {
     it("accumulates user and assistant messages in order", () => {
-      const agentId = "main";
-      const chatId = store.getState().agentChats[agentId].activeChatId;
+      const chatId = useChatMetaStore.getState().activeChatId;
 
-      store.getState().addMessage(agentId, {
-        role: "user",
-        content: "What is Rust?",
-        timestamp: new Date(),
-      });
+      useStreamStore.getState().addMessage(chatId, { role: "user", content: "What is Rust?", timestamp: new Date() });
+      useStreamStore.getState().addMessage(chatId, { role: "assistant", content: "Rust is a systems programming language.", timestamp: new Date() });
+      useStreamStore.getState().addMessage(chatId, { role: "user", content: "Tell me more", timestamp: new Date() });
 
-      store.getState().addMessage(agentId, {
-        role: "assistant",
-        content: "Rust is a systems programming language.",
-        timestamp: new Date(),
-      });
-
-      store.getState().addMessage(agentId, {
-        role: "user",
-        content: "Tell me more",
-        timestamp: new Date(),
-      });
-
-      const chat = store.getState().agentChats[agentId].chatList.find(
-        (c) => c.id === chatId,
-      )!;
-      expect(chat.stream).toHaveLength(3);
-      expect(chat.stream[0].type === "message" && chat.stream[0].data.role).toBe("user");
-      expect(chat.stream[1].type === "message" && chat.stream[1].data.role).toBe("assistant");
-      expect(chat.stream[2].type === "message" && chat.stream[2].data.role).toBe("user");
-      expect(chat.messageCount).toBe(3);
+      const stream = useStreamStore.getState().streams[chatId];
+      expect(stream).toHaveLength(3);
+      expect(stream[0].type === "message" && stream[0].data.role).toBe("user");
+      expect(stream[1].type === "message" && stream[1].data.role).toBe("assistant");
+      expect(stream[2].type === "message" && stream[2].data.role).toBe("user");
     });
 
-    it("auto-generates title from first user message", () => {
-      const agentId = "main";
-      const chatId = store.getState().agentChats[agentId].activeChatId;
+    it("auto-generates title from first user message via incrementMessageCount", () => {
+      const chatId = useChatMetaStore.getState().activeChatId;
 
-      store.getState().addMessage(agentId, {
-        role: "user",
-        content: "How to implement a web server in Rust?",
-        timestamp: new Date(),
-      });
+      useChatMetaStore.getState().incrementMessageCount(chatId, "How to implement a w");
 
-      const chat = store.getState().agentChats[agentId].chatList.find(
-        (c) => c.id === chatId,
-      )!;
+      const chat = useChatMetaStore.getState().chats[chatId];
       expect(chat.title).toBe("How to implement a w");
     });
 
     it("preserves messages with tool calls", () => {
-      const agentId = "main";
-      const chatId = store.getState().agentChats[agentId].activeChatId;
+      const chatId = useChatMetaStore.getState().activeChatId;
 
-      store.getState().addMessage(agentId, {
-        role: "assistant",
-        content: "Let me read that file.",
-        timestamp: new Date(),
+      useStreamStore.getState().addMessage(chatId, {
+        role: "assistant", content: "Let me read that file.", timestamp: new Date(),
         toolCalls: [
           { id: "tc-1", name: "file_read", status: "success", args: '{"path":"src/main.rs"}', result: "fn main() {}" },
         ],
       });
 
-      const chat = store.getState().agentChats[agentId].chatList.find(
-        (c) => c.id === chatId,
-      )!;
-      const item = chat.stream[0];
+      const stream = useStreamStore.getState().streams[chatId];
+      const item = stream[0];
       if (item.type === "message") {
         expect(item.data.toolCalls).toHaveLength(1);
         expect(item.data.toolCalls![0].name).toBe("file_read");
@@ -192,49 +137,35 @@ describe("session store integration", () => {
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Rapid message sending (AC4: 连续快速发送 10 条消息不崩溃)
-  // ═══════════════════════════════════════════════════════════════════
-
   describe("rapid message sending", () => {
     it("handles 10 rapid messages without errors", () => {
-      const agentId = "main";
-      const chatId = store.getState().agentChats[agentId].activeChatId;
+      const chatId = useChatMetaStore.getState().activeChatId;
 
       for (let i = 0; i < 10; i++) {
-        store.getState().addMessage(agentId, {
-          role: "user",
-          content: `Rapid message ${i}`,
-          timestamp: new Date(),
+        useStreamStore.getState().addMessage(chatId, {
+          role: "user", content: `Rapid message ${i}`, timestamp: new Date(),
         });
       }
 
-      const chat = store.getState().agentChats[agentId].chatList.find(
-        (c) => c.id === chatId,
-      )!;
-      expect(chat.stream).toHaveLength(10);
-      expect(chat.messageCount).toBe(10);
-      expect(chat.stream[9].data.content).toBe("Rapid message 9");
+      const stream = useStreamStore.getState().streams[chatId];
+      expect(stream).toHaveLength(10);
+      expect(stream[9].data.content).toBe("Rapid message 9");
     });
 
     it("handles 50 interleaved user/assistant messages without state corruption", () => {
-      const agentId = "main";
-      const chatId = store.getState().agentChats[agentId].activeChatId;
+      const chatId = useChatMetaStore.getState().activeChatId;
 
       for (let i = 0; i < 50; i++) {
-        store.getState().addMessage(agentId, {
+        useStreamStore.getState().addMessage(chatId, {
           role: i % 2 === 0 ? "user" : "assistant",
-          content: `Message ${i}`,
-          timestamp: new Date(),
+          content: `Message ${i}`, timestamp: new Date(),
         });
       }
 
-      const chat = store.getState().agentChats[agentId].chatList.find(
-        (c) => c.id === chatId,
-      )!;
-      expect(chat.stream).toHaveLength(50);
+      const stream = useStreamStore.getState().streams[chatId];
+      expect(stream).toHaveLength(50);
       for (let i = 0; i < 50; i++) {
-        const si = chat.stream[i];
+        const si = stream[i];
         if (si.type === "message") {
           expect(si.data.role).toBe(i % 2 === 0 ? "user" : "assistant");
         }
@@ -242,70 +173,55 @@ describe("session store integration", () => {
     });
 
     it("handles rapid chat creation and message sending across chats", () => {
-      const agentId = "main";
-
       for (let i = 0; i < 10; i++) {
-        if (i > 0) store.getState().newChat(agentId);
-        store.getState().addMessage(agentId, {
-          role: "user",
-          content: `Chat ${i} msg`,
-          timestamp: new Date(),
+        if (i > 0) useChatMetaStore.getState().newChat();
+        const chatId = useChatMetaStore.getState().activeChatId;
+        useStreamStore.getState().addMessage(chatId, {
+          role: "user", content: `Chat ${i} msg`, timestamp: new Date(),
         });
       }
 
-      const ac = store.getState().agentChats[agentId];
-      // initial chat gets first msg (i=0), then 9 new chats (i=1..9)
-      expect(ac.chatList).toHaveLength(10);
-      // Each chat has exactly 1 message
-      for (const chat of ac.chatList) {
-        expect(chat.stream).toHaveLength(1);
+      const { chatOrder } = useChatMetaStore.getState();
+      expect(chatOrder).toHaveLength(10);
+      for (const id of chatOrder) {
+        const stream = useStreamStore.getState().streams[id];
+        expect(stream).toHaveLength(1);
       }
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Chat close and reopen
-  // ═══════════════════════════════════════════════════════════════════
-
   describe("chat close and reopen", () => {
     it("closing active chat selects adjacent tab", () => {
-      const agentId = "main";
-      store.getState().newChat(agentId);
-      store.getState().newChat(agentId);
-      const ac = store.getState().agentChats[agentId];
-      expect(ac.chatList.filter((c) => c.open)).toHaveLength(3);
+      useChatMetaStore.getState().newChat();
+      useChatMetaStore.getState().newChat();
+      const { chatOrder, chats } = useChatMetaStore.getState();
+      const openChats = chatOrder.filter((id) => chats[id]?.open);
+      expect(openChats).toHaveLength(3);
 
-      const middleId = ac.chatList[1].id;
-      store.getState().setActiveChat(agentId, middleId);
-      store.getState().closeChat(agentId, middleId);
+      const middleId = openChats[1];
+      useChatMetaStore.getState().setActiveChat(middleId);
+      useChatMetaStore.getState().closeChat(middleId);
 
-      const after = store.getState().agentChats[agentId];
-      expect(after.activeChatId).not.toBe(middleId);
+      expect(useChatMetaStore.getState().activeChatId).not.toBe(middleId);
     });
 
     it("closing last chat creates a fresh one", () => {
-      const agentId = "main";
-      const chatId = store.getState().agentChats[agentId].activeChatId;
-      store.getState().closeChat(agentId, chatId);
+      const chatId = useChatMetaStore.getState().activeChatId;
+      useChatMetaStore.getState().closeChat(chatId);
 
-      const after = store.getState().agentChats[agentId];
-      expect(after.chatList.filter((c) => c.open)).toHaveLength(1);
-      expect(after.activeChatId).not.toBe(chatId);
+      const { chatOrder, chats, activeChatId } = useChatMetaStore.getState();
+      const openChats = chatOrder.filter((id) => chats[id]?.open);
+      expect(openChats).toHaveLength(1);
+      expect(activeChatId).not.toBe(chatId);
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Backend session sync
-  // ═══════════════════════════════════════════════════════════════════
-
   describe("backend session sync", () => {
     it("merges backend sessions with local chats", () => {
-      const agentId = "main";
-
-      store.getState().syncSessionsForAgent(agentId, [
+      useChatMetaStore.getState().syncSessionsForAgent([
         {
           id: "backend-1",
-          agentId,
+          agentId: "main",
           title: "Backend Chat",
           messageCount: 5,
           createdAt: "2024-01-01T00:00:00Z",
@@ -313,112 +229,85 @@ describe("session store integration", () => {
         },
       ]);
 
-      const ac = store.getState().agentChats[agentId];
-      const backendChat = ac.chatList.find((c) => c.id === "backend-1");
+      const { chats } = useChatMetaStore.getState();
+      const backendChat = chats["backend-1"];
       expect(backendChat).toBeDefined();
       expect(backendChat!.title).toBe("Backend Chat");
       expect(backendChat!.messageCount).toBe(5);
     });
 
     it("updates chat ID when backend assigns one", () => {
-      const agentId = "main";
-      const localId = store.getState().agentChats[agentId].activeChatId;
+      const localId = useChatMetaStore.getState().activeChatId;
 
-      store.getState().addMessage(agentId, {
-        role: "user",
-        content: "Hello",
-        timestamp: new Date(),
+      useStreamStore.getState().addMessage(localId, {
+        role: "user", content: "Hello", timestamp: new Date(),
       });
+      useChatMetaStore.getState().incrementMessageCount(localId, "Hello");
 
-      store.getState().updateChatBackendId(agentId, localId, "server-session-123");
+      useChatMetaStore.getState().updateChatBackendId(localId, "server-session-123");
 
-      const ac = store.getState().agentChats[agentId];
-      expect(ac.activeChatId).toBe("server-session-123");
-      const chat = ac.chatList.find((c) => c.id === "server-session-123");
-      expect(chat).toBeDefined();
-      expect(chat!.stream).toHaveLength(1);
+      const { activeChatId, chats } = useChatMetaStore.getState();
+      expect(activeChatId).toBe("server-session-123");
+      expect(chats["server-session-123"]).toBeDefined();
+
+      const stream = useStreamStore.getState().streams["server-session-123"];
+      expect(stream).toHaveLength(1);
     });
   });
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Usage tracking
-  // ═══════════════════════════════════════════════════════════════════
 
   describe("usage tracking", () => {
     it("accumulates token usage across turns", () => {
-      const agentId = "main";
-      const chatId = store.getState().agentChats[agentId].activeChatId;
+      const chatId = useChatMetaStore.getState().activeChatId;
 
-      store.getState().addMessage(agentId, {
-        role: "assistant",
-        content: "Turn 1",
-        timestamp: new Date(),
+      useStreamStore.getState().addMessage(chatId, {
+        role: "assistant", content: "Turn 1", timestamp: new Date(),
       });
 
-      store.getState().updateChatUsage(agentId, chatId, {
-        promptTokens: 100,
-        completionTokens: 50,
-        totalTokens: 150,
-        elapsedMs: 500,
-        contextTokens: 100,
-        contextWindow: 128000,
+      useStreamStore.getState().updateChatUsage(chatId, {
+        promptTokens: 100, completionTokens: 50, totalTokens: 150,
+        elapsedMs: 500, contextTokens: 100, contextWindow: 128000,
       });
 
-      store.getState().addMessage(agentId, {
-        role: "assistant",
-        content: "Turn 2",
-        timestamp: new Date(),
+      useStreamStore.getState().addMessage(chatId, {
+        role: "assistant", content: "Turn 2", timestamp: new Date(),
       });
 
-      store.getState().updateChatUsage(agentId, chatId, {
-        promptTokens: 200,
-        completionTokens: 80,
-        totalTokens: 280,
-        elapsedMs: 700,
-        contextTokens: 300,
-        contextWindow: 128000,
+      useStreamStore.getState().updateChatUsage(chatId, {
+        promptTokens: 200, completionTokens: 80, totalTokens: 280,
+        elapsedMs: 700, contextTokens: 300, contextWindow: 128000,
       });
 
-      const chat = store.getState().agentChats[agentId].chatList.find(
-        (c) => c.id === chatId,
-      )!;
-      expect(chat.usage!.promptTokens).toBe(300);
-      expect(chat.usage!.completionTokens).toBe(130);
-      expect(chat.usage!.elapsedMs).toBe(1200);
-      expect(chat.usage!.contextTokens).toBe(300);
+      const usage = useStreamStore.getState().usage[chatId]!;
+      expect(usage.promptTokens).toBe(300);
+      expect(usage.completionTokens).toBe(130);
+      expect(usage.elapsedMs).toBe(1200);
+      expect(usage.contextTokens).toBe(300);
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Rename and reorder
-  // ═══════════════════════════════════════════════════════════════════
-
   describe("rename and reorder", () => {
     it("renames a chat", () => {
-      const agentId = "main";
-      const chatId = store.getState().agentChats[agentId].activeChatId;
+      const chatId = useChatMetaStore.getState().activeChatId;
 
-      store.getState().renameChat(agentId, chatId, "My Custom Title");
+      useChatMetaStore.getState().renameChat(chatId, "My Custom Title");
 
-      const chat = store.getState().agentChats[agentId].chatList.find(
-        (c) => c.id === chatId,
-      )!;
+      const chat = useChatMetaStore.getState().chats[chatId];
       expect(chat.title).toBe("My Custom Title");
     });
 
     it("reorders chats", () => {
-      const agentId = "main";
-      store.getState().newChat(agentId);
-      store.getState().newChat(agentId);
+      useChatMetaStore.getState().newChat();
+      useChatMetaStore.getState().newChat();
 
-      const before = store.getState().agentChats[agentId].chatList.filter((c) => c.open);
-      const ids = before.map((c) => c.id);
+      const { chatOrder, chats } = useChatMetaStore.getState();
+      const openIds = chatOrder.filter((id) => chats[id]?.open);
 
-      store.getState().reorderChats(agentId, 0, 2);
+      useChatMetaStore.getState().reorderChats(0, 2);
 
-      const after = store.getState().agentChats[agentId].chatList.filter((c) => c.open);
-      expect(after[0].id).toBe(ids[1]);
-      expect(after[2].id).toBe(ids[0]);
+      const after = useChatMetaStore.getState();
+      const afterOpen = after.chatOrder.filter((id) => after.chats[id]?.open);
+      expect(afterOpen[0]).toBe(openIds[1]);
+      expect(afterOpen[2]).toBe(openIds[0]);
     });
   });
 });

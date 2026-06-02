@@ -1,4 +1,4 @@
-import type { Agent, AgentChats, Chat } from "./types";
+import type { Agent } from "./types";
 
 export const idCounter = { nextId: 1 };
 export const DEFAULT_AGENT_ID = "main";
@@ -9,37 +9,6 @@ export const INITIAL_AGENTS: Agent[] = [
     tagline: "通用智能助手", online: true, model: "",
   },
 ];
-
-export function createChat(workDir?: string): Chat {
-  const chatId = `new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  return {
-    id: chatId,
-    localKey: chatId,
-    title: "新对话",
-    workDir: workDir ?? null,
-    source: "client",
-    stream: [],
-    createdAt: new Date(),
-    messageCount: 0,
-    open: true,
-    subAgentRuns: {},
-    executionMode: "agent",
-  };
-}
-
-export function initAgentChats(): Record<string, AgentChats> {
-  const result: Record<string, AgentChats> = {};
-  const mainChat = createChat();
-  result[DEFAULT_AGENT_ID] = {
-    chatList: [mainChat],
-    activeChatId: mainChat.id,
-    unread: 0,
-    lastMsg: null,
-    lastTime: null,
-    messageQueue: [],
-  };
-  return result;
-}
 
 export function formatTime(d: Date): string {
   const now = new Date();

@@ -23,16 +23,3 @@ export const useUIStore = create<UIState>((set) => ({
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setActiveNav: (nav) => set({ activeNav: nav }),
 }));
-
-export function buildUISlice(set: (partial: Partial<{ detailOpen: boolean; sidebarCollapsed: boolean; activeNav: NavItem }>) => void) {
-  return {
-    detailOpen: false,
-    sidebarCollapsed: false,
-    activeNav: "chat" as NavItem,
-
-    toggleDetail: () => set({ detailOpen: !useUIStore.getState().detailOpen }),
-    closeDetail: () => set({ detailOpen: false }),
-    toggleSidebar: () => set({ sidebarCollapsed: !useUIStore.getState().sidebarCollapsed }),
-    setActiveNav: (nav: NavItem) => set({ activeNav: nav }),
-  };
-}
