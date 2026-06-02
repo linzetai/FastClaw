@@ -1,5 +1,6 @@
 import { Component, memo, useMemo, useState, useRef, useCallback, useEffect, lazy, Suspense, type ReactNode, type ErrorInfo } from "react";
 import type { ChatMessage, ChatUsage, SubAgentRunUI } from "../../lib/agent-store";
+import type { BriefMessageData } from "../../lib/stores/types";
 import { ICON, ICON_ACTIVE_STROKE, BTN_ICON } from "../../lib/ui-tokens";
 import { StepIndicator } from "./StepIndicator";
 import { SubAgentCard } from "./SubAgentCard";
@@ -10,6 +11,7 @@ import {
 } from "./StepGroup";
 import { AlertTriangle } from "lucide-react";
 import { UserInput } from "./UserInput";
+import { BriefMessageCard } from "./BriefMessageCard";
 import { ClawIcon } from "../layout/ClawIcon";
 
 const MarkdownContent = lazy(() =>
@@ -97,7 +99,7 @@ function ts(d: Date) {
     d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
 }
 
-const AiReactionBar = memo(function AiReactionBar({ content }: { content: string }) {
+const AiReactionBar = memo(function AiReactionBar({ content, sessionId, turnId }: { content: string; sessionId?: string; turnId?: string }) {
   const [copied, setCopied] = useState(false);
   const [liked, setLiked] = useState(false);
   const [disliked, setDisliked] = useState(false);
@@ -108,6 +110,24 @@ const AiReactionBar = memo(function AiReactionBar({ content }: { content: string
       setTimeout(() => setCopied(false), 1500);
     });
   }, [content]);
+
+  const handleLike = useCallback(() => {
+    const next = !liked;
+    setLiked(next);
+    if (disliked) setDisliked(false);
+    if (next && sessionId && turnId) {
+      import("../../lib/transport").then((t) => t.submitFeedback(sessionId, turnId, "positive").catch(() => {}));
+    }
+  }, [liked, disliked, sessionId, turnId]);
+
+  const handleDislike = useCallback(() => {
+    const next = !disliked;
+    setDisliked(next);
+    if (liked) setLiked(false);
+    if (next && sessionId && turnId) {
+      import("../../lib/transport").then((t) => t.submitFeedback(sessionId, turnId, "negative").catch(() => {}));
+    }
+  }, [liked, disliked, sessionId, turnId]);
 
   const btnCls = `${BTN_ICON.sm} transition-all duration-150 active:scale-90`;
   const iconProps = { ...ICON.sm, strokeWidth: 1.5 } as const;
@@ -121,7 +141,7 @@ const AiReactionBar = memo(function AiReactionBar({ content }: { content: string
         {copied ? <Check {...iconProps} strokeWidth={ICON_ACTIVE_STROKE} style={{ animation: "scale-spring var(--duration-normal) var(--ease-spring)" }} /> : <Copy {...iconProps} />}
       </button>
       <button
-        onClick={() => { setLiked(!liked); if (disliked) setDisliked(false); }}
+        onClick={handleLike}
         className={btnCls}
         style={{ color: liked ? "var(--tint)" : defaultColor }}
         title="点赞"
@@ -129,14 +149,23 @@ const AiReactionBar = memo(function AiReactionBar({ content }: { content: string
         <ThumbsUp {...iconProps} strokeWidth={liked ? ICON_ACTIVE_STROKE : iconProps.strokeWidth} />
       </button>
       <button
-        onClick={() => { setDisliked(!disliked); if (liked) setLiked(false); }}
+        onClick={handleDislike}
         className={btnCls}
         style={{ color: disliked ? "var(--red)" : defaultColor }}
         title="点踩"
       >
         <ThumbsDown {...iconProps} strokeWidth={disliked ? ICON_ACTIVE_STROKE : iconProps.strokeWidth} />
       </button>
-      <button className={btnCls} style={{ color: defaultColor }} title="重试">
+      <button
+        onClick={() => {
+          if (sessionId && turnId) {
+            import("../../lib/transport").then((t) => t.retryTurn(sessionId, turnId).catch(() => {}));
+          }
+        }}
+        className={btnCls}
+        style={{ color: defaultColor }}
+        title="重试"
+      >
         <RotateCw {...iconProps} />
       </button>
     </div>
@@ -161,7 +190,7 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
   }, [hasSegments, toolCalls, aiThreshold]);
 
   return (
-    <div className="pb-3 group/message" style={{ animation: "fade-in var(--duration-fast) var(--ease-out)" }}>
+    <div className="pb-3 group/message">
       <div className="flex items-start gap-[14px]">
         {onToggleSelect && (
           <button
@@ -241,8 +270,8 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
           </div>
         </>
       )}
-      {!groupedSegments && copyable && <AiReactionBar content={msg.content} />}
-      {groupedSegments && copyable && <AiReactionBar content={msg.content} />}
+      {!groupedSegments && copyable && <AiReactionBar content={msg.content} sessionId={msg.chatId} turnId={String(msg.id)} />}
+      {groupedSegments && copyable && <AiReactionBar content={msg.content} sessionId={msg.chatId} turnId={String(msg.id)} />}
         </div>
       </div>
     </div>
@@ -257,7 +286,6 @@ function SystemMsg({ msg }: { msg: ChatMessage }) {
       style={{
         color: isError ? "var(--red)" : "var(--fill-tertiary)",
         overflowWrap: "anywhere",
-        animation: "fade-in var(--duration-fast) var(--ease-out)",
       }}
     >
       <span
@@ -480,7 +508,7 @@ function formatTokens(n: number): string {
 
 function Typing() {
   return (
-    <div className="pb-6 flex items-center gap-1" style={{ animation: "fade-in var(--duration-fast)" }}>
+    <div className="pb-6 flex items-center gap-1">
       {[0, 1, 2].map((i) => (
         <div
           key={i}
@@ -494,20 +522,23 @@ function Typing() {
 
 type StreamableMsg = ChatMessage | { role: "streaming"; content: string; timestamp: Date };
 
+type DisplayItem =
+  | { type?: "message"; data: StreamableMsg }
+  | { type: "brief"; data: BriefMessageData };
+
 export interface MessageRendererRowProps {
-  item: { data: StreamableMsg };
+  item: DisplayItem;
   idx: number;
   paginationOffset: number;
   searchQuery: string;
   searchIdx: number;
-  searchResults: Array<{ item: { data: ChatMessage }; idx: number }>;
+  searchResults: Array<{ item: DisplayItem; idx: number }>;
   streamSegments: StreamSegment[];
   subAgentRuns: Record<string, SubAgentRunUI> | undefined;
   bottomRef: React.RefObject<HTMLDivElement | null>;
   selectMode?: boolean;
   isSelected?: boolean;
   onToggleSelect?: (fullIdx: number) => void;
-  animate?: boolean;
   lastSegments?: StreamSegment[];
 }
 
@@ -524,9 +555,12 @@ export function MessageRendererRow({
   selectMode,
   isSelected,
   onToggleSelect,
-  animate = true,
   lastSegments,
 }: MessageRendererRowProps) {
+  if (item.type === "brief") {
+    return <BriefMessageCard data={item.data as BriefMessageData} />;
+  }
+
   const m = item.data as StreamableMsg;
   const threshold = useConfigStore((s) => s.display.toolCallGroupThreshold);
   const grouped = useMemo(() => groupConsecutiveSegments(streamSegments, threshold), [streamSegments, threshold]);
@@ -664,7 +698,6 @@ export function MessageRendererRow({
           copyable
           selected={selectMode ? isSelected : undefined}
           onToggleSelect={selectMode ? () => onToggleSelect?.(fullIdx) : undefined}
-          animate={animate}
         />
       ) : cm.role === "system" ? (
         <SystemMsg msg={cm} />

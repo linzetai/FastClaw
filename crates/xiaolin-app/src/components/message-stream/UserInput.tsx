@@ -35,10 +35,9 @@ interface UserInputProps {
   copyable?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
-  animate?: boolean;
 }
 
-export const UserInput = memo(function UserInput({ msg, copyable, selected, onToggleSelect, animate = true }: UserInputProps) {
+export const UserInput = memo(function UserInput({ msg, copyable, selected, onToggleSelect }: UserInputProps) {
   const { text, tags } = useMemo(() => parseUserContent(msg.content), [msg.content]);
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -57,7 +56,6 @@ export const UserInput = memo(function UserInput({ msg, copyable, selected, onTo
   return (
     <div
       className="group/user-input mt-4 mb-3"
-      style={{ animation: animate ? "fade-in var(--duration-fast) var(--ease-out)" : "none" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -88,16 +86,21 @@ export const UserInput = memo(function UserInput({ msg, copyable, selected, onTo
             <span className="text-[13px] font-semibold" style={{ color: "var(--fill-primary)" }}>
               You
             </span>
+            {msg.isSteer && (
+              <span
+                className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                style={{ background: "var(--tint-subtle, rgba(66,153,225,0.12))", color: "var(--tint)" }}
+              >
+                追加
+              </span>
+            )}
             <span className="shrink-0 text-[11px] tabular-nums" style={{ color: "var(--fill-quaternary)" }}>
               {ts(msg.timestamp)}
             </span>
             <span className="flex-1" />
             {/* Hover actions */}
             {copyable && hovered && (
-              <div
-                className="flex items-center gap-0.5"
-                style={{ animation: "fade-in var(--duration-instant)" }}
-              >
+              <div className="flex items-center gap-0.5">
                 <button
                   onClick={handleCopy}
                   className="flex h-5 w-5 items-center justify-center rounded transition-all duration-150 hover:bg-[var(--bg-hover)] active:scale-90 cursor-pointer"

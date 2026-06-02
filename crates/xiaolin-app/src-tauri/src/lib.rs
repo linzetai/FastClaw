@@ -5,7 +5,7 @@ use embedded::{GatewayInfo, GatewayProcess};
 use serde_json::json;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Listener, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tokio::sync::Mutex;
 
@@ -74,6 +74,19 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
             }
         })
         .build(app)?;
+
+    let handle = app.handle().clone();
+    app.listen("tray-pending-update", move |event: tauri::Event| {
+        let has_pending: bool = event.payload().contains("true");
+        if let Some(tray) = handle.tray_by_id("main-tray") {
+            let tooltip = if has_pending {
+                "XiaoLin (待处理)"
+            } else {
+                "XiaoLin"
+            };
+            let _ = tray.set_tooltip(Some(tooltip));
+        }
+    });
 
     Ok(())
 }

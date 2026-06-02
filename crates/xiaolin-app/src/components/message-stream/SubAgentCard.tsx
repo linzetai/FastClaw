@@ -45,7 +45,7 @@ export function SubAgentCard({ run, onCancel }: SubAgentCardProps) {
   );
 
   return (
-    <div style={{ animation: "fade-in var(--duration-fast) var(--ease-out)" }}>
+    <div>
       {/* Summary row — same visual pattern as StepIndicator */}
       <button
         onClick={() => setExpanded(!expanded)}
@@ -126,7 +126,6 @@ export function SubAgentCard({ run, onCancel }: SubAgentCardProps) {
           className="pl-6 pb-1"
           style={{
             borderTop: "1px dashed var(--separator)",
-            animation: "fade-in var(--duration-fast) var(--ease-out)",
           }}
         >
           {/* Task detail */}

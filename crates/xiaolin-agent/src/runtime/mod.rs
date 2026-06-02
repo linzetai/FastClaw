@@ -1145,6 +1145,28 @@ impl AgentRuntime {
             }
 
             state.begin_iteration();
+
+            // ── Drain mid-turn steer messages ────────────────────────────────
+            if let Ok(inbox) = crate::builtin_tools::STEER_INBOX.try_with(|s| s.clone()) {
+                let mut rx = inbox.lock().await;
+                while let Ok(msg) = rx.try_recv() {
+                    tracing::info!(
+                        role = %msg.role,
+                        content_len = msg.content.len(),
+                        "injecting steer message into agentic loop"
+                    );
+                    messages.push(ChatMessage {
+                        role: Role::User,
+                        content: Some(serde_json::Value::String(msg.content)),
+                        reasoning_content: None,
+                        name: None,
+                        tool_calls: None,
+                        tool_call_id: None,
+                        compact_metadata: None,
+                    });
+                }
+            }
+
             state
                 .iteration_msg_boundaries
                 .push((messages.len(), std::time::Instant::now()));

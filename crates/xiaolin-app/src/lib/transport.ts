@@ -699,6 +699,53 @@ export async function getPlanFile(sessionId?: string): Promise<{ path: string; c
   };
 }
 
+export async function chatCancel(sessionId: string): Promise<{ ok: boolean }> {
+  const resp = (await wsClient.send("chat.cancel", { sessionId })) as {
+    data?: { cancelled?: boolean };
+  };
+  return { ok: resp?.data?.cancelled ?? false };
+}
+
+export async function chatSteer(
+  sessionId: string,
+  messages: Array<{ role: string; content: string }>,
+): Promise<{ ok: boolean }> {
+  const resp = (await wsClient.send("chat.steer", { sessionId, messages })) as {
+    data?: { ok?: boolean };
+  };
+  return { ok: resp?.data?.ok ?? false };
+}
+
+export async function submitFeedback(
+  sessionId: string,
+  turnId: string,
+  rating: "positive" | "negative",
+): Promise<{ ok: boolean }> {
+  const resp = (await wsClient.send("evolution.feedback", { sessionId, turnId, rating })) as {
+    data?: { ok?: boolean };
+  };
+  return { ok: resp?.data?.ok ?? false };
+}
+
+export async function retryTurn(
+  sessionId: string,
+  turnId: string,
+): Promise<{ ok: boolean }> {
+  const resp = (await wsClient.send("chat.retry_turn", { sessionId, turnId })) as {
+    data?: { ok?: boolean };
+  };
+  return { ok: resp?.data?.ok ?? false };
+}
+
+export async function chatSend(content: string, agentId?: string): Promise<{ ok: boolean }> {
+  const resp = (await wsClient.send("chat", {
+    messages: [{ role: "user", content }],
+    agentId,
+    stream: true,
+  })) as { data?: { ok?: boolean } };
+  return { ok: resp?.data?.ok ?? false };
+}
+
 export async function submitToolAnswer(requestId: string, answer: string, sessionId?: string): Promise<{ ok: boolean }> {
   const resp = (await wsClient.send("tools.submit_answer", { requestId, answer, sessionId })) as {
     data?: { ok?: boolean };

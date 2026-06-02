@@ -148,6 +148,13 @@ impl ToolOrchestrator {
         // Phase 1: Determine approval requirement
         let requirement = runtime.exec_requirement(args, ctx.cwd);
 
+        // Phase 1.5: Check denial tracker — auto-deny previously denied operations
+        if ctx.denial_tracker.is_denied(runtime.name(), &format!("{args}")) {
+            return Err(ToolRuntimeError::Rejected {
+                reason: "previously denied in this session".to_string(),
+            });
+        }
+
         // Phase 2: Resolve approval
         let decision_source = match requirement {
             ExecApprovalRequirement::Skip => DecisionSource::NotRequired,

@@ -1,11 +1,11 @@
 import { useRef, useCallback, useEffect, type RefObject, type MutableRefObject, type Dispatch, type SetStateAction } from "react";
-import type { VirtuosoHandle } from "react-virtuoso";
-import type { ChatMessage } from "../../lib/agent-store";
+import type { Virtualizer } from "@tanstack/react-virtual";
 
 export const STREAM_PAGE_SIZE = 50;
 
 export function useStreamScroll({
-  virtuosoRef,
+  virtualizer,
+  scrollContainerRef,
   scrollPositions,
   chatKey,
   displayDataLength,
@@ -21,7 +21,8 @@ export function useStreamScroll({
   suppressScrollTrackingUntilRef,
   runProgrammaticScroll,
 }: {
-  virtuosoRef: RefObject<VirtuosoHandle | null>;
+  virtualizer: Virtualizer<HTMLDivElement, Element> | null;
+  scrollContainerRef: RefObject<HTMLDivElement | null>;
   scrollPositions: MutableRefObject<Record<string, number>>;
   chatKey: string;
   displayDataLength: number;
@@ -30,92 +31,83 @@ export function useStreamScroll({
   setVisibleCount: Dispatch<SetStateAction<number>>;
   paginationOffsetRef: MutableRefObject<number>;
   searchIdx: number;
-  searchResults: Array<{ item: { data: ChatMessage }; idx: number }>;
+  searchResults: Array<{ item: unknown; idx: number }>;
   atBottomRef: MutableRefObject<boolean>;
   pendingBottomScrollBehaviorRef: MutableRefObject<"auto" | "smooth" | null>;
   pendingRestoreScrollTopRef: MutableRefObject<number | null>;
   suppressScrollTrackingUntilRef: MutableRefObject<number>;
   runProgrammaticScroll: (action: () => void, suppressMs?: number) => void;
 }) {
-  const handleAtBottomChange = useCallback((atBottom: boolean) => {
-    atBottomRef.current = atBottom;
-  }, [atBottomRef]);
-
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (Date.now() < suppressScrollTrackingUntilRef.current) return;
     if (!e.nativeEvent.isTrusted) return;
-    const top = (e.target as HTMLDivElement).scrollTop;
+
+    const el = e.target as HTMLDivElement;
+    const top = el.scrollTop;
+
     if (atBottomRef.current) {
       scrollPositions.current[chatKey] = 0;
       return;
     }
     scrollPositions.current[chatKey] = top;
-  }, [chatKey, scrollPositions, atBottomRef, suppressScrollTrackingUntilRef]);
+
+    if (hasMore && top < 200) {
+      handleStartReached();
+    }
+  }, [chatKey, scrollPositions, atBottomRef, suppressScrollTrackingUntilRef, hasMore]);
 
   const prevChatKey = useRef(chatKey);
 
   useEffect(() => {
     if (prevChatKey.current !== chatKey) {
       const prevKey = prevChatKey.current;
-      if (virtuosoRef.current && atBottomRef.current) {
+      if (atBottomRef.current) {
         scrollPositions.current[prevKey] = 0;
       }
       prevChatKey.current = chatKey;
       pendingRestoreScrollTopRef.current = scrollPositions.current[chatKey] ?? null;
     }
-  }, [chatKey, scrollPositions, virtuosoRef, atBottomRef, pendingRestoreScrollTopRef]);
+  }, [chatKey, scrollPositions, atBottomRef, pendingRestoreScrollTopRef]);
 
   useEffect(() => {
-    if (pendingBottomScrollBehaviorRef.current == null || !virtuosoRef.current) return;
+    if (pendingBottomScrollBehaviorRef.current == null || !virtualizer) return;
     const behavior = pendingBottomScrollBehaviorRef.current;
     pendingBottomScrollBehaviorRef.current = null;
     requestAnimationFrame(() => {
       runProgrammaticScroll(() => {
-        virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior });
+        virtualizer.scrollToEnd({ behavior });
       });
     });
-  }, [displayDataLength, chatKey, runProgrammaticScroll, virtuosoRef, pendingBottomScrollBehaviorRef]);
+  }, [displayDataLength, chatKey, runProgrammaticScroll, virtualizer, pendingBottomScrollBehaviorRef]);
 
   useEffect(() => {
-    if (pendingRestoreScrollTopRef.current == null || !virtuosoRef.current) return;
+    if (pendingRestoreScrollTopRef.current == null || !scrollContainerRef.current) return;
     const restoreTop = pendingRestoreScrollTopRef.current;
     pendingRestoreScrollTopRef.current = null;
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         runProgrammaticScroll(() => {
-          virtuosoRef.current?.scrollTo({ top: restoreTop });
+          if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = restoreTop;
+          }
         }, 360);
       });
     });
-  }, [chatKey, displayDataLength, runProgrammaticScroll, virtuosoRef, pendingRestoreScrollTopRef]);
+  }, [chatKey, displayDataLength, runProgrammaticScroll, scrollContainerRef, pendingRestoreScrollTopRef]);
 
+  const loadingMore = useRef(false);
   const handleStartReached = useCallback(() => {
-    if (hasMore) {
-      let startIndex = 0;
-      virtuosoRef.current?.getState((state) => {
-        startIndex = state.ranges?.[0]?.startIndex ?? 0;
-      });
-      setVisibleCount((prev) => {
-        const next = Math.min(prev + STREAM_PAGE_SIZE, streamLength);
-        const added = next - prev;
-        if (added > 0) {
-          requestAnimationFrame(() => {
-            runProgrammaticScroll(() => {
-              virtuosoRef.current?.scrollToIndex({
-                index: startIndex + added,
-                align: "start",
-                behavior: "auto",
-              });
-            });
-          });
-        }
-        return next;
-      });
-    }
-  }, [hasMore, streamLength, setVisibleCount, runProgrammaticScroll, virtuosoRef]);
+    if (!hasMore || loadingMore.current) return;
+    loadingMore.current = true;
+    setVisibleCount((prev) => {
+      const next = Math.min(prev + STREAM_PAGE_SIZE, streamLength);
+      loadingMore.current = false;
+      return next;
+    });
+  }, [hasMore, streamLength, setVisibleCount]);
 
   useEffect(() => {
-    if (searchResults.length > 0 && virtuosoRef.current) {
+    if (searchResults.length > 0 && virtualizer) {
       const fullIdx = searchResults[searchIdx]?.idx;
       if (fullIdx != null) {
         const visibleIdx = fullIdx - paginationOffsetRef.current;
@@ -126,7 +118,7 @@ export function useStreamScroll({
         }
         if (visibleIdx >= 0 && visibleIdx < displayDataLength) {
           runProgrammaticScroll(() => {
-            virtuosoRef.current?.scrollToIndex({ index: visibleIdx, align: "center", behavior: "auto" });
+            virtualizer.scrollToIndex(visibleIdx, { align: "center", behavior: "auto" });
           });
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
@@ -146,10 +138,9 @@ export function useStreamScroll({
         }
       }
     }
-  }, [searchIdx, searchResults, displayDataLength, streamLength, runProgrammaticScroll, virtuosoRef, setVisibleCount, paginationOffsetRef]);
+  }, [searchIdx, searchResults, displayDataLength, streamLength, runProgrammaticScroll, virtualizer, setVisibleCount, paginationOffsetRef]);
 
   return {
-    handleAtBottomChange,
     handleScroll,
     handleStartReached,
   };

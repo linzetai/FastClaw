@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, Window } from "@tauri-apps/api/window";
+import { emit } from "@tauri-apps/api/event";
 
 export function QuickActionBar() {
   const [input, setInput] = useState("");
@@ -28,8 +29,12 @@ export function QuickActionBar() {
     if (!text || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      // TODO: connect to gateway WebSocket to send the message
-      console.log("Quick action submit:", text);
+      await emit("quick-action-send", { content: text });
+      const mainWindow = await Window.getByLabel("main");
+      if (mainWindow) {
+        await mainWindow.show();
+        await mainWindow.setFocus();
+      }
     } finally {
       setInput("");
       setIsSubmitting(false);

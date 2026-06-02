@@ -135,7 +135,6 @@ export function PlanApprovalCard({
           className="px-3 pb-3"
           style={{
             borderTop: "0.5px solid var(--separator)",
-            animation: "fade-in var(--duration-instant) var(--ease-out)",
           }}
         >
           {loading ? (

@@ -478,7 +478,6 @@ export function ModelTab() {
           style={{
             background: toast.type === "ok" ? "color-mix(in srgb, var(--green) 15%, transparent)" : "color-mix(in srgb, var(--red) 15%, transparent)",
             color: toast.type === "ok" ? "var(--green)" : "var(--red)",
-            animation: "fade-in var(--duration-fast) var(--ease-out)",
           }}
         >
           {toast.type === "ok" ? <CheckCircle {...ICON.md} /> : <XCircle {...ICON.md} />}

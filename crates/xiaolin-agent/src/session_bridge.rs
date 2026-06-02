@@ -25,13 +25,12 @@ use crate::AgentRuntime;
 fn derive_approval_strategy(
     behavior: &xiaolin_core::agent_config::BehaviorConfig,
 ) -> xiaolin_core::tool_runtime::ApprovalStrategy {
-    let no_ask = behavior.tools_ask.is_empty()
-        && behavior.require_confirmation_for.is_empty();
-    if no_ask && behavior.file_access == xiaolin_core::agent_config::FileAccessMode::Full {
-        xiaolin_core::tool_runtime::ApprovalStrategy::AutoApprove
-    } else {
-        xiaolin_core::tool_runtime::ApprovalStrategy::Interactive
+    if let Some(ref strategy) = behavior.approval_strategy {
+        if strategy.eq_ignore_ascii_case("auto_approve") || strategy.eq_ignore_ascii_case("autoapprove") {
+            return xiaolin_core::tool_runtime::ApprovalStrategy::AutoApprove;
+        }
     }
+    xiaolin_core::tool_runtime::ApprovalStrategy::Interactive
 }
 
 /// Adapter implementing `TurnExecutor` by delegating to `AgentRuntime`.
@@ -497,14 +496,31 @@ impl TurnExecutor for RuntimeTurnExecutor {
         // If exceeding threshold, run inline compaction.
         self.maybe_auto_compact(&params, &tx).await;
 
-        let (request, config) = if let Some(ref td) = params.typed_data {
+        let (request, config, per_request_llm) = if let Some(ref td) = params.typed_data {
             if let Some(typed) = xiaolin_core::typed_turn_data::TypedTurnData::extract(td) {
-                (typed.enriched_request.clone(), typed.agent_config.clone())
+                let llm: Option<Arc<dyn LlmProvider>> = typed.llm_override.as_ref().and_then(|any| {
+                    let result = any.downcast_ref::<Arc<dyn LlmProvider>>().cloned();
+                    if result.is_none() {
+                        tracing::warn!(
+                            type_id = ?std::any::Any::type_id(any.as_ref()),
+                            expected_type_id = ?std::any::TypeId::of::<Arc<dyn LlmProvider>>(),
+                            "llm_override downcast failed — provider override will be lost"
+                        );
+                    }
+                    result
+                });
+                tracing::info!(
+                    has_llm_override = typed.llm_override.is_some(),
+                    downcast_ok = llm.is_some(),
+                    request_model = ?typed.enriched_request.model,
+                    "session_bridge: extracted TypedTurnData"
+                );
+                (typed.enriched_request.clone(), typed.agent_config.clone(), llm)
             } else {
-                (Self::request_from_extra(&params), Self::config_from_extra(&params, &self.config))
+                (Self::request_from_extra(&params), Self::config_from_extra(&params, &self.config), None)
             }
         } else {
-            (Self::request_from_extra(&params), Self::config_from_extra(&params, &self.config))
+            (Self::request_from_extra(&params), Self::config_from_extra(&params, &self.config), None)
         };
 
         let orchestrator = self.tool_orchestrator.clone().unwrap_or_else(|| {
@@ -585,26 +601,13 @@ impl TurnExecutor for RuntimeTurnExecutor {
             })
         };
 
-        // Spawn a task to drain steer messages. The current agentic loop
-        // does not support mid-turn injection yet, but we consume the channel
-        // so the actor doesn't block on sends.
-        let steer_drain = {
-            let mut steer_rx = params.steer_rx;
-            tokio::spawn(async move {
-                while let Some(msg) = steer_rx.recv().await {
-                    tracing::debug!(
-                        role = %msg.role,
-                        content_len = msg.content.len(),
-                        "received steer message (consumed but not yet injected into agentic loop)"
-                    );
-                }
-            })
-        };
+        let steer_inbox: crate::builtin_tools::SteerInbox =
+            std::sync::Arc::new(tokio::sync::Mutex::new(params.steer_rx));
 
         let result = {
             let runtime = self.runtime.clone();
             let tool_registry = self.tool_registry.clone();
-            let llm = self.llm_override.clone();
+            let llm = per_request_llm.or_else(|| self.llm_override.clone());
             let session_store = self.session_store.clone();
             let todo_store = self.todo_store.clone();
             let stream_ctx_key_inner = stream_context_key.clone();
@@ -629,21 +632,26 @@ impl TurnExecutor for RuntimeTurnExecutor {
                 todo_store.clone(),
             ));
 
+            let steer_inbox_inner = steer_inbox.clone();
             let wrapped_fut = async move {
                 let runtime_with_ih = crate::builtin_tools::with_interaction_handle(
                     ih_for_tools,
                     runtime_fut,
                 );
+                let runtime_with_steer = crate::builtin_tools::with_steer_inbox(
+                    steer_inbox_inner,
+                    runtime_with_ih,
+                );
                 if let Some(ms) = mode_state {
                     crate::builtin_tools::with_stream_context(
                         stream_ctx_key_inner,
-                        crate::builtin_tools::with_session_mode(ms, plan_ctx, runtime_with_ih),
+                        crate::builtin_tools::with_session_mode(ms, plan_ctx, runtime_with_steer),
                     )
                     .await
                 } else {
                     crate::builtin_tools::with_stream_context(
                         stream_ctx_key_inner,
-                        runtime_with_ih,
+                        runtime_with_steer,
                     )
                     .await
                 }
@@ -684,7 +692,7 @@ impl TurnExecutor for RuntimeTurnExecutor {
         };
 
         injector.abort();
-        steer_drain.abort();
+        drop(steer_inbox);
 
         if let Some(ref map) = self.stream_event_tx {
             map.remove(&stream_context_key);
@@ -729,7 +737,19 @@ mod tests {
     }
 
     #[test]
-    fn yolo_mode_returns_auto_approve() {
+    fn explicit_auto_approve_returns_auto_approve() {
+        let behavior = BehaviorConfig {
+            approval_strategy: Some("auto_approve".to_string()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            derive_approval_strategy(&behavior),
+            ApprovalStrategy::AutoApprove
+        ));
+    }
+
+    #[test]
+    fn no_explicit_strategy_defaults_to_interactive() {
         let behavior = BehaviorConfig {
             tools_ask: vec![],
             require_confirmation_for: vec![],
@@ -738,7 +758,7 @@ mod tests {
         };
         assert!(matches!(
             derive_approval_strategy(&behavior),
-            ApprovalStrategy::AutoApprove
+            ApprovalStrategy::Interactive
         ));
     }
 

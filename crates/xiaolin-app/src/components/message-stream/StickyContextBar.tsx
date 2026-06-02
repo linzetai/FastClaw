@@ -49,7 +49,6 @@ export const StickyContextBar = memo(function StickyContextBar({
       style={{
         background: "var(--bg-secondary)",
         borderBottom: "0.5px solid var(--separator)",
-        animation: "fade-in var(--duration-fast) var(--ease-out)",
       }}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1">

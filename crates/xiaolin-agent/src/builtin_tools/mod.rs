@@ -33,7 +33,7 @@ use xiaolin_core::tool::ToolRegistry;
 use xiaolin_core::workspace::AgentWorkspace;
 use xiaolin_session::SessionStore;
 
-pub use ask_question::{with_interaction_handle, with_stream_context, AskQuestionTool};
+pub use ask_question::{with_interaction_handle, with_steer_inbox, with_stream_context, AskQuestionTool, SteerInbox, STEER_INBOX};
 pub use brief::BriefTool;
 pub use xiaolin_tools_code::code_intel::{
     CodeSectionsTool, FileOutlineTool, FindReferencesTool, GoToDefinitionTool, UnifiedLspTool,

@@ -1,0 +1,186 @@
+import { useState, useCallback } from "react";
+import { ShieldAlert, ShieldCheck, ShieldX, ChevronDown, ChevronUp } from "lucide-react";
+
+export interface ApprovalData {
+  approvalId: string;
+  reason: string;
+  action?: {
+    action_type?: string;
+    command?: string;
+    path?: string;
+    content?: string;
+    diff?: string;
+  };
+  decisions: Array<{ id: string; label: string }>;
+  riskLevel: "danger" | "caution" | "safe";
+}
+
+interface ApprovalCardProps {
+  data: ApprovalData;
+  onDecision: (decision: string) => void;
+}
+
+const RISK_STYLES = {
+  danger: {
+    border: "var(--color-red-400, #fc8181)",
+    bg: "var(--color-red-50, rgba(254, 215, 215, 0.15))",
+    label: "禁止执行",
+    icon: ShieldX,
+    iconColor: "var(--color-red-500, #f56565)",
+  },
+  caution: {
+    border: "var(--color-amber-400, #f6ad55)",
+    bg: "var(--color-amber-50, rgba(254, 235, 200, 0.15))",
+    label: "需要确认",
+    icon: ShieldAlert,
+    iconColor: "var(--color-amber-500, #ed8936)",
+  },
+  safe: {
+    border: "var(--color-green-400, #68d391)",
+    bg: "var(--color-green-50, rgba(198, 246, 213, 0.15))",
+    label: "安全操作",
+    icon: ShieldCheck,
+    iconColor: "var(--color-green-500, #48bb78)",
+  },
+};
+
+export function ApprovalCard({ data, onDecision }: ApprovalCardProps) {
+  const [submitted, setSubmitted] = useState(false);
+  const isFileAction = data.action?.action_type === "write_file" || data.action?.action_type === "edit_file";
+  const [expanded, setExpanded] = useState(isFileAction);
+
+  const style = RISK_STYLES[data.riskLevel];
+  const Icon = style.icon;
+
+  const handleDecision = useCallback((decision: string) => {
+    if (submitted) return;
+    setSubmitted(true);
+    onDecision(decision);
+  }, [submitted, onDecision]);
+
+  const hasPreview = data.action?.command || data.action?.diff || data.action?.content;
+  const isForbidden = data.riskLevel === "danger";
+
+  return (
+    <div
+      className="mx-3 mb-3 overflow-hidden rounded-xl transition-all duration-200"
+      style={{
+        border: `1.5px solid ${style.border}`,
+        background: style.bg,
+      }}
+    >
+      <div className="flex items-center gap-2.5 px-4 py-3">
+        <Icon size={18} style={{ color: style.iconColor, flexShrink: 0 }} />
+        <span
+          className="text-xs font-semibold uppercase tracking-wide"
+          style={{ color: style.iconColor }}
+        >
+          {style.label}
+        </span>
+      </div>
+
+      <div className="px-4 pb-3">
+        <p className="text-sm leading-relaxed" style={{ color: "var(--fill-secondary)" }}>
+          {data.reason}
+        </p>
+        {data.action?.action_type && (
+          <span
+            className="mt-1.5 inline-block rounded-md px-2 py-0.5 text-xs font-medium"
+            style={{
+              background: "var(--bg-elevated, rgba(0,0,0,0.06))",
+              color: "var(--fill-tertiary)",
+            }}
+          >
+            {data.action.action_type}
+          </span>
+        )}
+      </div>
+
+      {hasPreview && (
+        <div className="border-t px-4 py-2" style={{ borderColor: "var(--separator)" }}>
+          <button
+            className="flex w-full items-center gap-1.5 text-xs font-medium"
+            style={{ color: "var(--fill-tertiary)" }}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            {data.action?.command ? "命令预览" : isFileAction ? "文件变更预览" : "内容预览"}
+          </button>
+          {expanded && (
+            <>
+              {data.action?.path && (
+                <div
+                  className="mt-1.5 truncate text-xs"
+                  style={{ color: "var(--fill-tertiary)", fontFamily: "var(--font-mono, ui-monospace, monospace)" }}
+                  title={data.action.path}
+                >
+                  {data.action.path}
+                </div>
+              )}
+              <pre
+                className="mt-2 max-h-48 overflow-auto rounded-lg p-3 text-xs leading-relaxed"
+                style={{
+                  background: "var(--bg-code, rgba(0,0,0,0.04))",
+                  color: "var(--fill-primary)",
+                  fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                }}
+              >
+                {data.action?.command || data.action?.diff || data.action?.content}
+              </pre>
+            </>
+          )}
+        </div>
+      )}
+
+      <div
+        className="flex flex-wrap items-center gap-2 border-t px-4 py-3"
+        style={{ borderColor: "var(--separator)" }}
+      >
+        {data.decisions
+          .filter((d) => !isForbidden || d.id === "denied" || d.id === "abort")
+          .map((d) => (
+            <button
+              key={d.id}
+              onClick={() => handleDecision(d.id)}
+              disabled={submitted}
+              className="rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-150 hover:scale-[1.02] active:scale-95 disabled:opacity-40"
+              style={getButtonStyle(d.id)}
+            >
+              {d.label}
+            </button>
+          ))}
+      </div>
+    </div>
+  );
+}
+
+function getButtonStyle(decision: string): React.CSSProperties {
+  switch (decision) {
+    case "approved":
+      return {
+        background: "var(--color-green-500, #48bb78)",
+        color: "#fff",
+      };
+    case "approved_for_session":
+      return {
+        background: "var(--color-blue-500, #4299e1)",
+        color: "#fff",
+      };
+    case "denied":
+      return {
+        background: "var(--bg-elevated, rgba(0,0,0,0.06))",
+        color: "var(--fill-secondary)",
+        border: "1px solid var(--separator)",
+      };
+    case "abort":
+      return {
+        background: "var(--color-red-500, #f56565)",
+        color: "#fff",
+      };
+    default:
+      return {
+        background: "var(--bg-elevated, rgba(0,0,0,0.06))",
+        color: "var(--fill-secondary)",
+      };
+  }
+}

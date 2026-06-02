@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { useState, useRef, useCallback, useEffect, useMemo, useLayoutEffect } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAgentStore } from "../../lib/agent-store";
 import { useActiveAgentChats } from "../../lib/stores/selectors";
 import type { MentionInputHandle, MentionOption } from "./MentionInput";
@@ -16,22 +16,6 @@ import { StreamEmptyState } from "./StreamEmptyState";
 import { StickyContextBar } from "./StickyContextBar";
 import { parseTodoResult, type TodoSummary } from "./TodoCard";
 import { ICON } from "../../lib/ui-tokens";
-
-const VIEWPORT_INCREASE = { top: 200, bottom: 200 };
-
-const VirtuosoFooter = () => <div className="h-8" />;
-
-const VirtuosoHeaderWithMore = memo(function VirtuosoHeaderWithMore() {
-  return (
-    <div className="flex h-8 items-center justify-center">
-      <span className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-        ↑ 滚动加载更多
-      </span>
-    </div>
-  );
-});
-
-const VirtuosoHeaderEmpty = () => <div className="h-8" />;
 
 interface MessageStreamProps {
   onToggleDetail?: () => void;
@@ -50,21 +34,11 @@ export function MessageStream(_props: MessageStreamProps) {
 
   const loadingChats = useRef(new Set<string>());
   const loadedChats = useRef(new Set<string>());
-  const [animateMessages, setAnimateMessages] = useState(false);
-  useEffect(() => {
-    setAnimateMessages(false);
-  }, [activeChat?.id]);
   useEffect(() => {
     if (!activeChat) return;
-    if (activeChat.messageCount === 0 && activeChat.stream.length === 0) {
-      setAnimateMessages(true);
-      return;
-    }
+    if (activeChat.messageCount === 0 && activeChat.stream.length === 0) return;
     if (loadingChats.current.has(activeChat.id)) return;
-    if (loadedChats.current.has(activeChat.id)) {
-      setAnimateMessages(true);
-      return;
-    }
+    if (loadedChats.current.has(activeChat.id)) return;
 
     loadingChats.current.add(activeChat.id);
     transport.getSessionMessages(activeChat.id).then((messages) => {
@@ -74,12 +48,11 @@ export function MessageStream(_props: MessageStreamProps) {
       loadedChats.current.add(activeChat.id);
     }).catch(() => {}).finally(() => {
       loadingChats.current.delete(activeChat.id);
-      setAnimateMessages(true);
     });
   }, [activeChat?.id, activeChat?.messageCount, activeChat?.stream.length, activeAgentId, loadChatStream]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollPositions = useRef<Record<string, number>>({});
   const mentionInputRef = useRef<MentionInputHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -141,7 +114,7 @@ export function MessageStream(_props: MessageStreamProps) {
     const q = searchQuery.toLowerCase();
     const results = stream
       .map((item, idx) => ({ item, idx }))
-      .filter(({ item }) => item.data.content.toLowerCase().includes(q));
+      .filter(({ item }) => item.type === "message" && item.data.content.toLowerCase().includes(q));
     return results;
   }, [stream, searchQuery]);
 
@@ -345,8 +318,37 @@ export function MessageStream(_props: MessageStreamProps) {
     return visibleStream;
   }, [visibleStream, streaming]);
 
-  const { handleAtBottomChange: rawAtBottomChange, handleScroll, handleStartReached } = useStreamScroll({
-    virtuosoRef,
+  const getItemKey = useCallback((index: number) => {
+    const item = displayData[index];
+    if (!item) return index;
+    if ("key" in item && (item as { key?: string }).key === "_streaming_") return "_streaming_";
+    if ("type" in item) {
+      const typed = item as { type: string; data: { id: string | number } };
+      if (typed.type === "message") return `msg-${typed.data.id}`;
+      if (typed.type === "brief") return `brief-${typed.data.id}`;
+    }
+    return index;
+  }, [displayData]);
+
+  const virtualizer = useVirtualizer({
+    count: displayData.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => 80,
+    getItemKey,
+    overscan: 6,
+    anchorTo: "end",
+    followOnAppend: "smooth",
+    scrollEndThreshold: 120,
+    useFlushSync: false,
+  });
+
+  useLayoutEffect(() => {
+    virtualizer.scrollToEnd();
+  }, [chatKey]);
+
+  const { handleScroll, handleStartReached: _handleStartReached } = useStreamScroll({
+    virtualizer,
+    scrollContainerRef,
     scrollPositions,
     chatKey,
     displayDataLength: displayData.length,
@@ -363,14 +365,19 @@ export function MessageStream(_props: MessageStreamProps) {
     runProgrammaticScroll,
   });
 
-  const handleAtBottomChange = useCallback((atBottom: boolean) => {
-    rawAtBottomChange(atBottom);
-    setShowScrollFab(!atBottom);
-    if (atBottom) {
-      setUnreadCount(0);
-      setStreamDoneLabel(false);
+  const handleScrollWithAtBottom = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    handleScroll(e);
+    const isAtEnd = virtualizer.isAtEnd();
+    const wasAtBottom = atBottomRef.current;
+    atBottomRef.current = isAtEnd;
+    if (isAtEnd !== wasAtBottom) {
+      setShowScrollFab(!isAtEnd);
+      if (isAtEnd) {
+        setUnreadCount(0);
+        setStreamDoneLabel(false);
+      }
     }
-  }, [rawAtBottomChange]);
+  }, [handleScroll, virtualizer]);
 
   useEffect(() => {
     if (!atBottomRef.current && stream.length > prevStreamLenRef.current) {
@@ -382,7 +389,7 @@ export function MessageStream(_props: MessageStreamProps) {
   useEffect(() => {
     if (prevStreamingRef.current && !streaming) {
       if (atBottomRef.current) {
-        virtuosoRef.current?.scrollToIndex({ index: displayData.length - 1, align: "end", behavior: "smooth" });
+        virtualizer.scrollToEnd({ behavior: "smooth" });
       } else {
         setShowScrollFab(true);
         setStreamDoneLabel(true);
@@ -392,18 +399,13 @@ export function MessageStream(_props: MessageStreamProps) {
   }, [streaming, displayData.length]);
 
   const scrollToBottom = useCallback(() => {
-    virtuosoRef.current?.scrollToIndex({ index: displayData.length - 1, align: "end", behavior: "smooth" });
+    virtualizer.scrollToEnd({ behavior: "smooth" });
     setTimeout(() => {
       setShowScrollFab(false);
       setUnreadCount(0);
       setStreamDoneLabel(false);
     }, 100);
-  }, [displayData.length]);
-
-  const virtuosoComponents = useMemo(() => ({
-    Header: hasMore ? VirtuosoHeaderWithMore : VirtuosoHeaderEmpty,
-    Footer: VirtuosoFooter,
-  }), [hasMore]);
+  }, [virtualizer]);
 
   const prevWidthRef = useRef(0);
   useEffect(() => {
@@ -411,27 +413,29 @@ export function MessageStream(_props: MessageStreamProps) {
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width ?? 0;
-      if (prevWidthRef.current > 0 && Math.abs(w - prevWidthRef.current) > 2 && virtuosoRef.current) {
+      if (prevWidthRef.current > 0 && Math.abs(w - prevWidthRef.current) > 2) {
         const idx = firstVisibleIndexRef.current;
         requestAnimationFrame(() => {
-          virtuosoRef.current?.scrollToIndex({ index: idx, align: "start", behavior: "auto" });
+          virtualizer.scrollToIndex(idx, { align: "start", behavior: "auto" });
         });
       }
       prevWidthRef.current = w;
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [chatKey]);
+  }, [chatKey, virtualizer]);
 
-  const [visibleRange, setVisibleRange] = useState<{ startIndex: number; endIndex: number }>({ startIndex: 0, endIndex: 0 });
-  const handleRangeChanged = useCallback((range: { startIndex: number; endIndex: number }) => {
-    firstVisibleIndexRef.current = range.startIndex;
-    setVisibleRange(range);
-  }, []);
+  const visibleRange = virtualizer.range ?? { startIndex: 0, endIndex: 0 };
+  useEffect(() => {
+    if (visibleRange) {
+      firstVisibleIndexRef.current = visibleRange.startIndex;
+    }
+  }, [visibleRange?.startIndex]);
 
   const lastUserMessage = useMemo(() => {
     for (let i = stream.length - 1; i >= 0; i--) {
-      if (stream[i].data.role === "user") return { content: stream[i].data.content, index: i };
+      const item = stream[i];
+      if (item.type === "message" && item.data.role === "user") return { content: item.data.content, index: i };
     }
     return null;
   }, [stream]);
@@ -441,6 +445,14 @@ export function MessageStream(_props: MessageStreamProps) {
     const globalIdx = lastUserMessage.index;
     return globalIdx - paginationOffset;
   }, [lastUserMessage, paginationOffset]);
+
+  const lastAssistantDisplayIdx = useMemo(() => {
+    for (let i = displayData.length - 1; i >= 0; i--) {
+      const it = displayData[i];
+      if ("type" in it && it.type === "message" && (it.data as { role: string }).role === "assistant") return i;
+    }
+    return -1;
+  }, [displayData]);
 
   const todoProgress = useMemo<TodoSummary | null>(() => {
     if (!streamSegments || streamSegments.length === 0) return null;
@@ -453,7 +465,9 @@ export function MessageStream(_props: MessageStreamProps) {
     }
     if (!streaming) {
       for (let i = stream.length - 1; i >= 0; i--) {
-        const msg = stream[i].data;
+        const item = stream[i];
+        if (item.type !== "message") continue;
+        const msg = item.data;
         if (msg.role === "assistant" && msg.toolCalls) {
           for (let j = msg.toolCalls.length - 1; j >= 0; j--) {
             const tc = msg.toolCalls[j];
@@ -510,7 +524,7 @@ export function MessageStream(_props: MessageStreamProps) {
       {isDragging && (
         <div
           className="absolute inset-0 z-30 flex items-center justify-center"
-          style={{ background: "rgba(0, 122, 255, 0.06)", animation: "fade-in var(--duration-fast)" }}
+          style={{ background: "rgba(0, 122, 255, 0.06)" }}
         >
           <div
             className="flex flex-col items-center gap-3 rounded-[var(--radius-xl)] border-2 border-dashed px-12 py-10"
@@ -605,46 +619,57 @@ export function MessageStream(_props: MessageStreamProps) {
               onResend={handleResendFromBar}
             />
           )}
-          <Virtuoso
-            ref={virtuosoRef}
+          <div
+            ref={scrollContainerRef}
             key={chatKey}
-            data={displayData}
-            initialTopMostItemIndex={Math.max(0, displayData.length - 1)}
-            followOutput={(isAtBottom) => {
-              if (isAtBottom) return "smooth";
-              if (streaming && atBottomRef.current) return "smooth";
-              return false;
-            }}
-            atBottomStateChange={handleAtBottomChange}
-            atBottomThreshold={120}
             className="flex-1"
-            style={{ overflowX: "hidden", overflowY: "scroll" }}
-            onScroll={handleScroll}
-            startReached={handleStartReached}
-            rangeChanged={handleRangeChanged}
-            itemContent={(idx, item) => (
-              <MessageRendererRow
-                item={item}
-                idx={idx}
-                paginationOffset={paginationOffset}
-                searchQuery={searchQuery}
-                searchIdx={searchIdx}
-                searchResults={searchResults}
-                streamSegments={streamSegments}
-                subAgentRuns={activeChat?.subAgentRuns}
-                bottomRef={bottomRef}
-                animate={animateMessages}
-                lastSegments={activeChat?.lastSegments as import("./types").StreamSegment[] | undefined}
-              />
+            style={{ overflowX: "hidden", overflowY: "auto" }}
+            onScroll={handleScrollWithAtBottom}
+          >
+            {hasMore && (
+              <div className="flex h-8 items-center justify-center">
+                <span className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
+                  ↑ 滚动加载更多
+                </span>
+              </div>
             )}
-            increaseViewportBy={VIEWPORT_INCREASE}
-            components={virtuosoComponents}
-          />
+            {!hasMore && <div className="h-8" />}
+            <div style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}>
+              {virtualizer.getVirtualItems().map((virtualItem) => (
+                <div
+                  key={virtualItem.key}
+                  ref={virtualizer.measureElement}
+                  data-index={virtualItem.index}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  <MessageRendererRow
+                    item={displayData[virtualItem.index]}
+                    idx={virtualItem.index}
+                    paginationOffset={paginationOffset}
+                    searchQuery={searchQuery}
+                    searchIdx={searchIdx}
+                    searchResults={searchResults}
+                    streamSegments={streamSegments}
+                    subAgentRuns={activeChat?.subAgentRuns}
+                    bottomRef={bottomRef}
+                    lastSegments={virtualItem.index === lastAssistantDisplayIdx ? activeChat?.lastSegments as import("./types").StreamSegment[] | undefined : undefined}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="h-8" />
+          </div>
         </div>
       )}
 
       {showScrollFab && !isEmpty && (
-        <div className="absolute right-6 bottom-[140px] z-20" style={{ animation: "fade-in var(--duration-fast) var(--ease-out)" }}>
+        <div className="absolute right-6 bottom-[140px] z-20">
           <button
             onClick={scrollToBottom}
             className="flex h-9 items-center gap-1.5 rounded-full px-3 shadow-lg transition-all duration-150 hover:scale-105 active:scale-95"

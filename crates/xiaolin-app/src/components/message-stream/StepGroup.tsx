@@ -176,7 +176,6 @@ export const StepGroup = memo(function StepGroup({
   return (
     <div
       style={{
-        animation: "fade-in var(--duration-fast) var(--ease-out)",
         border: "1px solid var(--step-border)",
         borderRadius: "var(--step-radius)",
         marginBottom: "var(--step-gap)",
@@ -249,7 +248,6 @@ export const StepGroup = memo(function StepGroup({
           className="px-1 pb-1"
           style={{
             borderTop: "1px solid var(--separator)",
-            animation: "fade-in var(--duration-fast) var(--ease-out)",
           }}
         >
           {!expanded && streaming && tools.length > 2 && (

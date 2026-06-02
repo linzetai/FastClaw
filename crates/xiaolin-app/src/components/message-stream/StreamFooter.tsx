@@ -8,6 +8,7 @@ import { MentionInput, type MentionInputHandle, type InlineMention, type Mention
 import { useAgentStore } from "../../lib/agent-store";
 import { ICON, BTN_ICON } from "../../lib/ui-tokens";
 import { QuestionPanel } from "./MessageRenderer";
+import { ApprovalCard, type ApprovalData } from "./ApprovalCard";
 import { QueueIndicator } from "./QueueIndicator";
 import { QueuePanel } from "./QueuePanel";
 // TODO: 语音输入功能待完善本地 STT（whisper.cpp 或 API）后重新启用
@@ -356,6 +357,14 @@ export type PendingToolQuestion = {
   timeoutSecs: number;
   expiresAt: number;
   allowMultiple?: boolean;
+  approvalMeta?: {
+    actionType?: string;
+    command?: string;
+    path?: string;
+    content?: string;
+    diff?: string;
+    riskLevel?: "danger" | "caution" | "safe";
+  };
 } | null;
 
 export interface StreamFooterProps {
@@ -375,6 +384,26 @@ export interface StreamFooterProps {
   setPendingQuestion: React.Dispatch<React.SetStateAction<PendingToolQuestion>>;
   stopStream: () => void;
   onTogglePlanPanel?: () => void;
+}
+
+function parseApprovalData(q: NonNullable<PendingToolQuestion>): ApprovalData {
+  const meta = q.approvalMeta;
+  const reason = q.question.split("\n")[0] || q.question;
+  return {
+    approvalId: q.requestId.slice("approval:".length),
+    reason,
+    action: meta ? {
+      action_type: meta.actionType,
+      command: meta.command,
+      path: meta.path,
+      content: meta.content,
+      diff: meta.diff,
+    } : {
+      action_type: q.question.includes("操作类型:") ? q.question.split("操作类型:")[1]?.trim() : undefined,
+    },
+    decisions: q.options,
+    riskLevel: meta?.riskLevel ?? "caution",
+  };
 }
 
 export function StreamFooter({
@@ -528,7 +557,6 @@ export function StreamFooter({
           className="fixed inset-0 z-[9998] flex items-center justify-center"
           style={{
             background: "rgba(0,0,0,0.4)",
-            animation: "fade-in var(--duration-fast) var(--ease-out)",
           }}
         >
           <div
@@ -548,25 +576,31 @@ export function StreamFooter({
         </div>
       )}
       {pendingQuestion && (
-        <QuestionPanel
-          question={pendingQuestion}
-          onAnswer={async (answer) => {
-            setPendingQuestion(null);
-            if (pendingQuestion.requestId.startsWith("approval:")) {
+        pendingQuestion.requestId.startsWith("approval:") ? (
+          <ApprovalCard
+            data={parseApprovalData(pendingQuestion)}
+            onDecision={async (decision) => {
               const approvalId = pendingQuestion.requestId.slice("approval:".length);
-              await transport.resolveApproval(approvalId, answer, activeChat?.id);
-            } else {
+              setPendingQuestion(null);
+              await transport.resolveApproval(approvalId, decision, activeChat?.id);
+            }}
+          />
+        ) : (
+          <QuestionPanel
+            question={pendingQuestion}
+            onAnswer={async (answer) => {
+              setPendingQuestion(null);
               await transport.submitToolAnswerIpc(pendingQuestion.requestId, answer, activeChat?.id);
-            }
-          }}
-          onTimeout={() => {
-            const q = pendingQuestion;
-            setPendingQuestion(null);
-            if (q && !q.requestId.startsWith("approval:")) {
-              transport.submitToolAnswerIpc(q.requestId, "", activeChat?.id);
-            }
-          }}
-        />
+            }}
+            onTimeout={() => {
+              const q = pendingQuestion;
+              setPendingQuestion(null);
+              if (q) {
+                transport.submitToolAnswerIpc(q.requestId, "", activeChat?.id);
+              }
+            }}
+          />
+        )
       )}
 
       <div
@@ -670,7 +704,7 @@ export function StreamFooter({
 
         <MentionInput
           ref={mentionInputRef}
-          placeholder={executionMode === "plan" ? "描述规划任务，或输入 /plan 切换到 Agent..." : "描述任务，或输入 @ 引用文件、/ 命令..."}
+          placeholder={streaming ? "追加指令..." : executionMode === "plan" ? "描述规划任务，或输入 /plan 切换到 Agent..." : "描述任务，或输入 @ 引用文件、/ 命令..."}
           options={mentionOptions}
           slashCommands={slashCommands}
           onSend={wrappedSend}
@@ -780,7 +814,7 @@ export function StreamFooter({
                   opacity: (inputHasContent || attachedFiles.length > 0) && messageQueue.length < 10 ? 1 : 0.3,
                   boxShadow: (inputHasContent || attachedFiles.length > 0) ? "var(--glow-tint)" : "none",
                 }}
-                title={messageQueue.length >= 10 ? "队列已满（最多10条）" : streaming ? "加入队列 ↩" : "发送 ↩"}
+                title={messageQueue.length >= 10 ? "队列已满（最多10条）" : streaming ? "追加指令 ↩" : "发送 ↩"}
               >
                 <ArrowUp {...ICON.md} />
               </button>

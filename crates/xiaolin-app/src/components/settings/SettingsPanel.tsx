@@ -46,7 +46,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ animation: "fade-in var(--duration-fast) var(--ease-out)" }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div
         className="absolute inset-0"
         style={{

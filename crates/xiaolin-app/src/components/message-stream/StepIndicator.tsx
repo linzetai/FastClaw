@@ -401,7 +401,6 @@ export const StepIndicator = memo(function StepIndicator({ tool, compact }: { to
     <div
       className={`step-indicator${expanded ? " open" : ""}`}
       style={{
-        animation: "fade-in var(--duration-fast) var(--ease-out)",
         border: compact ? "none" : "1px solid var(--step-border)",
         borderRadius: compact ? "0" : "var(--step-radius)",
         marginBottom: "var(--step-gap)",

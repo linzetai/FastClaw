@@ -48,6 +48,7 @@ export interface ChatMessage {
   toolCalls?: ChatMessageToolCall[];
   images?: ChatMessageImage[];
   usage?: ChatUsage;
+  isSteer?: boolean;
 }
 
 export interface SubAgentToolCall {
@@ -80,7 +81,16 @@ export interface ChatStreamSegment {
   toolCall?: ChatMessageToolCall;
 }
 
-export type StreamItem = { type: "message"; data: ChatMessage };
+export interface BriefMessageData {
+  id: string;
+  content: string;
+  mode: "normal" | "proactive";
+  timestamp: number;
+}
+
+export type StreamItem =
+  | { type: "message"; data: ChatMessage }
+  | { type: "brief"; data: BriefMessageData };
 
 export interface ChatUsage {
   promptTokens: number;
@@ -150,6 +160,7 @@ export interface AgentState {
   loadChatStream: (agentId: string, chatId: string, messages: BackendMessage[]) => void;
   updateChatBackendId: (agentId: string, localChatId: string, backendSessionId: string) => void;
   appendStreamDelta: (agentId: string, chatId: string, delta: string) => void;
+  addBriefMessage: (agentId: string, chatId: string, brief: BriefMessageData) => void;
   updateChatUsage: (agentId: string, chatId: string, usage: ChatUsage) => void;
   removeAgent: (agentId: string) => void;
 

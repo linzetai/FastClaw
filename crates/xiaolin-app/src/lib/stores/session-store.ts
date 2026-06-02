@@ -7,6 +7,7 @@ import type {
   AgentState,
   BackendMessage,
   BackendSession,
+  BriefMessageData,
   Chat,
   ChatMessage,
   ChatMessageImage,
@@ -571,7 +572,7 @@ export function buildSessionSlice({ set, get }: SetGet) {
         const chatList = ac.chatList.map((c) => {
           if (c.id !== chatId) return c;
           const lastItem = c.stream[c.stream.length - 1];
-          if (lastItem && lastItem.data.role === "assistant") {
+          if (lastItem && lastItem.type === "message" && lastItem.data.role === "assistant") {
             const updated = { ...lastItem, data: { ...lastItem.data, content: lastItem.data.content + delta } };
             return { ...c, stream: [...c.stream.slice(0, -1), updated] };
           }
@@ -583,6 +584,18 @@ export function buildSessionSlice({ set, get }: SetGet) {
             chatId,
           };
           return { ...c, stream: [...c.stream, { type: "message" as const, data: newMsg }] };
+        });
+        return { agentChats: { ...state.agentChats, [agentId]: { ...ac, chatList } } };
+      });
+    },
+
+    addBriefMessage: (agentId: string, chatId: string, brief: BriefMessageData) => {
+      set((state) => {
+        const ac = state.agentChats[agentId];
+        if (!ac) return state;
+        const chatList = ac.chatList.map((c) => {
+          if (c.id !== chatId) return c;
+          return { ...c, stream: [...c.stream, { type: "brief" as const, data: brief }] };
         });
         return { agentChats: { ...state.agentChats, [agentId]: { ...ac, chatList } } };
       });

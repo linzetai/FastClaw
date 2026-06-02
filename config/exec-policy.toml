@@ -1,0 +1,226 @@
+# XiaoLin Default Execution Policy
+# Loaded by Gateway at startup when no user-specified policy is found.
+# Users can override by placing a custom exec-policy.toml in their project
+# (.xiaolin/exec-policy.toml) or user config (~/.xiaolin/exec-policy.toml).
+
+[defaults]
+allow_readonly = [
+    "ls", "cat", "head", "tail", "wc", "grep", "find", "which", "whoami",
+    "pwd", "date", "echo", "printf", "test", "true", "false", "env", "uname",
+    "file", "stat", "du", "df", "free", "uptime", "id", "groups",
+    "git", "cargo", "npm", "node", "python3", "python", "rustc", "rustup",
+    "pnpm", "yarn", "bun", "deno", "go", "java", "javac",
+    "rg", "fd", "tree", "less", "more", "diff", "sort", "uniq", "cut",
+    "awk", "sed", "tr", "xargs", "tee", "basename", "dirname", "realpath",
+]
+fallback = "prompt"
+
+# ── Forbidden Operations ─────────────────────────────────────────────
+
+[[rules]]
+id = "forbid-sudo"
+pattern = ["sudo"]
+decision = "forbidden"
+justification = "Agent must not escalate to root privileges"
+
+[[rules]]
+id = "forbid-su"
+pattern = ["su"]
+decision = "forbidden"
+justification = "Agent must not switch to another user"
+
+[[rules]]
+id = "forbid-systemctl"
+pattern = ["systemctl"]
+decision = "forbidden"
+justification = "Agent must not manage system services"
+
+[[rules]]
+id = "forbid-reboot"
+pattern = ["reboot"]
+decision = "forbidden"
+justification = "Agent must not reboot the system"
+
+[[rules]]
+id = "forbid-shutdown"
+pattern = ["shutdown"]
+decision = "forbidden"
+justification = "Agent must not shut down the system"
+
+[[rules]]
+id = "forbid-force-push"
+pattern = ["git", "push", "--force"]
+decision = "forbidden"
+justification = "Force push rewrites history and can cause data loss"
+
+[[rules]]
+id = "forbid-rm-rf-root"
+pattern = ["rm", "-rf", "/"]
+decision = "forbidden"
+justification = "Would destroy the entire file system"
+
+[[rules]]
+id = "forbid-dd"
+pattern = ["dd"]
+decision = "forbidden"
+justification = "dd can destroy disk data; too dangerous for agent use"
+
+[[rules]]
+id = "forbid-mkfs"
+pattern = ["mkfs"]
+decision = "forbidden"
+justification = "Formatting filesystems is destructive and irreversible"
+
+# ── Prompt Operations ────────────────────────────────────────────────
+
+[[rules]]
+id = "prompt-rm"
+pattern = ["rm"]
+decision = "prompt"
+justification = "File deletion requires confirmation"
+
+[[rules]]
+id = "prompt-mv"
+pattern = ["mv"]
+decision = "prompt"
+justification = "Moving/renaming files requires confirmation"
+
+[[rules]]
+id = "prompt-chmod"
+pattern = ["chmod"]
+decision = "prompt"
+justification = "Permission changes require confirmation"
+
+[[rules]]
+id = "prompt-chown"
+pattern = ["chown"]
+decision = "prompt"
+justification = "Ownership changes require confirmation"
+
+[[rules]]
+id = "prompt-git-push"
+pattern = ["git", "push"]
+decision = "prompt"
+justification = "Push sends code to remote; confirm intent"
+
+[[rules]]
+id = "prompt-destructive-git"
+pattern = ["git", ["reset", "rebase", "cherry-pick"]]
+decision = "prompt"
+justification = "These operations can rewrite history"
+
+[[rules]]
+id = "prompt-npm-publish"
+pattern = ["npm", "publish"]
+decision = "prompt"
+justification = "Publishing packages is irreversible"
+
+[[rules]]
+id = "prompt-cargo-publish"
+pattern = ["cargo", "publish"]
+decision = "prompt"
+justification = "Publishing crates is irreversible"
+
+[[rules]]
+id = "prompt-curl"
+pattern = ["curl"]
+decision = "prompt"
+justification = "Network requests require confirmation"
+
+[[rules]]
+id = "prompt-wget"
+pattern = ["wget"]
+decision = "prompt"
+justification = "Network downloads require confirmation"
+
+[[rules]]
+id = "prompt-docker"
+pattern = ["docker"]
+decision = "prompt"
+justification = "Container operations require confirmation"
+
+[[rules]]
+id = "prompt-kill"
+pattern = ["kill"]
+decision = "prompt"
+justification = "Killing processes requires confirmation"
+
+[[rules]]
+id = "prompt-pkill"
+pattern = ["pkill"]
+decision = "prompt"
+justification = "Killing processes requires confirmation"
+
+# ── Network Rules ────────────────────────────────────────────────────
+
+[[network]]
+id = "allow-github"
+host = "github.com"
+protocol = "https"
+decision = "allow"
+
+[[network]]
+id = "allow-github-api"
+host = "api.github.com"
+protocol = "https"
+decision = "allow"
+
+[[network]]
+id = "allow-npm-registry"
+host = "registry.npmjs.org"
+protocol = "https"
+decision = "allow"
+
+[[network]]
+id = "allow-crates-io"
+host = "crates.io"
+protocol = "https"
+decision = "allow"
+
+[[network]]
+id = "allow-localhost"
+host = "localhost"
+decision = "allow"
+
+[[network]]
+id = "allow-127"
+host = "127.0.0.1"
+decision = "allow"
+
+# ── Validation Tests ─────────────────────────────────────────────────
+
+[[tests]]
+command = "ls -la"
+expect = "allow"
+
+[[tests]]
+command = "git status"
+expect = "allow"
+
+[[tests]]
+command = "cargo check"
+expect = "allow"
+
+[[tests]]
+command = "sudo rm -rf /"
+expect = "forbidden"
+
+[[tests]]
+command = "git push --force origin main"
+expect = "forbidden"
+
+[[tests]]
+command = "git push origin main"
+expect = "prompt"
+
+[[tests]]
+command = "rm -rf ./target"
+expect = "prompt"
+
+[[tests]]
+command = "npm publish"
+expect = "prompt"
+
+[[tests]]
+command = "curl http://example.com"
+expect = "prompt"

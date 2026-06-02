@@ -7,6 +7,7 @@ edition.workspace = true
 xiaolin-core = { path = "../xiaolin-core" }
 xiaolin-protocol = { path = "../xiaolin-protocol" }
 xiaolin-agent = { path = "../xiaolin-agent", features = ["browser"] }
+xiaolin-execpolicy = { path = "../xiaolin-execpolicy" }
 xiaolin-session-actor = { path = "../xiaolin-session-actor" }
 xiaolin-session = { path = "../xiaolin-session" }
 xiaolin-security = { path = "../xiaolin-security" }

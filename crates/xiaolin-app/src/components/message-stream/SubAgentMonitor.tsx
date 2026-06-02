@@ -75,7 +75,6 @@ function RunItem({ run, onCancel }: { run: SubAgentRunUI; onCancel: (id: string)
       style={{
         borderColor: isActive ? meta.color + "40" : "var(--separator)",
         background: isActive ? meta.color + "08" : "var(--bg-secondary)",
-        animation: "fade-in var(--duration-fast) var(--ease-out)",
       }}
     >
       <button

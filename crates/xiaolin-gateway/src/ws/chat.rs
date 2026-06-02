@@ -525,9 +525,12 @@ pub async fn spawn_chat(
 
         let after_turn_messages = setup.enriched_request.messages.clone();
 
-        let typed_data = Some(xiaolin_core::typed_turn_data::TypedTurnData::wrap(
+        let typed_data = Some(xiaolin_core::typed_turn_data::TypedTurnData::wrap_with_llm_override(
             setup.enriched_request.clone(),
             agent_config.clone(),
+            setup.llm_override.clone().map(|p| {
+                std::sync::Arc::new(p) as std::sync::Arc<dyn std::any::Any + Send + Sync>
+            }),
         ));
 
         let mut op_extra = serde_json::Map::new();

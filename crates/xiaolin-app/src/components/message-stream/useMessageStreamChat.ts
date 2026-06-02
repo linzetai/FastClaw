@@ -6,6 +6,25 @@ import type { AttachedFile } from "./StreamFooter";
 import * as transport from "../../lib/transport";
 import type { StreamSegment } from "./types";
 import { detachedStreams, MAX_DETACHED_STREAMS } from "./messageStreamRegistry";
+import { sendNotification, isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
+
+let _notifPermission: boolean | null = null;
+async function notifyIfBackground(title: string, body: string) {
+  if (document.hasFocus()) return;
+  if (_notifPermission === null) {
+    _notifPermission = await isPermissionGranted();
+    if (!_notifPermission) {
+      const perm = await requestPermission();
+      _notifPermission = perm === "granted";
+    }
+  }
+  if (_notifPermission) {
+    sendNotification({ title, body });
+    getCurrentWindow().setFocus().catch(() => {});
+  }
+}
 
 export function useMessageStreamChat({
   activeAgentId,
@@ -38,6 +57,7 @@ export function useMessageStreamChat({
   const subAgentToolDone = useAgentStore((s) => s.subAgentToolDone);
   const subAgentComplete = useAgentStore((s) => s.subAgentComplete);
   const enqueueMessage = useAgentStore((s) => s.enqueueMessage);
+  const addBriefMessage = useAgentStore((s) => s.addBriefMessage);
 
   const [streaming, setStreaming] = useState(false);
   const [streamSegments, setStreamSegments] = useState<StreamSegment[]>([]);
@@ -49,6 +69,14 @@ export function useMessageStreamChat({
     timeoutSecs: number;
     expiresAt: number;
     allowMultiple?: boolean;
+    approvalMeta?: {
+      actionType?: string;
+      command?: string;
+      path?: string;
+      content?: string;
+      diff?: string;
+      riskLevel?: "danger" | "caution" | "safe";
+    };
   } | null>(null);
   const streamAccRef = useRef("");
   const rafIdRef = useRef(0);
@@ -144,6 +172,8 @@ export function useMessageStreamChat({
             const action = d.action as Record<string, unknown> | undefined;
             const actionType = action?.action_type as string ?? "unknown";
             const decisions = (d.available_decisions as Array<{decision: string}>) ?? [];
+            const riskLevel = (d.risk_level as string) === "danger" ? "danger"
+              : (d.risk_level as string) === "safe" ? "safe" : "caution";
             setPendingQuestion({
               requestId: `approval:${approvalId}`,
               question: `${reason}\n操作类型: ${actionType}`,
@@ -158,6 +188,14 @@ export function useMessageStreamChat({
               timeoutSecs: 0,
               expiresAt: 0,
               allowMultiple: false,
+              approvalMeta: {
+                actionType,
+                command: action?.command as string | undefined,
+                path: action?.path as string | undefined,
+                content: action?.content as string | undefined,
+                diff: action?.diff as string | undefined,
+                riskLevel: riskLevel as "danger" | "caution" | "safe",
+              },
             });
           } else if (pi.type === "ask_question") {
             const d = pi.data;
@@ -522,6 +560,7 @@ export function useMessageStreamChat({
                   expiresAt: timeoutSecs > 0 ? Date.now() + timeoutSecs * 1000 : 0,
                   allowMultiple: d.allow_multiple as boolean | undefined,
                 });
+                notifyIfBackground("需要回答", (d.question as string).slice(0, 60));
               } else {
                 const ds = detachedStreams.get(capturedChatId);
                 if (ds) {
@@ -729,6 +768,9 @@ export function useMessageStreamChat({
                 const actionType = action?.action_type as string ?? "unknown";
                 const decisions = (d.available_decisions as Array<{decision: string}>) ?? [];
 
+                const riskLevel = (d.risk_level as string) === "danger" ? "danger"
+                  : (d.risk_level as string) === "safe" ? "safe" : "caution";
+
                 setPendingQuestion({
                   requestId: `approval:${approvalId}`,
                   question: `${reason}\n操作类型: ${actionType}`,
@@ -743,7 +785,16 @@ export function useMessageStreamChat({
                   timeoutSecs: 0,
                   expiresAt: 0,
                   allowMultiple: false,
+                  approvalMeta: {
+                    actionType,
+                    command: action?.command as string | undefined,
+                    path: action?.path as string | undefined,
+                    content: action?.content as string | undefined,
+                    diff: action?.diff as string | undefined,
+                    riskLevel: riskLevel as "danger" | "caution" | "safe",
+                  },
                 });
+                notifyIfBackground("需要审批", reason);
               } else {
                 const ds = detachedStreams.get(capturedChatId);
                 if (ds) {
@@ -763,6 +814,18 @@ export function useMessageStreamChat({
                 ds.pendingInteraction = undefined;
                 ds.needsAttention = false;
               }
+            }
+            break;
+          }
+          case "brief_message": {
+            const d = event.data;
+            if (d?.content && isActive()) {
+              addBriefMessage(capturedAgentId, capturedChatId, {
+                id: `brief-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                content: d.content as string,
+                mode: (d.mode as "normal" | "proactive") ?? "normal",
+                timestamp: Date.now(),
+              });
             }
             break;
           }
@@ -832,17 +895,16 @@ export function useMessageStreamChat({
       mentionInputRef.current?.clear();
 
       if (streamingRef.current) {
-        // 流式响应期间：加入队列
-        const imageDataUrls = attachedFilesRef.current
-          .filter(f => f.type.startsWith("image/"))
-          .map(f => ({ url: f.previewUrl ?? "", alt: f.name }));
-        enqueueMessage(activeAgentId, activeChat?.id ?? "", {
+        const sessionId = currentStreamChatRef.current;
+        if (sessionId) {
+          transport.chatSteer(sessionId, [{ role: "user", content: txt.trim() }]).catch(() => {});
+        }
+        addMessage(activeAgentId, {
+          role: "user",
           content: txt.trim(),
-          mentions: _mentions.map(m => ({ type: m.type, id: m.id, label: m.label })),
-          images: imageDataUrls,
-          status: "pending",
-          createdAt: new Date(),
-        });
+          timestamp: new Date(),
+          isSteer: true,
+        }, activeChat?.id);
         setAttachedFiles([]);
         return;
       }
@@ -857,6 +919,12 @@ export function useMessageStreamChat({
   );
 
   const stopStream = useCallback(() => {
+    const sessionId = currentStreamChatRef.current ?? undefined;
+
+    if (sessionId) {
+      transport.chatCancel(sessionId).catch(() => {});
+    }
+
     if (cleanupRef.current) {
       cleanupRef.current();
       cleanupRef.current = null;
@@ -881,7 +949,6 @@ export function useMessageStreamChat({
         toolCalls: savedTC.length > 0 ? savedTC : undefined,
       }, currentStreamChatRef.current ?? undefined);
     }
-    const sessionId = currentStreamChatRef.current ?? undefined;
     currentStreamChatRef.current = null;
     setStreaming(false);
     setPendingQuestion((prev) => {
@@ -913,6 +980,18 @@ export function useMessageStreamChat({
     }
     return ids;
   }, [streaming, detachedStreams]);
+
+  useEffect(() => {
+    getCurrentWindow().emit("tray-pending-update", pendingQuestion != null).catch(() => {});
+  }, [pendingQuestion]);
+
+  useEffect(() => {
+    const unlisten = listen<{ content: string }>("quick-action-send", (event) => {
+      const { content } = event.payload;
+      if (content) handleMentionSend(content, []);
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [handleMentionSend]);
 
   return {
     streaming,

@@ -27,7 +27,7 @@ A new WebSocket RPC method `execution.approve_plan` SHALL accept `{ sessionId, m
 - **THEN** Backend SHALL return `{ ok: true }` as a no-op
 
 ### Requirement: PlanApprovalCard renders execution mode choices
-When `PlanApprovalCard` detects `approval_pending` in the tool metadata, it SHALL render action buttons for the user to choose how to proceed.
+When `PlanApprovalCard` detects `approval_pending` in the tool metadata, it SHALL render action buttons for the user to choose how to proceed. The approval flow SHALL use a dedicated approval card style instead of the generic QuestionPanel, with options for "开始实现" (agent mode) and "继续规划" (plan mode), plus a "记住选择" toggle.
 
 #### Scenario: Approval card shows action buttons
 - **WHEN** `exit_plan_mode` result has `metadata.approval_pending = true`
@@ -40,6 +40,15 @@ When `PlanApprovalCard` detects `approval_pending` in the tool metadata, it SHAL
 #### Scenario: After approval, card shows completed state
 - **WHEN** User clicks "开始实现" and `execution.approve_plan` succeeds
 - **THEN** Card SHALL update to show "已切换到 Agent 模式" confirmation and disable buttons
+
+#### Scenario: Plan approval renders as ApprovalCard style
+- **WHEN** `exit_plan_mode` returns with `approval_pending: true`
+- **THEN** the PlanApprovalCard renders with the same visual language as the new ApprovalCard (risk-level border, action preview)
+- **THEN** the plan content preview is expandable inline
+
+#### Scenario: Plan approval supports remember choice
+- **WHEN** the user toggles "记住选择" and clicks "开始实现"
+- **THEN** subsequent plan exits in the same session auto-approve to agent mode
 
 ### Requirement: StepIndicator passes onImplement to PlanApprovalCard
 `StepIndicator` SHALL pass an `onImplement` callback to `PlanApprovalCard` that calls `execution.approve_plan` and updates the chat's execution mode in the store.

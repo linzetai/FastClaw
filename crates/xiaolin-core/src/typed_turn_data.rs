@@ -12,6 +12,9 @@ use crate::types::ChatRequest;
 pub struct TypedTurnData {
     pub enriched_request: ChatRequest,
     pub agent_config: AgentConfig,
+    /// Per-request LLM provider override (type-erased `Arc<dyn LlmProvider>`).
+    /// Used when the user pins a model that requires a different provider endpoint.
+    pub llm_override: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl TypedTurnData {
@@ -19,6 +22,19 @@ impl TypedTurnData {
         Arc::new(Self {
             enriched_request: request,
             agent_config: config,
+            llm_override: None,
+        })
+    }
+
+    pub fn wrap_with_llm_override(
+        request: ChatRequest,
+        config: AgentConfig,
+        llm_override: Option<Arc<dyn Any + Send + Sync>>,
+    ) -> Arc<dyn Any + Send + Sync> {
+        Arc::new(Self {
+            enriched_request: request,
+            agent_config: config,
+            llm_override,
         })
     }
 

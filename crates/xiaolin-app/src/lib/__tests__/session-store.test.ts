@@ -146,9 +146,9 @@ describe("session store integration", () => {
         (c) => c.id === chatId,
       )!;
       expect(chat.stream).toHaveLength(3);
-      expect(chat.stream[0].data.role).toBe("user");
-      expect(chat.stream[1].data.role).toBe("assistant");
-      expect(chat.stream[2].data.role).toBe("user");
+      expect(chat.stream[0].type === "message" && chat.stream[0].data.role).toBe("user");
+      expect(chat.stream[1].type === "message" && chat.stream[1].data.role).toBe("assistant");
+      expect(chat.stream[2].type === "message" && chat.stream[2].data.role).toBe("user");
       expect(chat.messageCount).toBe(3);
     });
 
@@ -184,8 +184,11 @@ describe("session store integration", () => {
       const chat = store.getState().agentChats[agentId].chatList.find(
         (c) => c.id === chatId,
       )!;
-      expect(chat.stream[0].data.toolCalls).toHaveLength(1);
-      expect(chat.stream[0].data.toolCalls![0].name).toBe("file_read");
+      const item = chat.stream[0];
+      if (item.type === "message") {
+        expect(item.data.toolCalls).toHaveLength(1);
+        expect(item.data.toolCalls![0].name).toBe("file_read");
+      }
     });
   });
 
@@ -230,9 +233,11 @@ describe("session store integration", () => {
         (c) => c.id === chatId,
       )!;
       expect(chat.stream).toHaveLength(50);
-      // Verify alternating roles
       for (let i = 0; i < 50; i++) {
-        expect(chat.stream[i].data.role).toBe(i % 2 === 0 ? "user" : "assistant");
+        const si = chat.stream[i];
+        if (si.type === "message") {
+          expect(si.data.role).toBe(i % 2 === 0 ? "user" : "assistant");
+        }
       }
     });
 

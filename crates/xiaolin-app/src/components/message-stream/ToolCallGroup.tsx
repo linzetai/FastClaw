@@ -239,10 +239,7 @@ export const ToolCallGroupCard = memo(function ToolCallGroupCard({
       </button>
 
       {!expanded && hasErrors && (
-        <div
-          className="px-3 pb-2"
-          style={{ animation: "fade-in var(--duration-fast) var(--ease-out)" }}
-        >
+        <div className="px-3 pb-2">
           {tools
             .filter((tc) => tc.status === "error")
             .map((tc) => (
@@ -256,7 +253,6 @@ export const ToolCallGroupCard = memo(function ToolCallGroupCard({
           className="px-3 pb-2"
           style={{
             borderTop: "0.5px solid var(--separator)",
-            animation: "fade-in var(--duration-fast) var(--ease-out)",
           }}
         >
           {tools.map((tc) => (

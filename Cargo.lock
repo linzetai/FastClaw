@@ -9935,6 +9935,7 @@ dependencies = [
  "xiaolin-core",
  "xiaolin-cron",
  "xiaolin-evolution",
+ "xiaolin-execpolicy",
  "xiaolin-feishu",
  "xiaolin-gateway",
  "xiaolin-mcp",

@@ -103,7 +103,7 @@ function Loading({ error }: { error: string | null }) {
   }
 
   return (
-    <div className="flex h-full flex-col" style={{ background: "var(--bg-primary)", animation: "fade-in var(--duration-slow) var(--ease-out)" }}>
+    <div className="flex h-full flex-col" style={{ background: "var(--bg-primary)" }}>
       <div className="flex h-[var(--titlebar-h)] shrink-0 items-center gap-2 px-4" style={{ background: "var(--bg-sidebar)", borderBottom: "0.5px solid var(--separator)" }}>
         <SkeletonPulse className="h-5 w-5" style={{ borderRadius: "50%" }} />
         <SkeletonPulse className="h-3 w-16" />
@@ -296,7 +296,6 @@ export function AppLayout() {
                     style={{
                       background: "rgba(var(--bg-primary-rgb, 0, 0, 0), 0.85)",
                       backdropFilter: "blur(8px)",
-                      animation: "fade-in var(--duration-slow)",
                     }}
                   >
                     <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>

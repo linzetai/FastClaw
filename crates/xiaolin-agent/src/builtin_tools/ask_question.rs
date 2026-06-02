@@ -7,9 +7,12 @@ use xiaolin_core::tool::{Tool, ToolParameterSchema, ToolResult};
 use xiaolin_protocol::{AgentEvent, AskQuestionOption, TurnId};
 use xiaolin_session_actor::InteractionHandle;
 
+pub type SteerInbox = std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<xiaolin_session_actor::turn::SteerMessage>>>;
+
 tokio::task_local! {
     pub(crate) static ASK_QUESTION_STREAM_KEY: String;
     pub(crate) static TASK_INTERACTION_HANDLE: InteractionHandle;
+    pub static STEER_INBOX: SteerInbox;
 }
 
 pub async fn with_stream_context<F, T>(stream_key: String, fut: F) -> T
@@ -27,6 +30,15 @@ where
     F: std::future::Future<Output = T>,
 {
     TASK_INTERACTION_HANDLE.scope(handle, fut).await
+}
+
+/// Run a future with a steer message inbox available via task-local.
+/// The agentic loop drains this inbox at each iteration to inject mid-turn user messages.
+pub async fn with_steer_inbox<F, T>(inbox: SteerInbox, fut: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    STEER_INBOX.scope(inbox, fut).await
 }
 
 type EventTxMap = Arc<DashMap<String, tokio::sync::mpsc::Sender<AgentEvent>>>;

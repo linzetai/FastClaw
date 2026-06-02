@@ -91,6 +91,85 @@ struct BuildPhase5 {
 pub(crate) struct StateBuilder;
 
 impl StateBuilder {
+    /// Builtin default exec-policy embedded at compile time from `config/exec-policy.toml`.
+    const BUILTIN_EXEC_POLICY: &'static str =
+        include_str!("../../../../config/exec-policy.toml");
+
+    /// Load execution policy from layered sources (project > user > builtin default).
+    fn load_exec_policy(engine: &mut xiaolin_execpolicy::PolicyEngine, config: &XiaoLinConfig) -> bool {
+        let mut loaded = false;
+
+        // User-specified policy path from config
+        if let Some(ref path_str) = config.security.exec_policy_path {
+            let path = std::path::Path::new(path_str);
+            if path.exists() {
+                match engine.load_file(path, "user") {
+                    Ok(()) => {
+                        tracing::info!(path = %path.display(), "loaded user exec-policy");
+                        loaded = true;
+                    }
+                    Err(e) => tracing::warn!(path = %path.display(), error = %e, "failed to load user exec-policy"),
+                }
+                return loaded;
+            }
+        }
+
+        // Project-level: .xiaolin/exec-policy.toml (relative to git root)
+        if let Ok(cwd) = std::env::current_dir() {
+            let mut dir = cwd.as_path();
+            loop {
+                if dir.join(".git").exists() {
+                    let project_policy = dir.join(".xiaolin").join("exec-policy.toml");
+                    if project_policy.exists() {
+                        match engine.load_file(&project_policy, "project") {
+                            Ok(()) => {
+                                tracing::info!(path = %project_policy.display(), "loaded project exec-policy");
+                                loaded = true;
+                            }
+                            Err(e) => tracing::warn!(path = %project_policy.display(), error = %e, "failed to load project exec-policy"),
+                        }
+                    }
+                    break;
+                }
+                match dir.parent() {
+                    Some(parent) if parent != dir => dir = parent,
+                    _ => break,
+                }
+            }
+        }
+
+        // User-level: ~/.xiaolin/exec-policy.toml
+        if let Some(home) = dirs::home_dir() {
+            let user_policy = home.join(".xiaolin").join("exec-policy.toml");
+            if user_policy.exists() {
+                let layer_name = if loaded { "user" } else { "system" };
+                match engine.load_file(&user_policy, layer_name) {
+                    Ok(()) => {
+                        tracing::info!(path = %user_policy.display(), "loaded user-level exec-policy");
+                        loaded = true;
+                    }
+                    Err(e) => tracing::warn!(path = %user_policy.display(), error = %e, "failed to load user-level exec-policy"),
+                }
+            }
+        }
+
+        // Builtin default: embedded at compile time (always available)
+        if !loaded {
+            match engine.load_str(Self::BUILTIN_EXEC_POLICY, "system") {
+                Ok(()) => {
+                    tracing::info!("loaded builtin default exec-policy (embedded)");
+                    loaded = true;
+                }
+                Err(e) => tracing::warn!(error = %e, "failed to parse embedded exec-policy"),
+            }
+        }
+
+        if loaded {
+            tracing::info!(rules = engine.rule_count(), "exec-policy engine initialized");
+        }
+        loaded
+    }
+
     /// Phase 1: config paths, agent list, unified SQLite pool, session store.
     async fn phase1_config_session(config: &XiaoLinConfig) -> anyhow::Result<BuildPhase1> {
         xiaolin_core::paths::ensure_state_dir_from(Some(&config.paths))?;
@@ -404,7 +483,15 @@ impl StateBuilder {
 
         let stream_event_tx = Arc::new(DashMap::new());
         let ask_question_pending = Arc::new(DashMap::new());
-        let tool_orchestrator = Arc::new(xiaolin_agent::ToolOrchestrator::new());
+        let tool_orchestrator = {
+            let mut policy_engine = xiaolin_execpolicy::PolicyEngine::new();
+            let policy_loaded = Self::load_exec_policy(&mut policy_engine, config);
+            if policy_loaded {
+                Arc::new(xiaolin_agent::ToolOrchestrator::with_policy(policy_engine))
+            } else {
+                Arc::new(xiaolin_agent::ToolOrchestrator::new())
+            }
+        };
         p3.tool_registry.register(Arc::new(
             xiaolin_agent::builtin_tools::AskQuestionTool::new(
                 stream_event_tx.clone(),
@@ -416,7 +503,11 @@ impl StateBuilder {
                 stream_event_tx.clone(),
                 ask_question_pending.clone(),
             )));
-        tracing::info!("registered ask_question + confirm tools");
+        xiaolin_agent::builtin_tools::register_brief_tool(
+            &p3.tool_registry,
+            stream_event_tx.clone(),
+        );
+        tracing::info!("registered ask_question + confirm + send_user_message tools");
 
         let session_modes = xiaolin_agent::builtin_tools::SessionModeRegistry::new();
         // Plan tools are registered with a default mode state; at runtime the

@@ -311,6 +311,10 @@ pub struct BehaviorConfig {
     /// LLM costs and stops execution when the limit is exceeded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget_limit_usd: Option<f64>,
+    /// Approval strategy override. When set to "auto_approve", tools execute
+    /// without confirmation. Default (None) uses Interactive mode with ExecPolicy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_strategy: Option<String>,
 }
 
 /// Policy governing sub-agent delegation for an agent.
@@ -463,6 +467,7 @@ impl Default for BehaviorConfig {
             streaming_tool_execution: false,
             enable_smart_compression: true,
             budget_limit_usd: None,
+            approval_strategy: None,
         }
     }
 }
