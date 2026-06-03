@@ -14,6 +14,7 @@ export const FONT_SIZE_MAP: Record<FontSize, number> = {
 export interface DisplayConfig {
   toolCallGroupThreshold: number;
   fontSize: FontSize;
+  showLineNumbers: boolean;
 }
 
 export interface ConfigStoreState {
@@ -28,6 +29,7 @@ export interface ConfigStoreState {
 const DEFAULT_DISPLAY: DisplayConfig = {
   toolCallGroupThreshold: 3,
   fontSize: "standard",
+  showLineNumbers: true,
 };
 
 function applyFontSize(size: FontSize) {

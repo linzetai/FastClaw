@@ -1,11 +1,12 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
-  Search, Plus, X, PanelLeftClose, PanelLeftOpen, MessageCircle,
+  Search, Plus, X, PanelLeftClose, MessageCircle,
   MoreHorizontal, Trash2, Pencil, FolderOpen,
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { ICON, BTN_ICON } from "../../lib/ui-tokens";
 import { useChatMetaStore, useStreamStore } from "../../lib/stores";
+import { useUIStore } from "../../lib/stores";
 import { useGatewayStore } from "../../lib/store";
 import { fuzzyMatch } from "../../lib/fuzzy";
 import type { ChatMeta, StreamItem } from "../../lib/stores/types";
@@ -81,6 +82,61 @@ function ChatContextMenu({
       })}
     </div>,
     document.body,
+  );
+}
+
+function ResizeHandle() {
+  const setSidebarWidth = useUIStore((s) => s.setSidebarWidth);
+  const resetSidebarWidth = useUIStore((s) => s.resetSidebarWidth);
+  const [dragging, setDragging] = useState(false);
+  const [hovered, setHovered] = useState(false);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    setDragging(true);
+  }, []);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const handleMove = (e: PointerEvent) => {
+      const navRailW = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--nav-rail-w")) || 54;
+      setSidebarWidth(e.clientX - navRailW);
+    };
+    const handleUp = () => setDragging(false);
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [dragging, setSidebarWidth]);
+
+  const visible = hovered || dragging;
+
+  return (
+    <div
+      className="absolute right-0 top-0 bottom-0 z-10"
+      style={{ width: 8, cursor: "col-resize" }}
+      onPointerDown={handlePointerDown}
+      onDoubleClick={resetSidebarWidth}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div
+        className="absolute right-0 top-0 bottom-0 transition-opacity duration-150"
+        style={{
+          width: 2,
+          background: dragging ? "var(--tint)" : "var(--fill-quaternary)",
+          opacity: visible ? (dragging ? 1 : 0.5) : 0,
+        }}
+      />
+    </div>
   );
 }
 
@@ -176,103 +232,76 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
     return groups;
   }, [filteredChats, extractProjectName]);
 
+  const sidebarWidth = useUIStore((s) => s.sidebarWidth);
+
   return (
     <aside
-      className="flex shrink-0 flex-col"
+      className="relative flex shrink-0 flex-col"
       style={{
-        width: collapsed ? "0px" : "240px",
+        width: collapsed ? 0 : sidebarWidth,
         background: "var(--bg-sidebar)",
         borderRight: collapsed ? "none" : "0.5px solid var(--separator)",
         transition: "width var(--duration-slow) var(--ease-in-out)",
         overflow: "hidden",
-        opacity: collapsed ? 0 : 1,
         pointerEvents: collapsed ? "none" : "auto",
       }}
       tabIndex={collapsed ? -1 : 0}
     >
-      <div className={`flex flex-col gap-2 pb-2 pt-2 ${collapsed ? "items-center px-2" : "px-3"}`}>
-        {collapsed ? (
+      {!collapsed && <ResizeHandle />}
+      <div className="flex flex-col gap-2 px-3 pb-2 pt-2">
+        <div className="flex items-center gap-1.5">
+          <div
+            className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg px-3"
+            style={{
+              background: "var(--bg-hover)",
+              border: "0.5px solid transparent",
+            }}
+          >
+            <Search {...ICON.sm} style={{ color: "var(--fill-tertiary)", flexShrink: 0 }} />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="搜索会话"
+              className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-[var(--fill-quaternary)]"
+              style={{ color: "var(--fill-primary)" }}
+            />
+            {query && (
+              <button
+                onClick={() => setQuery("")}
+                className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-150 hover:bg-[var(--bg-active)]"
+                style={{ color: "var(--fill-tertiary)" }}
+              >
+                <X {...ICON.sm} />
+              </button>
+            )}
+          </div>
           <button
             onClick={onToggleCollapse}
-            className={BTN_ICON.lg}
+            className={`${BTN_ICON.lg} shrink-0`}
             style={{ color: "var(--fill-tertiary)" }}
-            title="展开侧边栏"
+            title="折叠侧边栏"
           >
-            <PanelLeftOpen size={20} strokeWidth={1.2} />
+            <PanelLeftClose size={20} strokeWidth={1.2} />
           </button>
-        ) : (
-          <>
-            <div className="flex items-center gap-1.5">
-              <div
-                className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg px-3"
-                style={{
-                  background: "var(--bg-hover)",
-                  border: "0.5px solid transparent",
-                }}
-              >
-                <Search {...ICON.sm} style={{ color: "var(--fill-tertiary)", flexShrink: 0 }} />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="搜索会话"
-                  className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-[var(--fill-quaternary)]"
-                  style={{ color: "var(--fill-primary)" }}
-                />
-                {query && (
-                  <button
-                    onClick={() => setQuery("")}
-                    className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-150 hover:bg-[var(--bg-active)]"
-                    style={{ color: "var(--fill-tertiary)" }}
-                  >
-                    <X {...ICON.sm} />
-                  </button>
-                )}
-              </div>
-              <button
-                onClick={onToggleCollapse}
-                className={`${BTN_ICON.lg} shrink-0`}
-                style={{ color: "var(--fill-tertiary)" }}
-                title="折叠侧边栏"
-              >
-                <PanelLeftClose size={20} strokeWidth={1.2} />
-              </button>
-            </div>
-            <button
-              onClick={handleNewChat}
-              disabled={!gatewayReady}
-              className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg py-2 text-[12px] font-medium transition-colors duration-150 hover:bg-[var(--bg-hover)] disabled:opacity-50"
-              style={{
-                color: "var(--fill-tertiary)",
-                border: "0.5px dashed var(--separator-opaque)",
-              }}
-            >
-              <Plus {...ICON.sm} />
-              新建对话
-            </button>
-          </>
-        )}
+        </div>
+        <button
+          onClick={handleNewChat}
+          disabled={!gatewayReady}
+          className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg py-2 text-[12px] font-medium transition-colors duration-150 hover:bg-[var(--bg-hover)] disabled:opacity-50"
+          style={{
+            color: "var(--fill-tertiary)",
+            border: "0.5px dashed var(--separator-opaque)",
+          }}
+        >
+          <Plus {...ICON.sm} />
+          新建对话
+        </button>
       </div>
 
-      <div className={`flex-1 overflow-x-hidden overflow-y-auto py-1 ${collapsed ? "flex flex-col items-center px-2" : "px-1.5"}`}>
-        {collapsed ? (
-          chatList.filter((c) => c.open).map((chat, i) => (
-            <button
-              key={chat.id}
-              onClick={() => handleSelectChat(chat.id)}
-              className="group relative mx-auto mb-1 flex h-9 w-9 items-center justify-center rounded-[var(--radius-xs)] hover:bg-[var(--bg-hover)]"
-              style={{
-                background: activeChatId === chat.id ? "var(--bg-active)" : "transparent",
-                animation: `slide-up var(--duration-slow) var(--ease-out) ${i * 0.04}s backwards`,
-              }}
-              title={chat.title || "新会话"}
-            >
-              <MessageCircle {...ICON.md} style={{ color: activeChatId === chat.id ? "var(--tint)" : "var(--fill-quaternary)" }} />
-            </button>
-          ))
-        ) : (
-          Object.entries(groupedChats).map(([label, { workDir: groupWorkDir, chats }]) => (
+      <div className="flex-1 overflow-x-hidden overflow-y-auto px-1.5 py-1">
+        {Object.entries(groupedChats).map(([label, { workDir: groupWorkDir, chats }]) => (
             <div key={label} className="mb-1">
               <div
                 className="group/grp flex items-center gap-1.5 px-2.5 pb-1 pt-2 text-[11px] font-medium"
@@ -366,9 +395,8 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
                 );
               })}
             </div>
-          ))
-        )}
-        {!collapsed && filteredChats.length === 0 && query && (
+          ))}
+        {filteredChats.length === 0 && query && (
           <div className="px-3 py-4 text-center text-[12px]" style={{ color: "var(--fill-quaternary)" }}>
             未找到匹配的会话
           </div>

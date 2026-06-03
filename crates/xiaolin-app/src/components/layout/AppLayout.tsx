@@ -1,11 +1,9 @@
-import { useState, useEffect, useCallback, lazy, Suspense } from "react";
-import { Search, PanelLeftOpen } from "lucide-react";
-import { BTN_ICON } from "../../lib/ui-tokens";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { useGatewayStore } from "../../lib/store";
 import { useUIStore } from "../../lib/stores";
+import type { LayoutTier } from "../../lib/stores/ui-store";
 import { SessionList } from "../session-list/SessionList";
 import { MessageStream } from "../message-stream/MessageStream";
-import { SubAgentMonitor } from "../message-stream/SubAgentMonitor";
 import { TitleBar } from "./TitleBar";
 import { NavRail } from "./NavRail";
 import { ClawIcon } from "./ClawIcon";
@@ -130,60 +128,6 @@ function Loading({ error }: { error: string | null }) {
   );
 }
 
-function ContentHeader() {
-  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
-  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-
-  const handleSearchClick = useCallback(() => {
-    window.dispatchEvent(new CustomEvent("xiaolin:toggle-search"));
-  }, []);
-
-  return (
-    <div
-      className="flex shrink-0 items-center justify-between px-4"
-      style={{
-        height: 44,
-        borderBottom: "0.5px solid var(--separator)",
-        background: "var(--bg-primary)",
-      }}
-    >
-      <div className="flex items-center gap-1">
-        {sidebarCollapsed && (
-          <button
-            onClick={toggleSidebar}
-            className={BTN_ICON.sm}
-            style={{ color: "var(--fill-tertiary)" }}
-            title="展开侧边栏"
-          >
-            <PanelLeftOpen size={18} strokeWidth={1.2} />
-          </button>
-        )}
-        <span
-          className="relative px-3 py-2 text-[13px] font-semibold"
-          style={{ color: "var(--fill-primary)" }}
-        >
-          对话
-          <span
-            className="absolute inset-x-3 bottom-0 h-[2px] rounded-full"
-            style={{ background: "var(--tint)" }}
-          />
-        </span>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <button
-          onClick={handleSearchClick}
-          className={BTN_ICON.sm}
-          style={{ color: "var(--fill-quaternary)" }}
-          title="搜索"
-        >
-          <Search size={16} strokeWidth={1} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function AppLayout() {
   const mode = useGatewayStore((s) => s.mode);
   const error = useGatewayStore((s) => s.error);
@@ -192,6 +136,23 @@ export function AppLayout() {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const activeNav = useUIStore((s) => s.activeNav);
+  const setLayoutTier = useUIStore((s) => s.setLayoutTier);
+  const layoutTier = useUIStore((s) => s.layoutTier);
+  const outerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = outerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      let tier: LayoutTier = "standard";
+      if (w < 700) tier = "compact";
+      else if (w > 1100) tier = "wide";
+      setLayoutTier(tier);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [setLayoutTier]);
 
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
@@ -277,19 +238,13 @@ export function AppLayout() {
       <>
         <TitleBar />
         <UpdateBanner />
-        <div className="flex min-h-0 flex-1">
-          <NavRail />
+        <div ref={outerRef} className="flex min-h-0 flex-1">
+          {layoutTier !== "compact" && <NavRail />}
           {showAgentPane ? (
             <>
-              <SessionList collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} />
+              <SessionList collapsed={sidebarCollapsed || layoutTier === "compact"} onToggleCollapse={toggleSidebar} />
               <main className="relative flex min-w-0 flex-1 flex-col">
-                <ContentHeader />
-                <div className="flex min-h-0 flex-1">
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <MessageStream />
-                  </div>
-                  <SubAgentMonitor />
-                </div>
+                <MessageStream />
                 {!connected && mode !== "browser" && (
                   <div
                     className="absolute inset-x-0 top-0 z-20 flex items-center justify-center py-1.5"
@@ -328,7 +283,7 @@ export function AppLayout() {
   }
 
   return (
-    <div className={`app-shell relative flex h-full flex-col${isMaximized ? " maximized" : ""}`}>
+    <div className={`app-shell relative flex h-full flex-col${isMaximized ? " maximized" : ""}`} data-layout-tier={layoutTier}>
       {!isMaximized && <WindowResizeHandles />}
       {content}
     </div>

@@ -75,19 +75,16 @@ describe("ChatTabsBar", () => {
     });
   });
 
-  describe("dropdown", () => {
-    it("opens dropdown showing all chats when trigger clicked with multiple tabs", () => {
+  describe("tab interaction", () => {
+    it("renders all open tabs in horizontal bar", () => {
       renderTabs();
-      const trigger = screen.getByText("Chat One").closest("button")!;
-      fireEvent.click(trigger);
+      expect(screen.getByText("Chat One")).toBeInTheDocument();
       expect(screen.getByText("Chat Two")).toBeInTheDocument();
       expect(screen.getByText("Chat Three")).toBeInTheDocument();
     });
 
-    it("calls onSelect when clicking a chat in dropdown", () => {
+    it("calls onSelect when clicking a non-active tab", () => {
       const { props } = renderTabs();
-      const trigger = screen.getByText("Chat One").closest("button")!;
-      fireEvent.click(trigger);
       fireEvent.click(screen.getByText("Chat Two"));
       expect(props.onSelect).toHaveBeenCalledWith("c2");
     });

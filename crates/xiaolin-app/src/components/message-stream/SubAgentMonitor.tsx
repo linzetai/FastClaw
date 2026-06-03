@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
-  Bot, Search, Terminal, Globe, Wrench, X, ChevronDown, ChevronRight,
+  Bot, Search, Terminal, Globe, Wrench, X, ChevronDown, ChevronRight, ChevronUp,
   Clock, Zap, Copy, Square,
 } from "lucide-react";
 import { useActiveSubAgentRuns } from "../../lib/stores";
@@ -136,6 +136,11 @@ function RunItem({ run, onCancel }: { run: SubAgentRunUI; onCancel: (id: string)
   );
 }
 
+const MIN_DRAWER_H = 120;
+const MAX_DRAWER_H = 400;
+const DEFAULT_DRAWER_H = 240;
+const SUMMARY_H = 36;
+
 export function SubAgentMonitor() {
   const subAgentRuns = useActiveSubAgentRuns();
 
@@ -154,17 +159,21 @@ export function SubAgentMonitor() {
   );
 
   const [visible, setVisible] = useState(false);
-  const [manualHide, setManualHide] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [drawerHeight, setDrawerHeight] = useState(DEFAULT_DRAWER_H);
+  const [dragging, setDragging] = useState(false);
+  const prevActiveCount = useRef(activeCount);
 
   useEffect(() => {
-    if (activeCount > 0) {
+    if (activeCount > 0 && !visible) {
       setVisible(true);
-      setManualHide(false);
-    } else if (visible && !manualHide) {
-      const timer = setTimeout(() => setVisible(false), 3000);
+      setCollapsed(false);
+    } else if (activeCount === 0 && prevActiveCount.current > 0) {
+      const timer = setTimeout(() => setCollapsed(true), 3000);
       return () => clearTimeout(timer);
     }
-  }, [activeCount, visible, manualHide]);
+    prevActiveCount.current = activeCount;
+  }, [activeCount, visible]);
 
   const handleCancel = useCallback(async (runId: string) => {
     try {
@@ -174,53 +183,107 @@ export function SubAgentMonitor() {
     }
   }, []);
 
+  const handleResizePointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    setDragging(true);
+  }, []);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const startY = { current: 0 };
+    const startH = { current: drawerHeight };
+    const handleMove = (e: PointerEvent) => {
+      if (startY.current === 0) {
+        startY.current = e.clientY;
+        startH.current = drawerHeight;
+        return;
+      }
+      const delta = startY.current - e.clientY;
+      setDrawerHeight(Math.min(MAX_DRAWER_H, Math.max(MIN_DRAWER_H, startH.current + delta)));
+    };
+    const handleUp = () => setDragging(false);
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [dragging, drawerHeight]);
+
   if (!visible || runs.length === 0) return null;
+
+  const completedCount = runs.filter((r) => r.status === "completed").length;
+  const summaryText = activeCount > 0
+    ? `${activeCount} 个子智能体运行中`
+    : `${completedCount} 个子智能体已完成`;
 
   return (
     <div
-      className="flex h-full shrink-0 flex-col border-l"
+      className="absolute inset-x-0 bottom-0 z-10 flex flex-col border-t"
       style={{
-        width: 280,
+        height: collapsed ? SUMMARY_H : drawerHeight,
         borderColor: "var(--separator)",
         background: "var(--bg-primary)",
-        animation: "slide-in-right var(--duration-normal) var(--ease-out)",
-        overflow: "hidden",
+        animation: "slide-up var(--duration-normal) var(--ease-out)",
+        transition: collapsed ? "height var(--duration-normal) var(--ease-in-out)" : undefined,
       }}
     >
-      {/* Header */}
+      {!collapsed && (
+        <div
+          className="absolute -top-1 inset-x-0 z-10"
+          style={{ height: 8, cursor: "row-resize" }}
+          onPointerDown={handleResizePointerDown}
+        >
+          <div className="mx-auto mt-1 h-1 w-8 rounded-full" style={{ background: "var(--fill-quaternary)", opacity: 0.4 }} />
+        </div>
+      )}
+
       <div
-        className="flex shrink-0 items-center justify-between px-3 py-2"
-        style={{ borderBottom: "0.5px solid var(--separator)" }}
+        className="flex shrink-0 items-center justify-between px-3"
+        style={{ height: SUMMARY_H, cursor: "pointer" }}
+        onClick={() => setCollapsed(!collapsed)}
       >
         <div className="flex items-center gap-1.5">
           <Bot size={14} style={{ color: "var(--tint)" }} />
           <span className="text-[12px] font-semibold" style={{ color: "var(--fill-primary)" }}>
             子智能体
           </span>
-          {activeCount > 0 && (
-            <span
-              className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-              style={{ background: "rgba(0, 122, 255, 0.12)", color: "var(--tint)" }}
-            >
-              {activeCount} 运行中
-            </span>
-          )}
+          <span
+            className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+            style={{
+              background: activeCount > 0 ? "rgba(0, 122, 255, 0.12)" : "rgba(52, 199, 89, 0.12)",
+              color: activeCount > 0 ? "var(--tint)" : "#34c759",
+            }}
+          >
+            {summaryText}
+          </span>
         </div>
-        <button
-          onClick={() => { setManualHide(true); setVisible(false); }}
-          className="rounded p-0.5 transition-colors hover:bg-[var(--bg-tertiary)]"
-          title="隐藏面板"
-        >
-          <X size={14} style={{ color: "var(--fill-quaternary)" }} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button className="rounded p-0.5" style={{ color: "var(--fill-quaternary)" }}>
+            {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setVisible(false); }}
+            className="rounded p-0.5 transition-colors hover:bg-[var(--bg-tertiary)]"
+            title="隐藏面板"
+          >
+            <X size={14} style={{ color: "var(--fill-quaternary)" }} />
+          </button>
+        </div>
       </div>
 
-      {/* Run list */}
-      <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto p-2">
-        {runs.map((run) => (
-          <RunItem key={run.runId} run={run} onCancel={handleCancel} />
-        ))}
-      </div>
+      {!collapsed && (
+        <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-3 pb-2">
+          {runs.map((run) => (
+            <RunItem key={run.runId} run={run} onCancel={handleCancel} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

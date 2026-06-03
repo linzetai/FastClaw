@@ -228,7 +228,7 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
           {groupedSegments.map((group) => {
             if (group.type === "text" && group.segment.content) {
               return (
-                <div key={group.segment.id} className="pb-1" style={{ maxWidth: "720px" }}>
+                <div key={group.segment.id} className="pb-1" style={{ maxWidth: "var(--content-max-w)" }}>
                   <Suspense fallback={<div className="animate-pulse rounded py-1" style={{ background: "var(--bg-tertiary)", height: 16 }} />}>
                     <MarkdownContent content={group.segment.content} />
                   </Suspense>
@@ -264,7 +264,7 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
               })}
             </div>
           )}
-          <div style={{ maxWidth: "720px" }}>
+          <div style={{ maxWidth: "var(--content-max-w)" }}>
             <Suspense fallback={<div className="animate-pulse rounded py-2" style={{ background: "var(--bg-tertiary)", height: 20 }} />}>
               <MarkdownContent content={msg.content} />
             </Suspense>
@@ -641,7 +641,7 @@ export const MessageRendererRow = memo(function MessageRendererRow({
           if (group.type === "text" && group.segment.content) {
             const isLastSegment = gi === grouped.length - 1 && lastIsText;
             return (
-              <div key={group.segment.id} className="pb-1" style={{ maxWidth: "720px" }}>
+              <div key={group.segment.id} className="pb-1" style={{ maxWidth: "var(--content-max-w)" }}>
                 <StreamingMarkdown content={group.segment.content} />
                 {isLastSegment && (
                   <span

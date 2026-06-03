@@ -108,6 +108,7 @@
   --user-input-label-color: var(--fill-quaternary);
 
   --nav-rail-w: 54px;
+  --content-max-w: 720px;
 
   /* Tool category colors (semantic) */
   --tc-shell-bg: #EDE5F4;   --tc-shell-fg: #6D44A0;
@@ -136,6 +137,11 @@
   /* Code */
   --code-font-size: 11px;
 }
+
+/* Responsive layout tiers — driven by data-layout-tier attribute set via ResizeObserver */
+[data-layout-tier="compact"] { --content-max-w: calc(100% - 32px); }
+[data-layout-tier="standard"] { --content-max-w: 720px; }
+[data-layout-tier="wide"] { --content-max-w: 860px; }
 
 /* Non-macOS: use opaque chrome to avoid transparency-induced contrast loss.
    WebView2 (Windows) and WebKitGTK (Linux) lack native vibrancy/blur,
@@ -729,6 +735,30 @@
     tab-size: 2;
     font-variant-ligatures: none;
     color: var(--fill-primary);
+  }
+
+  /* Code line numbers */
+  .md-code-block pre code.has-line-numbers {
+    padding-left: calc(var(--gutter-w, 32px) + 1.1em);
+  }
+  .md-code-block pre code.has-line-numbers .code-line {
+    position: relative;
+    display: inline;
+  }
+  .md-code-block pre code.has-line-numbers .code-line::before {
+    counter-increment: line-number;
+    content: counter(line-number);
+    position: absolute;
+    left: calc(-1 * var(--gutter-w, 32px) - 0.5em);
+    width: var(--gutter-w, 32px);
+    text-align: right;
+    padding-right: 0.75em;
+    color: var(--fill-quaternary);
+    user-select: none;
+    pointer-events: none;
+    font-size: 12px;
+    line-height: inherit;
+    opacity: 0.6;
   }
 
   .markdown-body blockquote {

@@ -167,6 +167,9 @@ function DisplaySection() {
             ))}
           </div>
         </SettingRow>
+        <SettingRow label="代码行号" description="在代码块中显示行号">
+          <Toggle enabled={display.showLineNumbers} onChange={() => setDisplayConfig({ showLineNumbers: !display.showLineNumbers })} />
+        </SettingRow>
         <SettingRow label="工具调用折叠阈值" description="连续工具调用达到此数量时自动分组折叠" isLast>
           <div className="flex rounded-[var(--radius-xs)] p-0.5" style={{ background: "var(--bg-tertiary)" }}>
             {THRESHOLD_OPTIONS.map((opt) => (

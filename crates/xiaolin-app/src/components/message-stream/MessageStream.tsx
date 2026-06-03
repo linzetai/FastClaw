@@ -15,6 +15,8 @@ import type { MentionInputHandle, MentionOption } from "./MentionInput";
 import { MessageRendererRow } from "./MessageRenderer";
 
 import { StreamFooter, type AttachedFile } from "./StreamFooter";
+import { ChatTabsBar } from "./ChatTabsBar";
+import { SubAgentMonitor } from "./SubAgentMonitor";
 import { PlanPanel } from "./PlanPanel";
 import { useStreamScroll, STREAM_PAGE_SIZE } from "./useStreamScroll";
 import { useMessageStreamChat } from "./useMessageStreamChat";
@@ -120,8 +122,8 @@ export function MessageStream(_props: MessageStreamProps) {
     stopStream,
     handleMentionSend,
     handleNewTopic,
-    streamingChatIds: _streamingChatIds,
-    attentionChatIds: _attentionChatIds,
+    streamingChatIds,
+    attentionChatIds,
     atBottomRef,
     suppressScrollTrackingUntilRef,
     pendingBottomScrollBehaviorRef,
@@ -540,6 +542,8 @@ export function MessageStream(_props: MessageStreamProps) {
   const planFileExists = activeChatMeta?.planFileExists ?? false;
 
   return (
+    <div className="flex min-h-0 flex-1 flex-col">
+    <ChatTabsBar streamingChatIds={streamingChatIds} attentionChatIds={attentionChatIds} />
     <div className="flex min-h-0 flex-1">
     <div
       className="relative flex min-h-0 flex-1 flex-col"
@@ -726,6 +730,8 @@ export function MessageStream(_props: MessageStreamProps) {
         </div>
       )}
 
+      <SubAgentMonitor />
+
       <StreamFooter
         mentionInputRef={mentionInputRef}
         fileInputRef={fileInputRef}
@@ -756,6 +762,7 @@ export function MessageStream(_props: MessageStreamProps) {
         />
       </div>
     )}
+    </div>
     </div>
   );
 }

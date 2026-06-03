@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { rehypeHighlightLite } from "./rehype-highlight-lite";
 import { Check, Copy } from "lucide-react";
 import { ICON, ICON_ACTIVE_STROKE } from "../../lib/ui-tokens";
+import { useConfigStore } from "../../lib/stores";
 import { openLightbox } from "../common/ImageLightbox";
 
 interface MarkdownContentProps {
@@ -93,7 +94,21 @@ function CodeBlock({ children, className, ...rest }: ComponentPropsWithoutRef<"c
   if (isInline) {
     return <code className="md-inline-code" {...rest}>{children}</code>;
   }
-  return <code className={className} {...rest}>{children}</code>;
+  const showLineNumbers = useConfigStore((s) => s.display.showLineNumbers);
+  if (!showLineNumbers) {
+    return <code className={className} {...rest}>{children}</code>;
+  }
+  const text = extractTextFromNode(children);
+  const lines = text.replace(/\n$/, "").split("\n");
+  const totalLines = lines.length;
+  const gutterWidth = totalLines >= 100 ? 48 : totalLines >= 10 ? 40 : 32;
+  return (
+    <code className={`${className ?? ""} has-line-numbers`} {...rest} style={{ counterReset: "line-number", "--gutter-w": `${gutterWidth}px` } as React.CSSProperties}>
+      {lines.map((line, i) => (
+        <span key={i} className="code-line">{line}{i < lines.length - 1 ? "\n" : ""}</span>
+      ))}
+    </code>
+  );
 }
 
 function extractTextFromNode(node: React.ReactNode): string {
@@ -186,8 +201,10 @@ export const MarkdownContent = memo(function MarkdownContent({
 
   useEffect(() => {
     if (streaming || highlighted) return;
-    const id = requestIdleCallback(() => setHighlighted(true));
-    return () => cancelIdleCallback(id);
+    const ric = globalThis.requestIdleCallback ?? ((cb: () => void) => setTimeout(cb, 1));
+    const cic = globalThis.cancelIdleCallback ?? clearTimeout;
+    const id = ric(() => setHighlighted(true));
+    return () => cic(id);
   }, [streaming, highlighted]);
 
   const unclosed = streaming && hasUnclosedCodeBlock(content);
