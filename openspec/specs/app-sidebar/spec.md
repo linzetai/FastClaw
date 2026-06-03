@@ -39,12 +39,22 @@ AppSidebar SHALL 包含三个区域：顶部操作区（固定）、中间滚动
 - **THEN** 该项使用 `--bg-active` 背景高亮，字色 `--text-1`，font-weight 500
 
 ### Requirement: Session list item
-每个会话列表项 SHALL 显示：图标（16px 宽居中）、标题（flex-1, 单行截断）、时间标注（11px, 灰色, 靠右）。整体 padding 5px 10px，圆角 6px，hover 时 `--bg-hover` 背景。
+每个会话列表项 SHALL 采用紧凑单行布局：图标（14px SVG，16px 宽容器居中，无背景容器）、标题（flex-1, 单行截断, 13px, `--text-2` 色）、时间标注（11px, `--text-4` 灰色, 靠右, flex-shrink 0）。整体 padding 5px 10px，圆角 6px，行高约 30px，hover 时 `--bg-hover` 背景。
+
+**禁止**使用双行布局（标题+副标题）或大尺寸图标容器（如 28x28 圆形背景框），保持与原型一致的紧凑列表密度。
 
 #### Scenario: Session item interaction
 - **WHEN** 用户点击会话列表项
 - **THEN** 切换到该会话，ChatPane 加载对应的消息流
-- **AND** 该项变为 active 高亮状态
+- **AND** 该项变为 active 高亮状态（`--bg-active` 背景, `--text-1` 颜色, font-weight 500）
+
+### Requirement: Section header style
+分组标题 SHALL 使用小写文字（非全大写），11px, font-weight 500, `--text-4` 颜色，无 letter-spacing 或 text-transform。标题右侧可显示操作图标（如折叠/排序）。
+
+#### Scenario: Header rendering
+- **WHEN** 渲染分组标题（如 "Chats"、项目名等）
+- **THEN** 标题文字为小写形式（首字母大写），不使用 `text-transform: uppercase`
+- **AND** padding 为 `12px 10px 4px`
 
 ### Requirement: Bottom settings entry
 底部区域 SHALL 显示 Settings 按钮，上方有 `1px solid var(--border)` 分隔线。点击打开 SettingsPanel。

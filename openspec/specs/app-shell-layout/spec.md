@@ -14,12 +14,17 @@
 - **AND** ContentBlock 的 border-radius 改为四角圆角 `var(--card-r)`
 
 ### Requirement: ContentBlock unified card surface
-ChatPane 和 WorkspacePanel SHALL 共享同一个卡片容器（ContentBlock），使用统一的 `--bg-card` 背景和 `border-radius: var(--card-r) 0 0 var(--card-r)` 圆角。WorkspacePanel 与 ChatPane 之间使用 `border-left: 1px solid var(--border)` 分隔。
+ChatPane 和 WorkspacePanel **必须**共享同一个卡片容器（ContentBlock）。ContentBlock 使用统一的 `--bg-card` 背景和 `border-radius: var(--card-r) 0 0 var(--card-r)` 圆角。WorkspacePanel 与 ChatPane 之间使用 `border-left: 1px solid var(--border)` 分隔。
+
+**关键实现约束**：`ContentBlock` 组件的 `display: flex` 子元素应包含 ChatPane（flex: 1）和 WorkspacePanel（固定宽度），两者作为同级子元素存在于 ContentBlock 内部。WorkspacePanel **禁止**作为 ContentBlock 的兄弟元素渲染——这会破坏统一卡片的视觉效果。
+
+**间距约束**：ContentBlock **不应**有右侧 margin（`margin-right: 0`），它直接延伸到窗口右边缘。仅有左侧由 Sidebar 自然间隔，底部可有 `var(--gap-shell)` 间距。
 
 #### Scenario: Visual separation between Chat and Workspace
 - **WHEN** WorkspacePanel 打开
 - **THEN** ChatPane 和 WorkspacePanel 在同一白色卡片内，WorkspacePanel 左侧有 1px 的 `--border` 色分隔线
-- **AND** 外层 ContentBlock 的右侧无圆角（贴合窗口右边缘）
+- **AND** 外层 ContentBlock 的右侧无圆角且无 margin（贴合窗口右边缘）
+- **AND** ContentBlock 的 `flex-direction` 为 `row`，内含 ChatPane + WorkspacePanel
 
 ### Requirement: Empty state layout
 当活跃会话无消息（或没有选中会话）时，ContentBlock SHALL 仅显示 ChatPane，不显示 WorkspacePanel，且 ChatPane 内渲染居中 WelcomeView 而非 MessageStream。

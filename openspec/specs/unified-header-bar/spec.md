@@ -1,66 +1,35 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Merged header bar
-ContentHeader SHALL 被删除，其功能（侧边栏展开按钮、搜索按钮）SHALL 整合到 ChatTabsBar 中，形成统一的顶部栏。
+ContentHeader 已被删除。原 ChatTabsBar 的水平 Tab 功能 SHALL 被 AppHeader 的中间标题区域替代。Header 不再显示横排 Tab，改为显示当前活跃会话的标题和项目名称。会话切换通过 AppSidebar 进行。
 
 #### Scenario: Single header rendering
 - **WHEN** 应用加载完成显示对话视图
-- **THEN** 主内容区顶部只有一个 36px 高的 header 栏，包含 Tab 列表和功能按钮
-
-### Requirement: Horizontal scrollable tabs
-Tab 栏 SHALL 以横排方式显示所有打开的会话 Tab，当 Tab 总宽度超出容器时支持水平滚动。
-
-#### Scenario: Multiple tabs visible
-- **WHEN** 用户打开 3 个会话
-- **THEN** 3 个 Tab 横排显示在 header 栏中，每个 Tab 可见标题和关闭按钮
-
-#### Scenario: Overflow scrolling
-- **WHEN** 打开的 Tab 总宽度超出 header 栏可用宽度
-- **THEN** Tab 栏可水平滚动，两端显示滚动方向箭头
-
-#### Scenario: Active tab auto-scroll
-- **WHEN** 用户切换到一个被滚动隐藏的 Tab
-- **THEN** Tab 栏自动滚动使激活的 Tab 完全可见
-
-### Requirement: Tab overflow indicator
-当打开超过 8 个 Tab 时 SHALL 在末尾显示溢出计数器。
-
-#### Scenario: Overflow count display
-- **WHEN** 用户打开 12 个会话 Tab
-- **THEN** 可见区域显示尽可能多的 Tab，末尾显示 `+N` 按钮（N 为不可见的 Tab 数），点击展开下拉列表显示所有 Tab
-
-### Requirement: Tab drag reorder
-用户 SHALL 能够通过拖拽重新排列 Tab 顺序。
-
-#### Scenario: Drag to reorder
-- **WHEN** 用户按住某个 Tab 拖动到另一个位置
-- **THEN** Tab 顺序实时更新，拖放指示线显示目标位置
+- **THEN** 顶部只有一个 44px 高的 AppHeader，包含窗口控制、导航工具、标题、功能区
+- **AND** 没有独立的 ChatTabsBar 组件
 
 ### Requirement: Sidebar toggle in header
-侧边栏折叠时 SHALL 在 header 栏左侧显示展开按钮。
+侧边栏折叠时 SHALL 在 AppHeader 导航工具栏中通过 Sidebar 切换按钮控制展开（图标为带左竖线的矩形）。
 
-#### Scenario: Show toggle when collapsed
-- **WHEN** 侧边栏处于折叠状态
-- **THEN** header 栏最左侧显示 `PanelLeftOpen` 图标按钮，点击展开侧边栏
+#### Scenario: Show toggle always
+- **WHEN** 应用渲染 AppHeader
+- **THEN** 导航工具栏始终显示 Sidebar 切换按钮
+- **AND** 点击切换 AppSidebar 的展开/折叠状态
 
-#### Scenario: Hide toggle when expanded
-- **WHEN** 侧边栏处于展开状态
-- **THEN** header 栏不显示侧边栏切换按钮（折叠按钮在 SessionList 内部）
+## REMOVED Requirements
 
-### Requirement: Search button in header
-搜索按钮 SHALL 显示在 header 栏右侧。
+### Requirement: Horizontal scrollable tabs
+**Reason**: 新布局不使用水平 Tab 栏，会话切换改为通过 AppSidebar 列表完成
+**Migration**: 用户通过 AppSidebar 的会话列表切换会话，不再需要横排 Tab
 
-#### Scenario: Trigger search
-- **WHEN** 用户点击 header 栏右侧的搜索图标
-- **THEN** 消息区搜索栏展开（行为与现有一致）
+### Requirement: Tab overflow indicator
+**Reason**: 水平 Tab 栏已移除，不再需要溢出计数器
+**Migration**: 所有会话在 AppSidebar 的可滚动列表中显示
+
+### Requirement: Tab drag reorder
+**Reason**: 水平 Tab 栏已移除
+**Migration**: 会话排序通过 AppSidebar 中的 Pinned/时间排序实现
 
 ### Requirement: Streaming and attention indicators on tabs
-每个 Tab SHALL 显示 streaming 和 attention 状态指示器。
-
-#### Scenario: Streaming indicator
-- **WHEN** 某个会话正在接收 streaming 响应
-- **THEN** 该 Tab 上显示一个蓝色脉冲圆点
-
-#### Scenario: Attention indicator
-- **WHEN** 某个后台会话需要用户操作（如回答问题）
-- **THEN** 该 Tab 上显示一个橙色脉冲圆点
+**Reason**: Tab 栏已移除，但 streaming 和 attention 状态指示器 SHALL 移到 AppSidebar 的会话列表项中
+**Migration**: 在 AppSidebar 的会话列表项中，streaming 会话显示蓝色脉冲点，需要 attention 的会话显示橙色脉冲点
