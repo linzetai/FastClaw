@@ -539,10 +539,10 @@ export function MessageStream(_props: MessageStreamProps) {
   const planFileExists = activeChatMeta?.planFileExists ?? false;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-    <div className="flex min-h-0 flex-1">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1">
     <div
-      className="relative flex min-h-0 flex-1 flex-col"
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col"
       style={{ background: "var(--bg-primary)" }}
       data-streaming={streaming ? "true" : undefined}
       onDragEnter={handleDragEnter}
@@ -637,7 +637,7 @@ export function MessageStream(_props: MessageStreamProps) {
           }} />
         </div>
       ) : (
-        <div ref={containerRef} className="flex min-h-0 flex-1 flex-col">
+        <div ref={containerRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
           {showContextBar && lastUserMessage && (
             <StickyContextBar
               userMessage={lastUserMessage.content}
@@ -651,14 +651,14 @@ export function MessageStream(_props: MessageStreamProps) {
           <div
             ref={scrollContainerRef}
             key={chatKey}
-            className="flex-1"
+            className="min-w-0 flex-1"
             style={{ overflowX: "hidden", overflowY: "auto" }}
             onScroll={handleScrollWithAtBottom}
           >
             {hasMore && (
-              <div className="flex h-8 items-center justify-center">
-                <span className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-                  ↑ 滚动加载更多
+              <div className="m-prev flex h-8 cursor-pointer items-center justify-center">
+                <span className="text-[13px] transition-colors" style={{ color: "var(--fill-tertiary)" }}>
+                  {paginationOffset} previous messages ›
                 </span>
               </div>
             )}

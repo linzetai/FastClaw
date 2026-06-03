@@ -3403,6 +3403,8 @@ it provides atomic writes, encoding preservation, fuzzy matching, and stale-file
                         "file_path": args.file_path,
                         "replacements": replaced,
                         "diffStat": diff_stat,
+                        "linesAdded": added,
+                        "linesRemoved": removed,
                         "fuzzyMatch": fuzzy_used,
                         "diff": diff,
                         "snippet": snippet,

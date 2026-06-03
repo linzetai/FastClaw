@@ -34,11 +34,7 @@ impl LlmProvider for MockProvider {
                 message: ChatMessage {
                     role: Role::Assistant,
                     content: Some("Hello from mock".into()),
-                    reasoning_content: None,
-                    name: None,
-                    tool_calls: None,
-                    tool_call_id: None,
-            compact_metadata: None,
+                ..Default::default()
                 },
                 finish_reason: Some("stop".into()),
             }],
@@ -369,11 +365,7 @@ async fn append_and_load_messages() {
     let user_msg = ChatMessage {
         role: Role::User,
         content: Some(serde_json::Value::String("Hello".into())),
-        reasoning_content: None,
-        name: None,
-        tool_calls: None,
-        tool_call_id: None,
-            compact_metadata: None,
+    ..Default::default()
     };
     state
         .store
@@ -385,11 +377,7 @@ async fn append_and_load_messages() {
     let assistant_msg = ChatMessage {
         role: Role::Assistant,
         content: Some(serde_json::Value::String("Hi there!".into())),
-        reasoning_content: None,
-        name: None,
-        tool_calls: None,
-        tool_call_id: None,
-            compact_metadata: None,
+    ..Default::default()
     };
     state
         .store
@@ -435,11 +423,8 @@ async fn load_messages_preserves_content() {
         content: Some(serde_json::Value::String(
             "Test content with émojis 🎉".into(),
         )),
-        reasoning_content: None,
         name: Some("test-user".into()),
-        tool_calls: None,
-        tool_call_id: None,
-            compact_metadata: None,
+    ..Default::default()
     };
     state
         .store
@@ -538,11 +523,7 @@ async fn stream_chat_produces_events() {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some(serde_json::Value::String("Hello".into())),
-            reasoning_content: None,
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-            compact_metadata: None,
+        ..Default::default()
         }],
         model: None,
         stream: true,
@@ -620,11 +601,7 @@ async fn stream_chat_delta_content_accumulates() {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some(serde_json::Value::String("Test accumulation".into())),
-            reasoning_content: None,
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-            compact_metadata: None,
+        ..Default::default()
         }],
         model: None,
         stream: true,
@@ -687,11 +664,7 @@ async fn full_session_lifecycle() {
     let user_msg = ChatMessage {
         role: Role::User,
         content: Some(serde_json::Value::String("What is 2+2?".into())),
-        reasoning_content: None,
-        name: None,
-        tool_calls: None,
-        tool_call_id: None,
-            compact_metadata: None,
+    ..Default::default()
     };
     state
         .store
@@ -703,11 +676,7 @@ async fn full_session_lifecycle() {
     let asst_msg = ChatMessage {
         role: Role::Assistant,
         content: Some(serde_json::Value::String("4".into())),
-        reasoning_content: None,
-        name: None,
-        tool_calls: None,
-        tool_call_id: None,
-            compact_metadata: None,
+    ..Default::default()
     };
     state
         .store

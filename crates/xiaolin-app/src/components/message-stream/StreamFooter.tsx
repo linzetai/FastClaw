@@ -1,6 +1,7 @@
 import {
-  Image as ImageIcon, FileText, Paperclip, FolderOpen, ArrowUp,
+  Image as ImageIcon, FileText, Paperclip, ArrowUp,
   Square, X, Loader2, Compass, Code2, ChevronDown,
+  Plus, Lock, RefreshCw, GitBranch, Monitor,
 } from "lucide-react";
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
@@ -12,7 +13,7 @@ import {
   useChatQueue,
   useActiveStream,
 } from "../../lib/stores";
-import { ICON, BTN_ICON } from "../../lib/ui-tokens";
+import { ICON } from "../../lib/ui-tokens";
 import { QuestionPanel } from "./MessageRenderer";
 import { ApprovalCard, type ApprovalData } from "./ApprovalCard";
 import { QueueIndicator } from "./QueueIndicator";
@@ -542,31 +543,87 @@ export function StreamFooter({
     };
   }, [processFiles]);
 
+  const canSend = (inputHasContent || attachedFiles.length > 0) && messageQueue.length < 10;
+
+  const handleOpenWorkDir = useCallback(async () => {
+    const { activeChatId: chatId, chats } = useChatMetaStore.getState();
+    const curChat = chats[chatId];
+    if (!curChat) return;
+    let selected: string | null = null;
+    try {
+      const { open: tauriOpenDialog } = await import("@tauri-apps/plugin-dialog");
+      selected = await tauriOpenDialog({ directory: true, multiple: false, defaultPath: curChat.workDir ?? undefined }) as string | null;
+    } catch {
+      selected = prompt("输入工作目录路径:", curChat.workDir ?? "");
+    }
+    if (typeof selected === "string" && selected) {
+      setWorkDir("", chatId, selected);
+    }
+  }, [setWorkDir]);
+
+  const handleSendClick = useCallback(() => {
+    const ref = mentionInputRef.current;
+    if (ref) {
+      const t = ref.getText().trim();
+      if (t) wrappedSend(t, ref.getMentions());
+    }
+  }, [mentionInputRef, wrappedSend]);
+
+  const comingSoon = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    const btn = e.currentTarget;
+    btn.style.background = "var(--tint-subtle)";
+    btn.style.color = "var(--tint)";
+    setTimeout(() => { btn.style.background = "transparent"; btn.style.color = "var(--fill-tertiary)"; }, 600);
+  }, []);
+
+  /* ── chip / icon shared styles ── */
+  const chipStyle: React.CSSProperties = {
+    display: "flex", alignItems: "center", gap: 4,
+    padding: "3px 7px", borderRadius: 5,
+    fontSize: 11, fontWeight: 500, color: "var(--fill-tertiary)",
+    cursor: "pointer", border: "none", background: "transparent",
+    transition: "background 0.1s, color 0.1s", whiteSpace: "nowrap",
+  };
+  const chipHover = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.style.background = "var(--bg-hover)";
+    e.currentTarget.style.color = "var(--fill-secondary)";
+  };
+  const chipLeave = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.style.background = "transparent";
+    e.currentTarget.style.color = "var(--fill-tertiary)";
+  };
+  const ibIconStyle: React.CSSProperties = {
+    width: 26, height: 26, borderRadius: 6,
+    border: "none", background: "transparent",
+    color: "var(--fill-quaternary)", cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    transition: "color 0.12s, background 0.12s",
+  };
+  const ibIconHover = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.style.color = "var(--fill-tertiary)";
+    e.currentTarget.style.background = "var(--bg-hover)";
+  };
+  const ibIconLeave = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.style.color = "var(--fill-quaternary)";
+    e.currentTarget.style.background = "transparent";
+  };
+
   return (
-    <div className="relative shrink-0 px-4 pb-3 pt-2">
+    <div className="input-wrap relative shrink-0" style={{ padding: "6px 28px 12px" }}>
+      {/* Drag overlay */}
       {dragOver && (
-        <div
-          className="fixed inset-0 z-[9998] flex items-center justify-center"
-          style={{
-            background: "rgba(0,0,0,0.4)",
-          }}
-        >
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
           <div
             className="flex h-48 w-72 flex-col items-center justify-center gap-3 rounded-2xl"
-            style={{
-              background: "var(--bg-elevated)",
-              border: "2px dashed var(--tint)",
-              boxShadow: "var(--glow-tint)",
-              animation: "drop-zone-pulse 2s ease-in-out infinite",
-            }}
+            style={{ background: "var(--bg-elevated)", border: "2px dashed var(--tint)", boxShadow: "var(--glow-tint)", animation: "drop-zone-pulse 2s ease-in-out infinite" }}
           >
             <Paperclip size={32} strokeWidth={1.5} style={{ color: "var(--tint)", animation: "icon-float 1.5s ease-in-out infinite" }} />
-            <span className="text-[14px] font-medium" style={{ color: "var(--fill-primary)" }}>
-              拖放文件到此处
-            </span>
+            <span className="text-[14px] font-medium" style={{ color: "var(--fill-primary)" }}>拖放文件到此处</span>
           </div>
         </div>
       )}
+
+      {/* Pending question / approval */}
       {pendingQuestion && (
         pendingQuestion.requestId.startsWith("approval:") ? (
           <ApprovalCard
@@ -587,229 +644,218 @@ export function StreamFooter({
             onTimeout={() => {
               const q = pendingQuestion;
               setPendingQuestion(null);
-              if (q) {
-                transport.submitToolAnswerIpc(q.requestId, "", activeChat?.id);
-              }
+              if (q) transport.submitToolAnswerIpc(q.requestId, "", activeChat?.id);
             }}
           />
         )
       )}
 
+      {/* ═══ input-box container ═══ */}
       <div
-        className="input-box overflow-hidden transition-all duration-200"
+        className="input-box overflow-hidden"
         style={{
-          border: "1.5px solid var(--separator)",
-          borderRadius: "18px",
-          background: "var(--bg-surface)",
+          border: "1.5px solid var(--bg-input-border)",
+          borderRadius: 12,
+          background: "var(--bg-card)",
+          transition: "border-color 0.15s, box-shadow 0.15s",
+        }}
+        onFocusCapture={(e) => {
+          const box = e.currentTarget;
+          box.style.borderColor = "var(--accent, var(--tint))";
+          box.style.boxShadow = "0 0 0 3px color-mix(in srgb, var(--accent, var(--tint)) 8%, transparent)";
+        }}
+        onBlurCapture={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+            const box = e.currentTarget;
+            box.style.borderColor = "var(--bg-input-border)";
+            box.style.boxShadow = "none";
+          }
         }}
       >
+        {/* Queue indicator */}
         {messageQueue.length > 0 && (
           <div className="px-3 pt-2">
-            <QueueIndicator
-              count={messageQueue.length}
-              expanded={queueExpanded}
-              onToggle={() => setQueueExpanded(!queueExpanded)}
-            />
+            <QueueIndicator count={messageQueue.length} expanded={queueExpanded} onToggle={() => setQueueExpanded(!queueExpanded)} />
           </div>
         )}
         {queueExpanded && messageQueue.length > 0 && (
           <QueuePanel
             queue={messageQueue}
-            onEdit={(id, content) => {
-              updateQueuedMessage(activeChatId, id, { content });
-            }}
-            onRemove={(id) => {
-              removeQueuedMessage(activeChatId, id);
-            }}
-            onReorder={(from, to) => {
-              reorderQueue(activeChatId, from, to);
-            }}
-            onRetry={(id) => {
-              updateQueuedMessage(activeChatId, id, { status: "pending", error: undefined });
-            }}
+            onEdit={(id, content) => updateQueuedMessage(activeChatId, id, { content })}
+            onRemove={(id) => removeQueuedMessage(activeChatId, id)}
+            onReorder={(from, to) => reorderQueue(activeChatId, from, to)}
+            onRetry={(id) => updateQueuedMessage(activeChatId, id, { status: "pending", error: undefined })}
           />
         )}
+
+        {/* Attached files preview */}
         {attachedFiles.length > 0 && (
           <div className="flex flex-wrap gap-2 px-4 pt-3">
             {attachedFiles.map((f, i) => (
-              <div
-                key={`${f.name}-${i}`}
-                style={{ animation: `fade-slide-up var(--duration-normal) var(--ease-out) ${i * 50}ms backwards` }}
-              >
+              <div key={`${f.name}-${i}`} style={{ animation: `fade-slide-up var(--duration-normal) var(--ease-out) ${i * 50}ms backwards` }}>
                 <FilePill file={f} onRemove={() => removeFile(i)} />
               </div>
             ))}
           </div>
         )}
 
+        {/* Plan mode indicator */}
         {executionMode === "plan" && (
           <button
-            type="button"
-            onClick={onTogglePlanPanel}
+            type="button" onClick={onTogglePlanPanel}
             className="flex w-full items-center gap-2 px-4 py-2 text-left text-[11px] transition-colors hover:brightness-110"
-            style={{
-              background: "color-mix(in srgb, var(--tint, #4299E1) 6%, transparent)",
-              borderBottom: "0.5px solid color-mix(in srgb, var(--tint, #4299E1) 15%, transparent)",
-              color: "var(--tint, #4299E1)",
-            }}
+            style={{ background: "color-mix(in srgb, var(--tint, #4299E1) 6%, transparent)", borderBottom: "0.5px solid color-mix(in srgb, var(--tint, #4299E1) 15%, transparent)", color: "var(--tint, #4299E1)" }}
           >
             <Compass {...ICON.md} className="shrink-0" />
             <span className="min-w-0 truncate">
               Plan Mode — 只读探索模式
-              {planFilePath && (
-                <span style={{ opacity: 0.7 }}>
-                  {" · "}
-                  {planFileExists ? "" : "(未创建) "}
-                  {planFilePath.replace(/^\/home\/[^/]+\//, "~/")}
-                </span>
-              )}
+              {planFilePath && <span style={{ opacity: 0.7 }}>{" · "}{planFileExists ? "" : "(未创建) "}{planFilePath.replace(/^\/home\/[^/]+\//, "~/")}</span>}
             </span>
             <FileText {...ICON.sm} className="ml-auto shrink-0" style={{ opacity: 0.6 }} />
           </button>
         )}
-
         {executionMode === "agent" && planFileExists && planFilePath && (
           <button
-            type="button"
-            onClick={onTogglePlanPanel}
+            type="button" onClick={onTogglePlanPanel}
             className="flex w-full items-center gap-2 px-4 py-1.5 text-left text-[10px] transition-colors hover:brightness-110"
-            style={{
-              background: "color-mix(in srgb, var(--tint, #4299E1) 3%, transparent)",
-              borderBottom: "0.5px solid color-mix(in srgb, var(--tint, #4299E1) 10%, transparent)",
-              color: "var(--fill-tertiary)",
-            }}
+            style={{ background: "color-mix(in srgb, var(--tint, #4299E1) 3%, transparent)", borderBottom: "0.5px solid color-mix(in srgb, var(--tint, #4299E1) 10%, transparent)", color: "var(--fill-tertiary)" }}
           >
             <FileText {...ICON.sm} className="shrink-0" style={{ color: "var(--tint, #4299E1)", opacity: 0.7 }} />
-            <span className="min-w-0 truncate">
-              计划文件: {planFilePath.replace(/^\/home\/[^/]+\//, "~/")}
-            </span>
+            <span className="min-w-0 truncate">计划文件: {planFilePath.replace(/^\/home\/[^/]+\//, "~/")}</span>
           </button>
         )}
 
-        <MentionInput
-          ref={mentionInputRef}
-          placeholder={streaming ? "追加指令..." : executionMode === "plan" ? "描述规划任务，或输入 /plan 切换到 Agent..." : "描述任务，或输入 @ 引用文件、/ 命令..."}
-          options={mentionOptions}
-          slashCommands={slashCommands}
-          onSend={wrappedSend}
-          onNewTopic={handleNewTopic}
-          onAttach={() => fileInputRef.current?.click()}
-          onPasteFiles={processFiles}
-          onRecallLastMessage={handleRecallLastMessage}
-          onContentChange={setInputHasContent}
-        />
+        {/* ── Textarea ── */}
+        <div style={{ padding: "11px 14px 6px" }}>
+          <MentionInput
+            ref={mentionInputRef}
+            placeholder={streaming ? "追加指令..." : executionMode === "plan" ? "描述规划任务，或输入 /plan 切换到 Agent..." : "描述任务，或输入 @ 引用文件、/ 命令..."}
+            options={mentionOptions}
+            slashCommands={slashCommands}
+            onSend={wrappedSend}
+            onNewTopic={handleNewTopic}
+            onAttach={() => fileInputRef.current?.click()}
+            onPasteFiles={processFiles}
+            onRecallLastMessage={handleRecallLastMessage}
+            onContentChange={setInputHasContent}
+          />
+        </div>
 
-        <div className="flex items-center justify-between gap-2 px-3.5 pb-3">
-          <div className="flex min-w-0 items-center gap-0.5">
-            <ModelSelector />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className={BTN_ICON.sm}
-              style={{ color: "var(--fill-tertiary)" }}
-              title={`附件 (${MOD_KEY}${isMacPlatform ? "⇧" : "Shift+"}A)`}
+        {/* ── Inline toolbar (ib-bar) ── */}
+        <div style={{ display: "flex", alignItems: "center", padding: "3px 10px 8px" }}>
+          {/* ib-left */}
+          <div style={{ display: "flex", alignItems: "center", gap: 2, flex: 1, minWidth: 0, overflow: "hidden" }}>
+            {/* [1] + add button */}
+            <button type="button" style={chipStyle} onMouseEnter={chipHover} onMouseLeave={chipLeave}
+              onClick={() => fileInputRef.current?.click()} title={`附加文件 (${MOD_KEY}${isMacPlatform ? "⇧" : "Shift+"}A)`}
             >
-              <Paperclip {...ICON.md} />
+              <Plus size={13} strokeWidth={1.6} />
             </button>
-            <button
-              onClick={async () => {
-                const { activeChatId: chatId, chats } = useChatMetaStore.getState();
-                const curChat = chats[chatId];
-                if (!curChat) return;
-                let selected: string | null = null;
-                try {
-                  const { open: tauriOpenDialog } = await import("@tauri-apps/plugin-dialog");
-                  selected = await tauriOpenDialog({ directory: true, multiple: false, defaultPath: curChat.workDir ?? undefined }) as string | null;
-                } catch {
-                  selected = prompt("输入工作目录路径:", curChat.workDir ?? "");
-                }
-                if (typeof selected === "string" && selected) {
-                  setWorkDir("", chatId, selected);
-                }
-              }}
-              className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] transition-colors duration-100 hover:bg-[var(--bg-hover)]"
-              style={{ color: workDir ? "var(--fill-secondary)" : "var(--fill-tertiary)" }}
-              title={workDir ? `工作目录: ${workDir}` : "设置工作目录"}
+            {/* [2] permissions placeholder */}
+            <button type="button" style={chipStyle} onMouseEnter={chipHover} onMouseLeave={chipLeave}
+              onClick={comingSoon} title="权限管理即将推出"
             >
-              <FolderOpen className="shrink-0" {...ICON.md} />
-              <span className="max-w-[120px] truncate font-mono text-[11px]">
-                {workDir ? workDir.replace(/^\/home\/[^/]+\//, "~/") : "工作目录"}
-              </span>
+              <Lock size={13} strokeWidth={1.6} />
+              <span>Default permissions</span>
+              <span style={{ fontSize: 8, opacity: 0.5, marginLeft: 1 }}>▾</span>
+            </button>
+            {/* [3] refresh placeholder */}
+            <button type="button" style={chipStyle} onMouseEnter={chipHover} onMouseLeave={chipLeave}
+              onClick={comingSoon} title="预留"
+            >
+              <RefreshCw size={13} strokeWidth={1.6} />
+            </button>
+            {/* [4] model selector */}
+            <ModelSelector />
+            {/* [5] compute level placeholder */}
+            <button type="button" style={chipStyle} onMouseEnter={chipHover} onMouseLeave={chipLeave}
+              onClick={comingSoon} title="计算等级设置即将推出"
+            >
+              <span>Extra High</span>
+              <span style={{ fontSize: 8, opacity: 0.5, marginLeft: 1 }}>▾</span>
             </button>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
-            <ModeToggle
-              mode={executionMode}
-              onToggle={handleToggleMode}
-              disabled={streaming}
-            />
-            {activeChat?.usage?.contextTokens != null && activeChat?.usage?.contextWindow != null && activeChat.usage.contextWindow > 0 && (
-              <ContextRing
-                used={activeChat.usage.contextTokens}
-                limit={activeChat.usage.contextWindow}
-              />
-            )}
+          {/* ib-right */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {/* attach icon */}
+            <button type="button" style={ibIconStyle} onMouseEnter={ibIconHover} onMouseLeave={ibIconLeave}
+              onClick={() => fileInputRef.current?.click()} title={`附件 (${MOD_KEY}${isMacPlatform ? "⇧" : "Shift+"}A)`}
+            >
+              <Paperclip size={15} strokeWidth={1.6} />
+            </button>
+            {/* send / stop button */}
             {streaming ? (
               <button
-                key="stop"
-                onClick={stopStream}
-                className="relative flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-all duration-150 hover:scale-105 active:scale-90"
-                style={{
-                  background: "var(--red, #FF3B30)",
-                  color: "#fff",
-                  boxShadow: "0 0 0 3px color-mix(in srgb, var(--red, #FF3B30) 20%, transparent)",
-                  animation: "glow-pulse 1.5s ease-in-out infinite",
-                }}
+                key="stop" onClick={stopStream}
+                className="flex shrink-0 cursor-pointer items-center justify-center rounded-full transition-all duration-150 hover:scale-105 active:scale-90"
+                style={{ width: 28, height: 28, background: "var(--red, #FF3B30)", color: "#fff", boxShadow: "0 0 0 3px color-mix(in srgb, var(--red, #FF3B30) 20%, transparent)", animation: "glow-pulse 1.5s ease-in-out infinite" }}
                 title="停止生成"
               >
-                <Square size={14} strokeWidth={2.5} fill="currentColor" />
+                <Square size={12} strokeWidth={2.5} fill="currentColor" />
               </button>
             ) : sendPending ? (
-              <button
-                key="loading"
-                disabled
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-                style={{
-                  background: "var(--tint)",
-                  color: "#fff",
-                  opacity: 0.7,
-                }}
-                title="发送中..."
+              <button key="loading" disabled className="flex shrink-0 items-center justify-center rounded-full"
+                style={{ width: 28, height: 28, background: "var(--tint)", color: "#fff", opacity: 0.7 }} title="发送中..."
               >
-                <Loader2 {...ICON.md} className="animate-spin" />
+                <Loader2 size={14} strokeWidth={2} className="animate-spin" />
               </button>
             ) : (
               <button
-                key="send"
-                onClick={() => {
-                  const ref = mentionInputRef.current;
-                  if (ref) {
-                    const t = ref.getText().trim();
-                    if (t) wrappedSend(t, ref.getMentions());
-                  }
-                }}
-                disabled={(!inputHasContent && attachedFiles.length === 0) || messageQueue.length >= 10}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-150 hover:scale-110 active:scale-90 disabled:cursor-default disabled:hover:scale-100"
+                key="send" onClick={handleSendClick}
+                disabled={!canSend}
+                className="flex shrink-0 items-center justify-center rounded-full transition-all duration-150 hover:scale-[1.06] active:scale-90 disabled:cursor-default disabled:hover:scale-100"
                 style={{
-                  background: "var(--tint)",
-                  color: "#fff",
-                  opacity: (inputHasContent || attachedFiles.length > 0) && messageQueue.length < 10 ? 1 : 0.3,
-                  boxShadow: (inputHasContent || attachedFiles.length > 0) ? "var(--glow-tint)" : "none",
+                  width: 28, height: 28,
+                  background: "var(--tint)", color: "#fff",
+                  opacity: canSend ? 1 : 0.3,
+                  boxShadow: canSend ? "0 2px 8px color-mix(in srgb, var(--tint) 20%, transparent)" : "none",
                 }}
                 title={messageQueue.length >= 10 ? "队列已满（最多10条）" : streaming ? "追加指令 ↩" : "发送 ↩"}
               >
-                <ArrowUp {...ICON.md} />
+                <ArrowUp size={14} strokeWidth={2.5} />
               </button>
             )}
           </div>
         </div>
       </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        className="hidden"
+      {/* ═══ below-input metadata row ═══ */}
+      <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "4px 4px 0" }}>
+        {/* Work locally / workDir */}
+        <button type="button"
+          style={{ ...chipStyle, color: "var(--fill-quaternary)", fontSize: 11 }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--fill-tertiary)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--fill-quaternary)"; }}
+          onClick={handleOpenWorkDir}
+          title={workDir ? `工作目录: ${workDir}` : "设置工作目录"}
+        >
+          <Monitor size={12} strokeWidth={1.8} />
+          <span>{workDir ? workDir.replace(/^\/home\/[^/]+\//, "~/").replace(/^(.{24}).+/, "$1…") : "Work locally"}</span>
+          <span style={{ fontSize: 8, opacity: 0.4 }}>▾</span>
+        </button>
+        {/* Branch */}
+        <button type="button"
+          style={{ ...chipStyle, color: "var(--fill-quaternary)", fontSize: 11 }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--fill-tertiary)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--fill-quaternary)"; }}
+          onClick={comingSoon} title="Git 分支（即将推出）"
+        >
+          <GitBranch size={12} strokeWidth={1.8} />
+          <span>main</span>
+          <span style={{ fontSize: 8, opacity: 0.4 }}>▾</span>
+        </button>
+
+        <div style={{ flex: 1 }} />
+
+        {/* Mode toggle + context ring */}
+        <ModeToggle mode={executionMode} onToggle={handleToggleMode} disabled={streaming} />
+        {activeChat?.usage?.contextTokens != null && activeChat?.usage?.contextWindow != null && activeChat.usage.contextWindow > 0 && (
+          <ContextRing used={activeChat.usage.contextTokens} limit={activeChat.usage.contextWindow} />
+        )}
+      </div>
+
+      <input ref={fileInputRef} type="file" multiple className="hidden"
         onChange={(e) => { if (e.target.files) processFiles(e.target.files); e.target.value = ""; }}
       />
     </div>

@@ -2,15 +2,12 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react"
 import { useGatewayStore } from "../../lib/store";
 import { useUIStore } from "../../lib/stores";
 import type { LayoutTier } from "../../lib/stores/ui-store";
-import { SessionList } from "../session-list/SessionList";
 import { MessageStream } from "../message-stream/MessageStream";
 import { TitleBar } from "./TitleBar";
-import { NavRail } from "./NavRail";
 import { ClawIcon } from "./ClawIcon";
 import { UpdateBanner } from "./UpdateBanner";
-import { ComingSoon } from "../placeholder/ComingSoon";
+import { AppShell } from "../shell/AppShell";
 import * as api from "../../lib/api";
-import type { NavItem } from "../../lib/stores/ui-store";
 
 const isTauri =
   typeof window !== "undefined" &&
@@ -55,17 +52,6 @@ function WindowResizeHandles() {
 const OnboardingWizard = lazy(() =>
   import("../onboarding/OnboardingWizard").then((m) => ({ default: m.OnboardingWizard })),
 );
-const ConnectionsPage = lazy(() =>
-  import("../connections/ConnectionsPage").then((m) => ({ default: m.ConnectionsPage })),
-);
-const TasksPage = lazy(() =>
-  import("../tasks/TasksPage").then((m) => ({ default: m.TasksPage })),
-);
-
-const COMING_SOON_TITLES: Partial<Record<NavItem, string>> = {
-  workspace: "工作室",
-  files: "文件",
-};
 
 function SkeletonPulse({ className = "", style = {} }: { className?: string; style?: React.CSSProperties }) {
   return (
@@ -133,12 +119,10 @@ export function AppLayout() {
   const error = useGatewayStore((s) => s.error);
   const connected = useGatewayStore((s) => s.connected);
 
-  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
-  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const activeNav = useUIStore((s) => s.activeNav);
   const setLayoutTier = useUIStore((s) => s.setLayoutTier);
   const layoutTier = useUIStore((s) => s.layoutTier);
-  const outerRef = useRef<HTMLDivElement>(null);
+  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
 
   useEffect(() => {
     const computeTier = (w: number): LayoutTier =>
@@ -218,11 +202,6 @@ export function AppLayout() {
     setShowOnboarding(false);
   }, []);
 
-  const showAgentPane = activeNav === "chat";
-  const showConnections = activeNav === "connections";
-  const showTasks = activeNav === "tasks";
-  const comingSoonTitle = COMING_SOON_TITLES[activeNav];
-
   let content: React.ReactNode;
 
   if (mode === "shell" || mode === "connecting" || !onboardingChecked) {
@@ -238,50 +217,25 @@ export function AppLayout() {
     );
   } else {
     content = (
-      <>
-        <TitleBar />
+      <AppShell>
         <UpdateBanner />
-        <div ref={outerRef} className="flex min-h-0 flex-1">
-          {layoutTier !== "compact" && <NavRail />}
-          {showAgentPane ? (
-            <>
-              <SessionList collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} />
-              <main className="relative flex min-w-0 flex-1 flex-col">
-                <MessageStream />
-                {!connected && mode !== "browser" && (
-                  <div
-                    className="absolute inset-x-0 top-0 z-20 flex items-center justify-center py-1.5"
-                    style={{
-                      background: "rgba(var(--bg-primary-rgb, 0, 0, 0), 0.85)",
-                      backdropFilter: "blur(8px)",
-                    }}
-                  >
-                    <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
-                      连接已断开，正在重连...
-                    </span>
-                  </div>
-                )}
-              </main>
-            </>
-          ) : showConnections ? (
-            <main className="flex min-w-0 flex-1 flex-col">
-              <Suspense fallback={<div className="flex-1" style={{ background: "var(--bg-primary)" }} />}>
-                <ConnectionsPage />
-              </Suspense>
-            </main>
-          ) : showTasks ? (
-            <main className="flex min-w-0 flex-1 flex-col">
-              <Suspense fallback={<div className="flex-1" style={{ background: "var(--bg-primary)" }} />}>
-                <TasksPage />
-              </Suspense>
-            </main>
-          ) : (
-            <main className="flex min-w-0 flex-1 flex-col">
-              <ComingSoon title={comingSoonTitle} />
-            </main>
+        <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <MessageStream />
+          {!connected && mode !== "browser" && (
+            <div
+              className="absolute inset-x-0 top-0 z-20 flex items-center justify-center py-1.5"
+              style={{
+                background: "rgba(var(--bg-primary-rgb, 0, 0, 0), 0.85)",
+                backdropFilter: "blur(8px)",
+              }}
+            >
+              <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
+                连接已断开，正在重连...
+              </span>
+            </div>
           )}
-        </div>
-      </>
+        </main>
+      </AppShell>
     );
   }
 

@@ -109,9 +109,16 @@ function splitChildrenByLines(node: React.ReactNode): React.ReactNode[][] {
   return lines;
 }
 
+const CODE_EXT = /\.(py|js|ts|tsx|jsx|rs|go|java|c|cpp|h|hpp|rb|php|sh|sql|css|html|vue|svelte|toml|json|ya?ml|xml|md|txt|env|cfg|ini|lock|log|conf|dockerfile)$/i;
+const FILE_PATH_RE = /^\.{0,2}\/[\w./-]+\.\w+$|^[\w-]+(?:\/[\w./-]+)+\.\w+$|^[A-Z]:\\[\w.\\ -]+\.\w+$/;
+
 function CodeBlock({ children, className, ...rest }: ComponentPropsWithoutRef<"code">) {
   const isInline = !className && typeof children === "string" && !children.includes("\n");
   if (isInline) {
+    const text = children as string;
+    if (FILE_PATH_RE.test(text) || CODE_EXT.test(text)) {
+      return <code className="md-file-path" {...rest}><span className="md-fp-dot" aria-hidden>■</span>{text}</code>;
+    }
     return <code className="md-inline-code" {...rest}>{children}</code>;
   }
   const showLineNumbers = useConfigStore((s) => s.display.showLineNumbers);

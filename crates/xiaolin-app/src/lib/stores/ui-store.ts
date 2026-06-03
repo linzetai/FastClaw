@@ -1,10 +1,9 @@
 import { create } from "zustand";
 
-export type NavItem = "chat" | "workspace" | "tasks" | "files" | "connections";
 export type LayoutTier = "compact" | "standard" | "wide";
 
 const SIDEBAR_WIDTH_KEY = "xiaolin:sidebar-width";
-const DEFAULT_SIDEBAR_WIDTH = 240;
+const DEFAULT_SIDEBAR_WIDTH = 210;
 const MIN_SIDEBAR_WIDTH = 180;
 const MAX_SIDEBAR_WIDTH = 400;
 
@@ -22,7 +21,6 @@ export interface UIState {
   detailOpen: boolean;
   sidebarCollapsed: boolean;
   sidebarWidth: number;
-  activeNav: NavItem;
   layoutTier: LayoutTier;
 
   toggleDetail: () => void;
@@ -30,7 +28,6 @@ export interface UIState {
   toggleSidebar: () => void;
   setSidebarWidth: (w: number) => void;
   resetSidebarWidth: () => void;
-  setActiveNav: (nav: NavItem) => void;
   setLayoutTier: (tier: LayoutTier) => void;
 }
 
@@ -40,7 +37,6 @@ export const useUIStore = create<UIState>((set) => ({
   detailOpen: false,
   sidebarCollapsed: false,
   sidebarWidth: loadSidebarWidth(),
-  activeNav: "chat" as NavItem,
   layoutTier: "standard" as LayoutTier,
 
   toggleDetail: () => set((s) => ({ detailOpen: !s.detailOpen })),
@@ -55,6 +51,5 @@ export const useUIStore = create<UIState>((set) => ({
     try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(DEFAULT_SIDEBAR_WIDTH)); } catch { /* ignore */ }
     set({ sidebarWidth: DEFAULT_SIDEBAR_WIDTH });
   },
-  setActiveNav: (nav) => set({ activeNav: nav }),
   setLayoutTier: (tier) => set({ layoutTier: tier }),
 }));
