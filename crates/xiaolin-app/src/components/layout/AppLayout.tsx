@@ -4,6 +4,7 @@ import { useUIStore } from "../../lib/stores";
 import type { LayoutTier } from "../../lib/stores/ui-store";
 import { MessageStream } from "../message-stream/MessageStream";
 import { AutomationView } from "../automation/AutomationView";
+import { PluginsView } from "../plugins/PluginsView";
 import { TitleBar } from "./TitleBar";
 import { ClawIcon } from "./ClawIcon";
 import { UpdateBanner } from "./UpdateBanner";
@@ -121,7 +122,7 @@ function MainContent({ connected, mode }: { connected: boolean; mode: string }) 
     <>
       <UpdateBanner />
       <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-        {mainView === "automations" ? <AutomationView /> : <MessageStream />}
+        {mainView === "automations" ? <AutomationView /> : mainView === "plugins" ? <PluginsView /> : <MessageStream />}
         {!connected && mode !== "browser" && (
           <div
             className="absolute inset-x-0 top-0 z-20 flex items-center justify-center py-1.5"

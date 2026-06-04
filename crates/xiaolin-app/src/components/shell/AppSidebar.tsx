@@ -299,7 +299,7 @@ export function AppSidebar() {
             label="Search"
             onClick={() => { setSearchOpen(!searchOpen); if (searchOpen) { setQuery(""); } }}
           />
-          <SidebarAction icon={<Puzzle size={ICON_SIZE} strokeWidth={1.7} />} label="Plugins" />
+          <SidebarAction icon={<Puzzle size={ICON_SIZE} strokeWidth={1.7} />} label="Plugins" onClick={() => useUIStore.getState().setMainView("plugins")} active={mainView === "plugins"} />
           <SidebarAction icon={<RefreshCw size={ICON_SIZE} strokeWidth={1.7} />} label="Automations" onClick={() => useUIStore.getState().setMainView("automations")} active={mainView === "automations"} />
         </div>
 

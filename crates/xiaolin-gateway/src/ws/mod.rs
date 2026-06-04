@@ -7,6 +7,7 @@ mod cron;
 mod execution;
 mod mcp;
 mod notifications;
+mod plugins;
 mod session;
 mod skills;
 mod types;
@@ -104,6 +105,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, auth: ApiKeyAuth, pre
                             "cancel", "answer", "set_mode",
                             "models.list", "config.get", "config.set",
                             "mcp.status", "mcp.reload", "mcp.add", "mcp.remove", "mcp.detail",
+                            "plugins.list", "plugins.enable", "plugins.disable", "plugins.restart", "plugins.tools",
                             "channels.list", "channels.detail", "channels.connect", "channels.update", "channels.restore",
                             "channels.wechat_login", "channels.wechat_poll", "channels.wechat_verify", "channels.disconnect",
                             "sub_agents.list",
@@ -435,6 +437,21 @@ async fn dispatch(
         }
         ClientOp::McpDetail { id: server_id } => {
             mcp::handle_mcp_detail(sender, state, id, &server_id).await
+        }
+        ClientOp::PluginsList => {
+            plugins::handle_plugins_list(sender, state, id).await
+        }
+        ClientOp::PluginsEnable { id: plugin_id } => {
+            plugins::handle_plugins_enable(sender, state, id, &plugin_id).await
+        }
+        ClientOp::PluginsDisable { id: plugin_id } => {
+            plugins::handle_plugins_disable(sender, state, id, &plugin_id).await
+        }
+        ClientOp::PluginsRestart { id: plugin_id } => {
+            plugins::handle_plugins_restart(sender, state, id, &plugin_id).await
+        }
+        ClientOp::PluginsTools { id: plugin_id } => {
+            plugins::handle_plugins_tools(sender, state, id, &plugin_id).await
         }
         ClientOp::AgentsGet { .. } => {
             agents::handle_agents_get(sender, state, id, req.params).await

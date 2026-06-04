@@ -977,6 +977,68 @@ export function onAutomationsChanged(
   });
 }
 
+// ─── Plugins ───
+
+export interface PluginSummary {
+  id: string;
+  name: string;
+  scope: "user" | "project";
+  enabled: boolean;
+  status: "connected" | "connecting" | "failed" | "disabled";
+  toolCount: number;
+  lastError?: string | null;
+  connectedAt?: string | null;
+}
+
+export interface PluginTool {
+  name: string;
+  description: string;
+}
+
+export async function listPlugins(): Promise<PluginSummary[]> {
+  const resp = (await wsClient.send("plugins.list")) as {
+    data?: { plugins?: PluginSummary[] };
+  };
+  return resp?.data?.plugins ?? [];
+}
+
+export async function enablePlugin(id: string): Promise<boolean> {
+  const resp = (await wsClient.send("plugins.enable", { id })) as {
+    data?: { ok?: boolean };
+  };
+  return resp?.data?.ok ?? false;
+}
+
+export async function disablePlugin(id: string): Promise<boolean> {
+  const resp = (await wsClient.send("plugins.disable", { id })) as {
+    data?: { ok?: boolean };
+  };
+  return resp?.data?.ok ?? false;
+}
+
+export async function restartPlugin(id: string): Promise<boolean> {
+  const resp = (await wsClient.send("plugins.restart", { id })) as {
+    data?: { ok?: boolean };
+  };
+  return resp?.data?.ok ?? false;
+}
+
+export async function getPluginTools(id: string): Promise<PluginTool[]> {
+  const resp = (await wsClient.send("plugins.tools", { id })) as {
+    data?: { tools?: PluginTool[] };
+  };
+  return resp?.data?.tools ?? [];
+}
+
+export function onPluginsStatusChanged(
+  handler: (plugins: PluginSummary[]) => void,
+): () => void {
+  return wsClient.on("plugins.status_changed", (raw) => {
+    const msg = raw as { data?: { plugins?: PluginSummary[] } };
+    if (msg?.data?.plugins) handler(msg.data.plugins);
+  });
+}
+
 // ─── Notifications ───
 
 export interface AppNotification {

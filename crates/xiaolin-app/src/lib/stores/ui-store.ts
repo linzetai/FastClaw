@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 export type LayoutTier = "compact" | "standard" | "wide";
-export type MainView = "chat" | "automations";
+export type MainView = "chat" | "automations" | "plugins";
 
 const SIDEBAR_WIDTH_KEY = "xiaolin:sidebar-width";
 const DEFAULT_SIDEBAR_WIDTH = 210;

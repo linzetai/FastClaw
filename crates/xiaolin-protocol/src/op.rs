@@ -399,6 +399,21 @@ pub enum ClientOp {
         preset_id: String,
     },
 
+    // ── Plugins ──────────────────────────────────────────────────────
+    PluginsList,
+    PluginsEnable {
+        id: String,
+    },
+    PluginsDisable {
+        id: String,
+    },
+    PluginsRestart {
+        id: String,
+    },
+    PluginsTools {
+        id: String,
+    },
+
     // ── Workspace ────────────────────────────────────────────────────
     WorkspaceInit {
         #[serde(alias = "workDir", skip_serializing_if = "Option::is_none")]
@@ -744,6 +759,19 @@ impl ClientOp {
                     .or_else(|_| extract_string(&params, "session_id"))?,
                 preset_id: extract_string(&params, "presetId")
                     .or_else(|_| extract_string(&params, "preset_id"))?,
+            }),
+            "plugins.list" => Ok(Self::PluginsList),
+            "plugins.enable" => Ok(Self::PluginsEnable {
+                id: extract_string(&params, "id")?,
+            }),
+            "plugins.disable" => Ok(Self::PluginsDisable {
+                id: extract_string(&params, "id")?,
+            }),
+            "plugins.restart" => Ok(Self::PluginsRestart {
+                id: extract_string(&params, "id")?,
+            }),
+            "plugins.tools" => Ok(Self::PluginsTools {
+                id: extract_string(&params, "id")?,
             }),
             "workspace.init" => Ok(Self::WorkspaceInit {
                 work_dir: params
