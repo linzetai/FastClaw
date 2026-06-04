@@ -150,6 +150,7 @@ impl QueryEngine {
                 tools: None,
                 slash_intent: None,
                 work_dir: None,
+                response_language: None,
             }
         };
 

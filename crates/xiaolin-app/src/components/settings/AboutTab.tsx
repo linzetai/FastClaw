@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { RefreshCw, Download, RotateCcw, CheckCircle, AlertCircle } from "lucide-react";
 import { ClawIcon } from "../layout/ClawIcon";
 import { useGatewayStore } from "../../lib/store";
@@ -6,6 +7,7 @@ import { useAppUpdater } from "../../lib/use-app-updater";
 import { ICON } from "../../lib/ui-tokens";
 
 export function AboutTab() {
+  const { t } = useTranslation("settings");
   const gwInfo = useGatewayStore((s) => s.info);
   const {
     status,
@@ -23,15 +25,15 @@ export function AboutTab() {
         <div className="mb-4">
           <ClawIcon size={64} />
         </div>
-        <h3 className="text-[16px] font-semibold" style={{ color: "var(--fill-primary)" }}>小林</h3>
+        <h3 className="text-[16px] font-semibold" style={{ color: "var(--fill-primary)" }}>{t("appName")}</h3>
         <p className="mt-0.5 text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
-          版本 {gwInfo?.version ?? "0.1.0"}
+          {t("version", { version: gwInfo?.version ?? "0.1.0" })}
         </p>
       </div>
 
       {/* Update section */}
       <div>
-        <SectionTitle>软件更新</SectionTitle>
+        <SectionTitle>{t("softwareUpdate")}</SectionTitle>
         <div
           className="overflow-hidden rounded-[var(--radius-sm)]"
           style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}
@@ -41,7 +43,7 @@ export function AboutTab() {
               <div className="flex items-center justify-between">
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium" style={{ color: "var(--fill-primary)" }}>
-                    新版本 {info.version} 可用
+                    {t("newVersionAvailable", { version: info.version })}
                   </div>
                   {info.body && (
                     <div className="mt-1 text-[12px] leading-relaxed" style={{ color: "var(--fill-tertiary)" }}>
@@ -55,14 +57,14 @@ export function AboutTab() {
                   style={{ background: "var(--tint)" }}
                 >
                   <Download {...ICON.md} />
-                  下载更新
+                  {t("downloadUpdate")}
                 </button>
               </div>
             </div>
           ) : status === "downloading" ? (
             <div className="px-4 py-3">
               <div className="flex items-center justify-between">
-                <span className="text-[13px]" style={{ color: "var(--fill-secondary)" }}>正在下载更新...</span>
+                <span className="text-[13px]" style={{ color: "var(--fill-secondary)" }}>{t("downloadingUpdate")}</span>
                 <span className="text-[12px] font-medium tabular-nums" style={{ color: "var(--fill-tertiary)" }}>
                   {progress}%
                 </span>
@@ -78,7 +80,7 @@ export function AboutTab() {
             <div className="flex items-center justify-between px-4 py-3">
               <div className="flex items-center gap-2">
                 <CheckCircle {...ICON.md} style={{ color: "var(--green)" }} />
-                <span className="text-[13px]" style={{ color: "var(--fill-primary)" }}>更新已下载，重启后生效</span>
+                <span className="text-[13px]" style={{ color: "var(--fill-primary)" }}>{t("updateReady")}</span>
               </div>
               <button
                 onClick={restartApp}
@@ -86,7 +88,7 @@ export function AboutTab() {
                 style={{ background: "var(--green, #34C759)" }}
               >
                 <RotateCcw {...ICON.md} />
-                立即重启
+                {t("restartNow")}
               </button>
             </div>
           ) : status === "error" ? (
@@ -94,7 +96,7 @@ export function AboutTab() {
               <div className="flex min-w-0 items-center gap-2">
                 <AlertCircle {...ICON.md} className="shrink-0" style={{ color: "var(--red)" }} />
                 <span className="truncate text-[13px]" style={{ color: "var(--fill-secondary)" }}>
-                  {error ?? "检查更新失败"}
+                  {error ?? t("checkUpdateFailed")}
                 </span>
               </div>
               <button
@@ -102,14 +104,14 @@ export function AboutTab() {
                 className="ml-3 flex shrink-0 cursor-pointer items-center gap-1.5 rounded-[var(--radius-xs)] px-3 py-1.5 text-[12px] font-medium transition-colors duration-150 hover:opacity-80"
                 style={{ background: "var(--fill-quaternary)", color: "var(--fill-primary)" }}
               >
-                重试
+                {t("retry")}
               </button>
             </div>
           ) : status === "up-to-date" ? (
             <div className="flex items-center justify-between px-4 py-3">
               <div className="flex items-center gap-2">
                 <CheckCircle {...ICON.md} style={{ color: "var(--green)" }} />
-                <span className="text-[13px]" style={{ color: "var(--fill-primary)" }}>已是最新版本</span>
+                <span className="text-[13px]" style={{ color: "var(--fill-primary)" }}>{t("upToDate")}</span>
               </div>
               <button
                 onClick={checkForUpdate}
@@ -117,13 +119,13 @@ export function AboutTab() {
                 style={{ background: "var(--fill-quaternary)", color: "var(--fill-primary)" }}
               >
                 <RefreshCw {...ICON.md} />
-                再次检查
+                {t("checkAgain")}
               </button>
             </div>
           ) : (
             <div className="flex items-center justify-between px-4 py-3">
               <span className="text-[13px]" style={{ color: "var(--fill-secondary)" }}>
-                {status === "checking" ? "正在检查更新..." : "检查是否有新版本可用"}
+                {status === "checking" ? t("checkingUpdate") : t("checkUpdatePrompt")}
               </span>
               <button
                 onClick={checkForUpdate}
@@ -132,7 +134,7 @@ export function AboutTab() {
                 style={{ background: "var(--fill-quaternary)", color: "var(--fill-primary)" }}
               >
                 <RefreshCw {...ICON.md} className={status === "checking" ? "animate-spin" : ""} />
-                检查更新
+                {t("checkUpdate")}
               </button>
             </div>
           )}
@@ -140,13 +142,13 @@ export function AboutTab() {
       </div>
 
       <div>
-        <SectionTitle>信息</SectionTitle>
+        <SectionTitle>{t("infoSection")}</SectionTitle>
         {(() => {
           const rows = [
-            { label: "框架", value: "Tauri 2.0 + React 19" },
-            { label: "后端", value: "Rust (Tokio + Axum)" },
-            { label: "协议", value: "xiaolin-ws/1 (WebSocket)" },
-            { label: "许可证", value: "MIT" },
+            { label: t("info_framework"), value: "Tauri 2.0 + React 19" },
+            { label: t("info_backend"), value: "Rust (Tokio + Axum)" },
+            { label: t("info_protocol"), value: "xiaolin-ws/1 (WebSocket)" },
+            { label: t("info_license"), value: "MIT" },
           ];
           return (
             <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>

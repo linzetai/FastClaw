@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { CheckCircle, XCircle, X, Plus, Info } from "lucide-react";
 import * as api from "../../lib/api";
 import { useChatMetaStore } from "../../lib/stores";
@@ -10,12 +11,6 @@ import { inputCls as sharedInputCls, inputStyle as sharedInputStyle } from "../c
 type DangerousOpsPolicy = "deny" | "allow" | "confirm";
 type ExecutionMode = "plan" | "default" | "auto-edit" | "yolo";
 
-const POLICY_OPTIONS: { value: DangerousOpsPolicy; label: string; desc: string }[] = [
-  { value: "deny", label: "拒绝", desc: "直接阻止所有危险操作" },
-  { value: "confirm", label: "确认", desc: "暂停并弹窗询问用户是否继续（推荐）" },
-  { value: "allow", label: "允许", desc: "不做任何检查，直接执行" },
-];
-
 const MANAGED_PATTERNS = ["write_file", "edit_file", "apply_patch", "multi_edit", "shell_exec"];
 
 const MODE_TO_PRESET: Record<ExecutionMode, string> = {
@@ -24,13 +19,6 @@ const MODE_TO_PRESET: Record<ExecutionMode, string> = {
   "auto-edit": "auto-edit",
   yolo: "full-auto",
 };
-
-const EXECUTION_MODE_OPTIONS: { value: ExecutionMode; label: string; desc: string }[] = [
-  { value: "plan", label: "Plan（只读）", desc: "禁止写文件与 shell，仅允许工作区内读取，适合分析与规划" },
-  { value: "default", label: "Default（确认）", desc: "写文件与 shell 需确认，仅访问工作区内文件" },
-  { value: "auto-edit", label: "Auto-Edit", desc: "文件编辑自动通过且可访问全文件系统，shell 仍需确认" },
-  { value: "yolo", label: "YOLO", desc: "所有操作自动通过，可访问全文件系统，仅限可信环境" },
-];
 
 function dedupe(values: string[]): string[] {
   return Array.from(new Set(values));
@@ -64,7 +52,21 @@ function inferMode(behavior?: api.AgentBehaviorConfig): ExecutionMode {
 }
 
 export function SecurityTab() {
+  const { t } = useTranslation("settings");
   const activeAgentId = useChatMetaStore((s) => s.activeAgentId);
+
+  const policyOptions = useMemo(() => [
+    { value: "deny" as const, label: t("policy_deny"), desc: t("policy_denyDesc") },
+    { value: "confirm" as const, label: t("policy_confirm"), desc: t("policy_confirmDesc") },
+    { value: "allow" as const, label: t("policy_allow"), desc: t("policy_allowDesc") },
+  ], [t]);
+
+  const executionModeOptions = useMemo(() => [
+    { value: "plan" as const, label: t("executionMode_plan"), desc: t("executionMode_planDesc") },
+    { value: "default" as const, label: t("executionMode_default"), desc: t("executionMode_defaultDesc") },
+    { value: "auto-edit" as const, label: t("executionMode_autoEdit"), desc: t("executionMode_autoEditDesc") },
+    { value: "yolo" as const, label: t("executionMode_yolo"), desc: t("executionMode_yoloDesc") },
+  ], [t]);
   const [allowedHosts, setAllowedHosts] = useState<string[]>([]);
   const [newHost, setNewHost] = useState("");
   const [opsPolicy, setOpsPolicy] = useState<DangerousOpsPolicy>("confirm");
@@ -110,13 +112,13 @@ export function SecurityTab() {
     setSaving(true);
     try {
       await api.setConfig("security", patch);
-      showToast("已保存，立即生效", "ok");
+      showToast(t("savedOk"), "ok");
     } catch {
-      showToast("保存失败", "err");
+      showToast(t("saveFailed"), "err");
     } finally {
       setSaving(false);
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   const persistHosts = useCallback(async (hosts: string[]) => {
     setAllowedHosts(hosts);
@@ -170,13 +172,13 @@ export function SecurityTab() {
       });
 
       if (!ok) throw new Error("update failed");
-      showToast("执行模式已更新", "ok");
+      showToast(t("executionModeUpdated"), "ok");
     } catch {
-      showToast("执行模式更新失败", "err");
+      showToast(t("executionModeUpdateFailed"), "err");
     } finally {
       setModeSaving(false);
     }
-  }, [activeAgentId, showToast]);
+  }, [activeAgentId, showToast, t]);
 
   const handleAdd = () => {
     const trimmed = newHost.trim();
@@ -203,7 +205,7 @@ export function SecurityTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <span className="text-[13px]" style={{ color: "var(--fill-tertiary)" }}>加载中...</span>
+        <span className="text-[13px]" style={{ color: "var(--fill-tertiary)" }}>{t("loading")}</span>
       </div>
     );
   }
@@ -224,18 +226,18 @@ export function SecurityTab() {
       )}
 
       <div>
-        <SectionTitle>执行模式</SectionTitle>
+        <SectionTitle>{t("executionMode")}</SectionTitle>
         <p className="mb-3 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
-          统一控制 Agent 的工具权限与文件系统访问范围。决定写文件、shell 执行的审批策略，以及是否允许访问工作区外的文件。
+          {t("executionModeDesc")}
         </p>
         <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
-          {EXECUTION_MODE_OPTIONS.map((opt, idx) => (
+          {executionModeOptions.map((opt, idx) => (
             <button
               key={opt.value}
               onClick={() => handleExecutionModeChange(opt.value)}
               disabled={modeSaving || !activeAgentId}
               className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-              style={idx < EXECUTION_MODE_OPTIONS.length - 1 ? { borderBottom: "0.5px solid var(--separator)" } : undefined}
+              style={idx < executionModeOptions.length - 1 ? { borderBottom: "0.5px solid var(--separator)" } : undefined}
             >
               <span
                 className="flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full transition-all duration-150"
@@ -265,25 +267,25 @@ export function SecurityTab() {
           >
             <Info size={14} strokeWidth={1.6} className="mt-px shrink-0" />
             <span>
-              {sessionOverrideCount} 个活跃会话正在使用非默认权限预设。输入栏中的权限选择器可覆盖单个会话的执行模式。
+              {t("sessionOverrideHint", { count: sessionOverrideCount })}
             </span>
           </div>
         )}
       </div>
 
       <div>
-        <SectionTitle>危险操作保护</SectionTitle>
+        <SectionTitle>{t("dangerousOps")}</SectionTitle>
         <p className="mb-3 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
-          控制 Shell 中执行 rm、rmdir、chmod 等危险命令时的行为策略。
+          {t("dangerousOpsDesc")}
         </p>
         <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
-          {POLICY_OPTIONS.map((opt, idx) => (
+          {policyOptions.map((opt, idx) => (
             <button
               key={opt.value}
               onClick={() => handlePolicyChange(opt.value)}
               disabled={saving}
               className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-              style={idx < POLICY_OPTIONS.length - 1 ? { borderBottom: "0.5px solid var(--separator)" } : undefined}
+              style={idx < policyOptions.length - 1 ? { borderBottom: "0.5px solid var(--separator)" } : undefined}
             >
               <span
                 className="flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full transition-all duration-150"
@@ -306,16 +308,15 @@ export function SecurityTab() {
       </div>
 
       <div>
-        <SectionTitle>SSRF 白名单</SectionTitle>
+        <SectionTitle>{t("ssrfWhitelist")}</SectionTitle>
         <p className="mb-3 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
-          允许 http_fetch / web_fetch 访问的内网主机。默认情况下，解析到私有 IP (localhost, 10.x, 192.168.x) 的 URL 会被 SSRF 保护拦截。
-          将主机名或 host:port 加入白名单后可绕过此限制，适用于本地 SearXNG、内部 API 等场景。
+          {t("ssrfWhitelistDesc")}
         </p>
 
         <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
           {allowedHosts.length === 0 ? (
             <div className="px-4 py-4 text-center text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
-              暂无白名单主机 — 所有指向私有 IP 的请求将被拦截
+              {t("ssrfEmpty")}
             </div>
           ) : (
             allowedHosts.map((host, idx) => (
@@ -329,7 +330,7 @@ export function SecurityTab() {
                   onClick={() => handleRemove(host)}
                   disabled={saving}
                   className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full opacity-0 transition-all duration-100 hover:bg-[var(--bg-hover)] group-hover:opacity-100"
-                  title="移除"
+                  title={t("remove")}
                 >
                   <X {...ICON.sm} style={{ color: "var(--red)" }} />
                 </button>
@@ -343,7 +344,7 @@ export function SecurityTab() {
             value={newHost}
             onChange={(e) => setNewHost(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="例: localhost:8888 或 searxng.internal"
+            placeholder={t("ssrfPlaceholder")}
             className={inputCls}
             style={inputStyle}
             disabled={saving}
@@ -355,14 +356,14 @@ export function SecurityTab() {
             style={{ background: "var(--tint)" }}
           >
             <Plus {...ICON.sm} />
-            添加
+            {t("add")}
           </button>
         </div>
       </div>
 
       <div>
         <p className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-          配置保存到 ~/.xiaolin/config/default.json 的 security.ssrfAllowedHosts 字段，保存后立即生效。
+          {t("ssrfConfigHint")}
         </p>
       </div>
     </div>

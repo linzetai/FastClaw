@@ -1,4 +1,5 @@
 import { Component, memo, useMemo, useState, useRef, useCallback, useEffect, lazy, Suspense, type ReactNode, type ErrorInfo } from "react";
+import { useTranslation } from "react-i18next";
 import type { ChatMessage, ChatUsage, SubAgentRunUI } from "../../lib/agent-store";
 import type { BriefMessageData } from "../../lib/stores/types";
 import { ICON, ICON_ACTIVE_STROKE, BTN_ICON } from "../../lib/ui-tokens";
@@ -37,29 +38,34 @@ class MessageErrorBoundary extends Component<
 
   render() {
     if (this.state.error) {
-      return (
-        <div
-          className="mx-6 my-2 flex items-center gap-2 rounded-lg px-3 py-2 text-[12px]"
-          style={{
-            background: "color-mix(in srgb, var(--red) 6%, transparent)",
-            border: "0.5px solid color-mix(in srgb, var(--red) 20%, transparent)",
-            color: "var(--red)",
-          }}
-        >
-          <AlertTriangle {...ICON.sm} />
-          <span>渲染出错：{this.state.error.message}</span>
-          <button
-            onClick={() => this.setState({ error: null })}
-            className="ml-auto cursor-pointer text-[11px] font-medium underline"
-            style={{ color: "var(--fill-tertiary)" }}
-          >
-            重试
-          </button>
-        </div>
-      );
+      return <MessageErrorFallback error={this.state.error} onRetry={() => this.setState({ error: null })} />;
     }
     return this.props.children;
   }
+}
+
+function MessageErrorFallback({ error, onRetry }: { error: Error; onRetry: () => void }) {
+  const { t } = useTranslation("chat");
+  return (
+    <div
+      className="mx-6 my-2 flex items-center gap-2 rounded-lg px-3 py-2 text-[12px]"
+      style={{
+        background: "color-mix(in srgb, var(--red) 6%, transparent)",
+        border: "0.5px solid color-mix(in srgb, var(--red) 20%, transparent)",
+        color: "var(--red)",
+      }}
+    >
+      <AlertTriangle {...ICON.sm} />
+      <span>{t("renderError", { message: error.message })}</span>
+      <button
+        onClick={onRetry}
+        className="ml-auto cursor-pointer text-[11px] font-medium underline"
+        style={{ color: "var(--fill-tertiary)" }}
+      >
+        {t("retry", { ns: "common" })}
+      </button>
+    </div>
+  );
 }
 import {
   Clock, Copy, Check, ThumbsUp, ThumbsDown, RotateCw,
@@ -83,6 +89,7 @@ function ts(d: Date) {
 }
 
 const AiReactionBar = memo(function AiReactionBar({ content, sessionId, turnId }: { content: string; sessionId?: string; turnId?: string }) {
+  const { t } = useTranslation("chat");
   const [copied, setCopied] = useState(false);
   const [liked, setLiked] = useState(false);
   const [disliked, setDisliked] = useState(false);
@@ -120,14 +127,14 @@ const AiReactionBar = memo(function AiReactionBar({ content, sessionId, turnId }
     <div
       className="mt-1 flex items-center gap-0.5 -ml-1.5 opacity-0 group-hover/message:opacity-100 transition-opacity duration-150"
     >
-      <button onClick={handleCopy} className={btnCls} style={{ color: copied ? "var(--green)" : defaultColor }} title="复制">
+      <button onClick={handleCopy} className={btnCls} style={{ color: copied ? "var(--green)" : defaultColor }} title={t("copy", { ns: "common" })}>
         {copied ? <Check {...iconProps} strokeWidth={ICON_ACTIVE_STROKE} style={{ animation: "scale-spring var(--duration-normal) var(--ease-spring)" }} /> : <Copy {...iconProps} />}
       </button>
       <button
         onClick={handleLike}
         className={btnCls}
         style={{ color: liked ? "var(--tint)" : defaultColor }}
-        title="点赞"
+        title={t("message_like")}
       >
         <ThumbsUp {...iconProps} strokeWidth={liked ? ICON_ACTIVE_STROKE : iconProps.strokeWidth} />
       </button>
@@ -135,7 +142,7 @@ const AiReactionBar = memo(function AiReactionBar({ content, sessionId, turnId }
         onClick={handleDislike}
         className={btnCls}
         style={{ color: disliked ? "var(--red)" : defaultColor }}
-        title="点踩"
+        title={t("message_dislike")}
       >
         <ThumbsDown {...iconProps} strokeWidth={disliked ? ICON_ACTIVE_STROKE : iconProps.strokeWidth} />
       </button>
@@ -147,7 +154,7 @@ const AiReactionBar = memo(function AiReactionBar({ content, sessionId, turnId }
         }}
         className={btnCls}
         style={{ color: defaultColor }}
-        title="重试"
+        title={t("retry", { ns: "common" })}
       >
         <RotateCw {...iconProps} />
       </button>
@@ -156,6 +163,7 @@ const AiReactionBar = memo(function AiReactionBar({ content, sessionId, turnId }
 });
 
 const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onToggleSelect, savedSegments }: { msg: ChatMessage; usage?: ChatUsage; copyable?: boolean; selected?: boolean; onToggleSelect?: () => void; savedSegments?: StreamSegment[] }) {
+  const { t } = useTranslation("chat");
   const toolCalls = msg.toolCalls;
   const aiThreshold = useConfigStore((s) => s.display.toolCallGroupThreshold);
   const fileChangeSummary = useFileChangeSummary(toolCalls, savedSegments);
@@ -197,7 +205,10 @@ const AiMessage = memo(function AiMessage({ msg, usage, copyable, selected, onTo
           <span
             className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10.5px]"
             style={{ background: "var(--bg-secondary)", color: "var(--fill-quaternary)" }}
-            title={`上行 ${formatTokens(usage.promptTokens)} · 下行 ${formatTokens(usage.completionTokens)}`}
+            title={t("tokenUsageTitle", {
+              prompt: formatTokens(usage.promptTokens),
+              completion: formatTokens(usage.completionTokens),
+            })}
           >
             <Clock size={10} strokeWidth={1.2} />
             {formatElapsed(usage.elapsedMs)}
@@ -297,6 +308,7 @@ export function QuestionPanel({
   onAnswer: (answer: string) => void;
   onTimeout: () => void;
 }) {
+  const { t } = useTranslation("chat");
   const hasTimeout = question.timeoutSecs > 0 && question.expiresAt > 0;
   const [remaining, setRemaining] = useState(() => hasTimeout ? Math.max(0, Math.ceil((question.expiresAt - Date.now()) / 1000)) : 0);
   const [freeText, setFreeText] = useState("");
@@ -364,6 +376,7 @@ export function QuestionPanel({
   };
 
   const reducedMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const lastKey = OPTION_LETTERS[Math.min(question.options.length, OPTION_LETTERS.length) - 1];
 
   return (
     <div
@@ -396,12 +409,12 @@ export function QuestionPanel({
           )}
         </div>
         {multi && (
-          <p className="mb-2 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>可多选，选完后点击"确认"&nbsp;·&nbsp;按键盘 A-{OPTION_LETTERS[Math.min(question.options.length, OPTION_LETTERS.length) - 1]} 快速选择</p>
+          <p className="mb-2 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>{t("questionMultiSelectHint", { lastKey })}</p>
         )}
         {!multi && question.options.length > 0 && (
-          <p className="mb-2 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>按键盘 A-{OPTION_LETTERS[Math.min(question.options.length, OPTION_LETTERS.length) - 1]} 快速选择</p>
+          <p className="mb-2 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>{t("questionKeyboardHint", { lastKey })}</p>
         )}
-        <div className="flex flex-col gap-1.5" role="group" aria-label="选项列表">
+        <div className="flex flex-col gap-1.5" role="group" aria-label={t("optionsList")}>
           {question.options.map((opt, idx) => {
             const letter = OPTION_LETTERS[idx] ?? String(idx + 1);
             const isSelected = selected.has(opt.id);
@@ -410,7 +423,7 @@ export function QuestionPanel({
                 key={opt.id}
                 onClick={() => handleOptionClick(opt.id)}
                 disabled={submitted}
-                aria-label={`选项 ${letter}: ${opt.label}`}
+                aria-label={t("optionAriaLabel", { letter, label: opt.label })}
                 aria-pressed={multi ? isSelected : undefined}
                 className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12px] transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-[var(--fill-accent,#4299E1)] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
@@ -441,7 +454,7 @@ export function QuestionPanel({
               className="cursor-pointer rounded-lg px-4 py-1.5 text-[12px] font-medium transition-colors duration-150 hover:opacity-80 focus-visible:ring-2 focus-visible:ring-[var(--fill-accent,#4299E1)] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
               style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
             >
-              确认（{selected.size}项）
+              {t("confirmWithCount", { count: selected.size })}
             </button>
           </div>
         )}
@@ -452,8 +465,8 @@ export function QuestionPanel({
             onChange={(e) => setFreeText(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") handleFreeTextSubmit(); }}
             disabled={submitted}
-            placeholder="或输入自定义回答..."
-            aria-label="自定义回答"
+            placeholder={t("customAnswerPlaceholder")}
+            aria-label={t("customAnswerAria")}
             className="min-w-0 flex-1 rounded-lg px-2.5 py-1.5 text-[12px] outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-[var(--fill-accent,#4299E1)] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
             style={{ background: "var(--bg-primary)", color: "var(--fill-primary)", border: "1px solid var(--separator)" }}
           />
@@ -464,7 +477,7 @@ export function QuestionPanel({
               className="cursor-pointer rounded-lg px-3 py-1.5 text-[12px] font-medium transition-colors duration-150 hover:opacity-80 focus-visible:ring-2 focus-visible:ring-[var(--fill-accent,#4299E1)] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
               style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
             >
-              发送
+              {t("send", { ns: "common" })}
             </button>
           )}
         </div>

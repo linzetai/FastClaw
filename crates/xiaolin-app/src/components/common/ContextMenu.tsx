@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import i18n from "../../i18n";
 import { Copy, ClipboardPaste, Scissors, TextSelect } from "lucide-react";
 
 interface MenuItem {
@@ -35,14 +36,14 @@ function buildMenuItems(target: HTMLElement): MenuEntry[] {
 
   if (hasSelection) {
     items.push({
-      label: "剪切",
+      label: i18n.t("common:cut"),
       icon: <Scissors {...ICON_PROPS} />,
       shortcut: "Ctrl+X",
       disabled: !isEditable,
       action: () => document.execCommand("cut"),
     });
     items.push({
-      label: "复制",
+      label: i18n.t("common:copy"),
       icon: <Copy {...ICON_PROPS} />,
       shortcut: "Ctrl+C",
       action: () => navigator.clipboard.writeText(sel!.toString()),
@@ -51,7 +52,7 @@ function buildMenuItems(target: HTMLElement): MenuEntry[] {
 
   if (isEditable) {
     items.push({
-      label: "粘贴",
+      label: i18n.t("common:paste"),
       icon: <ClipboardPaste {...ICON_PROPS} />,
       shortcut: "Ctrl+V",
       action: async () => {
@@ -84,7 +85,7 @@ function buildMenuItems(target: HTMLElement): MenuEntry[] {
   if (items.length > 0) items.push({ separator: true });
 
   items.push({
-    label: "全选",
+    label: i18n.t("common:selectAll"),
     icon: <TextSelect {...ICON_PROPS} />,
     shortcut: "Ctrl+A",
     action: () => {

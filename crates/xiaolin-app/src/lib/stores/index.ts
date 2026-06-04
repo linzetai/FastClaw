@@ -2,6 +2,8 @@ import { saveUIStateFromMeta } from "./persistence";
 import { useChatMetaStore as _chatMetaStore } from "./chat-meta-store";
 
 export { useConfigStore } from "./config-store";
+export { useLocaleStore } from "./locale-store";
+export type { Locale, ResponseLang } from "./locale-store";
 export { usePermissionStore } from "./permission-store";
 export { useAutomationStore } from "./automation-store";
 export { usePluginStore } from "./plugin-store";

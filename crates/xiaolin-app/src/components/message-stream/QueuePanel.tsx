@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { X, Pencil, Check, AlertCircle, ArrowUp, ArrowDown } from "lucide-react";
 import type { QueuedMessage } from "../../lib/agent-store";
 import { ICON } from "../../lib/ui-tokens";
@@ -12,6 +13,7 @@ interface QueuePanelProps {
 }
 
 function StatusBadge({ status }: { status: QueuedMessage["status"] }) {
+  const { t } = useTranslation("chat");
   switch (status) {
     case "pending":
       return (
@@ -19,7 +21,7 @@ function StatusBadge({ status }: { status: QueuedMessage["status"] }) {
           className="rounded px-1.5 py-0.5 text-[10px] font-medium"
           style={{ background: "rgba(0,0,0,0.1)", color: "var(--fill-secondary)" }}
         >
-          等待中
+          {t("queue_waiting")}
         </span>
       );
     case "sending":
@@ -28,7 +30,7 @@ function StatusBadge({ status }: { status: QueuedMessage["status"] }) {
           className="rounded px-1.5 py-0.5 text-[10px] font-medium"
           style={{ background: "var(--tint)", color: "#fff", opacity: 0.7 }}
         >
-          发送中
+          {t("queue_sending")}
         </span>
       );
     case "failed":
@@ -38,7 +40,7 @@ function StatusBadge({ status }: { status: QueuedMessage["status"] }) {
           style={{ background: "rgba(252,129,129,0.15)", color: "var(--red, #FC8181)" }}
         >
           <AlertCircle {...ICON.sm} />
-          失败
+          {t("queue_failed")}
         </span>
       );
   }
@@ -61,6 +63,7 @@ function QueueItem({
   onReorder: (fromIndex: number, toIndex: number) => void;
   onRetry: (id: string) => void;
 }) {
+  const { t } = useTranslation("chat");
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(item.content);
 
@@ -117,7 +120,7 @@ function QueueItem({
             className="rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
             style={{ color: "var(--tint)" }}
           >
-            重试
+            {t("retry", { ns: "common" })}
           </button>
         )}
         {!editing && item.status === "pending" && (

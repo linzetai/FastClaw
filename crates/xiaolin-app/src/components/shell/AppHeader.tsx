@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, type CSSProperties, type ReactNode, type MouseEvent as RME } from "react";
+import { useTranslation } from "react-i18next";
 import {
   PanelLeft,
   PanelBottom,
@@ -79,6 +80,7 @@ function IconButton({
 }
 
 function WindowControls() {
+  const { t } = useTranslation("common");
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
@@ -122,18 +124,18 @@ function WindowControls() {
   return (
     <div style={{ display: "flex", alignItems: "stretch", height: "100%", marginLeft: 4 }}>
       <div style={{ width: 1, alignSelf: "center", height: 14, background: "var(--separator)" }} />
-      <button type="button" style={wc} onClick={minimize} title="最小化"
+      <button type="button" style={wc} onClick={minimize} title={t("minimize")}
         onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
         onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
         <Minus size={14} strokeWidth={1.2} />
       </button>
       <button type="button" style={wc} onClick={toggleMaximize}
-        title={isMaximized ? "还原" : "最大化"}
+        title={isMaximized ? t("restore") : t("maximize")}
         onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
         onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
         {isMaximized ? <Maximize2 size={14} strokeWidth={1.2} /> : <Square size={14} strokeWidth={1.2} />}
       </button>
-      <button type="button" style={{ ...wc, borderRadius: "0 0 0 0" }} onClick={close} title="关闭"
+      <button type="button" style={{ ...wc, borderRadius: "0 0 0 0" }} onClick={close} title={t("close")}
         onMouseEnter={(e) => { e.currentTarget.style.background = "#E81123"; e.currentTarget.style.color = "#fff"; }}
         onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--fill-quaternary)"; }}>
         <X size={14} strokeWidth={1.2} />
@@ -143,6 +145,7 @@ function WindowControls() {
 }
 
 export function AppHeader() {
+  const { t } = useTranslation("header");
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const resolved = useThemeStore((s) => s.resolved);
@@ -172,10 +175,10 @@ export function AppHeader() {
     >
       {/* Left: nav tools */}
       <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-        <IconButton title="切换侧边栏" onClick={toggleSidebar} active={!sidebarCollapsed}>
+        <IconButton title={t("toggleSidebar")} onClick={toggleSidebar} active={!sidebarCollapsed}>
           <PanelLeft size={16} strokeWidth={1.7} />
         </IconButton>
-        <IconButton title="切换面板" onClick={togglePanel} active={panelOpen}>
+        <IconButton title={t("togglePanel")} onClick={togglePanel} active={panelOpen}>
           <PanelBottom size={16} strokeWidth={1.7} />
         </IconButton>
       </div>
@@ -190,16 +193,16 @@ export function AppHeader() {
 
       {/* Right: actions + window controls */}
       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        <IconButton title={resolved === "light" ? "深色模式" : "浅色模式"} onClick={handleThemeToggle}>
+        <IconButton title={resolved === "light" ? t("darkMode") : t("lightMode")} onClick={handleThemeToggle}>
           {resolved === "light" ? <Sun size={ICON_SIZE} strokeWidth={1.7} /> : <Moon size={ICON_SIZE} strokeWidth={1.7} />}
         </IconButton>
         <div style={{ display: "flex", gap: 1 }}>
-          <IconButton title="单栏" onClick={() => { if (panelOpen) togglePanel(); }} active={!panelOpen}>
+          <IconButton title={t("singleColumn")} onClick={() => { if (panelOpen) togglePanel(); }} active={!panelOpen}>
             <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={1.7}>
               <rect x="3" y="3" width="18" height="18" rx="3" />
             </svg>
           </IconButton>
-          <IconButton title="分栏" onClick={() => { if (!panelOpen) togglePanel(); }} active={panelOpen}>
+          <IconButton title={t("splitColumn")} onClick={() => { if (!panelOpen) togglePanel(); }} active={panelOpen}>
             <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={1.7}>
               <rect x="3" y="3" width="18" height="18" rx="3" />
               <line x1="12" y1="3" x2="12" y2="21" />

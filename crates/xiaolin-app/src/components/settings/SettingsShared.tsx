@@ -49,12 +49,14 @@ export function Toggle({ enabled, onChange }: { enabled: boolean; onChange: () =
   );
 }
 
-export function ThemeCard({ preset, selected, resolved, onClick }: {
+export function ThemeCard({ preset, label, selected, resolved, onClick }: {
   preset: typeof ACCENT_PRESETS[number];
+  label?: string;
   selected: boolean;
   resolved: "light" | "dark";
   onClick: () => void;
 }) {
+  const displayLabel = label ?? preset.label;
   const p = resolved === "dark" ? preset.preview.dark : preset.preview.light;
 
   return (
@@ -62,7 +64,7 @@ export function ThemeCard({ preset, selected, resolved, onClick }: {
       onClick={onClick}
       className="group relative flex cursor-pointer flex-col items-center gap-2 outline-none focus-visible:outline-2 focus-visible:outline-offset-4"
       style={{ outlineColor: selected ? p.accent : "var(--tint)" } as React.CSSProperties}
-      title={preset.label}
+      title={displayLabel}
     >
       <div
         className="relative overflow-hidden rounded-[12px] transition-all duration-200 ease-out group-hover:scale-[1.04] group-active:scale-[0.98]"
@@ -115,7 +117,7 @@ export function ThemeCard({ preset, selected, resolved, onClick }: {
           fontWeight: selected ? 600 : 500,
         }}
       >
-        {preset.label}
+        {displayLabel}
       </span>
     </button>
   );

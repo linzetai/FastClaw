@@ -1,8 +1,10 @@
+import { useTranslation } from "react-i18next";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getCurrentWindow, Window } from "@tauri-apps/api/window";
 import { emit } from "@tauri-apps/api/event";
 
 export function QuickActionBar() {
+  const { t } = useTranslation("common");
   const [input, setInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -68,7 +70,7 @@ export function QuickActionBar() {
           ref={inputRef}
           type="text"
           className="quick-action-input"
-          placeholder="问小林任何事…"
+          placeholder={t("quickActionPlaceholder")}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}

@@ -3,15 +3,15 @@
  * Kept temporarily for backward compatibility during message-stream-redesign transition.
  */
 import { useState, useEffect, useRef, useCallback, useMemo, memo, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import {
-  FileText, PenLine, Search, Terminal, Globe, Download, Monitor,
-  Brain, Database, Image, Volume2, PackageSearch, PackagePlus,
-  TableProperties, Play, Wrench, Check, X as XIcon, ChevronRight, Plug,
-  Copy, Maximize2, ListTodo, Code2, Compass,
+  Wrench, Check, X as XIcon, ChevronRight, Plug,
+  Copy, Maximize2,
 } from "lucide-react";
 import { TodoCard, isTodoResult } from "./TodoCard";
 import { DiffCard, isEditResult } from "./DiffCard";
 import { PlanApprovalCard, isPlanExitResult, type PlanApprovalMetadata } from "./PlanApprovalCard";
+import { buildToolMeta } from "./StepIndicator";
 import { ICON } from "../../lib/ui-tokens";
 
 export interface ToolCall {
@@ -24,38 +24,6 @@ export interface ToolCall {
   startTime?: number;
   metadata?: Record<string, unknown> | null;
 }
-
-const TOOL_META: Record<string, { icon: ReactNode; label?: string }> = {
-  file_read: { icon: <FileText {...ICON.sm} />, label: "读取文件" },
-  file_write: { icon: <PenLine {...ICON.sm} />, label: "写入文件" },
-  file_search: { icon: <Search {...ICON.sm} />, label: "搜索文件" },
-  shell: { icon: <Terminal {...ICON.sm} />, label: "执行命令" },
-  shell_exec: { icon: <Terminal {...ICON.sm} />, label: "执行命令" },
-  web_search: { icon: <Globe {...ICON.sm} />, label: "搜索网络" },
-  web_fetch: { icon: <Download {...ICON.sm} />, label: "获取网页" },
-  browser: { icon: <Monitor {...ICON.sm} />, label: "浏览器" },
-  memory_search: { icon: <Brain {...ICON.sm} />, label: "搜索记忆" },
-  memory_store: { icon: <Database {...ICON.sm} />, label: "存储记忆" },
-  image_generate: { icon: <Image {...ICON.sm} />, label: "生成图片" },
-  text_to_speech: { icon: <Volume2 {...ICON.sm} />, label: "文本转语音" },
-  hub_search: { icon: <PackageSearch {...ICON.sm} />, label: "搜索 Hub" },
-  hub_install: { icon: <PackagePlus {...ICON.sm} />, label: "安装插件" },
-  sql_query: { icon: <TableProperties {...ICON.sm} />, label: "SQL 查询" },
-  code_execute: { icon: <Play {...ICON.sm} />, label: "执行代码" },
-  read_file: { icon: <FileText {...ICON.sm} />, label: "读取文件" },
-  write_file: { icon: <PenLine {...ICON.sm} />, label: "写入文件" },
-  list_directory: { icon: <Search {...ICON.sm} />, label: "列出目录" },
-  read_skill: { icon: <FileText {...ICON.sm} />, label: "读取 Skill" },
-  list_skills: { icon: <Search {...ICON.sm} />, label: "列出 Skills" },
-  write_skill: { icon: <PenLine {...ICON.sm} />, label: "写入 Skill" },
-  http_fetch: { icon: <Globe {...ICON.sm} />, label: "HTTP 请求" },
-  calculator: { icon: <TableProperties {...ICON.sm} />, label: "计算器" },
-  todo_write: { icon: <ListTodo {...ICON.sm} />, label: "任务管理" },
-  edit_file: { icon: <Code2 {...ICON.sm} />, label: "编辑文件" },
-  lsp: { icon: <Code2 {...ICON.sm} />, label: "代码分析" },
-  enter_plan_mode: { icon: <Compass {...ICON.sm} />, label: "进入 Plan 模式" },
-  exit_plan_mode: { icon: <Code2 {...ICON.sm} />, label: "退出 Plan 模式" },
-};
 
 const DEFAULT_META = { icon: <Wrench {...ICON.sm} /> };
 
@@ -117,6 +85,7 @@ function tryPrettyJson(text: string): string {
 }
 
 function ImageViewer({ src }: { src: string }) {
+  const { t } = useTranslation("chat");
   const [lightbox, setLightbox] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -148,8 +117,8 @@ function ImageViewer({ src }: { src: string }) {
             onClick={handleCopy}
             className="flex h-7 w-7 items-center justify-center rounded-md backdrop-blur-sm transition-colors hover:brightness-125"
             style={{ background: "rgba(0,0,0,0.55)", color: copied ? "var(--green)" : "#fff" }}
-            title={copied ? "已复制" : "复制图片"}
-            aria-label={copied ? "已复制" : "复制图片"}
+            title={copied ? t("copied") : t("copyImage")}
+            aria-label={copied ? t("copied") : t("copyImage")}
           >
             {copied ? <Check {...ICON.sm} /> : <Copy {...ICON.sm} />}
           </button>
@@ -157,8 +126,8 @@ function ImageViewer({ src }: { src: string }) {
             onClick={(e) => { e.stopPropagation(); setLightbox(true); }}
             className="flex h-7 w-7 items-center justify-center rounded-md backdrop-blur-sm transition-colors hover:brightness-125"
             style={{ background: "rgba(0,0,0,0.55)", color: "#fff" }}
-            title="查看大图"
-            aria-label="查看大图"
+            title={t("viewFullImage")}
+            aria-label={t("viewFullImage")}
           >
             <Maximize2 {...ICON.sm} />
           </button>
@@ -173,7 +142,7 @@ function ImageViewer({ src }: { src: string }) {
           onKeyDown={(e) => { if (e.key === "Escape") setLightbox(false); }}
           role="dialog"
           aria-modal="true"
-          aria-label="图片预览"
+          aria-label={t("imagePreview")}
           tabIndex={-1}
           ref={(el) => el?.focus()}
         >
@@ -182,16 +151,16 @@ function ImageViewer({ src }: { src: string }) {
               onClick={handleCopy}
               className="flex h-9 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-colors hover:brightness-125"
               style={{ background: "rgba(255,255,255,0.15)", color: copied ? "var(--green)" : "#fff" }}
-              aria-label={copied ? "已复制" : "复制图片"}
+              aria-label={copied ? t("copied") : t("copyImage")}
             >
               {copied ? <Check {...ICON.sm} /> : <Copy {...ICON.sm} />}
-              {copied ? "已复制" : "复制"}
+              {copied ? t("copied") : t("copy", { ns: "common" })}
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); setLightbox(false); }}
               className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:brightness-125"
               style={{ background: "rgba(255,255,255,0.15)", color: "#fff" }}
-              aria-label="关闭预览"
+              aria-label={t("closePreview")}
             >
               <XIcon {...ICON.md} />
             </button>
@@ -213,6 +182,7 @@ function isEditLikeTool(name: string): boolean {
 }
 
 function StreamingDiffPreview({ args }: { args: string }) {
+  const { t } = useTranslation("chat");
   const parsed = useMemo(() => {
     try {
       const a = JSON.parse(args);
@@ -236,7 +206,7 @@ function StreamingDiffPreview({ args }: { args: string }) {
     >
       <div className="flex items-center gap-2 px-2.5 py-1.5" style={{ borderBottom: "0.5px solid var(--separator)" }}>
         <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: "var(--tint, #4299E1)" }}>
-          {isCreate ? "创建" : "变更预览"}
+          {isCreate ? t("create") : t("changePreview")}
         </span>
         {fileName && (
           <span className="truncate text-[10px]" style={{ color: "var(--fill-quaternary)" }}>{fileName}</span>
@@ -318,6 +288,7 @@ function extractImages(text: string): { images: string[]; textOnly: string } {
 }
 
 function OutputBlock({ content, error }: { content: string; error?: boolean }) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(false);
   const { images, textOnly } = extractImages(content);
   const formatted = textOnly ? tryPrettyJson(textOnly) : "";
@@ -354,7 +325,7 @@ function OutputBlock({ content, error }: { content: string; error?: boolean }) {
               className="mt-1 cursor-pointer text-[11px] font-medium"
               style={{ color: "var(--fill-tertiary)" }}
             >
-              {expanded ? "收起" : `展开全部 (${lines.length} 行)`}
+              {expanded ? t("collapse", { ns: "common" }) : t("expandAllLines", { count: lines.length })}
             </button>
           )}
         </>
@@ -364,9 +335,11 @@ function OutputBlock({ content, error }: { content: string; error?: boolean }) {
 }
 
 export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCall }) {
+  const { t } = useTranslation("chat");
+  const toolMeta = useMemo(() => buildToolMeta(t), [t]);
   const [expanded, setExpanded] = useState(false);
   const mcpMeta = getMcpMeta(tool.name);
-  const meta = mcpMeta ?? TOOL_META[tool.name] ?? DEFAULT_META;
+  const meta = mcpMeta ?? toolMeta[tool.name] ?? DEFAULT_META;
   const label = meta.label ?? tool.name;
   const keyInfo = useMemo(() => extractKeyInfo(tool), [tool.args]);
   const hasDetails = !!(tool.args || tool.result);
@@ -497,7 +470,7 @@ export const ToolCallCard = memo(function ToolCallCard({ tool }: { tool: ToolCal
         >
           {tool.args && (
             <div className="mt-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--fill-quaternary)" }}>参数</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--fill-quaternary)" }}>{t("params")}</span>
               <pre
                 className="mt-1 overflow-x-auto whitespace-pre-wrap break-all rounded-md p-2 text-[11px] leading-[1.5]"
                 style={{

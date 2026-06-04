@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import i18n from "../../i18n";
 import * as api from "../api";
 import { DEFAULT_AGENT_ID, INITIAL_AGENTS, formatTime } from "./chat-helpers";
 import { _persisted } from "./persistence";
@@ -21,7 +22,7 @@ function createChatMeta(workDir?: string): ChatMeta {
   return {
     id: chatId,
     localKey: chatId,
-    title: "新对话",
+    title: i18n.t("common:newConversation"),
     workDir: workDir ?? null,
     source: "client",
     createdAt: new Date(),
@@ -250,7 +251,7 @@ export const useChatMetaStore = create<ChatMetaState>((set, get) => ({
         const meta: ChatMeta = {
           id: s.id,
           localKey: s.id,
-          title: s.title || "未命名会话",
+          title: s.title || i18n.t("common:unnamedSession"),
           workDir: s.workDir ?? null,
           source: s.source ?? "client",
           createdAt: parseUtcTimestamp(s.createdAt),

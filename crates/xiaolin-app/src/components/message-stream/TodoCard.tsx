@@ -3,6 +3,8 @@
  * Parses the formatted text output and renders a visual task list.
  */
 
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { CircleDot, CheckCircle2, Circle, XCircle } from "lucide-react";
 import { ICON } from "../../lib/ui-tokens";
 
@@ -54,32 +56,35 @@ export function parseTodoResult(text: string): { summary: TodoSummary; items: To
   return items.length > 0 ? { summary, items } : null;
 }
 
-const STATUS_CONFIG = {
-  completed: {
-    icon: CheckCircle2,
-    color: "var(--green, #48BB78)",
-    bg: "color-mix(in srgb, var(--green, #48BB78) 8%, transparent)",
-    label: "已完成",
-  },
-  in_progress: {
-    icon: CircleDot,
-    color: "var(--tint, #4299E1)",
-    bg: "color-mix(in srgb, var(--tint, #4299E1) 8%, transparent)",
-    label: "进行中",
-  },
-  pending: {
-    icon: Circle,
-    color: "var(--fill-tertiary)",
-    bg: "transparent",
-    label: "待开始",
-  },
-  cancelled: {
-    icon: XCircle,
-    color: "var(--fill-quaternary)",
-    bg: "transparent",
-    label: "已取消",
-  },
-} as const;
+function useStatusConfig() {
+  const { t } = useTranslation("chat");
+  return useMemo(() => ({
+    completed: {
+      icon: CheckCircle2,
+      color: "var(--green, #48BB78)",
+      bg: "color-mix(in srgb, var(--green, #48BB78) 8%, transparent)",
+      label: t("todo_status_completed"),
+    },
+    in_progress: {
+      icon: CircleDot,
+      color: "var(--tint, #4299E1)",
+      bg: "color-mix(in srgb, var(--tint, #4299E1) 8%, transparent)",
+      label: t("todo_status_in_progress"),
+    },
+    pending: {
+      icon: Circle,
+      color: "var(--fill-tertiary)",
+      bg: "transparent",
+      label: t("todo_status_pending"),
+    },
+    cancelled: {
+      icon: XCircle,
+      color: "var(--fill-quaternary)",
+      bg: "transparent",
+      label: t("todo_status_cancelled"),
+    },
+  }), [t]);
+}
 
 function ProgressBar({ summary }: { summary: TodoSummary }) {
   if (summary.total === 0) return null;
@@ -114,6 +119,8 @@ function ProgressBar({ summary }: { summary: TodoSummary }) {
 }
 
 export function TodoCard({ result }: { result: string }) {
+  const { t } = useTranslation("chat");
+  const statusConfig = useStatusConfig();
   const parsed = parseTodoResult(result);
   if (!parsed) return null;
 
@@ -133,13 +140,13 @@ export function TodoCard({ result }: { result: string }) {
             className="text-[11px] font-semibold uppercase tracking-wider"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            任务列表
+            {t("todo_list")}
           </span>
           <div className="flex gap-2 text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
             {summary.inProgress > 0 && (
-              <span style={{ color: "var(--tint, #4299E1)" }}>{summary.inProgress} 进行中</span>
+              <span style={{ color: "var(--tint, #4299E1)" }}>{t("todo_inProgress", { count: summary.inProgress })}</span>
             )}
-            {summary.pending > 0 && <span>{summary.pending} 待开始</span>}
+            {summary.pending > 0 && <span>{t("todo_pending", { count: summary.pending })}</span>}
           </div>
         </div>
 
@@ -147,7 +154,7 @@ export function TodoCard({ result }: { result: string }) {
 
         <div className="mt-2 space-y-0.5">
           {items.map((item) => {
-            const cfg = STATUS_CONFIG[item.status];
+            const cfg = statusConfig[item.status];
             const Icon = cfg.icon;
             return (
               <div

@@ -3,6 +3,7 @@
  * Kept temporarily for backward compatibility during message-stream-redesign transition.
  */
 import { useState, useMemo, memo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ChevronRight, AlertTriangle, Clock, Layers,
   Check, X as XIcon,
@@ -151,6 +152,7 @@ export const ToolCallGroupCard = memo(function ToolCallGroupCard({
 }: {
   tools: ToolCall[];
 }) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(true);
   const summary = useMemo(() => computeSummary(tools), [tools]);
 
@@ -179,7 +181,7 @@ export const ToolCallGroupCard = memo(function ToolCallGroupCard({
         className="flex w-full items-center gap-2 px-3 py-2 text-left transition-all duration-150 hover:brightness-[1.04]"
         style={{ cursor: "pointer" }}
         aria-expanded={expanded}
-        aria-label={`${tools.length} 个工具调用${expanded ? "，已展开" : "，已折叠"}`}
+        aria-label={`${t("toolCallsCount", { count: tools.length })}${expanded ? t("aria_expanded") : t("aria_collapsed")}`}
       >
         <span className="flex h-4 w-4 shrink-0 items-center justify-center">
           <Layers {...ICON.md} style={{ color: "var(--fill-tertiary)" }} />
@@ -187,7 +189,7 @@ export const ToolCallGroupCard = memo(function ToolCallGroupCard({
 
         <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-[12px]">
           <span className="shrink-0 font-medium" style={{ color: "var(--fill-primary)" }}>
-            {tools.length} 个工具调用
+            {t("toolCallsCount", { count: tools.length })}
           </span>
           <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
             {topTypes.map(([name, count]) => (
@@ -273,6 +275,7 @@ export const ToolCallGroupTimeline = memo(function ToolCallGroupTimeline({
 }: {
   tools: ToolCall[];
 }) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(false);
   const summary = useMemo(() => computeSummary(tools), [tools]);
   const handleToggle = useCallback(() => setExpanded((v) => !v), []);
@@ -307,7 +310,7 @@ export const ToolCallGroupTimeline = memo(function ToolCallGroupTimeline({
         >
           <Layers {...ICON.sm} style={{ color: "var(--fill-quaternary)" }} />
           <span className="text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
-            {expanded ? "收起" : `+${hiddenCount} 个已完成`}
+            {expanded ? t("collapse", { ns: "common" }) : t("moreCompleted", { count: hiddenCount })}
           </span>
           {summary.errorCount > 0 && (
             <span className="flex items-center gap-0.5 text-[10px]" style={{ color: "var(--red)" }}>

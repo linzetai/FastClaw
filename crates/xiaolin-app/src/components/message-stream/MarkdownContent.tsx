@@ -1,4 +1,5 @@
 import { memo, useState, useCallback, useEffect, useMemo, type ComponentPropsWithoutRef } from "react";
+import { useTranslation } from "react-i18next";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { rehypeHighlightLite } from "./rehype-highlight-lite";
@@ -62,6 +63,7 @@ function sanitizeUrl(url: string): string {
 }
 
 function CopyButton({ text }: { text: string }) {
+  const { t } = useTranslation("chat");
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
@@ -80,11 +82,11 @@ function CopyButton({ text }: { text: string }) {
         color: copied ? "var(--green)" : "var(--fill-tertiary)",
         background: copied ? "color-mix(in srgb, var(--green) 10%, transparent)" : "transparent",
       }}
-      title={copied ? "已复制" : "复制代码"}
-      aria-label={copied ? "已复制" : "复制代码"}
+      title={copied ? t("copied") : t("copyCode")}
+      aria-label={copied ? t("copied") : t("copyCode")}
     >
       {copied ? <Check {...ICON.sm} strokeWidth={ICON_ACTIVE_STROKE} /> : <Copy {...ICON.sm} />}
-      <span>{copied ? "已复制" : "复制"}</span>
+      <span>{copied ? t("copied") : t("copy", { ns: "common" })}</span>
     </button>
   );
 }

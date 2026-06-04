@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Zap, FileSearch, PlugZap } from "lucide-react";
 
 function SuggestionCard({
@@ -50,6 +51,7 @@ function SuggestionCard({
 }
 
 export function WelcomeView() {
+  const { t } = useTranslation("common");
   return (
     <div
       className="welcome-view"
@@ -106,15 +108,15 @@ export function WelcomeView() {
       >
         <SuggestionCard
           icon={<Zap size={16} strokeWidth={1.75} />}
-          text="开始构建新功能"
+          text={t("welcomeBuild")}
         />
         <SuggestionCard
           icon={<FileSearch size={16} strokeWidth={1.75} />}
-          text="审查最近的代码变更"
+          text={t("welcomeReview")}
         />
         <SuggestionCard
           icon={<PlugZap size={16} strokeWidth={1.75} />}
-          text="连接插件扩展能力"
+          text={t("welcomePlugins")}
         />
       </div>
     </div>

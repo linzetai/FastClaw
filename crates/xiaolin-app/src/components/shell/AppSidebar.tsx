@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Plus, Search, Puzzle, RefreshCw, Settings, MessageCircle, Pencil, FolderOpen, Trash2, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useUIStore, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "../../lib/stores";
@@ -70,6 +71,7 @@ function ChatContextMenu({
   onSetWorkDir: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation("sidebar");
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -86,9 +88,9 @@ function ChatContextMenu({
   }, [onClose]);
 
   const items = [
-    { icon: Pencil, label: "重命名", action: onRename },
-    { icon: FolderOpen, label: "设置工作目录", action: onSetWorkDir },
-    { icon: Trash2, label: "删除", action: onDelete, danger: true },
+    { icon: Pencil, label: t("rename"), action: onRename },
+    { icon: FolderOpen, label: t("setWorkDir"), action: onSetWorkDir },
+    { icon: Trash2, label: t("delete"), action: onDelete, danger: true },
   ];
 
   return createPortal(
@@ -148,6 +150,8 @@ function formatTimeAgo(date: Date | string | undefined | null): string {
 }
 
 export function AppSidebar() {
+  const { t } = useTranslation("sidebar");
+  const { t: tCommon } = useTranslation("common");
   const collapsed = useUIStore((s) => s.sidebarCollapsed);
   const layoutTier = useUIStore((s) => s.layoutTier);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
@@ -190,13 +194,13 @@ export function AppSidebar() {
     if (!query.trim()) return chatList;
     return chatList
       .map((chat) => {
-        const result = fuzzyMatch(query, chat.title || "新会话");
+        const result = fuzzyMatch(query, chat.title || t("newChat"));
         return result ? { chat, score: result.score } : null;
       })
       .filter((r): r is { chat: ChatMeta; score: number } => r !== null)
       .sort((a, b) => b.score - a.score)
       .map((r) => r.chat);
-  }, [chatList, query]);
+  }, [chatList, query, t]);
 
   const handleNewChat = useCallback(() => {
     const activeChat = chatList.find((c) => c.id === activeChatId);
@@ -221,7 +225,7 @@ export function AppSidebar() {
   const groupedChats = useMemo(() => {
     const groups: Record<string, { workDir: string | null; chats: ChatMeta[] }> = {};
     for (const chat of filteredChats) {
-      const label = chat.workDir ? extractProjectName(chat.workDir) : "Chats";
+      const label = chat.workDir ? extractProjectName(chat.workDir) : t("chats");
       if (!groups[label]) groups[label] = { workDir: chat.workDir ?? null, chats: [] };
       groups[label].chats.push(chat);
     }
@@ -290,17 +294,17 @@ export function AppSidebar() {
         <div style={{ padding: "10px 8px 6px", display: "flex", flexDirection: "column", gap: 1 }}>
           <SidebarAction
             icon={<Plus size={ICON_SIZE} strokeWidth={1.7} />}
-            label="New chat"
+            label={t("newChat")}
             onClick={handleNewChat}
             disabled={!gatewayReady}
           />
           <SidebarAction
             icon={<Search size={ICON_SIZE} strokeWidth={1.7} />}
-            label="Search"
+            label={t("search")}
             onClick={() => { setSearchOpen(!searchOpen); if (searchOpen) { setQuery(""); } }}
           />
-          <SidebarAction icon={<Puzzle size={ICON_SIZE} strokeWidth={1.7} />} label="Plugins" onClick={() => useUIStore.getState().setMainView("plugins")} active={mainView === "plugins"} />
-          <SidebarAction icon={<RefreshCw size={ICON_SIZE} strokeWidth={1.7} />} label="Automations" onClick={() => useUIStore.getState().setMainView("automations")} active={mainView === "automations"} />
+          <SidebarAction icon={<Puzzle size={ICON_SIZE} strokeWidth={1.7} />} label={t("plugins")} onClick={() => useUIStore.getState().setMainView("plugins")} active={mainView === "plugins"} />
+          <SidebarAction icon={<RefreshCw size={ICON_SIZE} strokeWidth={1.7} />} label={t("automations")} onClick={() => useUIStore.getState().setMainView("automations")} active={mainView === "automations"} />
         </div>
 
         {/* Search bar */}
@@ -323,7 +327,7 @@ export function AppSidebar() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索会话..."
+                placeholder={t("searchSessions")}
                 style={{
                   flex: 1,
                   minWidth: 0,
@@ -368,8 +372,8 @@ export function AppSidebar() {
                   {label}
                 </span>
                 <span style={{ display: "flex", gap: 2, opacity: 0, transition: "opacity 0.15s" }} className="group-actions">
-                  <button type="button" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit", fontSize: 11, lineHeight: 1 }} title="折叠">⊟</button>
-                  <button type="button" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit", fontSize: 11, lineHeight: 1 }} title="排序">≡</button>
+                  <button type="button" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit", fontSize: 11, lineHeight: 1 }} title={tCommon("collapse")}>⊟</button>
+                  <button type="button" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit", fontSize: 11, lineHeight: 1 }} title={tCommon("sort")}>≡</button>
                 </span>
               </div>
               {groupChats.map((chat) => {
@@ -434,7 +438,7 @@ export function AppSidebar() {
                           }}
                         />
                       ) : (
-                        chat.title || "新会话"
+                        chat.title || t("newChat")
                       )}
                     </span>
                     {!isRenaming && timeLabel && (
@@ -449,14 +453,14 @@ export function AppSidebar() {
           ))}
           {filteredChats.length === 0 && query && (
             <div style={{ padding: "16px 8px", textAlign: "center", fontSize: 12, color: "var(--fill-quaternary)" }}>
-              未找到匹配的会话
+              {t("noMatchingSessions")}
             </div>
           )}
         </div>
 
         {/* Bottom: Settings */}
         <div style={{ padding: 8, borderTop: "1px solid var(--border-shell-subtle)" }}>
-          <SidebarAction icon={<Settings size={ICON_SIZE} strokeWidth={1.7} />} label="Settings" />
+          <SidebarAction icon={<Settings size={ICON_SIZE} strokeWidth={1.7} />} label={t("settings")} onClick={() => useUIStore.getState().openSettings()} />
         </div>
 
         {/* Resize handle */}

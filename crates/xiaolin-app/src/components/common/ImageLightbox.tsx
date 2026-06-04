@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { X, ZoomIn, ZoomOut, RotateCw } from "lucide-react";
 
@@ -13,6 +14,7 @@ export function openLightbox(src: string, alt?: string) {
 }
 
 export function ImageLightbox() {
+  const { t } = useTranslation("common");
   const [state, setState] = useState<LightboxState | null>(null);
   const [scale, setScale] = useState(1);
   const [rotate, setRotate] = useState(0);
@@ -97,13 +99,13 @@ export function ImageLightbox() {
       }}
     >
       <div className="absolute top-4 right-4 flex items-center gap-1">
-        <button className={btnClass} onClick={() => setScale((s) => Math.min(s + 0.25, 5))} title="放大">
+        <button className={btnClass} onClick={() => setScale((s) => Math.min(s + 0.25, 5))} title={t("zoomIn")}>
           <ZoomIn size={16} strokeWidth={1.5} color="rgba(255,255,255,0.8)" />
         </button>
-        <button className={btnClass} onClick={() => setScale((s) => Math.max(s - 0.25, 0.25))} title="缩小">
+        <button className={btnClass} onClick={() => setScale((s) => Math.max(s - 0.25, 0.25))} title={t("zoomOut")}>
           <ZoomOut size={16} strokeWidth={1.5} color="rgba(255,255,255,0.8)" />
         </button>
-        <button className={btnClass} onClick={() => setRotate((r) => r + 90)} title="旋转">
+        <button className={btnClass} onClick={() => setRotate((r) => r + 90)} title={t("rotate")}>
           <RotateCw size={16} strokeWidth={1.5} color="rgba(255,255,255,0.8)" />
         </button>
         <span
@@ -112,7 +114,7 @@ export function ImageLightbox() {
         >
           {Math.round(scale * 100)}%
         </span>
-        <button className={btnClass} onClick={close} title="关闭">
+        <button className={btnClass} onClick={close} title={t("close")}>
           <X size={16} strokeWidth={1.5} color="rgba(255,255,255,0.8)" />
         </button>
       </div>

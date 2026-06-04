@@ -8,6 +8,7 @@ import {
   useImperativeHandle,
   type KeyboardEvent,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import {
   useFloating,
@@ -70,11 +71,17 @@ interface MentionInputProps {
   extraKeyHandler?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
 }
 
-const MENTION_TYPE_META: Record<MentionType, { text: string; icon: React.ReactNode; color: string }> = {
-  file: { text: "文件", icon: <File {...ICON.sm} />, color: "var(--tint)" },
-  dir: { text: "目录", icon: <Folder {...ICON.sm} />, color: "var(--orange)" },
-  skill: { text: "Skill", icon: <Sparkles {...ICON.sm} />, color: "var(--green)" },
-};
+function useMentionTypeMeta() {
+  const { t } = useTranslation("chat");
+  return useMemo(
+    (): Record<MentionType, { text: string; icon: React.ReactNode; color: string }> => ({
+      file: { text: t("mention_file"), icon: <File {...ICON.sm} />, color: "var(--tint)" },
+      dir: { text: t("mention_dir"), icon: <Folder {...ICON.sm} />, color: "var(--orange)" },
+      skill: { text: "Skill", icon: <Sparkles {...ICON.sm} />, color: "var(--green)" },
+    }),
+    [t],
+  );
+}
 
 /* ─── Fuzzy Highlight ─── */
 function FuzzyHighlight({ text, indices }: { text: string; indices: number[] }) {
@@ -139,6 +146,8 @@ function MentionPopup({
   floatingRef: (node: HTMLElement | null) => void;
   floatingStyles: React.CSSProperties;
 }) {
+  const { t } = useTranslation("chat");
+  const mentionTypeMeta = useMentionTypeMeta();
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
@@ -165,8 +174,13 @@ function MentionPopup({
           <Search {...ICON.sm} style={{ color: "var(--fill-quaternary)" }} />
           <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
             {query
-              ? `未找到「${query}」相关${triggerType === "/" ? "命令" : "项目"}`
-              : `输入${triggerType === "/" ? "命令名" : "文件名"}搜索…`}
+              ? t("mention_noResults", {
+                  query,
+                  type: triggerType === "/" ? t("mention_type_command") : t("mention_type_item"),
+                })
+              : t("mention_searchHint", {
+                  hint: triggerType === "/" ? t("mention_hint_command") : t("mention_hint_filename"),
+                })}
           </span>
         </div>
       </div>
@@ -196,10 +210,10 @@ function MentionPopup({
     >
       <div className="py-1">
         {items.map((item, i) => {
-          const group = getItemGroup(item);
+          const group = getItemGroup(item, mentionTypeMeta, t);
           const showHeader = group !== lastGroup;
           lastGroup = group;
-          const { icon, color } = getItemMeta(item);
+          const { icon, color } = getItemMeta(item, mentionTypeMeta);
 
           return (
             <div key={getItemKey(item)}>
@@ -252,13 +266,20 @@ function MentionPopup({
   );
 }
 
-function getItemGroup(item: PopupItem): string {
-  if (item.kind === "mention") return MENTION_TYPE_META[item.option.type].text;
-  return "命令";
+function getItemGroup(
+  item: PopupItem,
+  mentionTypeMeta: Record<MentionType, { text: string }>,
+  t: (key: string) => string,
+): string {
+  if (item.kind === "mention") return mentionTypeMeta[item.option.type].text;
+  return t("mention_commands");
 }
 
-function getItemMeta(item: PopupItem): { icon: React.ReactNode; color: string } {
-  if (item.kind === "mention") return MENTION_TYPE_META[item.option.type];
+function getItemMeta(
+  item: PopupItem,
+  mentionTypeMeta: Record<MentionType, { icon: React.ReactNode; color: string }>,
+): { icon: React.ReactNode; color: string } {
+  if (item.kind === "mention") return mentionTypeMeta[item.option.type];
   return { icon: <Terminal {...ICON.sm} />, color: "var(--purple)" };
 }
 
@@ -279,6 +300,7 @@ function getItemDesc(item: PopupItem): string | undefined {
 
 /* ─── Highlight Overlay ─── */
 function HighlightOverlay({ text, mentions }: { text: string; mentions: InlineMention[] }) {
+  const mentionTypeMeta = useMentionTypeMeta();
   if (mentions.length === 0) {
     return <span>{text || "\u00A0"}</span>;
   }
@@ -291,7 +313,7 @@ function HighlightOverlay({ text, mentions }: { text: string; mentions: InlineMe
     if (m.start > cursor) {
       parts.push(<span key={`t-${cursor}`}>{text.slice(cursor, m.start)}</span>);
     }
-    const meta = MENTION_TYPE_META[m.type];
+    const meta = mentionTypeMeta[m.type];
     parts.push(
       <span
         key={`m-${m.start}`}

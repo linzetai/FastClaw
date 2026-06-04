@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import {
   ChevronRight, Eye, EyeOff, Zap, CheckCircle, XCircle,
@@ -23,6 +24,7 @@ export function ApiKeyConfigStep({
   onTest: () => void;
   onSave: () => void;
 }) {
+  const { t } = useTranslation("onboarding");
   const [showApiKey, setShowApiKey] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const canSave = state.key.trim() && state.model.trim() && state.contextWindow >= 1024;
@@ -42,7 +44,7 @@ export function ApiKeyConfigStep({
       <div className="space-y-3.5 p-5">
         {state.selectedProvider && (
           <div>
-            <label className={labelCls} style={labelStyle}>提供商</label>
+            <label className={labelCls} style={labelStyle}>{t("provider")}</label>
             <div
               className="flex items-center gap-2 rounded-[8px] px-3 py-2.5 text-[13px]"
               style={{
@@ -58,19 +60,19 @@ export function ApiKeyConfigStep({
         )}
 
         <div>
-          <label htmlFor="ob-key" className={labelCls} style={labelStyle}>名称</label>
+          <label htmlFor="ob-key" className={labelCls} style={labelStyle}>{t("name")}</label>
           <input
             id="ob-key"
             value={state.key}
             onChange={(e) => setField("key", e.target.value)}
-            placeholder="如 openai / qwen"
+            placeholder={t("namePlaceholder")}
             className={inputCls}
             style={inputStyle}
           />
         </div>
 
         <div>
-          <label htmlFor="ob-model" className={labelCls} style={labelStyle}>模型名称</label>
+          <label htmlFor="ob-model" className={labelCls} style={labelStyle}>{t("modelName")}</label>
           <input
             id="ob-model"
             value={state.model}
@@ -82,7 +84,7 @@ export function ApiKeyConfigStep({
                 if (inferred !== 8192) setField("contextWindow", inferred);
               }
             }}
-            placeholder="如 gpt-4o / qwen-max / claude-sonnet-4-20250514"
+            placeholder={t("modelPlaceholder")}
             className={inputCls}
             style={inputStyle}
           />
@@ -94,7 +96,7 @@ export function ApiKeyConfigStep({
             id="ob-baseurl"
             value={state.baseUrl}
             onChange={(e) => setField("baseUrl", e.target.value)}
-            placeholder="如 https://api.openai.com/v1"
+            placeholder="https://api.openai.com/v1"
             className={inputCls}
             style={inputStyle}
           />
@@ -108,7 +110,7 @@ export function ApiKeyConfigStep({
                 className="ml-1.5 font-normal normal-case"
                 style={{ color: "var(--fill-quaternary)" }}
               >
-                (以 {state.selectedProvider.apiKeyPrefix} 开头)
+                {t("apiKeyPrefix", { prefix: state.selectedProvider.apiKeyPrefix })}
               </span>
             )}
           </label>
@@ -152,7 +154,7 @@ export function ApiKeyConfigStep({
                 ) : (
                   <Zap {...ICON.sm} />
                 )}
-                测试
+                {t("test")}
               </button>
             </div>
           </div>
@@ -168,7 +170,7 @@ export function ApiKeyConfigStep({
 
         <div>
           <label htmlFor="ob-ctx" className={labelCls} style={labelStyle}>
-            上下文窗口 (tokens)
+            {t("contextWindow")}
           </label>
           <input
             id="ob-ctx"
@@ -177,7 +179,7 @@ export function ApiKeyConfigStep({
             step="1024"
             value={state.contextWindow || ""}
             onChange={(e) => setField("contextWindow", parseInt(e.target.value) || 0)}
-            placeholder="如 128000（选预设模型时自动填入）"
+            placeholder={t("contextWindowPlaceholder")}
             className={inputCls}
             style={{
               ...inputStyle,
@@ -186,18 +188,18 @@ export function ApiKeyConfigStep({
           />
           <p className="mt-1 text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
             {state.contextWindow > 0
-              ? `当前 ${state.contextWindow.toLocaleString()} tokens`
-              : "输入模型名可自动推断，也可手动填写"}
+              ? t("contextWindowCurrent", { count: state.contextWindow.toLocaleString() })
+              : t("contextWindowInfer")}
           </p>
         </div>
 
         {showAdvanced && (
           <div className="rounded-[8px] p-3" style={{ background: "var(--bg-base)" }}>
             <p className="mb-2 text-[11px] font-medium" style={{ color: "var(--fill-tertiary)" }}>
-              高级选项（可保持默认）
+              {t("advancedDefaults")}
             </p>
             <p className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-              Temperature: 0 · 并发: 10 · 超时: 120s
+              {t("advancedValues")}
             </p>
           </div>
         )}
@@ -216,7 +218,7 @@ export function ApiKeyConfigStep({
             {...ICON.sm}
             className={`transition-transform ${showAdvanced ? "rotate-90" : ""}`}
           />
-          高级选项
+          {t("advancedOptions")}
         </button>
         <button
           onClick={onSave}
@@ -224,7 +226,7 @@ export function ApiKeyConfigStep({
           className="cursor-pointer rounded-full px-6 py-2 text-[13px] font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
           style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
         >
-          {state.saving ? "保存中..." : "保存模型"}
+          {state.saving ? t("saving") : t("saveModel")}
         </button>
       </div>
     </div>

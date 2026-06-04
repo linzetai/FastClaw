@@ -1,9 +1,11 @@
+import { useTranslation } from "react-i18next";
 import { Settings } from "lucide-react";
 import { ICON } from "../../../lib/ui-tokens";
 import { getAllProviders } from "../../../lib/model-registry";
 import type { ModelAction } from "./model-state";
 
 export function ProviderSelectStep({ dispatch }: { dispatch: React.Dispatch<ModelAction> }) {
+  const { t } = useTranslation("onboarding");
   const providers = getAllProviders();
   return (
     <div
@@ -30,7 +32,7 @@ export function ProviderSelectStep({ dispatch }: { dispatch: React.Dispatch<Mode
                     {p.name}
                   </div>
                   <div className="mt-0.5 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
-                    {p.models.length} 个模型
+                    {t("modelsCount", { count: p.models.length })}
                   </div>
                 </div>
               </div>

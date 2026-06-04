@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo, useLayoutEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   useChatMetaStore,
@@ -34,6 +35,8 @@ interface MessageStreamProps {
 }
 
 export function MessageStream(_props: MessageStreamProps) {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
   const activeAgentId = useChatMetaStore((s) => s.activeAgentId);
   const activeChatId = useActiveChatId();
   const activeChatMeta = useActiveChatMeta();
@@ -208,12 +211,12 @@ export function MessageStream(_props: MessageStreamProps) {
       }
     } else {
       opts.push(
-        { id: "s-web-search", label: "Web Search", type: "skill", desc: "搜索互联网获取实时信息" },
-        { id: "s-code-exec", label: "Code Execution", type: "skill", desc: "在沙箱中执行代码片段" },
+        { id: "s-web-search", label: "Web Search", type: "skill", desc: t("webSearch") },
+        { id: "s-code-exec", label: "Code Execution", type: "skill", desc: t("codeExec") },
       );
     }
     return opts;
-  }, [workDir, fsEntries, backendSkills]);
+  }, [workDir, fsEntries, backendSkills, t]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -567,10 +570,10 @@ export function MessageStream(_props: MessageStreamProps) {
           >
             <Upload size={32} strokeWidth={1.5} style={{ color: "var(--fill-secondary)" }} />
             <span className="text-[15px] font-medium" style={{ color: "var(--fill-primary)" }}>
-              拖拽文件到这里
+              {t("dropFilesHere")}
             </span>
             <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
-              支持图片、文档、代码文件
+              {t("dropFilesSupport")}
             </span>
           </div>
         </div>
@@ -591,13 +594,15 @@ export function MessageStream(_props: MessageStreamProps) {
               if (e.key === "Enter" && !e.shiftKey) setSearchIdx((i) => (i + 1) % Math.max(searchResults.length, 1));
               if (e.key === "Enter" && e.shiftKey) setSearchIdx((i) => (i - 1 + Math.max(searchResults.length, 1)) % Math.max(searchResults.length, 1));
             }}
-            placeholder="搜索消息..."
+            placeholder={t("searchMessages")}
             className="min-w-0 flex-1 bg-transparent text-[13px] outline-none"
             style={{ color: "var(--fill-primary)" }}
           />
           {searchQuery && (
             <span className="shrink-0 text-[11px] tabular-nums" style={{ color: "var(--fill-tertiary)" }}>
-              {searchResults.length > 0 ? `${searchIdx + 1}/${searchResults.length}` : "无结果"}
+              {searchResults.length > 0
+                ? t("searchResult", { current: searchIdx + 1, total: searchResults.length })
+                : tCommon("noResults")}
             </span>
           )}
           <div className="flex items-center gap-0.5">
@@ -734,7 +739,7 @@ export function MessageStream(_props: MessageStreamProps) {
             <ArrowDown {...ICON.sm} />
             {streamDoneLabel ? (
               <span className="text-[11px] font-medium" style={{ color: "var(--tint)" }}>
-                输出完成
+                {tCommon("outputComplete")}
               </span>
             ) : unreadCount > 0 ? (
               <span

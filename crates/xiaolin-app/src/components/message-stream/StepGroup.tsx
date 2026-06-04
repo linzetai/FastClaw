@@ -1,4 +1,6 @@
 import { useState, useMemo, memo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { ChevronRight } from "lucide-react";
 import { StepIndicator, type ToolCall } from "./StepIndicator";
 import type { StreamSegment } from "./types";
@@ -133,19 +135,19 @@ const FILE_SEARCH_TOOLS = new Set(["file_search", "list_directory", "list_skills
 const SHELL_TOOLS = new Set(["shell", "shell_exec"]);
 const WEB_TOOLS = new Set(["web_search", "web_fetch", "http_fetch"]);
 
-function generateSemanticSummary(tools: ToolCall[]): string {
+function generateSemanticSummary(tools: ToolCall[], t: TFunction<"chat">): string {
   const count = tools.length;
-  const names = new Set(tools.map((t) => t.name));
+  const names = new Set(tools.map((tc) => tc.name));
 
-  if ([...names].every((n) => FILE_READ_TOOLS.has(n))) return `读取了 ${count} 个文件`;
-  if ([...names].every((n) => FILE_SEARCH_TOOLS.has(n))) return `搜索了 ${count} 个位置`;
-  if ([...names].every((n) => SHELL_TOOLS.has(n))) return `执行了 ${count} 条命令`;
-  if ([...names].every((n) => WEB_TOOLS.has(n))) return `搜索了 ${count} 个网页`;
+  if ([...names].every((n) => FILE_READ_TOOLS.has(n))) return t("stepGroup_readFiles", { count });
+  if ([...names].every((n) => FILE_SEARCH_TOOLS.has(n))) return t("stepGroup_searchedLocations", { count });
+  if ([...names].every((n) => SHELL_TOOLS.has(n))) return t("stepGroup_executedCommands", { count });
+  if ([...names].every((n) => WEB_TOOLS.has(n))) return t("stepGroup_searchedWebPages", { count });
 
   const allFileOps = [...names].every((n) => FILE_READ_TOOLS.has(n) || FILE_SEARCH_TOOLS.has(n));
-  if (allFileOps) return `探索了 ${count} 个文件`;
+  if (allFileOps) return t("stepGroup_exploredFiles", { count });
 
-  return `执行了 ${count} 个操作`;
+  return t("stepGroup_executedOps", { count });
 }
 
 /**
@@ -159,9 +161,10 @@ export const StepGroup = memo(function StepGroup({
   tools: ToolCall[];
   streaming?: boolean;
 }) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(!streaming);
   const summary = useMemo(() => computeSummary(tools), [tools]);
-  const semanticSummary = useMemo(() => generateSemanticSummary(tools), [tools]);
+  const semanticSummary = useMemo(() => generateSemanticSummary(tools, t), [tools, t]);
   const handleToggle = useCallback(() => setExpanded((v) => !v), []);
 
   const hasErrors = summary.errorCount > 0;
@@ -193,7 +196,7 @@ export const StepGroup = memo(function StepGroup({
         onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--step-hover-bg)"; }}
         onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ""; }}
         aria-expanded={expanded}
-        aria-label={`${semanticSummary}${expanded ? "，已展开" : "，已折叠"}`}
+        aria-label={`${semanticSummary}${expanded ? t("aria_expanded") : t("aria_collapsed")}`}
       >
         {/* Status dot */}
         <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center">
@@ -219,7 +222,7 @@ export const StepGroup = memo(function StepGroup({
           </span>
           {hasErrors && (
             <span className="flex items-center gap-0.5 text-[10px]" style={{ color: "var(--red)" }}>
-              {summary.errorCount} 错误
+              {t("errorsCount", { count: summary.errorCount })}
             </span>
           )}
         </span>
@@ -256,7 +259,7 @@ export const StepGroup = memo(function StepGroup({
               className="py-0.5 px-2 text-[11px] cursor-pointer"
               style={{ color: "var(--fill-quaternary)" }}
             >
-              +{tools.length - 2} 个已完成
+              {t("moreCompleted", { count: tools.length - 2 })}
             </button>
           )}
           {visibleTools.map((tc) => (

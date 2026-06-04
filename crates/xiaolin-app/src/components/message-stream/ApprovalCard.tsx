@@ -1,4 +1,5 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { ShieldAlert, ShieldCheck, ShieldX, ChevronDown, ChevronUp, ShieldOff } from "lucide-react";
 import { usePermissionStore } from "../../lib/stores/permission-store";
 
@@ -22,37 +23,37 @@ interface ApprovalCardProps {
   sessionId?: string;
 }
 
-const RISK_STYLES = {
-  danger: {
-    border: "var(--color-red-400, #fc8181)",
-    bg: "var(--color-red-50, rgba(254, 215, 215, 0.15))",
-    label: "禁止执行",
-    icon: ShieldX,
-    iconColor: "var(--color-red-500, #f56565)",
-  },
-  caution: {
-    border: "var(--color-amber-400, #f6ad55)",
-    bg: "var(--color-amber-50, rgba(254, 235, 200, 0.15))",
-    label: "需要确认",
-    icon: ShieldAlert,
-    iconColor: "var(--color-amber-500, #ed8936)",
-  },
-  safe: {
-    border: "var(--color-green-400, #68d391)",
-    bg: "var(--color-green-50, rgba(198, 246, 213, 0.15))",
-    label: "安全操作",
-    icon: ShieldCheck,
-    iconColor: "var(--color-green-500, #48bb78)",
-  },
-};
-
 export function ApprovalCard({ data, onDecision, sessionId }: ApprovalCardProps) {
+  const { t } = useTranslation("chat");
+  const riskStyles = useMemo(() => ({
+    danger: {
+      border: "var(--color-red-400, #fc8181)",
+      bg: "var(--color-red-50, rgba(254, 215, 215, 0.15))",
+      label: t("approval_riskForbidden"),
+      icon: ShieldX,
+      iconColor: "var(--color-red-500, #f56565)",
+    },
+    caution: {
+      border: "var(--color-amber-400, #f6ad55)",
+      bg: "var(--color-amber-50, rgba(254, 235, 200, 0.15))",
+      label: t("approval_riskCaution"),
+      icon: ShieldAlert,
+      iconColor: "var(--color-amber-500, #ed8936)",
+    },
+    safe: {
+      border: "var(--color-green-400, #68d391)",
+      bg: "var(--color-green-50, rgba(198, 246, 213, 0.15))",
+      label: t("approval_riskSafe"),
+      icon: ShieldCheck,
+      iconColor: "var(--color-green-500, #48bb78)",
+    },
+  }), [t]);
   const [submitted, setSubmitted] = useState(false);
   const isFileAction = data.action?.action_type === "write_file" || data.action?.action_type === "edit_file";
   const [expanded, setExpanded] = useState(isFileAction);
   const setSessionPreset = usePermissionStore((s) => s.setSessionPreset);
 
-  const style = RISK_STYLES[data.riskLevel];
+  const style = riskStyles[data.riskLevel];
   const Icon = style.icon;
 
   const handleDecision = useCallback((decision: string) => {
@@ -114,7 +115,7 @@ export function ApprovalCard({ data, onDecision, sessionId }: ApprovalCardProps)
             onClick={() => setExpanded(!expanded)}
           >
             {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            {data.action?.command ? "命令预览" : isFileAction ? "文件变更预览" : "内容预览"}
+            {data.action?.command ? t("approval_commandPreview") : isFileAction ? t("approval_fileChangePreview") : t("approval_contentPreview")}
           </button>
           {expanded && (
             <>
@@ -169,10 +170,10 @@ export function ApprovalCard({ data, onDecision, sessionId }: ApprovalCardProps)
               color: "var(--color-amber-600, #c05621)",
               border: "1px solid var(--color-amber-200, rgba(237, 137, 54, 0.3))",
             }}
-            title="切换到 Full Auto 模式，本次会话不再弹出确认"
+            title={t("approval_approveAllSessionTitle")}
           >
             <ShieldOff size={12} strokeWidth={1.6} />
-            本次全部批准
+            {t("approval_approveAllSession")}
           </button>
         )}
       </div>

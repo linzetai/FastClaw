@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { ChevronRight, Sparkles } from "lucide-react";
 import { ICON } from "../../../lib/ui-tokens";
 import type { ProviderPreset } from "../../../lib/model-registry";
@@ -10,6 +11,7 @@ export function ModelSelectStep({
   provider: ProviderPreset;
   dispatch: React.Dispatch<ModelAction>;
 }) {
+  const { t } = useTranslation("onboarding");
   return (
     <div
       className="overflow-hidden rounded-[var(--radius-md)]"
@@ -56,7 +58,7 @@ export function ModelSelectStep({
         >
               <Sparkles {...ICON.sm} style={{ color: "var(--tint)" }} />
           <span className="text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
-            还没有 API Key？
+            {t("noApiKey")}
           </span>
           <a
             href={provider.docsUrl}
@@ -65,7 +67,7 @@ export function ModelSelectStep({
             className="text-[11px] font-medium underline"
             style={{ color: "var(--tint)" }}
           >
-            前往获取
+            {t("getApiKey")}
           </a>
         </div>
       )}

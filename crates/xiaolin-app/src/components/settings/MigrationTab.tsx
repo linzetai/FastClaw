@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Download, Upload, RotateCcw, AlertTriangle, CheckCircle, XCircle } from "lucide-react";
 import * as transport from "../../lib/transport";
 import { ICON } from "../../lib/ui-tokens";
 
 export function MigrationTab() {
+  const { t } = useTranslation("settings");
   const [exportStatus, setExportStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [importStatus, setImportStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [progress, setProgress] = useState(0);
@@ -15,7 +17,7 @@ export function MigrationTab() {
 
   const handleExport = async () => {
     if (!transport.isTauri) {
-      alert("导出功能仅在桌面应用中可用");
+      alert(t("exportDesktopOnly"));
       return;
     }
 
@@ -28,7 +30,6 @@ export function MigrationTab() {
         setProgress(prev => Math.min(prev + 10, 90));
       }, 200);
 
-      // 导出数据
       const data = await transport.exportData({
         includeSessions: options.includeSessions,
         includeSkills: options.includeSkills,
@@ -66,7 +67,7 @@ export function MigrationTab() {
 
   const handleImport = async () => {
     if (!transport.isTauri) {
-      alert("导入功能仅在桌面应用中可用");
+      alert(t("importDesktopOnly"));
       return;
     }
 
@@ -95,7 +96,7 @@ export function MigrationTab() {
         clearInterval(progressInterval);
         setProgress(70);
 
-        // 导入数据
+        // {t("importData")}
         await transport.importData(new Uint8Array(fileContents), {
           merge: false,
           overwriteConfig: true,
@@ -130,10 +131,10 @@ export function MigrationTab() {
     <div className="space-y-6">
       <div>
         <h3 className="text-[16px] font-semibold mb-1" style={{ color: "var(--fill-primary)" }}>
-          数据迁移
+          {t("migrationTitle")}
         </h3>
         <p className="text-[13px] text-[var(--fill-secondary)]">
-          导出或导入您的配置、代理、技能和会话数据
+          {t("migrationDesc")}
         </p>
       </div>
 
@@ -145,14 +146,14 @@ export function MigrationTab() {
         <div className="flex items-center gap-2 mb-3">
           <Download {...ICON.md} style={{ color: "var(--blue)" }} />
           <h4 className="font-medium" style={{ color: "var(--fill-primary)" }}>
-            导出数据
+            {t("exportData")}
           </h4>
         </div>
 
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-[13px]" style={{ color: "var(--fill-secondary)" }}>
-              包括会话历史记录
+              {t("includeSessions")}
             </span>
             <label className="switch">
               <input
@@ -167,7 +168,7 @@ export function MigrationTab() {
 
           <div className="flex items-center justify-between">
             <span className="text-[13px]" style={{ color: "var(--fill-secondary)" }}>
-              包括技能
+              {t("includeSkills")}
             </span>
             <label className="switch">
               <input
@@ -182,7 +183,7 @@ export function MigrationTab() {
 
           <div className="flex items-center justify-between">
             <span className="text-[13px]" style={{ color: "var(--fill-secondary)" }}>
-              包括代理工作目录
+              {t("includeWorkspaces")}
             </span>
             <label className="switch">
               <input
@@ -206,7 +207,7 @@ export function MigrationTab() {
               }}
             >
               {getStatusIcon(exportStatus)}
-              {exportStatus === "loading" ? `导出中... ${progress}%` : "导出数据"}
+              {exportStatus === "loading" ? t("exporting", { progress }) : t("exportData")}
             </button>
           </div>
         </div>
@@ -220,13 +221,13 @@ export function MigrationTab() {
         <div className="flex items-center gap-2 mb-3">
           <Upload {...ICON.md} style={{ color: "var(--green)" }} />
           <h4 className="font-medium" style={{ color: "var(--fill-primary)" }}>
-            导入数据
+            {t("importData")}
           </h4>
         </div>
 
         <div className="space-y-3">
           <div className="text-[13px]" style={{ color: "var(--fill-secondary)" }}>
-            从备份文件导入配置、代理、技能和会话数据
+            {t("importDesc")}
           </div>
 
           <div className="pt-2">
@@ -240,14 +241,14 @@ export function MigrationTab() {
               }}
             >
               {getStatusIcon(importStatus)}
-              {importStatus === "loading" ? `导入中... ${progress}%` : "选择文件导入"}
+              {importStatus === "loading" ? t("importing", { progress }) : t("selectFileImport")}
             </button>
           </div>
 
           <div className="flex items-start gap-2 pt-2">
             <AlertTriangle {...ICON.sm} className="mt-0.5 flex-shrink-0" style={{ color: "var(--yellow)" }} />
             <p className="text-[12px] leading-relaxed" style={{ color: "var(--fill-secondary)" }}>
-              注意：导入操作将覆盖当前配置。如有重要数据，请先执行导出备份。
+              {t("importWarning")}
             </p>
           </div>
         </div>
@@ -260,15 +261,15 @@ export function MigrationTab() {
       >
         <summary className="cursor-pointer font-medium flex items-center gap-2" style={{ color: "var(--fill-primary)" }}>
           <RotateCcw {...ICON.md} />
-          <span>高级选项</span>
+          <span>{t("advancedOptions")}</span>
         </summary>
         <div className="pt-4 space-y-3">
           <div className="text-[13px]" style={{ color: "var(--fill-tertiary)" }}>
-            配置导入时的行为
+            {t("importBehavior")}
           </div>
           <div className="flex items-center justify-between">
             <span className="text-[13px]" style={{ color: "var(--fill-secondary)" }}>
-              合并而非覆盖
+              {t("mergeNotOverwrite")}
             </span>
             <label className="switch">
               <input

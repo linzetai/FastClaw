@@ -2997,7 +2997,7 @@ impl AgentRuntime {
             shell,
             execution_mode: mode,
             mcp_servers: vec![],
-            language_preference: None,
+            language_preference: params.request.response_language.clone(),
             token_budget: None,
             memory_prompt: None,
             session_start_date: date,
@@ -3241,6 +3241,7 @@ mod stream_resume_tests {
             tools: None,
             slash_intent: None,
             work_dir: None,
+            response_language: None,
         };
 
         let res = runtime

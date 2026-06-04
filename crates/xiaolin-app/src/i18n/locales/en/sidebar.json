@@ -1,0 +1,13 @@
+{
+  "searchSessions": "Search sessions...",
+  "rename": "Rename",
+  "setWorkDir": "Set working directory",
+  "delete": "Delete",
+  "newChat": "New Chat",
+  "search": "Search",
+  "plugins": "Plugins",
+  "automations": "Automations",
+  "settings": "Settings",
+  "chats": "Chats",
+  "noMatchingSessions": "No matching sessions found"
+}

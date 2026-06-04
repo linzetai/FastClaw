@@ -1,4 +1,5 @@
 import { memo, useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Square, Pencil, RotateCw, ChevronDown, ChevronUp } from "lucide-react";
 import { ICON } from "../../lib/ui-tokens";
 import type { TodoSummary } from "./TodoCard";
@@ -20,6 +21,7 @@ export const StickyContextBar = memo(function StickyContextBar({
   onEdit,
   onResend,
 }: StickyContextBarProps) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(false);
   const truncated = userMessage.length > 80;
   const displayText = expanded ? userMessage : userMessage.slice(0, 80) + (truncated ? "…" : "");
@@ -103,17 +105,17 @@ export const StickyContextBar = memo(function StickyContextBar({
             onClick={handleStop}
             className="flex h-6 items-center gap-1 rounded-md px-1.5 transition-colors duration-100 hover:bg-[var(--bg-hover)]"
             style={{ color: "var(--red)" }}
-            title="停止"
+            title={t("sticky_stop")}
           >
             <Square size={10} strokeWidth={2} fill="currentColor" />
-            <span className="text-[11px] font-medium">停止</span>
+            <span className="text-[11px] font-medium">{t("sticky_stop")}</span>
           </button>
         )}
         <button
           onClick={handleEdit}
           className="flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-100 hover:bg-[var(--bg-hover)]"
           style={{ color: "var(--fill-tertiary)" }}
-          title="编辑"
+          title={t("edit")}
         >
           <Pencil {...ICON.sm} />
         </button>
@@ -122,7 +124,7 @@ export const StickyContextBar = memo(function StickyContextBar({
             onClick={handleResend}
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-100 hover:bg-[var(--bg-hover)]"
             style={{ color: "var(--fill-tertiary)" }}
-            title="重新发送"
+            title={t("sticky_resend")}
           >
             <RotateCw {...ICON.sm} />
           </button>

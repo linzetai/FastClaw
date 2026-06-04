@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Bot, Search, Terminal, Globe, Wrench, X, ChevronDown, ChevronRight, ChevronUp,
   Clock, Zap, Copy, Square,
@@ -8,15 +9,17 @@ import { ICON } from "../../lib/ui-tokens";
 import type { SubAgentRunUI } from "../../lib/stores/types";
 import * as api from "../../lib/api";
 
-const TYPE_META: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
-  general: { icon: <Bot {...ICON.sm} />, label: "通用", color: "var(--tint)" },
-  explore: { icon: <Search {...ICON.sm} />, label: "探索", color: "#34c759" },
-  shell: { icon: <Terminal {...ICON.sm} />, label: "命令", color: "#ff9500" },
-  browser: { icon: <Globe {...ICON.sm} />, label: "浏览器", color: "#af52de" },
-};
-
-function getTypeMeta(type: string) {
-  return TYPE_META[type] ?? { icon: <Wrench {...ICON.sm} />, label: type, color: "var(--fill-tertiary)" };
+function useTypeMeta() {
+  const { t } = useTranslation("chat");
+  return useMemo(() => {
+    const map: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
+      general: { icon: <Bot {...ICON.sm} />, label: t("subAgent_general"), color: "var(--tint)" },
+      explore: { icon: <Search {...ICON.sm} />, label: t("subAgent_explore"), color: "#34c759" },
+      shell: { icon: <Terminal {...ICON.sm} />, label: t("subAgent_shell"), color: "#ff9500" },
+      browser: { icon: <Globe {...ICON.sm} />, label: t("subAgent_browser"), color: "#af52de" },
+    };
+    return (type: string) => map[type] ?? { icon: <Wrench {...ICON.sm} />, label: type, color: "var(--fill-tertiary)" };
+  }, [t]);
 }
 
 function formatElapsed(ms?: number): string {
@@ -26,12 +29,13 @@ function formatElapsed(ms?: number): string {
 }
 
 function StatusBadge({ status }: { status: SubAgentRunUI["status"] }) {
+  const { t } = useTranslation("chat");
   const styles: Record<string, { bg: string; color: string; label: string }> = {
-    pending: { bg: "var(--bg-tertiary)", color: "var(--fill-tertiary)", label: "等待" },
-    running: { bg: "rgba(0, 122, 255, 0.12)", color: "var(--tint)", label: "运行中" },
-    completed: { bg: "rgba(52, 199, 89, 0.12)", color: "#34c759", label: "完成" },
-    failed: { bg: "rgba(255, 59, 48, 0.12)", color: "#ff3b30", label: "失败" },
-    cancelled: { bg: "rgba(142, 142, 147, 0.12)", color: "var(--fill-tertiary)", label: "取消" },
+    pending: { bg: "var(--bg-tertiary)", color: "var(--fill-tertiary)", label: t("subAgent_status_pending") },
+    running: { bg: "rgba(0, 122, 255, 0.12)", color: "var(--tint)", label: t("subAgent_status_running") },
+    completed: { bg: "rgba(52, 199, 89, 0.12)", color: "#34c759", label: t("subAgent_status_completed") },
+    failed: { bg: "rgba(255, 59, 48, 0.12)", color: "#ff3b30", label: t("subAgent_status_failed") },
+    cancelled: { bg: "rgba(142, 142, 147, 0.12)", color: "var(--fill-tertiary)", label: t("subAgent_status_cancelled") },
   };
   const s = styles[status] ?? styles.pending;
   return (
@@ -51,6 +55,8 @@ function StatusBadge({ status }: { status: SubAgentRunUI["status"] }) {
 }
 
 function RunItem({ run, onCancel }: { run: SubAgentRunUI; onCancel: (id: string) => void }) {
+  const { t } = useTranslation("chat");
+  const getTypeMeta = useTypeMeta();
   const [expanded, setExpanded] = useState(false);
   const meta = getTypeMeta(run.subagentType);
   const isActive = run.status === "running" || run.status === "pending";
@@ -94,7 +100,7 @@ function RunItem({ run, onCancel }: { run: SubAgentRunUI; onCancel: (id: string)
           <Clock size={10} /> {formatElapsed(isActive ? elapsed : run.elapsedMs)}
         </span>
         <span className="inline-flex items-center gap-0.5">
-          <Zap size={10} /> {run.toolCallsMade} 工具
+          <Zap size={10} /> {t("subAgent_toolsCount", { count: run.toolCallsMade })}
         </span>
         {currentTool && (
           <span className="truncate" style={{ color: meta.color }}>
@@ -105,7 +111,7 @@ function RunItem({ run, onCancel }: { run: SubAgentRunUI; onCancel: (id: string)
           <button
             onClick={(e) => { e.stopPropagation(); onCancel(run.runId); }}
             className="ml-auto rounded p-0.5 transition-colors hover:bg-[var(--bg-tertiary)]"
-            title="取消"
+            title={t("cancel", { ns: "common" })}
           >
             <Square size={10} style={{ color: "var(--red)" }} />
           </button>
@@ -115,11 +121,11 @@ function RunItem({ run, onCancel }: { run: SubAgentRunUI; onCancel: (id: string)
       {expanded && run.result && (
         <div className="border-t px-2 py-1.5" style={{ borderColor: "var(--separator)" }}>
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-medium" style={{ color: "var(--fill-tertiary)" }}>结果</span>
+            <span className="text-[10px] font-medium" style={{ color: "var(--fill-tertiary)" }}>{t("subAgent_result")}</span>
             <button
               onClick={() => navigator.clipboard.writeText(run.result ?? "")}
               className="rounded p-0.5 transition-colors hover:bg-[var(--bg-tertiary)]"
-              title="复制"
+              title={t("copy", { ns: "common" })}
             >
               <Copy size={10} style={{ color: "var(--fill-quaternary)" }} />
             </button>
@@ -142,6 +148,7 @@ const DEFAULT_DRAWER_H = 240;
 const SUMMARY_H = 36;
 
 export function SubAgentMonitor() {
+  const { t } = useTranslation("chat");
   const subAgentRuns = useActiveSubAgentRuns();
 
   const runs = useMemo(() => {
@@ -219,8 +226,8 @@ export function SubAgentMonitor() {
 
   const completedCount = runs.filter((r) => r.status === "completed").length;
   const summaryText = activeCount > 0
-    ? `${activeCount} 个子智能体运行中`
-    : `${completedCount} 个子智能体已完成`;
+    ? t("subAgent_runningSummary", { count: activeCount })
+    : t("subAgent_completedSummary", { count: completedCount });
 
   return (
     <div
@@ -251,7 +258,7 @@ export function SubAgentMonitor() {
         <div className="flex items-center gap-1.5">
           <Bot size={14} style={{ color: "var(--tint)" }} />
           <span className="text-[12px] font-semibold" style={{ color: "var(--fill-primary)" }}>
-            子智能体
+            {t("subAgent_title")}
           </span>
           <span
             className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
@@ -270,7 +277,7 @@ export function SubAgentMonitor() {
           <button
             onClick={(e) => { e.stopPropagation(); setVisible(false); }}
             className="rounded p-0.5 transition-colors hover:bg-[var(--bg-tertiary)]"
-            title="隐藏面板"
+            title={t("subAgent_hidePanel")}
           >
             <X size={14} style={{ color: "var(--fill-quaternary)" }} />
           </button>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Eye, EyeOff, Zap, CheckCircle, XCircle, Loader2, Search } from "lucide-react";
 import * as api from "../../lib/api";
 import { SectionTitle } from "./SettingsShared";
@@ -11,19 +12,21 @@ type TestStatus = "idle" | "testing" | "success" | "error";
 
 type WebSearchBackend = "tavily" | "searxng" | "builtin" | "";
 
-const BUILTIN_ENGINES = [
-  { id: "google", label: "Google" },
-  { id: "baidu", label: "百度 (Baidu)" },
-  { id: "bing", label: "Bing" },
-  { id: "sogou", label: "搜狗 (Sogou)" },
-  { id: "360", label: "360搜索 (360 Search)" },
-] as const;
+const BUILTIN_ENGINE_IDS = ["google", "baidu", "bing", "sogou", "360"] as const;
 
 export function WebSearchTab() {
+  const { t } = useTranslation("settings");
+  const builtinEngines = [
+    { id: "google", label: "Google" },
+    { id: "baidu", label: t("engine_baidu") },
+    { id: "bing", label: "Bing" },
+    { id: "sogou", label: t("engine_sogou") },
+    { id: "360", label: t("engine_360") },
+  ] as const;
   const [backend, setBackend] = useState<WebSearchBackend>("");
   const [tavilyKey, setTavilyKey] = useState("");
   const [searxngUrl, setSearxngUrl] = useState("");
-  const [enabledEngines, setEnabledEngines] = useState<Set<string>>(new Set(BUILTIN_ENGINES.map(e => e.id)));
+  const [enabledEngines, setEnabledEngines] = useState<Set<string>>(new Set(BUILTIN_ENGINE_IDS));
   const [showKey, setShowKey] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -81,9 +84,9 @@ export function WebSearchTab() {
         await api.setConfig("credentials", creds);
       }
 
-      showToast("搜索配置已保存（重启后生效）", "ok");
+      showToast(t("searchSavedRestart"), "ok");
     } catch {
-      showToast("保存失败", "err");
+      showToast(t("saveFailed"), "err");
     } finally {
       setSaving(false);
     }
@@ -97,7 +100,7 @@ export function WebSearchTab() {
         const key = tavilyKey.includes("*") ? "" : tavilyKey.trim();
         if (!key) {
           setTestStatus("error");
-          setTestMsg("请先填写有效的 API Key");
+          setTestMsg(t("testNeedApiKey"));
           return;
         }
         const resp = await fetch("https://api.tavily.com/search", {
@@ -108,7 +111,7 @@ export function WebSearchTab() {
         });
         if (resp.ok) {
           setTestStatus("success");
-          setTestMsg("Tavily 连接成功");
+          setTestMsg(t("testTavilyOk"));
         } else {
           const body = await resp.text().catch(() => "");
           setTestStatus("error");
@@ -118,7 +121,7 @@ export function WebSearchTab() {
         const base = searxngUrl.trim().replace(/\/+$/, "");
         if (!base) {
           setTestStatus("error");
-          setTestMsg("请先填写 SearXNG 实例 URL");
+          setTestMsg(t("testNeedSearxngUrl"));
           return;
         }
         const resp = await fetch(`${base}/search?q=test&format=json&categories=general`, {
@@ -126,18 +129,18 @@ export function WebSearchTab() {
         });
         if (resp.ok) {
           setTestStatus("success");
-          setTestMsg("SearXNG 连接成功");
+          setTestMsg(t("testSearxngOk"));
         } else {
           setTestStatus("error");
           setTestMsg(`HTTP ${resp.status}`);
         }
       } else {
         setTestStatus("error");
-        setTestMsg("请先选择搜索引擎");
+        setTestMsg(t("testNeedEngine"));
       }
     } catch (err) {
       setTestStatus("error");
-      const msg = typeof err === "string" ? err : err instanceof Error ? err.message : "连接失败";
+      const msg = typeof err === "string" ? err : err instanceof Error ? err.message : t("connectionFailed");
       setTestMsg(msg.length > 120 ? msg.slice(0, 120) + "…" : msg);
     }
   }, [backend, tavilyKey, searxngUrl]);
@@ -145,7 +148,7 @@ export function WebSearchTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <span className="text-[13px]" style={{ color: "var(--fill-tertiary)" }}>加载中...</span>
+        <span className="text-[13px]" style={{ color: "var(--fill-tertiary)" }}>{t("loading")}</span>
       </div>
     );
   }
@@ -171,15 +174,15 @@ export function WebSearchTab() {
       )}
 
       <div>
-        <SectionTitle>搜索引擎</SectionTitle>
+        <SectionTitle>{t("searchEngine")}</SectionTitle>
         <p className="mb-3 text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
-          配置 Agent 使用的 web_search 工具后端，用于联网搜索实时信息
+          {t("searchEngineDesc")}
         </p>
         <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
           {([
-            { value: "builtin" as const, label: "内置搜索", desc: "直接抓取 Google、百度、Bing 等公开搜索页面，无需 API Key" },
-            { value: "tavily" as const, label: "Tavily", desc: "商业 API，搜索质量高，需要 API Key" },
-            { value: "searxng" as const, label: "SearXNG", desc: "开源自托管元搜索引擎，无需 API Key" },
+            { value: "builtin" as const, label: t("searchBuiltin"), desc: t("searchBuiltinDesc") },
+            { value: "tavily" as const, label: "Tavily", desc: t("searchTavilyDesc") },
+            { value: "searxng" as const, label: "SearXNG", desc: t("searchSearxngDesc") },
           ]).map((opt, idx, arr) => (
             <div
               key={opt.value}
@@ -208,18 +211,18 @@ export function WebSearchTab() {
 
       {backend === "builtin" && (
         <div>
-          <SectionTitle>搜索引擎选择</SectionTitle>
+          <SectionTitle>{t("searchEngineSelect")}</SectionTitle>
           <p className="mb-3 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
-            选择要启用的搜索引擎，搜索时将并行查询所有已启用的引擎并合并结果
+            {t("searchEngineSelectDesc")}
           </p>
           <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
-            {BUILTIN_ENGINES.map((eng, idx) => {
+            {builtinEngines.map((eng, idx) => {
               const checked = enabledEngines.has(eng.id);
               return (
                 <div
                   key={eng.id}
                   className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition-colors duration-100 hover:bg-[var(--bg-hover)]"
-                  style={idx < BUILTIN_ENGINES.length - 1 ? { borderBottom: "0.5px solid var(--separator)" } : undefined}
+                  style={idx < builtinEngines.length - 1 ? { borderBottom: "0.5px solid var(--separator)" } : undefined}
                   onClick={() => {
                     setEnabledEngines(prev => {
                       const next = new Set(prev);
@@ -252,14 +255,14 @@ export function WebSearchTab() {
             })}
           </div>
           <p className="mt-2 text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-            至少需要启用一个搜索引擎 · 已选中 {enabledEngines.size}/{BUILTIN_ENGINES.length}
+            {t("searchMinOne", { selected: enabledEngines.size, total: builtinEngines.length })}
           </p>
         </div>
       )}
 
       {backend === "tavily" && (
         <div>
-          <SectionTitle>Tavily 配置</SectionTitle>
+          <SectionTitle>{t("tavilyConfig")}</SectionTitle>
           <div className="space-y-3">
             <div>
               <label className={labelCls} style={labelStyle}>API Key</label>
@@ -295,7 +298,7 @@ export function WebSearchTab() {
                       : testStatus === "error" ? <XCircle {...ICON.md} />
                       : <Zap {...ICON.md} />
                     }
-                    {testStatus === "idle" && "测试"}
+                    {testStatus === "idle" && t("test")}
                   </button>
                 </div>
               </div>
@@ -306,7 +309,7 @@ export function WebSearchTab() {
               )}
             </div>
             <p className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-              前往 <a href="https://tavily.com" target="_blank" rel="noreferrer" className="underline" style={{ color: "var(--tint)" }}>tavily.com</a> 注册获取 API Key
+              前往 <a href="https://tavily.com" target="_blank" rel="noreferrer" className="underline" style={{ color: "var(--tint)" }}>tavily.com</a> {/* signup */}
             </p>
           </div>
         </div>
@@ -314,10 +317,10 @@ export function WebSearchTab() {
 
       {backend === "searxng" && (
         <div>
-          <SectionTitle>SearXNG 配置</SectionTitle>
+          <SectionTitle>{t("searxngConfig")}</SectionTitle>
           <div className="space-y-3">
             <div>
-              <label className={labelCls} style={labelStyle}>实例 URL</label>
+              <label className={labelCls} style={labelStyle}>{t("searxngInstanceUrl")}</label>
               <div className="relative">
                 <input
                   value={searxngUrl}
@@ -338,7 +341,7 @@ export function WebSearchTab() {
                     : testStatus === "error" ? <XCircle {...ICON.md} />
                     : <Zap {...ICON.md} />
                   }
-                  {testStatus === "idle" && "测试"}
+                  {testStatus === "idle" && t("test")}
                 </button>
               </div>
               {testMsg && (
@@ -348,7 +351,7 @@ export function WebSearchTab() {
               )}
             </div>
             <p className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-              确保实例已启用 JSON 输出格式（/search?format=json）
+              {t("searxngJsonHint")}
             </p>
           </div>
         </div>
@@ -358,7 +361,7 @@ export function WebSearchTab() {
         <div className="rounded-[var(--radius-sm)] px-4 py-6 text-center" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
           <Search size={24} strokeWidth={1.5} className="mx-auto mb-2" style={{ color: "var(--fill-quaternary)" }} />
           <p className="text-[13px]" style={{ color: "var(--fill-tertiary)" }}>
-            选择一个搜索引擎后端以启用 Agent 联网搜索能力
+            {t("searchSelectBackend")}
           </p>
         </div>
       )}
@@ -370,12 +373,12 @@ export function WebSearchTab() {
           className="rounded-[var(--radius-xs)] px-4 py-2 text-[13px] font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
           style={{ background: "var(--tint)", cursor: saving ? "not-allowed" : "pointer" }}
         >
-          {saving ? "保存中..." : "保存"}
+          {saving ? t("saving") : t("save")}
         </button>
       </div>
 
       <p className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-        搜索配置保存到 ~/.xiaolin/config/default.json，修改后需重启应用生效
+        {t("searchConfigHint")}
       </p>
     </div>
   );

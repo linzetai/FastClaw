@@ -1,5 +1,6 @@
 import { Lock, Shield, ShieldCheck, ShieldOff, ChevronDown } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { usePermissionStore } from "../../lib/stores/permission-store";
 
@@ -23,6 +24,7 @@ interface PermissionSelectorProps {
 }
 
 export function PermissionSelector({ sessionId, disabled }: PermissionSelectorProps) {
+  const { t } = useTranslation("chat");
   const presets = usePermissionStore((s) => s.presets);
   const presetsLoaded = usePermissionStore((s) => s.presetsLoaded);
   const loadPresets = usePermissionStore((s) => s.loadPresets);
@@ -92,7 +94,7 @@ export function PermissionSelector({ sessionId, disabled }: PermissionSelectorPr
                 className="px-3 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-wider"
                 style={{ color: "var(--fill-quaternary)" }}
               >
-                权限预设
+                {t("permission_presets")}
               </div>
               {presets.map((p) => {
                 const active = p.id === activePresetId;

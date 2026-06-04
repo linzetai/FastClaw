@@ -232,6 +232,8 @@ pub struct ChatRequest {
     pub slash_intent: Option<SlashIntent>,
     #[serde(default, alias = "workDir")]
     pub work_dir: Option<String>,
+    #[serde(default, alias = "responseLanguage")]
+    pub response_language: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

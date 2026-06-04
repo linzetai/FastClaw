@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { X, Clock, AlertTriangle, Info, Zap } from "lucide-react";
 import { ICON } from "../../lib/ui-tokens";
 import type { AppNotification } from "../../lib/transport";
@@ -13,16 +14,16 @@ function parseUtc(ts: string): Date {
   return new Date(ts.replace(" ", "T") + "Z");
 }
 
-function categoryLabel(category?: string): { icon: ReactNode; label: string } {
+function categoryLabel(category: string | undefined, tr: (key: string) => string): { icon: ReactNode; label: string } {
   switch (category) {
     case "cron":
-      return { icon: <Clock {...ICON.md} />, label: "定时任务" };
+      return { icon: <Clock {...ICON.md} />, label: tr("type_cron") };
     case "agent":
       return { icon: <Zap {...ICON.md} />, label: "Agent" };
     case "error":
-      return { icon: <AlertTriangle {...ICON.md} />, label: "错误" };
+      return { icon: <AlertTriangle {...ICON.md} />, label: tr("type_error") };
     default:
-      return { icon: <Info {...ICON.md} />, label: "系统" };
+      return { icon: <Info {...ICON.md} />, label: tr("type_system") };
   }
 }
 
@@ -32,7 +33,8 @@ interface Props {
 }
 
 export function NotificationDetailPanel({ notification, onClose }: Props) {
-  const { icon, label } = categoryLabel(notification.category);
+  const { t } = useTranslation("notification");
+  const { icon, label } = categoryLabel(notification.category, t);
 
   return (
     <div

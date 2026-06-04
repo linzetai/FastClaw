@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import { Plus, Maximize2, PanelRightClose, FileText } from "lucide-react";
 import { useWorkspaceTabs } from "./workspace-tabs";
 
@@ -28,6 +29,7 @@ const iconBtnStyle: CSSProperties = {
 };
 
 export function WorkspacePanel() {
+  const { t } = useTranslation("common");
   const tabs = useWorkspaceTabs((s) => s.tabs);
   const activeTabId = useWorkspaceTabs((s) => s.activeTabId);
   const setActiveTab = useWorkspaceTabs((s) => s.setActiveTab);
@@ -127,7 +129,7 @@ export function WorkspacePanel() {
           <button
             type="button"
             style={iconBtnStyle}
-            title="最大化"
+            title={t("maximizePanel")}
             onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
           >
@@ -136,7 +138,7 @@ export function WorkspacePanel() {
           <button
             type="button"
             style={iconBtnStyle}
-            title="关闭面板"
+            title={t("closePanel")}
             onClick={togglePanel}
             onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}

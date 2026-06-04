@@ -1,12 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useThemeStore, ACCENT_PRESETS, type ThemeMode } from "../../lib/theme";
 import * as api from "../../lib/api";
 import * as transport from "../../lib/transport";
 import { SectionTitle, SettingRow, Toggle, ThemeCard } from "./SettingsShared";
 import { NotificationTab } from "./NotificationTab";
 import { useConfigStore, type FontSize } from "../../lib/stores/config-store";
+import { useLocaleStore, type Locale, type ResponseLang } from "../../lib/stores/locale-store";
 
 export function GeneralTab() {
+  const { t } = useTranslation("settings");
   const { mode, setMode, accent, setAccent, resolved } = useThemeStore();
   const [notifications, setNotifications] = useState(true);
   const [sounds, setSounds] = useState(false);
@@ -50,14 +53,16 @@ export function GeneralTab() {
     } catch { /* not available outside Tauri */ }
   }, [autostart]);
 
-  const themeOptions: { value: ThemeMode; label: string }[] = [
-    { value: "light", label: "浅色" }, { value: "dark", label: "深色" }, { value: "system", label: "跟随系统" },
-  ];
+  const themeOptions: { value: ThemeMode; label: string }[] = useMemo(() => [
+    { value: "light", label: t("themeMode_light") },
+    { value: "dark", label: t("themeMode_dark") },
+    { value: "system", label: t("themeMode_system") },
+  ], [t]);
 
   return (
     <div className="space-y-6">
       <div>
-        <SectionTitle>外观</SectionTitle>
+        <SectionTitle>{t("appearance")}</SectionTitle>
         <div className="flex rounded-[var(--radius-xs)] p-0.5" style={{ background: "var(--bg-tertiary)" }}>
           {themeOptions.map((opt) => (
             <button
@@ -77,7 +82,7 @@ export function GeneralTab() {
       </div>
 
       <div>
-        <SectionTitle>主题</SectionTitle>
+        <SectionTitle>{t("themeSection")}</SectionTitle>
         <div
           className="overflow-hidden rounded-[var(--radius-sm)] px-5 py-5"
           style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}
@@ -87,6 +92,7 @@ export function GeneralTab() {
               <ThemeCard
                 key={preset.id}
                 preset={preset}
+                label={t(`theme_${preset.id}`)}
                 selected={accent === preset.id}
                 resolved={resolved}
                 onClick={() => setAccent(preset.id)}
@@ -95,7 +101,7 @@ export function GeneralTab() {
           </div>
         </div>
         <p className="mt-2 text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-          每个主题完整定义背景、文字、强调色，支持浅色与深色模式
+          {t("themeHint")}
         </p>
       </div>
 
@@ -112,16 +118,79 @@ export function GeneralTab() {
 
       <DisplaySection />
 
+      <LanguageSection />
+
       {transport.isTauri && (
         <div>
-          <SectionTitle>系统</SectionTitle>
+          <SectionTitle>{t("systemSection")}</SectionTitle>
           <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
-            <SettingRow label="开机自启动" description="系统启动时自动运行 XiaoLin，定时任务将正常执行" isLast>
+            <SettingRow label={t("autostart")} description={t("autostartDesc")} isLast>
               <Toggle enabled={autostart} onChange={toggleAutostart} />
             </SettingRow>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
+  { value: "zh", label: "中文" },
+  { value: "en", label: "English" },
+];
+
+const RESPONSE_LANG_OPTIONS: { value: ResponseLang; labelKey: string }[] = [
+  { value: "zh", labelKey: "responseLang_zh" },
+  { value: "en", labelKey: "responseLang_en" },
+  { value: "follow-ui", labelKey: "responseLang_followUi" },
+  { value: "auto", labelKey: "responseLang_auto" },
+];
+
+function LanguageSection() {
+  const { t } = useTranslation("settings");
+  const { locale, responseLang, setLocale, setResponseLang } = useLocaleStore();
+
+  return (
+    <div>
+      <SectionTitle>{t("language")}</SectionTitle>
+      <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
+        <SettingRow label={t("uiLanguage")}>
+          <div className="flex rounded-[var(--radius-xs)] p-0.5" style={{ background: "var(--bg-tertiary)" }}>
+            {LOCALE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setLocale(opt.value)}
+                className="cursor-pointer rounded-[var(--radius-xs)] px-3 py-1 text-center text-[12px] font-medium transition-all duration-200"
+                style={{
+                  background: locale === opt.value ? "var(--bg-elevated)" : "transparent",
+                  color: locale === opt.value ? "var(--fill-primary)" : "var(--fill-tertiary)",
+                  boxShadow: locale === opt.value ? "var(--shadow-sm)" : "none",
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </SettingRow>
+        <SettingRow label={t("responseLanguage")} isLast>
+          <div className="flex rounded-[var(--radius-xs)] p-0.5" style={{ background: "var(--bg-tertiary)" }}>
+            {RESPONSE_LANG_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setResponseLang(opt.value)}
+                className="cursor-pointer rounded-[var(--radius-xs)] px-2.5 py-1 text-center text-[12px] font-medium transition-all duration-200"
+                style={{
+                  background: responseLang === opt.value ? "var(--bg-elevated)" : "transparent",
+                  color: responseLang === opt.value ? "var(--fill-primary)" : "var(--fill-tertiary)",
+                  boxShadow: responseLang === opt.value ? "var(--shadow-sm)" : "none",
+                }}
+              >
+                {t(opt.labelKey)}
+              </button>
+            ))}
+          </div>
+        </SettingRow>
+      </div>
     </div>
   );
 }
@@ -133,25 +202,26 @@ const THRESHOLD_OPTIONS = [
   { value: 10, label: "10" },
 ];
 
-const FONT_SIZE_OPTIONS: { value: FontSize; label: string }[] = [
-  { value: "small", label: "小" },
-  { value: "standard", label: "标准" },
-  { value: "large", label: "大" },
-  { value: "xlarge", label: "特大" },
-];
-
 function DisplaySection() {
+  const { t } = useTranslation("settings");
   const { display, setDisplayConfig, loadDisplayConfig } = useConfigStore();
+
+  const fontSizeOptions: { value: FontSize; label: string }[] = useMemo(() => [
+    { value: "small", label: t("fontSize_small") },
+    { value: "standard", label: t("fontSize_standard") },
+    { value: "large", label: t("fontSize_large") },
+    { value: "xlarge", label: t("fontSize_xlarge") },
+  ], [t]);
 
   useEffect(() => { loadDisplayConfig(); }, [loadDisplayConfig]);
 
   return (
     <div>
-      <SectionTitle>显示</SectionTitle>
+      <SectionTitle>{t("displaySection")}</SectionTitle>
       <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
-        <SettingRow label="字体大小" description="调整全局界面文字大小">
+        <SettingRow label={t("fontSize")} description={t("fontSizeDesc")}>
           <div className="flex rounded-[var(--radius-xs)] p-0.5" style={{ background: "var(--bg-tertiary)" }}>
-            {FONT_SIZE_OPTIONS.map((opt) => (
+            {fontSizeOptions.map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => setDisplayConfig({ fontSize: opt.value })}
@@ -167,10 +237,10 @@ function DisplaySection() {
             ))}
           </div>
         </SettingRow>
-        <SettingRow label="代码行号" description="在代码块中显示行号">
+        <SettingRow label={t("lineNumbers")} description={t("lineNumbersDesc")}>
           <Toggle enabled={display.showLineNumbers} onChange={() => setDisplayConfig({ showLineNumbers: !display.showLineNumbers })} />
         </SettingRow>
-        <SettingRow label="工具调用折叠阈值" description="连续工具调用达到此数量时自动分组折叠" isLast>
+        <SettingRow label={t("toolCallThreshold")} description={t("toolCallThresholdDesc")} isLast>
           <div className="flex rounded-[var(--radius-xs)] p-0.5" style={{ background: "var(--bg-tertiary)" }}>
             {THRESHOLD_OPTIONS.map((opt) => (
               <button

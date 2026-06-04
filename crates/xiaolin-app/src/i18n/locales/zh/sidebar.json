@@ -1,0 +1,13 @@
+{
+  "searchSessions": "搜索会话...",
+  "rename": "重命名",
+  "setWorkDir": "设置工作目录",
+  "delete": "删除",
+  "newChat": "新会话",
+  "search": "搜索",
+  "plugins": "插件",
+  "automations": "自动化",
+  "settings": "设置",
+  "chats": "会话",
+  "noMatchingSessions": "未找到匹配的会话"
+}

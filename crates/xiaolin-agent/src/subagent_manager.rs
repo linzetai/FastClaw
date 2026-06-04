@@ -630,6 +630,7 @@ impl SubAgentManager {
             tools: None,
             slash_intent: None,
             work_dir: None,
+            response_language: None,
         };
 
         let (child_tx, mut child_rx) = mpsc::channel::<AgentEvent>(256);

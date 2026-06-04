@@ -254,6 +254,7 @@ impl RuntimeTurnExecutor {
                 tools: None,
                 work_dir: params.work_dir.clone(),
                 slash_intent: None,
+                response_language: None,
             })
     }
 
@@ -397,6 +398,7 @@ impl RuntimeTurnExecutor {
                 tools: None,
                 work_dir: request.work_dir.clone(),
                 slash_intent: None,
+                response_language: None,
             };
 
             // Re-prompt LLM.

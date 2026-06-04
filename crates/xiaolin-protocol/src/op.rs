@@ -26,6 +26,8 @@ pub struct ChatParams {
     pub slash_intent: Option<String>,
     #[serde(default, alias = "workDir", skip_serializing_if = "Option::is_none")]
     pub work_dir: Option<String>,
+    #[serde(default, alias = "responseLanguage", skip_serializing_if = "Option::is_none")]
+    pub response_language: Option<String>,
     /// Catch-all for forward compatibility
     #[serde(flatten)]
     #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]

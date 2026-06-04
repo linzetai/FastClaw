@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Compass, Code2, ChevronDown, ChevronUp, FileText, RefreshCw } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -29,6 +30,7 @@ export function PlanApprovalCard({
   metadata?: PlanApprovalMetadata | null;
   onApprove?: (mode: "agent" | "plan") => void;
 }) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [planContent, setPlanContent] = useState<string | null>(null);
@@ -60,13 +62,13 @@ export function PlanApprovalCard({
     try {
       const chatId = useChatMetaStore.getState().activeChatId;
       const resp = await transport.getPlanFile(chatId ?? undefined);
-      setPlanContent(resp.content ?? inlinePreview ?? "(计划文件为空)");
+      setPlanContent(resp.content ?? inlinePreview ?? t("plan_empty"));
     } catch {
-      setPlanContent(inlinePreview ?? "(无法读取计划文件)");
+      setPlanContent(inlinePreview ?? t("plan_readFailed"));
     } finally {
       setLoading(false);
     }
-  }, [expanded, planContent, inlinePreview]);
+  }, [expanded, planContent, inlinePreview, t]);
 
   const handleApprove = useCallback(async (mode: "agent" | "plan") => {
     if (approving) return;
@@ -99,7 +101,7 @@ export function PlanApprovalCard({
       <div className="flex items-center gap-2 px-3 py-2">
         <Compass {...ICON.md} style={{ color: "var(--tint, #4299E1)" }} className="shrink-0" />
         <span className="text-[12px] font-semibold" style={{ color: "var(--tint, #4299E1)" }}>
-          {isPending ? "计划等待审批" : "计划已完成"}
+          {isPending ? t("plan_pendingApproval") : t("plan_completed")}
         </span>
         {planPath && (
           <span
@@ -119,7 +121,7 @@ export function PlanApprovalCard({
           style={{ color: "var(--fill-tertiary)", borderTop: "0.5px solid var(--separator)" }}
         >
           <FileText {...ICON.sm} />
-          <span>{expanded ? "收起计划" : "查看计划内容"}</span>
+          <span>{expanded ? t("plan_collapse") : t("plan_viewContent")}</span>
           {expanded ? <ChevronUp {...ICON.sm} /> : <ChevronDown {...ICON.sm} />}
         </button>
       )}
@@ -140,7 +142,7 @@ export function PlanApprovalCard({
                   animation: "spin 0.8s linear infinite",
                 }}
               />
-              加载计划内容...
+              {t("plan_loading")}
             </div>
           ) : (
             <div
@@ -172,7 +174,7 @@ export function PlanApprovalCard({
             }}
           >
             <Code2 {...ICON.sm} />
-            开始实现
+            {t("plan_startImplementation")}
           </button>
           <button
             onClick={() => handleApprove("plan")}
@@ -184,10 +186,10 @@ export function PlanApprovalCard({
             }}
           >
             <RefreshCw {...ICON.sm} />
-            继续规划
+            {t("plan_continuePlanning")}
           </button>
           <span className="text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
-            选择下一步操作
+            {t("plan_chooseNext")}
           </span>
         </div>
       )}

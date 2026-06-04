@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { SectionTitle, SettingRow, Toggle } from "./SettingsShared";
 
 export function NotificationTab({
@@ -19,11 +20,12 @@ export function NotificationTab({
   loaded: boolean;
   persist: (key: string, value: boolean) => void;
 }) {
+  const { t } = useTranslation("settings");
   return (
     <div>
-      <SectionTitle>行为</SectionTitle>
+      <SectionTitle>{t("behaviorSection")}</SectionTitle>
       <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
-        <SettingRow label="桌面通知" description="Agent 完成回复时推送通知">
+        <SettingRow label={t("desktopNotification")} description={t("desktopNotificationDesc")}>
           <Toggle
             enabled={notifications}
             onChange={() => {
@@ -32,7 +34,7 @@ export function NotificationTab({
             }}
           />
         </SettingRow>
-        <SettingRow label="提示音" description="收到消息时播放提示音">
+        <SettingRow label={t("sounds")} description={t("soundsDesc")}>
           <Toggle
             enabled={sounds}
             onChange={() => {
@@ -41,7 +43,7 @@ export function NotificationTab({
             }}
           />
         </SettingRow>
-        <SettingRow label="自动滚动" description="新消息时自动滚动到底部" isLast>
+        <SettingRow label={t("autoScroll")} description={t("autoScrollDesc")} isLast>
           <Toggle
             enabled={autoScroll}
             onChange={() => {

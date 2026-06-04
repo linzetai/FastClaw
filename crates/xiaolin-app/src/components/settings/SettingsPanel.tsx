@@ -1,4 +1,5 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Settings2, Box, Wrench, Server, Info, Search, Shield, X, RotateCcw, Bot } from "lucide-react";
 import { ICON, BTN_ICON } from "../../lib/ui-tokens";
 
@@ -19,20 +20,21 @@ interface SettingsPanelProps {
 
 type SettingsTab = "general" | "models" | "web-search" | "skills" | "sub-agents" | "security" | "gateway" | "about" | "migration";
 
-const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
-  { id: "general", label: "通用", icon: <Settings2 {...ICON.md} /> },
-  { id: "models", label: "模型", icon: <Box {...ICON.md} /> },
-  { id: "web-search", label: "联网搜索", icon: <Search {...ICON.md} /> },
-  { id: "skills", label: "Skills", icon: <Wrench {...ICON.md} /> },
-  { id: "sub-agents", label: "Sub-Agents", icon: <Bot {...ICON.md} /> },
-  { id: "security", label: "安全", icon: <Shield {...ICON.md} /> },
-  { id: "gateway", label: "网关", icon: <Server {...ICON.md} /> },
-  { id: "migration", label: "迁移", icon: <RotateCcw {...ICON.md} /> },
-  { id: "about", label: "关于", icon: <Info {...ICON.md} /> },
-];
-
 export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
+  const { t } = useTranslation("settings");
   const [tab, setTab] = useState<SettingsTab>("general");
+
+  const tabs: { id: SettingsTab; label: string; icon: React.ReactNode }[] = useMemo(() => [
+    { id: "general", label: t("general"), icon: <Settings2 {...ICON.md} /> },
+    { id: "models", label: t("model"), icon: <Box {...ICON.md} /> },
+    { id: "web-search", label: t("webSearchTab"), icon: <Search {...ICON.md} /> },
+    { id: "skills", label: t("skills"), icon: <Wrench {...ICON.md} /> },
+    { id: "sub-agents", label: t("subAgents"), icon: <Bot {...ICON.md} /> },
+    { id: "security", label: t("security"), icon: <Shield {...ICON.md} /> },
+    { id: "gateway", label: t("gateway"), icon: <Server {...ICON.md} /> },
+    { id: "migration", label: t("migration"), icon: <RotateCcw {...ICON.md} /> },
+    { id: "about", label: t("about"), icon: <Info {...ICON.md} /> },
+  ], [t]);
 
   useEffect(() => {
     if (!open) return;
@@ -68,26 +70,26 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         }}
       >
         <div className="flex w-[160px] shrink-0 flex-col py-3" style={{ background: "var(--bg-secondary)", borderRight: `0.5px solid var(--separator)` }}>
-          <div className="mb-2 px-4 text-[12px] font-semibold" style={{ color: "var(--fill-tertiary)" }}>设置</div>
-          {TABS.map((t) => (
+          <div className="mb-2 px-4 text-[12px] font-semibold" style={{ color: "var(--fill-tertiary)" }}>{t("title")}</div>
+          {tabs.map((tabItem) => (
             <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
+              key={tabItem.id}
+              onClick={() => setTab(tabItem.id)}
               className="mx-2 flex cursor-pointer items-center gap-2.5 rounded-[var(--radius-xs)] px-3 py-2 text-left text-[13px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)]"
               style={{
-                background: tab === t.id ? "var(--bg-active)" : "transparent",
-                color: tab === t.id ? "var(--fill-primary)" : "var(--fill-secondary)",
+                background: tab === tabItem.id ? "var(--bg-active)" : "transparent",
+                color: tab === tabItem.id ? "var(--fill-primary)" : "var(--fill-secondary)",
               }}
             >
-              {t.icon}
-              {t.label}
+              {tabItem.icon}
+              {tabItem.label}
             </button>
           ))}
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex shrink-0 items-center justify-between px-6 py-4" style={{ borderBottom: `0.5px solid var(--separator)` }}>
             <h2 className="text-[15px] font-semibold" style={{ color: "var(--fill-primary)" }}>
-              {TABS.find((t) => t.id === tab)?.label}
+              {tabs.find((tabItem) => tabItem.id === tab)?.label}
             </h2>
             <button onClick={onClose} className={`${BTN_ICON.sm} cursor-pointer rounded-full`} style={{ color: "var(--fill-tertiary)" }}>
               <X {...ICON.md} />

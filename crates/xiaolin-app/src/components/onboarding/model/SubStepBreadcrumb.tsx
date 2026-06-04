@@ -1,9 +1,11 @@
+import { useTranslation } from "react-i18next";
 import { CheckCircle } from "lucide-react";
 
 export function SubStepBreadcrumb({ current, isCustom }: { current: 1 | 2 | 3; isCustom: boolean }) {
+  const { t } = useTranslation("onboarding");
   const steps = isCustom
-    ? [{ num: 1, label: "选择提供商" }, { num: 3, label: "配置信息" }]
-    : [{ num: 1, label: "选择提供商" }, { num: 2, label: "选择模型" }, { num: 3, label: "配置密钥" }];
+    ? [{ num: 1, label: t("step_provider") }, { num: 3, label: t("step_config") }]
+    : [{ num: 1, label: t("step_provider") }, { num: 2, label: t("step_model") }, { num: 3, label: t("step_apiKey") }];
 
   return (
     <div className="mb-5 flex items-center justify-center gap-1">

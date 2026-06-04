@@ -1,13 +1,15 @@
+import { useTranslation } from "react-i18next";
 import { useState, useEffect } from "react";
 import { Sparkles, ArrowRight } from "lucide-react";
 import { ICON } from "../../lib/ui-tokens";
 
 export function DoneStep({ onComplete }: { onComplete: () => void }) {
+  const { t } = useTranslation("onboarding");
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const t = setTimeout(() => setReady(true), 1200);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setReady(true), 1200);
+    return () => clearTimeout(timer);
   }, []);
 
   return (
@@ -22,10 +24,10 @@ export function DoneStep({ onComplete }: { onComplete: () => void }) {
         <Sparkles size={32} strokeWidth={1.5} style={{ color: "var(--green)" }} />
       </div>
       <h2 className="mt-5 text-[22px] font-bold" style={{ color: "var(--fill-primary)" }}>
-        一切就绪
+        {t("allSet")}
       </h2>
       <p className="mt-2 text-[14px]" style={{ color: "var(--fill-secondary)" }}>
-        准备好和你的 Agent 开始对话了
+        {t("readyToChat")}
       </p>
 
       <div className="mt-6 flex gap-3">
@@ -35,7 +37,7 @@ export function DoneStep({ onComplete }: { onComplete: () => void }) {
             className="flex cursor-pointer items-center gap-2 rounded-full px-8 py-3 text-[14px] font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
             style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
           >
-            开始使用
+            {t("startUsing")}
             <ArrowRight {...ICON.md} />
           </button>
         )}

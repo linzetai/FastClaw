@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Bot, ChevronRight, Check, X as XIcon, Search, Terminal,
   Globe, Wrench, Square,
@@ -7,15 +8,17 @@ import type { SubAgentRunUI, SubAgentToolCall } from "../../lib/agent-store";
 import { StepIndicator, type ToolCall } from "./StepIndicator";
 import { ICON } from "../../lib/ui-tokens";
 
-const TYPE_META: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
-  general: { icon: <Bot {...ICON.sm} />, label: "通用子智能体", color: "var(--tint)" },
-  explore: { icon: <Search {...ICON.sm} />, label: "探索 (只读)", color: "#34c759" },
-  shell: { icon: <Terminal {...ICON.sm} />, label: "命令执行", color: "#ff9500" },
-  browser: { icon: <Globe {...ICON.sm} />, label: "浏览器", color: "#af52de" },
-};
-
-function getTypeMeta(type: string) {
-  return TYPE_META[type] ?? { icon: <Wrench {...ICON.sm} />, label: type, color: "var(--fill-tertiary)" };
+function useSubAgentCardTypeMeta() {
+  const { t } = useTranslation("chat");
+  return useMemo(() => {
+    const map: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
+      general: { icon: <Bot {...ICON.sm} />, label: t("subAgentCard_general"), color: "var(--tint)" },
+      explore: { icon: <Search {...ICON.sm} />, label: t("subAgentCard_explore"), color: "#34c759" },
+      shell: { icon: <Terminal {...ICON.sm} />, label: t("subAgentCard_shell"), color: "#ff9500" },
+      browser: { icon: <Globe {...ICON.sm} />, label: t("subAgent_browser"), color: "#af52de" },
+    };
+    return (type: string) => map[type] ?? { icon: <Wrench {...ICON.sm} />, label: type, color: "var(--fill-tertiary)" };
+  }, [t]);
 }
 
 function adaptToolCall(tc: SubAgentToolCall): ToolCall {
@@ -34,6 +37,8 @@ interface SubAgentCardProps {
 }
 
 export function SubAgentCard({ run, onCancel }: SubAgentCardProps) {
+  const { t } = useTranslation("chat");
+  const getTypeMeta = useSubAgentCardTypeMeta();
   const [expanded, setExpanded] = useState(false);
   const meta = getTypeMeta(run.subagentType);
   const isActive = run.status === "running" || run.status === "pending";
@@ -102,8 +107,8 @@ export function SubAgentCard({ run, onCancel }: SubAgentCardProps) {
           <button
             onClick={(e) => { e.stopPropagation(); onCancel(run.runId); }}
             className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
-            title="取消"
-            aria-label="取消子智能体"
+            title={t("cancel", { ns: "common" })}
+            aria-label={t("subAgentCard_cancelAria")}
           >
             <Square {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
           </button>
@@ -131,7 +136,7 @@ export function SubAgentCard({ run, onCancel }: SubAgentCardProps) {
           {/* Task detail */}
           <div className="mt-1.5 mb-1">
             <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--fill-quaternary)" }}>
-              任务
+              {t("subAgentCard_task")}
             </span>
             <p className="mt-0.5 text-[11px] leading-relaxed" style={{ color: "var(--fill-secondary)" }}>
               {run.task}
@@ -161,7 +166,7 @@ export function SubAgentCard({ run, onCancel }: SubAgentCardProps) {
           {toolCallsAsSteps.length > 0 && (
             <div className="mt-1">
               <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--fill-quaternary)" }}>
-                工具调用 ({toolCallsAsSteps.length})
+                {t("subAgentCard_toolCalls", { count: toolCallsAsSteps.length })}
               </span>
               <div className="mt-0.5">
                 {toolCallsAsSteps.map((tc) => (
@@ -175,7 +180,7 @@ export function SubAgentCard({ run, onCancel }: SubAgentCardProps) {
           {run.result && (
             <div className="mt-1.5">
               <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--fill-quaternary)" }}>
-                结果
+                {t("subAgent_result")}
               </span>
               <pre
                 className="mt-0.5 overflow-x-auto whitespace-pre-wrap break-words rounded-md p-2 text-[11px] leading-[1.55]"
@@ -196,9 +201,9 @@ export function SubAgentCard({ run, onCancel }: SubAgentCardProps) {
           {/* Stats */}
           {(run.toolCallsMade > 0 || run.iterations > 0) && (
             <div className="mt-1.5 flex gap-3 text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
-              {run.toolCallsMade > 0 && <span>{run.toolCallsMade} 次工具调用</span>}
-              {run.iterations > 0 && <span>{run.iterations} 轮迭代</span>}
-              {run.elapsedMs != null && <span>耗时 {(run.elapsedMs / 1000).toFixed(1)}s</span>}
+              {run.toolCallsMade > 0 && <span>{t("subAgentCard_toolCallsMade", { count: run.toolCallsMade })}</span>}
+              {run.iterations > 0 && <span>{t("subAgentCard_iterations", { count: run.iterations })}</span>}
+              {run.elapsedMs != null && <span>{t("subAgentCard_elapsed", { seconds: (run.elapsedMs / 1000).toFixed(1) })}</span>}
             </div>
           )}
         </div>

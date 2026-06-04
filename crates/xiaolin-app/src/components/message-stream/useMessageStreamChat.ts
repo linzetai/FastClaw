@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo, type MutableRefObject, type RefObject, type Dispatch, type SetStateAction } from "react";
-import { useChatMetaStore, useStreamStore, useQueueStore } from "../../lib/stores";
+import { useChatMetaStore, useStreamStore, useQueueStore, useLocaleStore } from "../../lib/stores";
 import type { ChatMessage, SubAgentRunUI } from "../../lib/stores/types";
 import { type ToolCall } from "./ToolCallCard";
 import type { MentionInputHandle, InlineMention } from "./MentionInput";
@@ -326,6 +326,7 @@ export function useMessageStreamChat({
       messageContent = txt + mentionDesc + fileDesc;
     }
 
+    const resolvedLang = useLocaleStore.getState().resolvedResponseLang();
     const { promise: chatPromise, cleanup } = transport.chatStream(
       {
         messages: [{ role: "user", content: messageContent }],
@@ -333,6 +334,7 @@ export function useMessageStreamChat({
         sessionId: capturedChatId,
         model: currentAgent?.model || undefined,
         workDir: currentActiveChat?.workDir ?? undefined,
+        responseLanguage: resolvedLang,
       },
       (event) => {
         switch (event.type) {

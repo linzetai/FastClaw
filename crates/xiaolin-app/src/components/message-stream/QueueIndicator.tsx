@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronUp, Clock } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { ICON } from "../../lib/ui-tokens";
 
 interface QueueIndicatorProps {
@@ -8,6 +9,7 @@ interface QueueIndicatorProps {
 }
 
 export function QueueIndicator({ count, expanded, onToggle }: QueueIndicatorProps) {
+  const { t } = useTranslation("chat");
   if (count === 0) return null;
 
   return (
@@ -23,7 +25,7 @@ export function QueueIndicator({ count, expanded, onToggle }: QueueIndicatorProp
     >
       <Clock {...ICON.sm} />
       <span className="flex-1 text-left font-medium">
-        {count} 条消息待发送
+        {t("queue_pendingCount", { count })}
       </span>
       {expanded ? <ChevronUp {...ICON.sm} /> : <ChevronDown {...ICON.sm} />}
     </button>

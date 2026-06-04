@@ -1,3 +1,4 @@
+import i18n from "../../i18n";
 import { useState, useEffect, useCallback, type MouseEvent as RME } from "react";
 import { useGatewayStore } from "../../lib/store";
 // Agent store import removed — single-agent mode
@@ -70,7 +71,7 @@ function WindowControls() {
         onClick={minimize}
         className={`${btn} w-[36px] hover:bg-[var(--bg-hover)] active:scale-95`}
         style={{ color: "var(--fill-quaternary)" }}
-        title="最小化"
+        title={i18n.t("common:minimize")}
       >
         <Minus {...iconProps} />
       </button>
@@ -78,7 +79,7 @@ function WindowControls() {
         onClick={toggleMaximize}
         className={`${btn} w-[36px] hover:bg-[var(--bg-hover)] active:scale-95`}
         style={{ color: "var(--fill-quaternary)" }}
-        title={isMaximized ? "还原" : "最大化"}
+        title={isMaximized ? i18n.t("common:restore") : i18n.t("common:maximize")}
       >
         {isMaximized ? <Maximize2 {...iconProps} /> : <Square {...iconProps} />}
       </button>
@@ -86,7 +87,7 @@ function WindowControls() {
         onClick={close}
         className={`${btn} w-[36px] hover:bg-[#E81123] hover:text-white active:scale-95`}
         style={{ color: "var(--fill-quaternary)", transition: "background 0.15s, color 0.15s, transform 0.1s" }}
-        title="关闭"
+        title={i18n.t("common:close")}
       >
         <X {...iconProps} />
       </button>
@@ -99,7 +100,7 @@ function ConnectionDot() {
   return (
     <div
       className="flex h-7 w-7 items-center justify-center"
-      title={connected ? "已连接" : "未连接"}
+      title={connected ? i18n.t("common:titleBarConnected") : i18n.t("common:titleBarDisconnected")}
     >
       <span className="relative inline-flex items-center justify-center">
         <span
@@ -133,7 +134,7 @@ function AgentLabel() {
   return (
     <div className="pointer-events-none flex items-center gap-2 pl-4" data-tauri-drag-region="">
       <span className="text-[12px] font-medium" style={{ color: "var(--fill-secondary)" }}>
-        小林
+        {i18n.t("common:appName")}
       </span>
     </div>
   );

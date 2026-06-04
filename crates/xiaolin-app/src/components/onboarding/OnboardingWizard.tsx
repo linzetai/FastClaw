@@ -19,6 +19,7 @@
  *   - Emits `xiaolin:models-updated` event
  */
 
+import { useTranslation } from "react-i18next";
 import { useState, useCallback, useReducer } from "react";
 import * as transport from "../../lib/transport";
 import { WelcomeStep } from "./WelcomeStep";
@@ -33,6 +34,7 @@ export interface OnboardingWizardProps {
 }
 
 export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
+  const { t } = useTranslation("onboarding");
   const [step, setStep] = useState<WizardStep>("welcome");
   const [fadeClass, setFadeClass] = useState("ob-fade-in");
   const [ms, dispatch] = useReducer(modelReducer, INITIAL_MODEL_STATE);
@@ -48,7 +50,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   const handleImportClick = useCallback(async () => {
     try {
       if (!transport.isTauri) {
-        alert("迁移功能仅在桌面应用中可用");
+        alert(t("migrationDesktopOnly"));
         return;
       }
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -69,7 +71,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
       goTo("model");
     } catch (error) {
       console.error("导入失败:", error);
-      alert("导入失败: " + (error as Error).message);
+      alert(t("importFailed", { error: (error as Error).message }));
     }
   }, [goTo]);
 

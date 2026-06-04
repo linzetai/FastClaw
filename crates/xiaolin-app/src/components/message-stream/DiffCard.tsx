@@ -4,12 +4,14 @@
  */
 
 import { useState, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Plus, Minus, ChevronRight } from "lucide-react";
 import { parseEditResult } from "./edit-result-utils";
 
 function DiffStatBadge({ added, removed }: { added: number; removed: number }) {
+  const { t } = useTranslation("chat");
   const total = added + removed;
-  if (total === 0) return <span className="text-[10px]" style={{ color: "var(--fill-quaternary)" }}>no change</span>;
+  if (total === 0) return <span className="text-[10px]" style={{ color: "var(--fill-quaternary)" }}>{t("diff_noChange")}</span>;
 
   const maxDots = 5;
   const addDots = total > 0 ? Math.max(1, Math.round((added / total) * maxDots)) : 0;
@@ -57,6 +59,7 @@ function parseEditArgs(argsStr: string): { oldString?: string; newString?: strin
 const INITIAL_MAX = 12;
 
 function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
+  const { t } = useTranslation("chat");
   const [showAll, setShowAll] = useState(false);
 
   const allLines = useMemo(() => {
@@ -127,7 +130,7 @@ function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
           className="w-full cursor-pointer px-2 py-1 text-left text-[11px] transition-colors hover:underline"
           style={{ color: "var(--tint)" }}
         >
-          展开剩余 {remaining} 行
+          {t("diff_expandRemaining", { count: remaining })}
         </button>
       )}
       {showAll && allLines.length > INITIAL_MAX && (
@@ -137,7 +140,7 @@ function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
           className="w-full cursor-pointer px-2 py-1 text-left text-[11px] transition-colors hover:underline"
           style={{ color: "var(--tint)" }}
         >
-          收起
+          {t("collapse", { ns: "common" })}
         </button>
       )}
     </pre>
@@ -145,6 +148,7 @@ function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
 }
 
 export function DiffCard({ result, args }: { result: string; args?: string }) {
+  const { t } = useTranslation("chat");
   const [diffOpen, setDiffOpen] = useState(false);
   const editResult = parseEditResult(result);
   if (!editResult) return null;
@@ -183,7 +187,7 @@ export function DiffCard({ result, args }: { result: string; args?: string }) {
         <div className="flex items-center gap-2">
           {editResult.replacements > 1 && (
             <span className="text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
-              {editResult.replacements} 处替换
+              {t("diff_replacements", { count: editResult.replacements })}
             </span>
           )}
           <DiffStatBadge added={editResult.linesAdded} removed={editResult.linesRemoved} />

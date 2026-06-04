@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   useState,
   useEffect,
@@ -18,16 +19,16 @@ function parseUtc(ts: string): Date {
   return new Date(ts.replace(" ", "T") + "Z");
 }
 
-function relativeTime(iso: string): string {
+function relativeTime(iso: string, tr: (key: string, opts?: Record<string, unknown>) => string): string {
   const diff = Date.now() - parseUtc(iso).getTime();
   const secs = Math.floor(diff / 1000);
-  if (secs < 60) return "刚刚";
+  if (secs < 60) return tr("justNow");
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}分钟前`;
+  if (mins < 60) return tr("minutesAgo", { count: mins });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}小时前`;
+  if (hours < 24) return tr("hoursAgo", { count: hours });
   const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}天前`;
+  if (days < 30) return tr("daysAgo", { count: days });
   return parseUtc(iso).toLocaleDateString();
 }
 
@@ -49,6 +50,7 @@ interface Props {
 }
 
 export function NotificationCenter({ onDetailOpen }: Props) {
+  const { t } = useTranslation("notification");
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<transport.AppNotification[]>([]);
@@ -196,7 +198,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
         onClick={handleToggle}
         className="relative flex h-7 w-7 items-center justify-center rounded-md transition-all duration-100 hover:bg-[var(--bg-hover)] active:scale-95"
         style={{ color: "var(--fill-quaternary)" }}
-        title="消息中心"
+        title={t("centerTitle")}
       >
         <Bell size={14} strokeWidth={1.5} />
         {unreadCount > 0 && (
@@ -244,17 +246,17 @@ export function NotificationCenter({ onDetailOpen }: Props) {
               className="text-[13px] font-semibold"
               style={{ color: "var(--fill-primary)" }}
             >
-              消息中心
+              {t("centerTitle")}
             </span>
             {unreadCount > 0 && (
               <button
                 onClick={handleMarkAllRead}
                 className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
                 style={{ color: "var(--blue)" }}
-                title="全部标为已读"
+                title={t("markAllReadTitle")}
               >
                 <CheckCheck {...ICON.sm} />
-                全部已读
+                {t("markAllRead")}
               </button>
             )}
           </div>
@@ -266,7 +268,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                 className="flex items-center justify-center py-10 text-[12px]"
                 style={{ color: "var(--fill-quaternary)" }}
               >
-                加载中…
+                {t("loading")}
               </div>
             ) : notifications.length === 0 ? (
               <div
@@ -274,7 +276,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                 style={{ color: "var(--fill-quaternary)" }}
               >
                 <Bell size={28} strokeWidth={1} />
-                <span className="text-[12px]">暂无消息</span>
+                <span className="text-[12px]">{t("empty")}</span>
               </div>
             ) : (
               notifications.map((n, i) => (
@@ -339,14 +341,14 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                         className="text-[10px]"
                         style={{ color: "var(--fill-quaternary)" }}
                       >
-                        {relativeTime(n.createdAt)}
+                        {relativeTime(n.createdAt, (k, o) => t(k, o))}
                       </span>
                       {(n.body || n.detail) && (
                         <span
                           className="text-[10px]"
                           style={{ color: "var(--tint)" }}
                         >
-                          查看详情
+                          {t("viewDetails")}
                         </span>
                       )}
                     </div>
@@ -359,7 +361,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                         onClick={(e) => handleMarkRead(n.id, e)}
                         className="flex items-center justify-center rounded p-1 hover:bg-[var(--bg-active)]"
                         style={{ color: "var(--fill-tertiary)" }}
-                        title="标为已读"
+                        title={t("markRead")}
                       >
                         <Check {...ICON.sm} />
                       </button>
@@ -368,7 +370,7 @@ export function NotificationCenter({ onDetailOpen }: Props) {
                       onClick={(e) => handleDelete(n.id, e)}
                       className="flex items-center justify-center rounded p-1 hover:bg-[var(--bg-active)]"
                       style={{ color: "var(--fill-tertiary)" }}
-                      title="删除"
+                      title={t("delete")}
                     >
                       <Trash2 {...ICON.sm} />
                     </button>

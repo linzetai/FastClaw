@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronDown, Plus, Pencil, X, Eye, EyeOff, Zap, CheckCircle, XCircle, Loader2, Trash2 } from "lucide-react";
 import * as api from "../../lib/api";
 import { SectionTitle } from "./SettingsShared";
@@ -37,6 +38,7 @@ const EMPTY_MODEL: Omit<ModelConfigEntry, "key"> = {
 };
 
 function ModelFormModal({
+  t,
   entry,
   credential,
   isNew,
@@ -45,6 +47,7 @@ function ModelFormModal({
   onDelete,
   saving,
 }: {
+  t: (key: string, opts?: Record<string, unknown>) => string;
   entry: ModelConfigEntry;
   credential: CredentialEntry;
   isNew: boolean;
@@ -88,7 +91,7 @@ function ModelFormModal({
       >
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "0.5px solid var(--separator)" }}>
           <h3 className="text-[14px] font-semibold" style={{ color: "var(--fill-primary)" }}>
-            {isNew ? "新增模型" : `编辑 · ${entry.key}`}
+            {isNew ? t("modelAdd") : t("modelEdit", { key: entry.key })}
           </h3>
           <button onClick={onCancel} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-[var(--bg-hover)]" style={{ color: "var(--fill-tertiary)" }}>
             <X {...ICON.md} />
@@ -97,7 +100,7 @@ function ModelFormModal({
         <div className="max-h-[60vh] space-y-4 overflow-y-auto px-5 py-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls} style={labelStyle}>名称 (key)</label>
+              <label className={labelCls} style={labelStyle}>{t("modelNameKey")}</label>
               <input value={form.key} onChange={(e) => patch("key", e.target.value)} disabled={!isNew} placeholder="例: dashscope" className={inputCls} style={{ ...inputStyle, opacity: isNew ? 1 : 0.6 }} />
             </div>
             <div>
@@ -114,7 +117,7 @@ function ModelFormModal({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls} style={labelStyle}>模型名称</label>
+              <label className={labelCls} style={labelStyle}>{t("modelName")}</label>
               <input value={form.model} onChange={(e) => {
                 const modelId = e.target.value;
                 patch("model", modelId);
@@ -131,7 +134,7 @@ function ModelFormModal({
           </div>
           <div>
             <label className={labelCls} style={labelStyle}>
-              上下文窗口 (tokens) <span style={{ color: "var(--red, #FC8181)" }}>*</span>
+              {t("contextWindow")} <span style={{ color: "var(--red, #FC8181)" }}>*</span>
             </label>
             <input
               type="number"
@@ -148,7 +151,7 @@ function ModelFormModal({
               }}
             />
             <p className="mt-1 text-[10px]" style={{ color: form.contextWindow <= 0 ? "var(--red, #FC8181)" : "var(--fill-quaternary)" }}>
-              {form.contextWindow <= 0 ? "必填项：请输入模型支持的最大上下文长度" : "模型支持的最大上下文长度，用于自动压缩历史消息"}
+              {form.contextWindow <= 0 ? t("contextWindowRequired") : t("contextWindowHint")}
             </p>
           </div>
           <div>
@@ -167,7 +170,7 @@ function ModelFormModal({
                   type="button"
                   onClick={() => setShowApiKey((v) => !v)}
                   className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[var(--radius-xs)] transition-colors hover:bg-[var(--bg-hover)]"
-                  title={showApiKey ? "隐藏密钥" : "显示密钥"}
+                  title={showApiKey ? t("hideApiKey") : t("showApiKey")}
                 >
                   {showApiKey
                     ? <EyeOff {...ICON.md} style={{ color: "var(--fill-tertiary)" }} />
@@ -180,14 +183,14 @@ function ModelFormModal({
                   disabled={testStatus === "testing"}
                   className="flex h-7 cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
                   style={{ color: testStatus === "success" ? "var(--green)" : testStatus === "error" ? "var(--red)" : "var(--tint)" }}
-                  title="测试连接"
+                  title={t("testConnection")}
                 >
                   {testStatus === "testing" ? <Loader2 {...ICON.md} className="animate-spin" />
                     : testStatus === "success" ? <CheckCircle {...ICON.md} />
                     : testStatus === "error" ? <XCircle {...ICON.md} />
                     : <Zap {...ICON.md} />
                   }
-                  {testStatus === "idle" && "测试"}
+                  {testStatus === "idle" && t("test")}
                 </button>
               </div>
             </div>
@@ -220,10 +223,10 @@ function ModelFormModal({
                   </label>
                   {(() => {
                     const TIERS: Array<{ label: string; value: number; desc: string }> = [
-                      { label: "精确", value: 0, desc: "确定性强，适合代码和分析" },
-                      { label: "均衡", value: 0.7, desc: "通用场景的最佳默认值" },
-                      { label: "创意", value: 1.0, desc: "更有创意，适合写作" },
-                      { label: "自由", value: 1.5, desc: "高随机性，充满惊喜" },
+                      { label: t("temp_precise"), value: 0, desc: t("temp_preciseDesc") },
+                      { label: t("temp_balanced"), value: 0.7, desc: t("temp_balancedDesc") },
+                      { label: t("temp_creative"), value: 1.0, desc: t("temp_creativeDesc") },
+                      { label: t("temp_free"), value: 1.5, desc: t("temp_freeDesc") },
                     ];
                     const activeIdx = TIERS.findIndex((t) => Math.abs(t.value - form.temperature) < 0.05);
                     return (
@@ -260,7 +263,7 @@ function ModelFormModal({
                   })()}
                   {/* Custom value input for power users */}
                   <div style={{ marginTop: 5, display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 10, color: "var(--fill-quaternary)" }}>自定义：</span>
+                    <span style={{ fontSize: 10, color: "var(--fill-quaternary)" }}>{t("tempCustom")}</span>
                     <input
                       type="number"
                       step="0.1"
@@ -275,11 +278,11 @@ function ModelFormModal({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className={labelCls} style={labelStyle}>并发数</label>
+                    <label className={labelCls} style={labelStyle}>{t("concurrency")}</label>
                     <input type="number" min="1" value={form.maxConcurrent} onChange={(e) => patch("maxConcurrent", parseInt(e.target.value) || 1)} className={inputCls} style={inputStyle} />
                   </div>
                   <div>
-                    <label className={labelCls} style={labelStyle}>超时 (秒)</label>
+                    <label className={labelCls} style={labelStyle}>{t("timeoutSecs")}</label>
                     <input type="number" min="10" value={form.timeoutSecs} onChange={(e) => patch("timeoutSecs", parseInt(e.target.value) || 60)} className={inputCls} style={inputStyle} />
                   </div>
                 </div>
@@ -311,7 +314,7 @@ function ModelFormModal({
               onClick={() => onSave(form, cred)}
               disabled={saving || !form.key || !form.model}
             >
-              {saving ? "保存中..." : "保存"}
+              {saving ? t("saving") : t("save")}
             </FormButton>
           </div>
         </div>
@@ -321,6 +324,7 @@ function ModelFormModal({
 }
 
 export function ModelTab() {
+  const { t } = useTranslation("settings");
   const [modelsConfig, setModelsConfig] = useState<Record<string, Record<string, unknown>>>({});
   const [credentials, setCredentials] = useState<Record<string, CredentialEntry>>({});
   const [loading, setLoading] = useState(true);
@@ -371,7 +375,7 @@ export function ModelTab() {
 
   const handleSave = async (entry: ModelConfigEntry, cred: CredentialEntry) => {
     if (!entry.contextWindow || entry.contextWindow < 1024) {
-      alert("请设置上下文窗口大小（至少 1024 tokens）");
+      alert(t("contextWindowAlert"));
       return;
     }
     setSaving(true);
@@ -419,9 +423,9 @@ export function ModelTab() {
       setAdding(false);
       loadData();
       window.dispatchEvent(new CustomEvent("xiaolin:models-updated"));
-      showToast("模型配置已保存", "ok");
+      showToast(t("modelSaved"), "ok");
     } catch {
-      showToast("保存失败", "err");
+      showToast(t("saveFailed"), "err");
     } finally {
       setSaving(false);
     }
@@ -437,9 +441,9 @@ export function ModelTab() {
       setEditing(null);
       loadData();
       window.dispatchEvent(new CustomEvent("xiaolin:models-updated"));
-      showToast(`已删除「${key}」`, "ok");
+      showToast(t("modelDeleted", { key }), "ok");
     } catch {
-      showToast("删除失败", "err");
+      showToast(t("deleteFailed"), "err");
     } finally {
       setSaving(false);
     }
@@ -454,9 +458,9 @@ export function ModelTab() {
       await api.setConfig("credentials", snapshot.credentials);
       loadData();
       window.dispatchEvent(new CustomEvent("xiaolin:models-updated"));
-      showToast("已回滚到上一个配置", "ok");
+      showToast(t("rolledBack"), "ok");
     } catch {
-      showToast("回滚失败", "err");
+      showToast(t("rollbackFailed"), "err");
     } finally {
       setSaving(false);
     }
@@ -465,7 +469,7 @@ export function ModelTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <span className="text-[13px]" style={{ color: "var(--fill-tertiary)" }}>加载中...</span>
+        <span className="text-[13px]" style={{ color: "var(--fill-tertiary)" }}>{t("loading")}</span>
       </div>
     );
   }
@@ -485,7 +489,7 @@ export function ModelTab() {
         </div>
       )}
       <div className="flex items-center justify-between">
-        <SectionTitle>已配置模型 ({entries.length})</SectionTitle>
+        <SectionTitle>{t("configuredModels", { count: entries.length })}</SectionTitle>
         <div className="flex items-center gap-2">
           {hasModelSnapshots() && (
             <button
@@ -533,7 +537,7 @@ export function ModelTab() {
                 {credentials[entry.key]?.apiKey && (
                   <div className="mt-1 flex items-center gap-1.5 text-[11px]">
                     <span className="inline-block h-[6px] w-[6px] rounded-full" style={{ background: "var(--green)" }} />
-                    <span style={{ color: "var(--fill-tertiary)" }}>已配置密钥</span>
+                    <span style={{ color: "var(--fill-tertiary)" }}>{t("apiKeyConfigured")}</span>
                   </div>
                 )}
               </div>
@@ -546,17 +550,18 @@ export function ModelTab() {
       {entries.length === 0 && (
         <div className="py-8 text-center">
           <p className="text-[13px]" style={{ color: "var(--fill-tertiary)" }}>
-            暂无已配置模型，点击上方"新增模型"添加
+            {t("noModels")}
           </p>
         </div>
       )}
 
       <p className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-        点击模型卡片即可编辑，修改会持久化到 ~/.xiaolin/config/default.json（部分配置重启后生效）
+        {t("modelEditHint")}
       </p>
 
       {(editing || adding) && (
         <ModelFormModal
+          t={t}
           entry={editing ? entries.find((e) => e.key === editing)! : { key: "", ...EMPTY_MODEL }}
           credential={editing ? (credentials[editing] ?? { apiKey: "", baseUrl: "" }) : { apiKey: "", baseUrl: "" }}
           isNew={adding}

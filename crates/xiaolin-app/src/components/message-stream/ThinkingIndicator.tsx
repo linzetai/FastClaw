@@ -1,10 +1,5 @@
-import { useEffect, useState } from "react";
-
-const LABELS = [
-  "思考中",
-  "正在思考",
-  "处理中",
-] as const;
+import { useEffect, useState, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 
 function OrbitSpinner() {
   return (
@@ -48,20 +43,25 @@ function OrbitSpinner() {
 }
 
 export function ThinkingIndicator() {
+  const { t } = useTranslation("chat");
+  const labels = useMemo(
+    () => [t("thinking_0"), t("thinking_1"), t("thinking_2")] as const,
+    [t],
+  );
   const [dots, setDots] = useState(0);
   const [labelIdx, setLabelIdx] = useState(0);
 
   useEffect(() => {
     const dotTimer = setInterval(() => setDots((d) => (d + 1) % 4), 500);
     const labelTimer = setInterval(
-      () => setLabelIdx((i) => (i + 1) % LABELS.length),
+      () => setLabelIdx((i) => (i + 1) % labels.length),
       3000,
     );
     return () => {
       clearInterval(dotTimer);
       clearInterval(labelTimer);
     };
-  }, []);
+  }, [labels.length]);
 
   return (
     <div
@@ -79,7 +79,7 @@ export function ThinkingIndicator() {
           animation: "glow-pulse 2s ease-in-out infinite",
         }}
       >
-        {LABELS[labelIdx]}
+        {labels[labelIdx]}
         {".".repeat(dots)}
       </span>
     </div>

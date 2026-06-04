@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { X, FileText, RefreshCw } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -16,6 +17,7 @@ interface PlanPanelProps {
 }
 
 export function PlanPanel({ sessionId, planFilePath, planFileExists, onClose }: PlanPanelProps) {
+  const { t } = useTranslation("chat");
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,11 +29,11 @@ export function PlanPanel({ sessionId, planFilePath, planFileExists, onClose }: 
       const resp = await transport.getPlanFile(sessionId);
       setContent(resp.content);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "加载失败");
+      setError(err instanceof Error ? err.message : t("loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [sessionId]);
+  }, [sessionId, t]);
 
   useEffect(() => {
     fetchContent();
@@ -66,19 +68,19 @@ export function PlanPanel({ sessionId, planFilePath, planFileExists, onClose }: 
       >
         <FileText {...ICON.md} style={{ color: "var(--tint, #4299E1)" }} />
         <span className="flex-1 text-[12px] font-semibold" style={{ color: "var(--tint, #4299E1)" }}>
-          计划文件
+          {t("plan_file")}
         </span>
         <button
           onClick={fetchContent}
           className="rounded p-1 transition-colors hover:bg-[color-mix(in_srgb,var(--fill-tertiary)_10%,transparent)]"
-          title="刷新"
+          title={t("plan_refresh")}
         >
           <RefreshCw {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
         </button>
         <button
           onClick={onClose}
           className="rounded p-1 transition-colors hover:bg-[color-mix(in_srgb,var(--fill-tertiary)_10%,transparent)]"
-          title="关闭"
+          title={t("close", { ns: "common" })}
         >
           <X {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
         </button>
@@ -95,7 +97,7 @@ export function PlanPanel({ sessionId, planFilePath, planFileExists, onClose }: 
         >
           {displayPath}
           {planFileExists === false && (
-            <span style={{ opacity: 0.6 }}> (未创建)</span>
+            <span style={{ opacity: 0.6 }}> {t("plan_notCreated")}</span>
           )}
         </div>
       )}
@@ -110,7 +112,7 @@ export function PlanPanel({ sessionId, planFilePath, planFileExists, onClose }: 
                 animation: "spin 0.8s linear infinite",
               }}
             />
-            加载中...
+            {t("loading", { ns: "common" })}
           </div>
         )}
         {error && (
@@ -128,7 +130,7 @@ export function PlanPanel({ sessionId, planFilePath, planFileExists, onClose }: 
         )}
         {!loading && !error && !content && (
           <div className="py-4 text-center text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
-            计划文件尚未创建
+            {t("plan_notCreatedYet")}
           </div>
         )}
       </div>

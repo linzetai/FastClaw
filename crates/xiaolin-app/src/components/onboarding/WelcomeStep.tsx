@@ -1,8 +1,10 @@
+import { useTranslation } from "react-i18next";
 import { Settings, ArrowRight } from "lucide-react";
 import { ClawIcon } from "../layout/ClawIcon";
 import { ICON } from "../../lib/ui-tokens";
 
 export function WelcomeStep({ onNext, onImport }: { onNext: () => void; onImport: () => void }) {
+  const { t } = useTranslation("onboarding");
   return (
     <div className="flex flex-col items-center text-center">
       <div style={{ animation: "scale-in var(--duration-slower) var(--ease-out)" }}>
@@ -12,18 +14,16 @@ export function WelcomeStep({ onNext, onImport }: { onNext: () => void; onImport
         className="mt-6 text-[28px] font-bold tracking-tight"
         style={{ color: "var(--fill-primary)" }}
       >
-        欢迎使用小林
+        {t("welcomeTitle")}
       </h1>
       <p
         className="mt-3 max-w-[380px] text-[15px] leading-relaxed"
         style={{ color: "var(--fill-secondary)" }}
       >
-        小林是一个本地优先的 AI Agent 平台。
-        <br />
-        支持多 Agent 管理、工具调用、定时任务和联网搜索。
+        {t("welcomeDesc")}
       </p>
       <p className="mt-6 text-[13px]" style={{ color: "var(--fill-tertiary)" }}>
-        如何开始？
+        {t("howToStart")}
       </p>
       <div className="mt-4 flex w-full max-w-[280px] flex-col gap-3">
         <button
@@ -31,7 +31,7 @@ export function WelcomeStep({ onNext, onImport }: { onNext: () => void; onImport
           className="flex cursor-pointer items-center justify-center gap-2 rounded-full px-6 py-3 text-[14px] font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
           style={{ background: "var(--fill-primary)", color: "var(--fill-inverse)" }}
         >
-          新手配置
+          {t("newUserSetup")}
           <Settings {...ICON.md} />
         </button>
         <button
@@ -43,7 +43,7 @@ export function WelcomeStep({ onNext, onImport }: { onNext: () => void; onImport
             border: "1px solid var(--separator-opaque)",
           }}
         >
-          导入现有配置
+          {t("importConfig")}
           <ArrowRight {...ICON.md} />
         </button>
       </div>

@@ -534,6 +534,7 @@ async fn stream_chat_produces_events() {
         tools: None,
         slash_intent: None,
         work_dir: None,
+        response_language: None,
     };
 
     let agent_config = {
@@ -612,6 +613,7 @@ async fn stream_chat_delta_content_accumulates() {
         tools: None,
         slash_intent: None,
         work_dir: None,
+        response_language: None,
     };
 
     let agent_config = {
@@ -745,6 +747,7 @@ async fn router_resolves_main_agent() {
         tools: None,
         slash_intent: None,
         work_dir: None,
+        response_language: None,
     };
     let router = state.rt.router.read().await;
     let config = router.resolve(&request);
@@ -766,6 +769,7 @@ async fn router_resolve_nonexistent_agent_fails() {
         tools: None,
         slash_intent: None,
         work_dir: None,
+        response_language: None,
     };
     let router = state.rt.router.read().await;
     let result = router.resolve(&request);

@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useGatewayStore } from "../../lib/store";
 import * as api from "../../lib/api";
 import { SectionTitle } from "./SettingsShared";
 
 
 export function GatewayTab() {
+  const { t } = useTranslation("settings");
   const gwInfo = useGatewayStore((s) => s.info);
   const gwMode = useGatewayStore((s) => s.mode);
   const connected = useGatewayStore((s) => s.connected);
@@ -18,19 +20,19 @@ export function GatewayTab() {
     }).catch(() => {});
   }, []);
 
-  const modeLabel = gwMode === "ready" ? "已就绪" : gwMode === "browser" ? "浏览器开发" : "连接中...";
+  const modeLabel = gwMode === "ready" ? t("gatewayMode_ready") : gwMode === "browser" ? t("gatewayMode_browser") : t("gatewayMode_connecting");
 
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <SectionTitle>运行状态</SectionTitle>
+        <SectionTitle>{t("gatewayStatus")}</SectionTitle>
         {(() => {
           const rows = [
-            { label: "模式", value: modeLabel },
-            { label: "状态", value: connected ? "已连接" : "未连接", dot: connected },
+            { label: t("gatewayMode"), value: modeLabel },
+            { label: t("gatewayState"), value: connected ? t("connected") : t("disconnected"), dot: connected },
             ...(gwInfo ? [
-              { label: "端口", value: String(gwInfo.port) },
-              { label: "版本", value: gwInfo.version },
+              { label: t("port"), value: String(gwInfo.port) },
+              { label: t("versionLabel"), value: gwInfo.version },
               { label: "WebSocket", value: gwInfo.wsUrl },
               { label: "HTTP", value: gwInfo.httpUrl },
             ] : []),
@@ -54,21 +56,21 @@ export function GatewayTab() {
       </div>
       {gwConfig && (
         <div>
-          <SectionTitle>配置</SectionTitle>
+          <SectionTitle>{t("gatewayConfig")}</SectionTitle>
           <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
             <div className="px-4 py-2.5" style={gwConfig.host ? { borderBottom: "0.5px solid var(--separator)" } : undefined}>
-              <span className="text-[11px]" style={{ color: "var(--fill-tertiary)" }}>配置端口</span>
-              <div className="text-[13px] font-mono" style={{ color: "var(--fill-primary)" }}>{gwConfig.port ?? "默认"}</div>
+              <span className="text-[11px]" style={{ color: "var(--fill-tertiary)" }}>{t("configPort")}</span>
+              <div className="text-[13px] font-mono" style={{ color: "var(--fill-primary)" }}>{gwConfig.port ?? t("defaultValue")}</div>
             </div>
             {gwConfig.host && (
               <div className="px-4 py-2.5">
-                <span className="text-[11px]" style={{ color: "var(--fill-tertiary)" }}>绑定地址</span>
+                <span className="text-[11px]" style={{ color: "var(--fill-tertiary)" }}>{t("bindAddress")}</span>
                 <div className="text-[13px] font-mono" style={{ color: "var(--fill-primary)" }}>{gwConfig.host}</div>
               </div>
             )}
           </div>
           <p className="mt-2 text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-            修改网关配置需编辑 ~/.xiaolin/config/default.json 并重启
+            {t("gatewayConfigHint")}
           </p>
         </div>
       )}

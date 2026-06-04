@@ -4,6 +4,7 @@ import {
   Plus, GitBranch, Monitor,
 } from "lucide-react";
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { MentionInput, type MentionInputHandle, type InlineMention, type MentionOption, type SlashCommand } from "./MentionInput";
 import {
@@ -101,6 +102,7 @@ function formatTokens(n: number): string {
 }
 
 function ContextRing({ used, limit }: { used: number; limit: number }) {
+  const { t } = useTranslation("chat");
   const [hover, setHover] = useState(false);
   const ringRef = useRef<HTMLDivElement>(null);
   const ratio = limit > 0 ? used / limit : 0;
@@ -177,7 +179,7 @@ function ContextRing({ used, limit }: { used: number; limit: number }) {
           }}
         >
           <div className="mb-2 text-[11px] font-semibold" style={{ color: "var(--fill-secondary)" }}>
-            上下文窗口
+            {t("contextWindow")}
           </div>
           <div className="mb-2.5 flex items-baseline gap-1.5">
             <span className="text-[15px] font-bold tabular-nums" style={{ color }}>{formatTokens(used)}</span>
@@ -197,8 +199,8 @@ function ContextRing({ used, limit }: { used: number; limit: number }) {
             />
           </div>
           <div className="flex justify-between text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
-            <span>已用 {pct.toFixed(1)}%</span>
-            <span>剩余 {formatTokens(remaining)}</span>
+            <span>{t("used", { pct: pct.toFixed(1) })}</span>
+            <span>{t("remaining", { tokens: formatTokens(remaining) })}</span>
           </div>
           {warning && (
             <div
@@ -208,7 +210,7 @@ function ContextRing({ used, limit }: { used: number; limit: number }) {
                 color: critical ? "var(--red, #FC8181)" : "var(--yellow, #ED8936)",
               }}
             >
-              {critical ? "上下文即将溢出，建议开始新对话" : "上下文使用较高，较长对话可能被压缩"}
+              {critical ? t("contextOverflow") : t("contextHigh")}
             </div>
           )}
         </div>
@@ -227,6 +229,7 @@ const PROVIDER_COLORS: Record<string, string> = {
 };
 
 function ModelSelector() {
+  const { t } = useTranslation("chat");
   const models = useConfigStore((s) => s.models);
   const modelsLoaded = useConfigStore((s) => s.modelsLoaded);
   const refreshModels = useConfigStore((s) => s.refreshModels);
@@ -243,7 +246,7 @@ function ModelSelector() {
 
   const currentMeta = models.find((m) => m.model === currentModel);
   const dotColor = PROVIDER_COLORS[currentMeta?.provider ?? ""] ?? PROVIDER_COLORS.default;
-  const displayName = currentModel.split("/").pop() || currentModel || "选择模型";
+  const displayName = currentModel.split("/").pop() || currentModel || t("selectModel");
 
   return (
     <div className="relative">
@@ -295,7 +298,7 @@ function ModelSelector() {
               );
             })}
             {models.length === 0 && (
-              <div className="px-3 py-2 text-[11px]" style={{ color: "var(--fill-quaternary)" }}>暂无模型</div>
+              <div className="px-3 py-2 text-[11px]" style={{ color: "var(--fill-quaternary)" }}>{t("noModels")}</div>
             )}
           </div>
         </div>,
@@ -408,6 +411,7 @@ export function ComposerCore({
   onTogglePlanPanel,
   onRecallLastMessage,
 }: ComposerCoreProps) {
+  const { t } = useTranslation("chat");
   const [inputHasContent, setInputHasContent] = useState(false);
   const [sendPending, setSendPending] = useState(false);
   const [queueExpanded, setQueueExpanded] = useState(false);
@@ -460,15 +464,15 @@ export function ComposerCore({
   }, [activeChat?.id]);
 
   const slashCommands = useMemo((): SlashCommand[] => [
-    { id: "new", label: "new", desc: "开始新话题", action: handleNewTopic },
-    { id: "clear", label: "clear", desc: "新建对话（清空当前）", action: handleNewTopic },
-    { id: "compact", label: "compact", desc: "压缩上下文以释放空间", action: handleCompact },
-    { id: "plan", label: "plan", desc: executionMode === "plan" ? "切换到 Agent 模式" : "切换到 Plan 模式（只读探索）", action: handlePlanSlash },
-    { id: "export-md", label: "export md", desc: "导出当前会话为 Markdown 文件", action: handleExportMd },
-    { id: "export-json", label: "export json", desc: "导出当前会话为 JSON 文件", action: handleExportJson },
-    { id: "model", label: "model", desc: "在消息中指定模型，如 /model gpt-4o" },
-    { id: "tools", label: "tools", desc: "在消息中指定工具，如 /tools search" },
-  ], [handleNewTopic, handleCompact, handlePlanSlash, handleExportMd, handleExportJson, executionMode]);
+    { id: "new", label: "new", desc: t("slashNew"), action: handleNewTopic },
+    { id: "clear", label: "clear", desc: t("slashClear"), action: handleNewTopic },
+    { id: "compact", label: "compact", desc: t("slashCompact"), action: handleCompact },
+    { id: "plan", label: "plan", desc: executionMode === "plan" ? t("slashPlanToggle_toAgent") : t("slashPlanToggle_toPlan"), action: handlePlanSlash },
+    { id: "export-md", label: "export md", desc: t("slashExportMd"), action: handleExportMd },
+    { id: "export-json", label: "export json", desc: t("slashExportJson"), action: handleExportJson },
+    { id: "model", label: "model", desc: t("slashModel") },
+    { id: "tools", label: "tools", desc: t("slashTools") },
+  ], [t, handleNewTopic, handleCompact, handlePlanSlash, handleExportMd, handleExportJson, executionMode]);
 
   const wrappedSend = useCallback((txt: string, mentions: InlineMention[]) => {
     setSendPending(true);
@@ -490,18 +494,18 @@ export function ComposerCore({
       const { open: tauriOpenDialog } = await import("@tauri-apps/plugin-dialog");
       selected = await tauriOpenDialog({ directory: true, multiple: false, defaultPath: curChat.workDir ?? undefined }) as string | null;
     } catch {
-      selected = prompt("输入工作目录路径:", curChat.workDir ?? "");
+      selected = prompt(t("enterWorkDir"), curChat.workDir ?? "");
     }
     if (typeof selected === "string" && selected) {
       setWorkDir("", chatId, selected);
     }
-  }, [setWorkDir]);
+  }, [setWorkDir, t]);
 
   const handleSendClick = useCallback(() => {
     const ref = mentionInputRef.current;
     if (ref) {
-      const t = ref.getText().trim();
-      if (t) wrappedSend(t, ref.getMentions());
+      const text = ref.getText().trim();
+      if (text) wrappedSend(text, ref.getMentions());
     }
   }, [mentionInputRef, wrappedSend]);
 
@@ -584,8 +588,8 @@ export function ComposerCore({
           >
             <Compass {...ICON.md} className="shrink-0" />
             <span className="min-w-0 truncate">
-              Plan Mode — 只读探索模式
-              {planFilePath && <span style={{ opacity: 0.7 }}>{" · "}{planFileExists ? "" : "(未创建) "}{planFilePath.replace(/^\/home\/[^/]+\//, "~/")}</span>}
+              {t("planMode")}
+              {planFilePath && <span style={{ opacity: 0.7 }}>{" · "}{planFileExists ? "" : t("notCreated")}{planFilePath.replace(/^\/home\/[^/]+\//, "~/")}</span>}
             </span>
             <FileText {...ICON.sm} className="ml-auto shrink-0" style={{ opacity: 0.6 }} />
           </button>
@@ -597,14 +601,14 @@ export function ComposerCore({
             style={{ background: "color-mix(in srgb, var(--tint, #4299E1) 3%, transparent)", borderBottom: "0.5px solid color-mix(in srgb, var(--tint, #4299E1) 10%, transparent)", color: "var(--fill-tertiary)" }}
           >
             <FileText {...ICON.sm} className="shrink-0" style={{ color: "var(--tint, #4299E1)", opacity: 0.7 }} />
-            <span className="min-w-0 truncate">计划文件: {planFilePath.replace(/^\/home\/[^/]+\//, "~/")}</span>
+            <span className="min-w-0 truncate">{t("planFile", { path: planFilePath.replace(/^\/home\/[^/]+\//, "~/") })}</span>
           </button>
         )}
 
         <div style={{ padding: "11px 14px 6px" }}>
           <MentionInput
             ref={mentionInputRef}
-            placeholder={streaming ? "追加指令..." : executionMode === "plan" ? "描述规划任务，或输入 /plan 切换到 Agent..." : "描述任务，或输入 @ 引用文件、/ 命令..."}
+            placeholder={streaming ? t("placeholderStreaming") : executionMode === "plan" ? t("placeholderPlan") : t("placeholderDefault")}
             options={mentionOptions}
             slashCommands={slashCommands}
             onSend={wrappedSend}
@@ -619,7 +623,7 @@ export function ComposerCore({
         <div style={{ display: "flex", alignItems: "center", padding: "3px 10px 8px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 2, flex: 1, minWidth: 0, overflow: "hidden" }}>
             <button type="button" style={chipStyle} onMouseEnter={chipHover} onMouseLeave={chipLeave}
-              onClick={() => fileInputRef.current?.click()} title={`附加文件 (${MOD_KEY}${isMacPlatform ? "⇧" : "Shift+"}A)`}
+              onClick={() => fileInputRef.current?.click()} title={t("attachFile", { shortcut: `${MOD_KEY}${isMacPlatform ? "⇧" : "Shift+"}A` })}
             >
               <Plus size={13} strokeWidth={1.6} />
             </button>
@@ -633,13 +637,13 @@ export function ComposerCore({
                 key="stop" onClick={stopStream}
                 className="flex shrink-0 cursor-pointer items-center justify-center rounded-full transition-all duration-150 hover:scale-105 active:scale-90"
                 style={{ width: 28, height: 28, background: "var(--red, #FF3B30)", color: "#fff", boxShadow: "0 0 0 3px color-mix(in srgb, var(--red, #FF3B30) 20%, transparent)", animation: "glow-pulse 1.5s ease-in-out infinite" }}
-                title="停止生成"
+                title={t("stopGenerate")}
               >
                 <Square size={12} strokeWidth={2.5} fill="currentColor" />
               </button>
             ) : sendPending ? (
               <button key="loading" disabled className="flex shrink-0 items-center justify-center rounded-full"
-                style={{ width: 28, height: 28, background: "var(--tint)", color: "#fff", opacity: 0.7 }} title="发送中..."
+                style={{ width: 28, height: 28, background: "var(--tint)", color: "#fff", opacity: 0.7 }} title={t("sending")}
               >
                 <Loader2 size={14} strokeWidth={2} className="animate-spin" />
               </button>
@@ -654,7 +658,7 @@ export function ComposerCore({
                   opacity: canSend ? 1 : 0.3,
                   boxShadow: canSend ? "0 2px 8px color-mix(in srgb, var(--tint) 20%, transparent)" : "none",
                 }}
-                title={messageQueue.length >= 10 ? "队列已满（最多10条）" : streaming ? "追加指令 ↩" : "发送 ↩"}
+                title={messageQueue.length >= 10 ? t("queueFull") : streaming ? t("appendInstruction") : t("sendHint")}
               >
                 <ArrowUp size={14} strokeWidth={2.5} />
               </button>
@@ -670,7 +674,7 @@ export function ComposerCore({
           onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--fill-tertiary)"; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--fill-quaternary)"; }}
           onClick={handleOpenWorkDir}
-          title={workDir ? `工作目录: ${workDir}` : "设置工作目录"}
+          title={workDir ? t("workDirTitle", { dir: workDir }) : t("setWorkDir")}
         >
           <Monitor size={12} strokeWidth={1.8} />
           <span>{workDir ? workDir.replace(/^\/home\/[^/]+\//, "~/").replace(/^(.{24}).+/, "$1…") : "Work locally"}</span>
@@ -680,7 +684,7 @@ export function ComposerCore({
           style={{ ...chipStyle, color: "var(--fill-quaternary)", fontSize: 11 }}
           onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--fill-tertiary)"; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--fill-quaternary)"; }}
-          onClick={comingSoon} title="Git 分支（即将推出）"
+          onClick={comingSoon} title={t("gitBranch")}
         >
           <GitBranch size={12} strokeWidth={1.8} />
           <span>main</span>

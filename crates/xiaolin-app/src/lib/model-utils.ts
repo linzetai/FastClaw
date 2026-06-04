@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import * as api from "./api";
 import * as transport from "./transport";
 import { inferContextWindow } from "./model-registry";
@@ -52,15 +53,16 @@ export interface UseModelTestReturn {
  * Handles both Tauri IPC and browser-based fetch paths.
  */
 export function useModelTest(): UseModelTestReturn {
+  const { t } = useTranslation("settings");
   const [testStatus, setTestStatus] = useState<TestStatus>("idle");
   const [testMsg, setTestMsg] = useState("");
   const abortRef = useRef<AbortController | null>(null);
 
   const runTest = useCallback(async (baseUrl: string, apiKey: string, model?: string) => {
     const url = baseUrl.replace(/\/+$/, "");
-    if (!url) { setTestStatus("error"); setTestMsg("请填写 Base URL"); return; }
+    if (!url) { setTestStatus("error"); setTestMsg(t("fillBaseUrl")); return; }
     if (!apiKey || apiKey.startsWith("***")) {
-      setTestStatus("error"); setTestMsg("请填写有效的 API Key"); return;
+      setTestStatus("error"); setTestMsg(t("fillValidApiKey")); return;
     }
 
     abortRef.current?.abort();
@@ -75,7 +77,7 @@ export function useModelTest(): UseModelTestReturn {
         await transport.testModelConnection(url, apiKey, model || undefined);
         if (ac.signal.aborted) return;
         setTestStatus("success");
-        setTestMsg("连接成功");
+        setTestMsg(t("connectionSuccess"));
       } else {
         const resp = await fetch(`${url}/models`, {
           method: "GET",
@@ -85,7 +87,7 @@ export function useModelTest(): UseModelTestReturn {
         if (ac.signal.aborted) return;
         if (resp.ok) {
           setTestStatus("success");
-          setTestMsg("连接成功");
+          setTestMsg(t("connectionSuccess"));
         } else {
           const body = await resp.text().catch(() => "");
           setTestStatus("error");
@@ -95,10 +97,10 @@ export function useModelTest(): UseModelTestReturn {
     } catch (err: unknown) {
       if (ac.signal.aborted) return;
       setTestStatus("error");
-      const msg = typeof err === "string" ? err : err instanceof Error ? err.message : "连接失败";
+      const msg = typeof err === "string" ? err : err instanceof Error ? err.message : t("connectionFailed");
       setTestMsg(msg.length > 120 ? msg.slice(0, 120) + "…" : msg);
     }
-  }, []);
+  }, [t]);
 
   const resetTest = useCallback(() => {
     abortRef.current?.abort();

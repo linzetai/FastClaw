@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useCallback } from "react";
 import { ChevronLeft } from "lucide-react";
 import { ICON } from "../../../lib/ui-tokens";
@@ -20,6 +21,7 @@ export function ModelStep({
   onNext: () => void;
   onPrev: () => void;
 }) {
+  const { t } = useTranslation("onboarding");
   const { testStatus, testMsg, runTest, resetTest } = useModelTest();
 
   const handleSave = useCallback(async () => {
@@ -53,16 +55,16 @@ export function ModelStep({
           style={{ color: "var(--fill-tertiary)" }}
         >
           <ChevronLeft {...ICON.md} />
-          {state.subStep > 1 ? "上一步" : "返回"}
+          {state.subStep > 1 ? t("prev") : t("back")}
         </button>
       </div>
 
       <div className="mb-5 text-center">
         <h2 className="text-[22px] font-bold" style={{ color: "var(--fill-primary)" }}>
-          添加你的第一个模型
+          {t("addFirstModel")}
         </h2>
         <p className="mt-1.5 text-[13px]" style={{ color: "var(--fill-secondary)" }}>
-          选择 AI 提供商，配置 API 密钥即可开始
+          {t("addFirstModelDesc")}
         </p>
       </div>
 

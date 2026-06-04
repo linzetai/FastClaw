@@ -1,9 +1,11 @@
+import { useTranslation } from "react-i18next";
 import { memo, useCallback } from "react";
 import { Download, X, RotateCcw } from "lucide-react";
 import { ICON } from "../../lib/ui-tokens";
 import { useAppUpdater } from "../../lib/use-app-updater";
 
 export const UpdateBanner = memo(function UpdateBanner() {
+  const { t } = useTranslation("common");
   const { status, info, progress, downloadAndInstall, restartApp, dismiss } =
     useAppUpdater(true);
 
@@ -18,13 +20,13 @@ export const UpdateBanner = memo(function UpdateBanner() {
 
   const label =
     status === "available"
-      ? `新版本 ${info?.version ?? ""} 可用`
+      ? t("updateAvailable", { version: info?.version ?? "" })
       : status === "downloading"
-        ? `正在下载更新 ${progress}%`
-        : "更新已就绪，重启后生效";
+        ? t("updateDownloading", { progress })
+        : t("updateReadyRestart");
 
   const ActionIcon = status === "ready" ? RotateCcw : Download;
-  const actionLabel = status === "ready" ? "立即重启" : "下载更新";
+  const actionLabel = status === "ready" ? t("restartNow") : t("downloadUpdate");
   const actionDisabled = status === "downloading";
 
   return (
@@ -67,7 +69,7 @@ export const UpdateBanner = memo(function UpdateBanner() {
             onClick={dismiss}
             className="flex cursor-pointer items-center rounded p-0.5 transition-opacity duration-150 hover:opacity-70"
             style={{ background: "transparent" }}
-            aria-label="关闭"
+            aria-label={t("close")}
           >
             <X {...ICON.md} />
           </button>

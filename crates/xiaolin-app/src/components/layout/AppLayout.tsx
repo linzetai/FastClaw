@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import { useGatewayStore } from "../../lib/store";
 import { useUIStore } from "../../lib/stores";
 import type { LayoutTier } from "../../lib/stores/ui-store";
 import { MessageStream } from "../message-stream/MessageStream";
 import { AutomationView } from "../automation/AutomationView";
 import { PluginsView } from "../plugins/PluginsView";
+import { SettingsPanel } from "../settings/SettingsPanel";
 import { TitleBar } from "./TitleBar";
 import { ClawIcon } from "./ClawIcon";
 import { UpdateBanner } from "./UpdateBanner";
@@ -56,19 +58,20 @@ const OnboardingWizard = lazy(() =>
 );
 
 function Loading({ error }: { error: string | null }) {
+  const { t } = useTranslation("common");
   if (error) {
     return (
       <div className="flex h-full flex-col items-center justify-center" style={{ background: "var(--bg-primary)" }}>
         <div style={{ animation: "scale-in var(--duration-slow) var(--ease-out)" }} className="text-center">
           <div className="mx-auto mb-5"><ClawIcon size={64} /></div>
           <p className="text-[15px] font-semibold tracking-[-0.01em]" style={{ color: "var(--fill-primary)" }}>XiaoLin</p>
-          <p className="mt-1.5 text-[13px]" style={{ color: "var(--red)" }}>连接失败: {error}</p>
+          <p className="mt-1.5 text-[13px]" style={{ color: "var(--red)" }}>{t("connectionFailed", { error })}</p>
           <button
             onClick={() => window.location.reload()}
             className="mt-4 cursor-pointer rounded-[var(--radius-xs)] px-4 py-1.5 text-[12px] font-medium transition-colors duration-150 hover:opacity-80 active:scale-[0.97]"
             style={{ background: "var(--tint)", color: "#fff" }}
           >
-            重试连接
+            {t("retryConnection")}
           </button>
         </div>
       </div>
@@ -78,12 +81,13 @@ function Loading({ error }: { error: string | null }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4" style={{ background: "var(--bg-primary)" }}>
       <div style={{ animation: "pulse-subtle 2s ease-in-out infinite" }}><ClawIcon size={48} /></div>
-      <p className="text-[13px] font-medium" style={{ color: "var(--fill-tertiary)" }}>连接中...</p>
+      <p className="text-[13px] font-medium" style={{ color: "var(--fill-tertiary)" }}>{t("connecting")}</p>
     </div>
   );
 }
 
 function MainContent({ connected, mode }: { connected: boolean; mode: string }) {
+  const { t } = useTranslation("common");
   const mainView = useUIStore((s) => s.mainView);
   return (
     <>
@@ -99,7 +103,7 @@ function MainContent({ connected, mode }: { connected: boolean; mode: string }) 
             }}
           >
             <span className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
-              连接已断开，正在重连...
+              {t("connectionLost")}
             </span>
           </div>
         )}
@@ -217,10 +221,14 @@ export function AppLayout() {
     );
   }
 
+  const settingsOpen = useUIStore((s) => s.settingsOpen);
+  const closeSettings = useUIStore((s) => s.closeSettings);
+
   return (
     <div className={`app-shell relative flex h-full flex-col${isMaximized ? " maximized" : ""}`} data-layout-tier={layoutTier}>
       {!isMaximized && <WindowResizeHandles />}
       {content}
+      <SettingsPanel open={settingsOpen} onClose={closeSettings} />
     </div>
   );
 }

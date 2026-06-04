@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, memo } from "react";
+import { useTranslation } from "react-i18next";
 import { Copy, Check, Pencil } from "lucide-react";
 import type { ChatMessage } from "../../lib/agent-store";
 import { openLightbox } from "../common/ImageLightbox";
@@ -25,6 +26,7 @@ interface UserInputProps {
 }
 
 export const UserInput = memo(function UserInput({ msg, copyable, selected, onToggleSelect }: UserInputProps) {
+  const { t } = useTranslation("chat");
   const { text, tags } = useMemo(() => parseUserContent(msg.content), [msg.content]);
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -74,7 +76,7 @@ export const UserInput = memo(function UserInput({ msg, copyable, selected, onTo
             className="absolute -top-2 right-2 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
             style={{ background: "var(--tint-subtle, rgba(66,153,225,0.12))", color: "var(--tint)" }}
           >
-            追加
+            {t("steerAppend")}
           </span>
         )}
         <div className="text-[14px] leading-[1.5] break-words" style={{ color: "var(--fill-primary)", overflowWrap: "anywhere" }}>
@@ -104,7 +106,9 @@ export const UserInput = memo(function UserInput({ msg, copyable, selected, onTo
                   className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium"
                   style={{ background: "color-mix(in srgb, var(--fill-primary) 6%, transparent)", color: "var(--fill-secondary)" }}
                 >
-                  <span className="max-w-[120px] truncate">{tag.type}: {item}</span>
+                  <span className="max-w-[120px] truncate">
+                    {tag.type === "引用" ? t("refTag") : tag.type === "附件" ? t("attachTag") : tag.type}: {item}
+                  </span>
                 </span>
               ))
             )}
@@ -119,13 +123,13 @@ export const UserInput = memo(function UserInput({ msg, copyable, selected, onTo
           >
             <button onClick={handleCopy}
               className="flex h-5 w-5 cursor-pointer items-center justify-center rounded transition-all duration-150 hover:bg-[var(--bg-hover)] active:scale-90"
-              style={{ color: copied ? "var(--green)" : "var(--fill-quaternary)" }} title="复制"
+              style={{ color: copied ? "var(--green)" : "var(--fill-quaternary)" }} title={t("copy", { ns: "common" })}
             >
               {copied ? <Check size={11} strokeWidth={1.5} /> : <Copy size={11} strokeWidth={1.2} />}
             </button>
             <button onClick={handleEdit}
               className="flex h-5 w-5 cursor-pointer items-center justify-center rounded transition-all duration-150 hover:bg-[var(--bg-hover)] active:scale-90"
-              style={{ color: "var(--fill-quaternary)" }} title="编辑"
+              style={{ color: "var(--fill-quaternary)" }} title={t("edit")}
             >
               <Pencil size={11} strokeWidth={1.2} />
             </button>

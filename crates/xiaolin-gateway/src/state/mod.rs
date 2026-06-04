@@ -1970,6 +1970,7 @@ mod reload_tests {
             tools: None,
             slash_intent: None,
             work_dir: None,
+            response_language: None,
         };
         assert!(state.rt.router.read().await.resolve(&req).is_ok());
 

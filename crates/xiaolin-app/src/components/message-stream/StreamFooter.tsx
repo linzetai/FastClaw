@@ -1,5 +1,6 @@
 import { Paperclip } from "lucide-react";
 import { useState, useCallback, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import type { MentionInputHandle, InlineMention, MentionOption } from "./MentionInput";
 import { useActiveStream } from "../../lib/stores";
 import { QuestionPanel } from "./MessageRenderer";
@@ -84,6 +85,7 @@ export function StreamFooter({
   stopStream,
   onTogglePlanPanel,
 }: StreamFooterProps) {
+  const { t } = useTranslation("chat");
   const [dragOver, setDragOver] = useState(false);
 
   useEffect(() => {
@@ -141,7 +143,7 @@ export function StreamFooter({
             style={{ background: "var(--bg-elevated)", border: "2px dashed var(--tint)", boxShadow: "var(--glow-tint)", animation: "drop-zone-pulse 2s ease-in-out infinite" }}
           >
             <Paperclip size={32} strokeWidth={1.5} style={{ color: "var(--tint)", animation: "icon-float 1.5s ease-in-out infinite" }} />
-            <span className="text-[14px] font-medium" style={{ color: "var(--fill-primary)" }}>拖放文件到此处</span>
+            <span className="text-[14px] font-medium" style={{ color: "var(--fill-primary)" }}>{t("dropFileToAttach")}</span>
           </div>
         </div>
       )}

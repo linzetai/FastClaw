@@ -24,6 +24,7 @@ export interface UIState {
   sidebarWidth: number;
   layoutTier: LayoutTier;
   mainView: MainView;
+  settingsOpen: boolean;
 
   toggleDetail: () => void;
   closeDetail: () => void;
@@ -32,6 +33,8 @@ export interface UIState {
   resetSidebarWidth: () => void;
   setLayoutTier: (tier: LayoutTier) => void;
   setMainView: (view: MainView) => void;
+  openSettings: () => void;
+  closeSettings: () => void;
 }
 
 export { DEFAULT_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH };
@@ -42,6 +45,7 @@ export const useUIStore = create<UIState>((set) => ({
   sidebarWidth: loadSidebarWidth(),
   layoutTier: "standard" as LayoutTier,
   mainView: "chat" as MainView,
+  settingsOpen: false,
 
   toggleDetail: () => set((s) => ({ detailOpen: !s.detailOpen })),
   closeDetail: () => set({ detailOpen: false }),
@@ -57,4 +61,6 @@ export const useUIStore = create<UIState>((set) => ({
   },
   setLayoutTier: (tier) => set({ layoutTier: tier }),
   setMainView: (view) => set({ mainView: view }),
+  openSettings: () => set({ settingsOpen: true }),
+  closeSettings: () => set({ settingsOpen: false }),
 }));

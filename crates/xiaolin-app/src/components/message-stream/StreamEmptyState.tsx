@@ -3,22 +3,23 @@ import {
   FileText, Sparkles, Search, Code2,
   Lightbulb, PenTool, Zap, BookOpen, RefreshCw,
 } from "lucide-react";
+import { useTranslation, Trans } from "react-i18next";
 import { ICON } from "../../lib/ui-tokens";
 
 interface Suggestion {
-  text: string;
+  key: string;
   icon: typeof FileText;
 }
 
 const SUGGESTION_POOL: Suggestion[] = [
-  { text: "分析代码库结构，找出关键模块", icon: Search },
-  { text: "设计一个 RESTful API 方案", icon: Sparkles },
-  { text: "排查并修复当前存在的 Bug", icon: Zap },
-  { text: "为核心函数编写单元测试", icon: Code2 },
-  { text: "重构这段代码以提升可读性", icon: PenTool },
-  { text: "生成技术文档或 README", icon: BookOpen },
-  { text: "解释这个框架的最佳实践", icon: Lightbulb },
-  { text: "审查最近的代码变更", icon: FileText },
+  { key: "suggestion_analyzeCode", icon: Search },
+  { key: "suggestion_designApi", icon: Sparkles },
+  { key: "suggestion_fixBug", icon: Zap },
+  { key: "suggestion_writeTests", icon: Code2 },
+  { key: "suggestion_refactor", icon: PenTool },
+  { key: "suggestion_genDocs", icon: BookOpen },
+  { key: "suggestion_bestPractice", icon: Lightbulb },
+  { key: "suggestion_reviewCode", icon: FileText },
 ];
 
 function shuffle<T>(arr: T[]): T[] {
@@ -43,6 +44,7 @@ interface StreamEmptyStateProps {
 }
 
 export function StreamEmptyState({ workDir, composerSlot, onPick }: StreamEmptyStateProps) {
+  const { t } = useTranslation("chat");
   const projectName = extractProjectName(workDir);
 
   const [seed, setSeed] = useState(0);
@@ -77,10 +79,16 @@ export function StreamEmptyState({ workDir, composerSlot, onPick }: StreamEmptyS
             animation: "fade-slide-up var(--duration-slow) var(--ease-out) 0.05s backwards",
           }}
         >
-          {projectName
-            ? <>在 <span style={{ color: "var(--tint)" }}>{projectName}</span> 中构建什么？</>
-            : "想要构建什么？"
-          }
+          {projectName ? (
+            <Trans
+              i18nKey="buildInProject"
+              ns="chat"
+              values={{ project: projectName }}
+              components={{ 1: <span style={{ color: "var(--tint)" }} /> }}
+            />
+          ) : (
+            t("buildWhat")
+          )}
         </h1>
 
         {/* Composer (passed from parent) */}
@@ -96,10 +104,11 @@ export function StreamEmptyState({ workDir, composerSlot, onPick }: StreamEmptyS
         <div className="mt-5 space-y-1">
           {suggestions.map((s, i) => {
             const Icon = s.icon;
+            const text = t(s.key);
             return (
               <button
-                key={`${s.text}-${seed}`}
-                onClick={() => onPick(s.text)}
+                key={`${s.key}-${seed}`}
+                onClick={() => onPick(text)}
                 className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] transition-colors duration-100 hover:bg-[var(--bg-hover)]"
                 style={{
                   color: "var(--fill-tertiary)",
@@ -107,7 +116,7 @@ export function StreamEmptyState({ workDir, composerSlot, onPick }: StreamEmptyS
                 }}
               >
                 <Icon {...ICON.sm} className="shrink-0" style={{ opacity: 0.6 }} />
-                <span>{s.text}</span>
+                <span>{text}</span>
               </button>
             );
           })}
@@ -118,7 +127,7 @@ export function StreamEmptyState({ workDir, composerSlot, onPick }: StreamEmptyS
               style={{ color: "var(--fill-quaternary)" }}
             >
               <RefreshCw ref={refreshRef} size={11} strokeWidth={1.8} />
-              换一换
+              {t("refreshSuggestions")}
             </button>
           </div>
         </div>

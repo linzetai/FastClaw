@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -11,6 +12,7 @@ type RecordingState = "idle" | "recording" | "transcribing";
 type CaptureBackend = "webrtc" | "native" | null;
 
 export function VoiceButton({ onTranscription, disabled, className }: VoiceButtonProps) {
+  const { t } = useTranslation("common");
   const [state, setState] = useState<RecordingState>("idle");
   const [sttAvailable, setSttAvailable] = useState(true);
   const [micError, setMicError] = useState<string | null>(null);
@@ -31,7 +33,7 @@ export function VoiceButton({ onTranscription, disabled, className }: VoiceButto
         if (nativeOk) {
           setBackend("native");
         } else {
-          setMicError("无可用的音频输入设备");
+          setMicError(t("voiceNoMic"));
         }
       }
     })();
@@ -119,7 +121,7 @@ export function VoiceButton({ onTranscription, disabled, className }: VoiceButto
       }
     } catch (err) {
       console.error("Recording failed:", err);
-      setMicError(err instanceof Error ? err.message : "录音失败");
+      setMicError(err instanceof Error ? err.message : t("voiceRecordFailed"));
     }
   }, [state, disabled, sttAvailable, backend, startWebRtcRecording, startNativeRecording]);
 
@@ -139,7 +141,7 @@ export function VoiceButton({ onTranscription, disabled, className }: VoiceButto
       <button
         className={`voice-btn voice-btn-disabled ${className ?? ""}`}
         disabled
-        title="语音输入不可用（STT 服务未就绪）"
+        title={t("voiceUnavailable")}
       >
         <MicOffIcon />
       </button>
@@ -151,7 +153,7 @@ export function VoiceButton({ onTranscription, disabled, className }: VoiceButto
       <button
         className={`voice-btn voice-btn-disabled ${className ?? ""}`}
         onClick={() => setMicError(null)}
-        title={`${micError}（点击重试）`}
+        title={t("voiceRetry", { error: micError })}
       >
         <MicOffIcon />
       </button>
@@ -163,7 +165,7 @@ export function VoiceButton({ onTranscription, disabled, className }: VoiceButto
       <button
         className={`voice-btn voice-btn-disabled ${className ?? ""}`}
         disabled
-        title="检测音频设备中…"
+        title={t("voiceDetecting")}
       >
         <SpinnerIcon />
       </button>
@@ -179,10 +181,12 @@ export function VoiceButton({ onTranscription, disabled, className }: VoiceButto
       disabled={disabled || state === "transcribing"}
       title={
         state === "recording"
-          ? "松开停止"
+          ? t("voiceReleaseStop")
           : state === "transcribing"
-            ? "转录中…"
-            : `按住说话 (${backend === "native" ? "原生录音" : "WebRTC"})`
+            ? t("voiceTranscribing")
+            : t("voiceHoldToTalk", {
+                backend: backend === "native" ? t("voiceBackendNative") : t("voiceBackendWebrtc"),
+              })
       }
     >
       {state === "transcribing" ? <SpinnerIcon /> : state === "recording" ? <WaveIcon /> : <MicIcon />}

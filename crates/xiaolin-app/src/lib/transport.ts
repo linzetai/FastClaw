@@ -402,6 +402,7 @@ export interface ChatStreamParams {
   temperature?: number;
   maxTokens?: number;
   workDir?: string;
+  responseLanguage?: string | null;
 }
 
 const CHAT_EVENT_TYPES = [
@@ -467,6 +468,7 @@ export function chatStream(
       ...(params.temperature != null ? { temperature: params.temperature } : {}),
       ...(params.maxTokens != null ? { maxTokens: params.maxTokens } : {}),
       ...(params.workDir ? { workDir: params.workDir } : {}),
+      ...(params.responseLanguage ? { responseLanguage: params.responseLanguage } : {}),
     })
     .then(() => {})
     .catch(() => {

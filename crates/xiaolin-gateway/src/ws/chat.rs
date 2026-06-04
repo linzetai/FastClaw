@@ -418,6 +418,7 @@ pub async fn spawn_chat(
                 .get("slashIntent")
                 .and_then(|v| serde_json::from_value(v.clone()).ok()),
             work_dir: params.work_dir.clone(),
+            response_language: params.response_language.clone(),
         };
 
         let setup = match setup_chat(
