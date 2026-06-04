@@ -55,19 +55,6 @@ const OnboardingWizard = lazy(() =>
   import("../onboarding/OnboardingWizard").then((m) => ({ default: m.OnboardingWizard })),
 );
 
-function SkeletonPulse({ className = "", style = {} }: { className?: string; style?: React.CSSProperties }) {
-  return (
-    <div
-      className={`rounded-md ${className}`}
-      style={{
-        background: "var(--bg-tertiary)",
-        animation: "pulse-subtle 1.5s ease-in-out infinite",
-        ...style,
-      }}
-    />
-  );
-}
-
 function Loading({ error }: { error: string | null }) {
   if (error) {
     return (
@@ -89,29 +76,9 @@ function Loading({ error }: { error: string | null }) {
   }
 
   return (
-    <div className="flex h-full flex-col" style={{ background: "var(--bg-primary)" }}>
-      <div className="flex h-[var(--titlebar-h)] shrink-0 items-center gap-2 px-4" style={{ background: "var(--bg-sidebar)", borderBottom: "0.5px solid var(--separator)" }}>
-        <SkeletonPulse className="h-5 w-5" style={{ borderRadius: "50%" }} />
-        <SkeletonPulse className="h-3 w-16" />
-      </div>
-      <div className="flex min-h-0 flex-1">
-        <div className="flex w-[260px] shrink-0 flex-col gap-3 p-4" style={{ borderRight: "0.5px solid var(--separator)" }}>
-          <SkeletonPulse className="h-9 w-full" />
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="flex items-center gap-3" style={{ animationDelay: `${i * 80}ms` }}>
-              <SkeletonPulse className="h-9 w-9 shrink-0" style={{ borderRadius: "50%" }} />
-              <div className="flex flex-1 flex-col gap-1.5">
-                <SkeletonPulse className="h-3 w-24" />
-                <SkeletonPulse className="h-2.5 w-36" />
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="flex flex-1 flex-col items-center justify-center gap-3">
-          <div style={{ animation: "pulse-subtle 2s ease-in-out infinite" }}><ClawIcon size={48} /></div>
-          <SkeletonPulse className="h-3 w-20" />
-        </div>
-      </div>
+    <div className="flex h-full flex-col items-center justify-center gap-4" style={{ background: "var(--bg-primary)" }}>
+      <div style={{ animation: "pulse-subtle 2s ease-in-out infinite" }}><ClawIcon size={48} /></div>
+      <p className="text-[13px] font-medium" style={{ color: "var(--fill-tertiary)" }}>连接中...</p>
     </div>
   );
 }

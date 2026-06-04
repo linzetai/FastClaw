@@ -1,28 +1,24 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { type ReactNode, useState, useMemo, useCallback, useRef } from "react";
 import {
-  FileText, Sparkles, Search, Settings2, Code2, MessageSquare,
-  Palette, Globe, Lightbulb, PenTool, BarChart3, Shield,
-  RefreshCw, Zap, BookOpen,
+  FileText, Sparkles, Search, Code2,
+  Lightbulb, PenTool, Zap, BookOpen, RefreshCw,
 } from "lucide-react";
-import { useChatMetaStore } from "../../lib/stores";
-
 import { ICON } from "../../lib/ui-tokens";
 
-const SUGGESTION_POOL = [
-  { title: "分析代码", desc: "解读和审查代码逻辑", icon: FileText, color: "var(--tint)" },
-  { title: "API 设计", desc: "设计 RESTful 或 GraphQL 方案", icon: Sparkles, color: "var(--orange)" },
-  { title: "排查 Bug", desc: "定位和修复代码问题", icon: Search, color: "var(--red)" },
-  { title: "性能优化", desc: "提升系统运行效率", icon: Zap, color: "var(--green)" },
-  { title: "写单元测试", desc: "为函数编写测试用例", icon: Shield, color: "var(--tint)" },
-  { title: "重构代码", desc: "改善代码结构和可读性", icon: Settings2, color: "var(--tint)" },
-  { title: "写文档", desc: "生成技术文档或 README", icon: BookOpen, color: "var(--orange)" },
-  { title: "学习新技术", desc: "解释框架或库的用法", icon: Lightbulb, color: "var(--orange)" },
-  { title: "UI 设计建议", desc: "提供界面设计灵感", icon: Palette, color: "var(--red)" },
-  { title: "数据分析", desc: "分析数据并生成图表", icon: BarChart3, color: "var(--green)" },
-  { title: "翻译润色", desc: "翻译或优化文案表达", icon: Globe, color: "var(--tint)" },
-  { title: "头脑风暴", desc: "产品功能创意发散", icon: MessageSquare, color: "var(--orange)" },
-  { title: "写脚本工具", desc: "自动化脚本或 CLI 工具", icon: Code2, color: "var(--green)" },
-  { title: "架构设计", desc: "系统架构方案讨论", icon: PenTool, color: "var(--tint)" },
+interface Suggestion {
+  text: string;
+  icon: typeof FileText;
+}
+
+const SUGGESTION_POOL: Suggestion[] = [
+  { text: "分析代码库结构，找出关键模块", icon: Search },
+  { text: "设计一个 RESTful API 方案", icon: Sparkles },
+  { text: "排查并修复当前存在的 Bug", icon: Zap },
+  { text: "为核心函数编写单元测试", icon: Code2 },
+  { text: "重构这段代码以提升可读性", icon: PenTool },
+  { text: "生成技术文档或 README", icon: BookOpen },
+  { text: "解释这个框架的最佳实践", icon: Lightbulb },
+  { text: "审查最近的代码变更", icon: FileText },
 ];
 
 function shuffle<T>(arr: T[]): T[] {
@@ -34,12 +30,23 @@ function shuffle<T>(arr: T[]): T[] {
   return copy;
 }
 
-export function StreamEmptyState({ onPick }: { onPick: (t: string) => void }) {
-  const agents = useChatMetaStore((s) => s.agents);
-  const agent = agents.find((a) => a.id === "main") ?? agents[0];
+function extractProjectName(workDir: string | null): string | null {
+  if (!workDir) return null;
+  const segments = workDir.replace(/\/+$/, "").split("/");
+  return segments[segments.length - 1] || null;
+}
+
+interface StreamEmptyStateProps {
+  workDir: string | null;
+  composerSlot: ReactNode;
+  onPick: (text: string) => void;
+}
+
+export function StreamEmptyState({ workDir, composerSlot, onPick }: StreamEmptyStateProps) {
+  const projectName = extractProjectName(workDir);
 
   const [seed, setSeed] = useState(0);
-  const cards = useMemo(() => shuffle(SUGGESTION_POOL).slice(0, 4), [seed]);
+  const suggestions = useMemo(() => shuffle(SUGGESTION_POOL).slice(0, 3), [seed]);
   const refreshRef = useRef<SVGSVGElement>(null);
 
   const handleRefresh = useCallback(() => {
@@ -58,95 +65,62 @@ export function StreamEmptyState({ onPick }: { onPick: (t: string) => void }) {
 
   return (
     <div
-      className="relative flex min-h-full flex-col items-center justify-center px-8"
+      className="flex min-h-full flex-col items-center justify-center px-6"
       style={{ animation: "scale-in var(--duration-slow) var(--ease-out)" }}
     >
-      <div className="relative mb-6 text-center">
-        <h2
-          className="text-[26px] font-bold tracking-[-0.03em]"
+      <div className="w-full" style={{ maxWidth: 640 }}>
+        {/* Title */}
+        <h1
+          className="mb-6 text-center text-[28px] font-semibold tracking-[-0.03em]"
           style={{
-            background: "var(--gradient-border)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-            backgroundClip: "text",
+            color: "var(--fill-primary)",
             animation: "fade-slide-up var(--duration-slow) var(--ease-out) 0.05s backwards",
           }}
         >
-          Hi，我是{agent?.name ?? "Agent"}
-          <sup
-            className="ml-0.5 text-[14px] font-semibold"
-            style={{ WebkitTextFillColor: "var(--tint)", color: "var(--tint)" }}
-          >
-            +
-          </sup>
-        </h2>
-        {agent?.tagline && (
-          <p
-            className="mt-2 text-[13px]"
-            style={{
-              color: "var(--fill-tertiary)",
-              animation: "fade-slide-up var(--duration-slow) var(--ease-out) 0.1s backwards",
-            }}
-          >
-            {agent.tagline}
-          </p>
-        )}
-      </div>
+          {projectName
+            ? <>在 <span style={{ color: "var(--tint)" }}>{projectName}</span> 中构建什么？</>
+            : "想要构建什么？"
+          }
+        </h1>
 
-      <div className="relative w-full" style={{ maxWidth: 560 }}>
-        <div className="grid grid-cols-2 gap-3 pb-4">
-          {cards.map((card, i) => {
-            const Icon = card.icon;
+        {/* Composer (passed from parent) */}
+        <div
+          style={{
+            animation: "fade-slide-up var(--duration-slow) var(--ease-out) 0.1s backwards",
+          }}
+        >
+          {composerSlot}
+        </div>
+
+        {/* Suggestion rows */}
+        <div className="mt-5 space-y-1">
+          {suggestions.map((s, i) => {
+            const Icon = s.icon;
             return (
               <button
-                key={`${card.title}-${seed}`}
-                onClick={() => onPick(card.title)}
-                className="group flex cursor-pointer flex-col gap-2.5 rounded-[var(--radius-md)] px-4 py-4 text-left transition-all duration-150 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]"
+                key={`${s.text}-${seed}`}
+                onClick={() => onPick(s.text)}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] transition-colors duration-100 hover:bg-[var(--bg-hover)]"
                 style={{
-                  backdropFilter: "saturate(180%) blur(16px)",
-                  WebkitBackdropFilter: "saturate(180%) blur(16px)",
-                  background: "color-mix(in srgb, var(--bg-surface) 85%, transparent)",
-                  border: "0.5px solid var(--border-subtle)",
-                  boxShadow: "var(--shadow-md), inset 0 1px 0 var(--highlight-top)",
-                  animation: `fade-slide-up var(--duration-slow) var(--ease-out) ${0.08 + i * 0.08}s backwards`,
+                  color: "var(--fill-tertiary)",
+                  animation: `fade-slide-up var(--duration-slow) var(--ease-out) ${0.15 + i * 0.06}s backwards`,
                 }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = "var(--shadow-lg), var(--glow-tint-sm), inset 0 1px 0 var(--highlight-top)"; (e.currentTarget as HTMLElement).style.borderColor = "var(--border-emphasis)"; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = "var(--shadow-md), inset 0 1px 0 var(--highlight-top)"; (e.currentTarget as HTMLElement).style.borderColor = "var(--border-subtle)"; }}
               >
-                <div
-                  className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] transition-all duration-150 group-hover:scale-110 group-hover:rotate-[5deg]"
-                  style={{ background: `color-mix(in srgb, ${card.color} 10%, transparent)`, color: card.color }}
-                >
-                  <Icon {...ICON.lg} />
-                </div>
-                <div>
-                  <span
-                    className="block text-[13px] font-semibold"
-                    style={{ color: "var(--fill-primary)" }}
-                  >
-                    {card.title}
-                  </span>
-                  <span
-                    className="mt-0.5 block text-[11px] leading-snug"
-                    style={{ color: "var(--fill-quaternary)" }}
-                  >
-                    {card.desc}
-                  </span>
-                </div>
+                <Icon {...ICON.sm} className="shrink-0" style={{ opacity: 0.6 }} />
+                <span>{s.text}</span>
               </button>
             );
           })}
-        </div>
-
-        <div className="flex justify-end">
-          <button
-            onClick={handleRefresh}
-            className="flex items-center gap-1.5 text-[12px] font-medium transition-all duration-150 hover:opacity-70 active:scale-95"
-            style={{ color: "var(--fill-tertiary)" }}
-          >
-            <RefreshCw ref={refreshRef} {...ICON.sm} />
-            换一换
-          </button>
+          <div className="flex justify-end pt-1 pr-1">
+            <button
+              onClick={handleRefresh}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)]"
+              style={{ color: "var(--fill-quaternary)" }}
+            >
+              <RefreshCw ref={refreshRef} size={11} strokeWidth={1.8} />
+              换一换
+            </button>
+          </div>
         </div>
       </div>
     </div>

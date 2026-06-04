@@ -15,6 +15,7 @@ import type { MentionInputHandle, MentionOption } from "./MentionInput";
 import { MessageRendererRow } from "./MessageRenderer";
 
 import { StreamFooter, type AttachedFile } from "./StreamFooter";
+import { ComposerCore } from "./ComposerCore";
 import { SubAgentMonitor } from "./SubAgentMonitor";
 import { PlanPanel } from "./PlanPanel";
 import { useStreamScroll, STREAM_PAGE_SIZE } from "./useStreamScroll";
@@ -629,12 +630,33 @@ export function MessageStream(_props: MessageStreamProps) {
 
       {isEmpty ? (
         <div className="flex-1 overflow-y-auto px-6 py-6">
-          <StreamEmptyState onPick={(t) => {
-            if (mentionInputRef.current) {
-              mentionInputRef.current.setText(t);
-              mentionInputRef.current.focus();
+          <StreamEmptyState
+            workDir={workDir}
+            composerSlot={
+              <ComposerCore
+                mentionInputRef={mentionInputRef}
+                fileInputRef={fileInputRef}
+                workDir={workDir}
+                activeChat={activeChat}
+                streaming={streaming}
+                mentionOptions={mentionOptions}
+                attachedFiles={attachedFiles}
+                removeFile={removeFile}
+                processFiles={processFiles}
+                handleMentionSend={handleMentionSend}
+                handleNewTopic={handleNewTopic}
+                setWorkDir={setWorkDir}
+                stopStream={stopStream}
+                onTogglePlanPanel={togglePlanPanel}
+              />
             }
-          }} />
+            onPick={(t) => {
+              if (mentionInputRef.current) {
+                mentionInputRef.current.setText(t);
+                mentionInputRef.current.focus();
+              }
+            }}
+          />
         </div>
       ) : (
         <div ref={containerRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -728,24 +750,26 @@ export function MessageStream(_props: MessageStreamProps) {
 
       <SubAgentMonitor />
 
-      <StreamFooter
-        mentionInputRef={mentionInputRef}
-        fileInputRef={fileInputRef}
-        workDir={workDir}
-        activeChat={activeChat}
-        streaming={streaming}
-        mentionOptions={mentionOptions}
-        attachedFiles={attachedFiles}
-        removeFile={removeFile}
-        processFiles={processFiles}
-        handleMentionSend={handleMentionSend}
-        handleNewTopic={handleNewTopic}
-        setWorkDir={setWorkDir}
-        pendingQuestion={pendingQuestion}
-        setPendingQuestion={setPendingQuestion}
-        stopStream={stopStream}
-        onTogglePlanPanel={togglePlanPanel}
-      />
+      {!isEmpty && (
+        <StreamFooter
+          mentionInputRef={mentionInputRef}
+          fileInputRef={fileInputRef}
+          workDir={workDir}
+          activeChat={activeChat}
+          streaming={streaming}
+          mentionOptions={mentionOptions}
+          attachedFiles={attachedFiles}
+          removeFile={removeFile}
+          processFiles={processFiles}
+          handleMentionSend={handleMentionSend}
+          handleNewTopic={handleNewTopic}
+          setWorkDir={setWorkDir}
+          pendingQuestion={pendingQuestion}
+          setPendingQuestion={setPendingQuestion}
+          stopStream={stopStream}
+          onTogglePlanPanel={togglePlanPanel}
+        />
+      )}
     </div>
 
     {showPlanPanel && chatSessionId && (

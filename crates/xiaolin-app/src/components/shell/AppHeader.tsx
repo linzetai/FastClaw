@@ -2,12 +2,8 @@ import { useState, useEffect, useCallback, type CSSProperties, type ReactNode, t
 import {
   PanelLeft,
   PanelBottom,
-  ChevronLeft,
-  ChevronRight,
-  ChevronDown,
   Sun,
   Moon,
-  Diamond,
   Square,
   Minus,
   Maximize2,
@@ -159,13 +155,6 @@ export function AppHeader() {
     setMode(resolved === "light" ? "dark" : "light");
   }, [resolved, setMode]);
 
-  const comingSoon = useCallback((e: RME<HTMLButtonElement>) => {
-    const el = e.currentTarget;
-    el.style.background = "var(--tint)";
-    el.style.color = "#fff";
-    setTimeout(() => { el.style.background = "transparent"; el.style.color = "var(--fill-quaternary)"; }, 180);
-  }, []);
-
   return (
     <header
       className="app-header"
@@ -189,104 +178,21 @@ export function AppHeader() {
         <IconButton title="切换面板" onClick={togglePanel} active={panelOpen}>
           <PanelBottom size={16} strokeWidth={1.7} />
         </IconButton>
-        <IconButton title="后退" onClick={comingSoon}>
-          <ChevronLeft size={16} strokeWidth={1.7} />
-        </IconButton>
-        <IconButton title="前进" onClick={comingSoon}>
-          <ChevronRight size={16} strokeWidth={1.7} />
-        </IconButton>
       </div>
 
-      {/* Center: title — drag region */}
+      {/* Center: drag region */}
       <div
         data-tauri-drag-region=""
         onMouseDown={onDragMouseDown}
         onDoubleClick={onDragDoubleClick}
-        style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 6,
-          minWidth: 0,
-          pointerEvents: "auto",
-        }}
-      >
-        <span
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: "var(--fill-primary)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            letterSpacing: "-0.01em",
-          }}
-        >
-          New chat
-        </span>
-        <span
-          style={{
-            fontSize: 12,
-            color: "var(--fill-quaternary)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          XiaoLin
-        </span>
-        <span
-          style={{
-            color: "var(--fill-quaternary)",
-            cursor: "pointer",
-            fontSize: 18,
-            letterSpacing: 1,
-            padding: "0 4px",
-            lineHeight: 1,
-            pointerEvents: "auto",
-          }}
-        >
-          ···
-        </span>
-      </div>
+        style={{ flex: 1, minWidth: 0 }}
+      />
 
       {/* Right: actions + window controls */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
         <IconButton title={resolved === "light" ? "深色模式" : "浅色模式"} onClick={handleThemeToggle}>
           {resolved === "light" ? <Sun size={ICON_SIZE} strokeWidth={1.7} /> : <Moon size={ICON_SIZE} strokeWidth={1.7} />}
         </IconButton>
-        <IconButton title="选项" onClick={comingSoon}>
-          <ChevronDown size={ICON_SIZE} strokeWidth={1.7} />
-        </IconButton>
-        <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", display: "flex", gap: 4, padding: "0 2px" }}>
-          <span style={{ color: "var(--green-text)" }}>+0</span>
-          <span style={{ color: "var(--red-text)" }}>-0</span>
-        </div>
-        <button
-          type="button"
-          disabled
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 5,
-            padding: "4px 10px",
-            borderRadius: 8,
-            fontSize: 12,
-            fontWeight: 500,
-            border: "1.5px solid var(--green-text)",
-            color: "var(--green-text)",
-            background: "transparent",
-            cursor: "not-allowed",
-            opacity: 0.6,
-            transition: "background 0.12s",
-          }}
-          title="Git 集成即将推出"
-        >
-          <Diamond size={12} strokeWidth={2} />
-          Commit
-          <ChevronDown size={10} strokeWidth={2} />
-        </button>
         <div style={{ display: "flex", gap: 1 }}>
           <IconButton title="单栏" onClick={() => { if (panelOpen) togglePanel(); }} active={!panelOpen}>
             <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={1.7}>
