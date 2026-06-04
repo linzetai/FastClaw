@@ -119,6 +119,7 @@ pub async fn handle_projects_create(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_projects_update(
     sender: &mut futures::stream::SplitSink<WebSocket, Message>,
     state: &AppState,

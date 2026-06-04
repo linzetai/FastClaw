@@ -804,6 +804,16 @@ impl StateBuilder {
             .await?;
         }
 
+        // Backfill project_id for sessions that have work_dir but no project yet.
+        let _ = p5
+            .phase2
+            .phase4
+            .phase3
+            .phase1
+            .session_store
+            .migrate_sessions_to_projects()
+            .await;
+
         let agent_count = p5.phase2.phase4.phase3.phase1.agent_count;
         let tool_count = p5.phase2.tool_count;
         let channel_count = p5.phase2.phase4.channel_registry.channel_count();
