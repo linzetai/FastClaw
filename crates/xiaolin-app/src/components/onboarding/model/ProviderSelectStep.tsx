@@ -45,7 +45,7 @@ export function ProviderSelectStep({ dispatch }: { dispatch: React.Dispatch<Mode
           >
             <Settings {...ICON.md} style={{ color: "var(--fill-tertiary)" }} />
             <span className="text-[13px] font-medium" style={{ color: "var(--fill-secondary)" }}>
-              自定义
+              {t("custom")}
             </span>
           </div>
         </div>

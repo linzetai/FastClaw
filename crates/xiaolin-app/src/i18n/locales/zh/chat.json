@@ -190,5 +190,16 @@
   "mention_hint_filename": "文件名",
   "sticky_stop": "停止",
   "sticky_resend": "重新发送",
-  "edit": "编辑"
+  "edit": "编辑",
+  "review_notGitRepo": "当前项目不是 Git 仓库",
+  "review_noChanges": "没有文件变更",
+  "review_confirmRevert": "确认 Revert?",
+  "perm_suggest": "建议修改",
+  "perm_suggestDesc": "所有写操作需要确认",
+  "perm_autoEdit": "自动编辑",
+  "perm_autoEditDesc": "文件编辑自动通过，shell 仍需确认",
+  "perm_fullAuto": "完全自动",
+  "perm_fullAutoDesc": "所有操作自动通过 (YOLO 模式)",
+  "perm_planOnly": "仅规划",
+  "perm_planOnlyDesc": "只读规划模式，阻止所有写入"
 }

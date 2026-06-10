@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Plus, Trash2, RefreshCw, CheckCircle2, XCircle, Pencil,
   Zap, Terminal, ChevronDown, ChevronUp, Play,
@@ -146,6 +147,7 @@ function Label({ children }: { children: React.ReactNode }) {
 }
 
 export function LlmPluginTab() {
+  const { t } = useTranslation("settings");
   const [plugins, setPlugins] = useState<LlmPluginSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -169,7 +171,7 @@ export function LlmPluginTab() {
   useEffect(() => { refresh(); }, [refresh]);
 
   const handleDelete = async (id: string) => {
-    if (!confirm(`确定删除插件 "${id}" 吗?`)) return;
+    if (!confirm(t("confirmDeletePlugin", { id }))) return;
     try {
       await deleteLlmPlugin(id);
       await refresh();
@@ -179,14 +181,14 @@ export function LlmPluginTab() {
   };
 
   const handleTest = async (id: string) => {
-    setTestResult((prev) => ({ ...prev, [id]: { ok: true, message: "测试中..." } }));
+    setTestResult((prev) => ({ ...prev, [id]: { ok: true, message: t("testing") } }));
     try {
       const result = await testLlmPlugin(id);
       setTestResult((prev) => ({
         ...prev,
         [id]: result.ok
-          ? { ok: true, message: `成功 — 模型: ${result.model}, 回复: ${result.reply}` }
-          : { ok: false, message: result.error ?? "未知错误" },
+          ? { ok: true, message: t("testSuccess", { model: result.model, reply: result.reply }) }
+          : { ok: false, message: result.error ?? t("unknownError") },
       }));
     } catch (e) {
       setTestResult((prev) => ({ ...prev, [id]: { ok: false, message: (e as Error).message } }));
@@ -240,10 +242,10 @@ export function LlmPluginTab() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <SectionTitle>LLM 提供商插件</SectionTitle>
+        <SectionTitle>{t("llmPlugins")}</SectionTitle>
         <div className="flex gap-2">
-          <Btn onClick={refresh}><RefreshCw {...ICON.sm} /> 刷新</Btn>
-          <Btn variant="primary" onClick={openNew}><Plus {...ICON.sm} /> 添加插件</Btn>
+          <Btn onClick={refresh}><RefreshCw {...ICON.sm} /> {t("refresh")}</Btn>
+          <Btn variant="primary" onClick={openNew}><Plus {...ICON.sm} /> {t("addPlugin")}</Btn>
         </div>
       </div>
 
@@ -254,12 +256,12 @@ export function LlmPluginTab() {
       )}
 
       {loading ? (
-        <div className="py-8 text-center text-[13px]" style={{ color: "var(--fill-tertiary)" }}>加载中...</div>
+        <div className="py-8 text-center text-[13px]" style={{ color: "var(--fill-tertiary)" }}>{t("loading")}</div>
       ) : plugins.length === 0 ? (
         <div className="rounded-[var(--radius-sm)] px-5 py-8 text-center" style={{ background: "var(--bg-secondary)" }}>
-          <div className="text-[13px] font-medium" style={{ color: "var(--fill-secondary)" }}>尚未安装任何 LLM 插件</div>
+          <div className="text-[13px] font-medium" style={{ color: "var(--fill-secondary)" }}>{t("noLlmPlugins")}</div>
           <div className="mt-1 text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
-            插件可以添加自定义 LLM 提供商，支持自定义鉴权、请求头、模型映射等
+            {t("llmPluginHint")}
           </div>
         </div>
       ) : (
@@ -280,16 +282,16 @@ export function LlmPluginTab() {
                         background: p.enabled ? "var(--system-green-bg)" : "var(--bg-hover)",
                         color: p.enabled ? "var(--system-green)" : "var(--fill-tertiary)",
                       }}>
-                        {p.enabled ? "启用" : "禁用"}
+                        {p.enabled ? t("enabled") : t("disabled")}
                       </span>
                       <span className="rounded-full px-2 py-0.5 text-[10px]" style={{ background: "var(--bg-hover)", color: "var(--fill-tertiary)" }}>
-                        {p.type === "middleware" ? "中间件" : "外部进程"}
+                        {p.type === "middleware" ? t("middleware") : t("externalProcess")}
                       </span>
                     </div>
                     <div className="text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
                       {p.models.length > 0
-                        ? `${p.models.length} 个模型: ${p.models.map((m) => m.name || m.id).join(", ")}`
-                        : "暂无模型定义"}
+                        ? t("modelsCount", { count: p.models.length, names: p.models.map((m) => m.name || m.id).join(", ") })
+                        : t("noModelsDefined")}
                     </div>
                   </div>
                   {isExpanded ? <ChevronUp {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} /> : <ChevronDown {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />}
@@ -302,9 +304,9 @@ export function LlmPluginTab() {
                     </div>
                     {p.description && <div className="mb-3 text-[12px]" style={{ color: "var(--fill-secondary)" }}>{p.description}</div>}
                     <div className="flex gap-2">
-                      <Btn onClick={() => handleTest(p.id)}><Play {...ICON.sm} /> 测试连接</Btn>
-                      <Btn onClick={() => openEdit(p)}><Pencil {...ICON.sm} /> 编辑</Btn>
-                      <Btn variant="danger" onClick={() => handleDelete(p.id)}><Trash2 {...ICON.sm} /> 删除</Btn>
+                      <Btn onClick={() => handleTest(p.id)}><Play {...ICON.sm} /> {t("testConnectionBtn")}</Btn>
+                      <Btn onClick={() => openEdit(p)}><Pencil {...ICON.sm} /> {t("edit")}</Btn>
+                      <Btn variant="danger" onClick={() => handleDelete(p.id)}><Trash2 {...ICON.sm} /> {t("delete")}</Btn>
                     </div>
                     {tr && (
                       <div className="mt-2 flex items-center gap-2 text-[12px]" style={{ color: tr.ok ? "var(--system-green)" : "var(--system-red)" }}>
@@ -330,6 +332,8 @@ function PluginForm({ form, setForm, onSave, onCancel, isNew }: {
   onCancel: () => void;
   isNew: boolean;
 }) {
+  const { t } = useTranslation("settings");
+
   const update = <K extends keyof PluginFormState>(key: K, value: PluginFormState[K]) => {
     setForm({ ...form, [key]: value });
   };
@@ -354,64 +358,64 @@ function PluginForm({ form, setForm, onSave, onCancel, isNew }: {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <SectionTitle>{isNew ? "添加 LLM 插件" : `编辑: ${form.name}`}</SectionTitle>
+        <SectionTitle>{isNew ? t("addLlmPlugin") : t("editLlmPlugin", { name: form.name })}</SectionTitle>
         <div className="flex gap-2">
-          <Btn onClick={onCancel}>取消</Btn>
-          <Btn variant="primary" onClick={onSave} disabled={!isValid}>保存</Btn>
+          <Btn onClick={onCancel}>{t("cancel")}</Btn>
+          <Btn variant="primary" onClick={onSave} disabled={!isValid}>{t("save")}</Btn>
         </div>
       </div>
 
       <div className="space-y-4 rounded-[var(--radius-sm)] p-4" style={{ background: "var(--bg-secondary)", border: "0.5px solid var(--separator)" }}>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label>插件 ID</Label>
+            <Label>{t("pluginId")}</Label>
             <Input value={form.id} onChange={(v) => update("id", v)} placeholder="corp-gateway" />
           </div>
           <div>
-            <Label>名称</Label>
+            <Label>{t("pluginName")}</Label>
             <Input value={form.name} onChange={(v) => update("name", v)} placeholder="Corporate Gateway" />
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label>类型</Label>
+            <Label>{t("pluginType")}</Label>
             <Select
               value={form.type}
               onChange={(v) => update("type", v as "middleware" | "process")}
               options={[
-                { value: "middleware", label: "中间件 (HTTP 代理)" },
-                { value: "process", label: "外部进程 (stdio)" },
+                { value: "middleware", label: t("type_middleware") },
+                { value: "process", label: t("type_process") },
               ]}
             />
           </div>
           <div>
-            <Label>版本</Label>
+            <Label>{t("pluginVersion")}</Label>
             <Input value={form.version} onChange={(v) => update("version", v)} placeholder="1.0.0" />
           </div>
         </div>
 
         <div>
-          <Label>描述</Label>
-          <Input value={form.description} onChange={(v) => update("description", v)} placeholder="可选描述" />
+          <Label>{t("description")}</Label>
+          <Input value={form.description} onChange={(v) => update("description", v)} placeholder={t("optionalDesc")} />
         </div>
       </div>
 
       {form.type === "middleware" ? (
         <div className="space-y-4 rounded-[var(--radius-sm)] p-4" style={{ background: "var(--bg-secondary)", border: "0.5px solid var(--separator)" }}>
-          <SectionTitle>中间件配置</SectionTitle>
+          <SectionTitle>{t("middlewareConfig")}</SectionTitle>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Base URL</Label>
               <Input value={form.baseUrl} onChange={(v) => update("baseUrl", v)} placeholder="https://llm-gateway.example.com/v1" />
             </div>
             <div>
-              <Label>协议</Label>
+              <Label>{t("protocol")}</Label>
               <Select
                 value={form.protocol}
                 onChange={(v) => update("protocol", v as "openai" | "anthropic")}
                 options={[
-                  { value: "openai", label: "OpenAI 兼容" },
+                  { value: "openai", label: t("protocol_openai") },
                   { value: "anthropic", label: "Anthropic" },
                 ]}
               />
@@ -419,14 +423,14 @@ function PluginForm({ form, setForm, onSave, onCancel, isNew }: {
           </div>
 
           <div>
-            <Label>认证方式</Label>
+            <Label>{t("authType")}</Label>
             <Select
               value={form.authType}
               onChange={(v) => update("authType", v as AuthType)}
               options={[
-                { value: "none", label: "无认证" },
+                { value: "none", label: t("auth_none") },
                 { value: "bearer_token", label: "Bearer Token" },
-                { value: "custom_header", label: "自定义请求头" },
+                { value: "custom_header", label: t("auth_customHeader") },
                 { value: "oauth2_client_credentials", label: "OAuth2 Client Credentials" },
                 { value: "pre_request_hook", label: "Pre-Request Hook" },
               ]}
@@ -443,11 +447,11 @@ function PluginForm({ form, setForm, onSave, onCancel, isNew }: {
           {form.authType === "custom_header" && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Header 名称</Label>
+                <Label>{t("headerName")}</Label>
                 <Input value={form.authHeader} onChange={(v) => update("authHeader", v)} placeholder="x-api-key" />
               </div>
               <div>
-                <Label>Header 值</Label>
+                <Label>{t("headerValue")}</Label>
                 <Input value={form.authValue} onChange={(v) => update("authValue", v)} placeholder="secret-key" type="password" />
               </div>
             </div>
@@ -470,7 +474,7 @@ function PluginForm({ form, setForm, onSave, onCancel, isNew }: {
                 </div>
               </div>
               <div>
-                <Label>Scope (可选)</Label>
+                <Label>{t("scopeOptional")}</Label>
                 <Input value={form.oauth2Scope} onChange={(v) => update("oauth2Scope", v)} placeholder="llm:invoke" />
               </div>
             </div>
@@ -494,11 +498,11 @@ function PluginForm({ form, setForm, onSave, onCancel, isNew }: {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Label>提取路径 (dot-separated)</Label>
+                  <Label>{t("extractPath")}</Label>
                   <Input value={form.preRequestExtractPath} onChange={(v) => update("preRequestExtractPath", v)} placeholder="data.access_token" />
                 </div>
                 <div>
-                  <Label>缓存 TTL (秒)</Label>
+                  <Label>{t("cacheTtl")}</Label>
                   <Input value={String(form.preRequestCacheTtl)} onChange={(v) => update("preRequestCacheTtl", parseInt(v) || 0)} type="number" />
                 </div>
               </div>
@@ -507,13 +511,13 @@ function PluginForm({ form, setForm, onSave, onCancel, isNew }: {
         </div>
       ) : (
         <div className="space-y-4 rounded-[var(--radius-sm)] p-4" style={{ background: "var(--bg-secondary)", border: "0.5px solid var(--separator)" }}>
-          <SectionTitle>进程配置</SectionTitle>
+          <SectionTitle>{t("processConfig")}</SectionTitle>
           <div>
-            <Label>命令</Label>
+            <Label>{t("command")}</Label>
             <Input value={form.command} onChange={(v) => update("command", v)} placeholder="python3" />
           </div>
           <div>
-            <Label>参数 (空格分隔)</Label>
+            <Label>{t("argsSpaceSeparated")}</Label>
             <Input value={form.args} onChange={(v) => update("args", v)} placeholder="provider.py --port 8080" />
           </div>
         </div>
@@ -521,11 +525,11 @@ function PluginForm({ form, setForm, onSave, onCancel, isNew }: {
 
       <div className="space-y-3 rounded-[var(--radius-sm)] p-4" style={{ background: "var(--bg-secondary)", border: "0.5px solid var(--separator)" }}>
         <div className="flex items-center justify-between">
-          <SectionTitle>模型列表</SectionTitle>
-          <Btn onClick={addModel}><Plus {...ICON.sm} /> 添加模型</Btn>
+          <SectionTitle>{t("modelList")}</SectionTitle>
+          <Btn onClick={addModel}><Plus {...ICON.sm} /> {t("addModel")}</Btn>
         </div>
         {form.models.length === 0 ? (
-          <div className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>暂无模型。点击「添加模型」定义此插件支持的模型。</div>
+          <div className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>{t("noModelsInPlugin")}</div>
         ) : (
           <div className="space-y-2">
             {form.models.map((m, idx) => (
@@ -533,19 +537,19 @@ function PluginForm({ form, setForm, onSave, onCancel, isNew }: {
                 <Input
                   value={m.id}
                   onChange={(v) => updateModel(idx, "id", v)}
-                  placeholder="模型 ID"
+                  placeholder={t("modelIdPlaceholder")}
                   className="flex-1"
                 />
                 <Input
                   value={m.name}
                   onChange={(v) => updateModel(idx, "name", v)}
-                  placeholder="显示名称"
+                  placeholder={t("displayNamePlaceholder")}
                   className="flex-1"
                 />
                 <Input
                   value={String(m.contextWindow)}
                   onChange={(v) => updateModel(idx, "contextWindow", parseInt(v) || 0)}
-                  placeholder="上下文窗口"
+                  placeholder={t("contextWindowPlaceholder")}
                   type="number"
                   className="w-28"
                 />

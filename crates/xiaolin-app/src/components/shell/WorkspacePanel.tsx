@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { PanelRightClose } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useWorkspaceTabs } from "./workspace-tabs";
 
 const tabBtnStyle: CSSProperties = {
@@ -28,6 +29,7 @@ const iconBtnStyle: CSSProperties = {
 };
 
 export function WorkspacePanel() {
+  const { t } = useTranslation("sidebar");
   const tabs = useWorkspaceTabs((s) => s.tabs);
   const activeTabId = useWorkspaceTabs((s) => s.activeTabId);
   const setActiveTab = useWorkspaceTabs((s) => s.setActiveTab);
@@ -108,7 +110,7 @@ export function WorkspacePanel() {
         <button
           type="button"
           style={iconBtnStyle}
-          title="关闭面板"
+          title={t("closePanel")}
           onClick={togglePanel}
           onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}

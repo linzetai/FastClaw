@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Settings, CheckCircle, XCircle, Play, Square, RotateCcw, Plug } from "lucide-react";
 import { ICON } from "../../lib/ui-tokens";
 
@@ -18,6 +19,7 @@ interface McpServerConfig {
 }
 
 export const useMcpManager = () => {
+  const { t } = useTranslation("settings");
   const [servers, setServers] = useState<McpServerConfig[]>([]);
   const [statusMap, setStatusMap] = useState<Record<string, McpServerStatus>>({});
   const [loading, setLoading] = useState(true);
@@ -40,7 +42,7 @@ export const useMcpManager = () => {
     // 这里应该实际查询MCP服务器状态
     const mockStatus: McpServerStatus[] = [
       { id: "chrome-devtools", status: "connected", toolCount: 5, connectedAt: new Date().toISOString() },
-      { id: "github", status: "failed", error: "找不到命令", toolCount: 0 },
+      { id: "github", status: "failed", error: t("commandNotFound"), toolCount: 0 },
     ];
     const map: Record<string, McpServerStatus> = {};
     for (const s of mockStatus) map[s.id] = s;
@@ -101,6 +103,8 @@ export const McpServerCard = ({
   onEdit: (server: McpServerConfig) => void; 
   onDelete: (id: string) => void; 
 }) => {
+  const { t } = useTranslation("settings");
+
   const statusColors = {
     connected: "var(--green)",
     failed: "var(--red)",
@@ -139,13 +143,13 @@ export const McpServerCard = ({
                 className="text-[11px] font-medium" 
                 style={{ color: statusColors[status.status] }}
               >
-                {status.status === "connected" ? "已连接" : 
-                 status.status === "failed" ? "连接失败" : 
-                 status.status === "connecting" ? "连接中" : "已禁用"}
+                {status.status === "connected" ? t("mcpConnected") :
+                 status.status === "failed" ? t("mcpFailed") :
+                 status.status === "connecting" ? t("mcpConnecting") : t("mcpDisabled")}
               </span>
               {status.toolCount > 0 && (
                 <span className="text-[10px] font-mono" style={{ color: "var(--fill-tertiary)" }}>
-                  · {status.toolCount} 工具
+                  {t("mcpToolsCount", { count: status.toolCount })}
                 </span>
               )}
             </div>
@@ -158,7 +162,7 @@ export const McpServerCard = ({
           <button 
             onClick={() => onToggle(server.id)}
             className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]"
-            title={server.enabled ? "禁用服务器" : "启用服务器"}
+            title={server.enabled ? t("disableServer") : t("enableServer")}
           >
             {server.enabled ? (
               <Square {...ICON.md} style={{ color: "var(--red)" }} />
@@ -169,14 +173,14 @@ export const McpServerCard = ({
           <button 
             onClick={() => onEdit(server)}
             className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]"
-            title="编辑服务器配置"
+            title={t("editServerConfig")}
           >
             <Settings {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
           </button>
           <button 
             onClick={() => onDelete(server.id)}
             className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-colors duration-100 hover:bg-[var(--bg-hover)]"
-            title="删除服务器"
+            title={t("deleteServer")}
           >
             <XCircle {...ICON.sm} style={{ color: "var(--red)" }} />
           </button>
@@ -191,7 +195,7 @@ export const McpServerCard = ({
             background: "color-mix(in srgb, var(--red) 5%, transparent)" 
           }}
         >
-          错误: {status.error}
+          {t("errorLabel", { error: status.error })}
         </div>
       )}
     </div>
@@ -209,6 +213,7 @@ export const McpServerForm = ({
   onCancel: () => void; 
   onChange: (field: keyof McpServerConfig, value: any) => void; 
 }) => {
+  const { t } = useTranslation("settings");
   const isNew = !server;
   
   const handleSave = () => {
@@ -232,46 +237,46 @@ export const McpServerForm = ({
   return (
     <div className="space-y-4 rounded-[var(--radius-sm)] p-5" style={{ background: "var(--bg-primary)", border: "0.5px solid var(--separator-opaque)" }}>
       <h3 className="text-[15px] font-semibold" style={{ color: "var(--fill-primary)" }}>
-        {isNew ? "添加 MCP 服务器" : "编辑 MCP 服务器"}
+        {isNew ? t("addMcpServer") : t("editMcpServer")}
       </h3>
       
       <div>
-        <label className="mb-1 block text-[12px] font-medium" style={{ color: "var(--fill-tertiary)" }}>服务器 ID</label>
+        <label className="mb-1 block text-[12px] font-medium" style={{ color: "var(--fill-tertiary)" }}>{t("serverId")}</label>
         <input
           style={inputStyle}
           value={server?.id || ""}
           onChange={(e) => onChange('id', e.target.value)}
-          placeholder="例如：chrome-devtools"
+          placeholder="e.g. chrome-devtools"
           disabled={!isNew}  // ID 在编辑时不可更改
         />
         <p className="mt-1 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
-          服务器的唯一标识符，只能包含字母、数字和连字符
+          {t("serverIdHint")}
         </p>
       </div>
       
       <div>
-        <label className="mb-1 block text-[12px] font-medium" style={{ color: "var(--fill-tertiary)" }}>命令</label>
+        <label className="mb-1 block text-[12px] font-medium" style={{ color: "var(--fill-tertiary)" }}>{t("command")}</label>
         <input
           style={inputStyle}
           value={server?.command || ""}
           onChange={(e) => onChange('command', e.target.value)}
-          placeholder="例如：npx 或 node"
+          placeholder="e.g. npx or node"
         />
         <p className="mt-1 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
-          启动 MCP 服务器的命令
+          {t("startCommand")}
         </p>
       </div>
       
       <div>
-        <label className="mb-1 block text-[12px] font-medium" style={{ color: "var(--fill-tertiary)" }}>参数</label>
+        <label className="mb-1 block text-[12px] font-medium" style={{ color: "var(--fill-tertiary)" }}>{t("args")}</label>
         <input
           style={inputStyle}
           value={server?.args.join(" ") || ""}
           onChange={(e) => onChange('args', e.target.value.split(" ").filter(arg => arg.trim() !== ""))}
-          placeholder="例如：@modelcontextprotocol/chrome-devtools-mcp@latest"
+          placeholder="e.g. @modelcontextprotocol/chrome-devtools-mcp@latest"
         />
         <p className="mt-1 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
-          传递给命令的参数，用空格分隔
+          {t("argsHint")}
         </p>
       </div>
       
@@ -282,14 +287,14 @@ export const McpServerForm = ({
           className="rounded-[var(--radius-sm)] px-4 py-2 text-[13px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           style={{ background: "var(--accent)", color: "white" }}
         >
-          {isNew ? "添加服务器" : "保存更改"}
+          {isNew ? t("add") : t("saveChanges")}
         </button>
         <button
           onClick={onCancel}
           className="rounded-[var(--radius-sm)] px-4 py-2 text-[13px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
           style={{ color: "var(--fill-secondary)" }}
         >
-          取消
+          {t("cancel")}
         </button>
       </div>
     </div>

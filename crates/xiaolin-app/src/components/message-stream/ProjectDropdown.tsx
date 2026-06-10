@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { FolderOpen, X, Check } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useProjectStore } from "../../lib/stores";
@@ -20,6 +21,7 @@ export function ProjectDropdown({
   onBrowseFolder,
   onClearProject,
 }: ProjectDropdownProps) {
+  const { t } = useTranslation("sidebar");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -118,7 +120,7 @@ export function ProjectDropdown({
         onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--fill-tertiary)"; }}
         onMouseLeave={(e) => { if (!open) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--fill-quaternary)"; } }}
         onClick={() => setOpen(!open)}
-        title={currentWorkDir ? `工作目录: ${currentWorkDir}` : "设置工作目录"}
+        title={currentWorkDir ? t("workDirLabel", { dir: currentWorkDir }) : t("setWorkDir")}
       >
         {currentProject ? (
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: currentProject.color || "#2563EB", flexShrink: 0 }} />
@@ -156,7 +158,7 @@ export function ProjectDropdown({
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索项目或输入路径..."
+              placeholder={t("searchProjectOrPath")}
               style={{
                 width: "100%", padding: "6px 10px",
                 borderRadius: 6, border: "1px solid var(--separator)",
@@ -172,7 +174,7 @@ export function ProjectDropdown({
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px 4px" }}>
             {filtered.length === 0 && (
               <div style={{ padding: "12px 8px", fontSize: 12, color: "var(--fill-quaternary)", textAlign: "center" }}>
-                {query ? "无匹配项目" : "还没有项目"}
+                {query ? t("noMatchingProjects") : t("noProjects")}
               </div>
             )}
             {filtered.map((project) => {
@@ -223,7 +225,7 @@ export function ProjectDropdown({
               onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
             >
               <FolderOpen size={13} strokeWidth={1.8} />
-              <span>浏览文件夹...</span>
+              <span>{t("browseFolder")}</span>
             </button>
             {(currentProjectId || currentWorkDir) && (
               <button
@@ -240,7 +242,7 @@ export function ProjectDropdown({
                 onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
               >
                 <X size={13} strokeWidth={1.8} />
-                <span>不使用项目</span>
+                <span>{t("noProject")}</span>
               </button>
             )}
           </div>

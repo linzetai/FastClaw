@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
 import { Plus, Search, Puzzle, RefreshCw, Settings, MessageCircle, Pencil, FolderOpen, Trash2, X, ChevronRight, ChevronDown, Pin, PinOff, Archive, Palette, FolderPlus } from "lucide-react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { useUIStore, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, useProjectStore } from "../../lib/stores";
 import { useChatMetaStore } from "../../lib/stores";
 import { useGatewayStore } from "../../lib/store";
@@ -55,6 +56,7 @@ function ChatContextMenu({
   onSetWorkDir: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation("sidebar");
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -71,9 +73,9 @@ function ChatContextMenu({
   }, [onClose]);
 
   const items = [
-    { icon: Pencil, label: "重命名", action: onRename },
-    { icon: FolderOpen, label: "设置工作目录", action: onSetWorkDir },
-    { icon: Trash2, label: "删除", action: onDelete, danger: true },
+    { icon: Pencil, label: t("rename"), action: onRename },
+    { icon: FolderOpen, label: t("setWorkDir"), action: onSetWorkDir },
+    { icon: Trash2, label: t("delete"), action: onDelete, danger: true },
   ];
 
   return createPortal(
@@ -122,6 +124,7 @@ function ProjectContextMenu({
   onDelete: () => void;
   onChangeColor: (color: string) => void;
 }) {
+  const { t } = useTranslation("sidebar");
   const ref = useRef<HTMLDivElement>(null);
   const [showColors, setShowColors] = useState(false);
 
@@ -139,11 +142,11 @@ function ProjectContextMenu({
   }, [onClose]);
 
   const menuItems = [
-    { icon: Pencil, label: "重命名", action: onRename },
-    { icon: Palette, label: "更改颜色", action: () => setShowColors(!showColors) },
-    { icon: project.pinned ? PinOff : Pin, label: project.pinned ? "取消置顶" : "置顶", action: onTogglePin },
-    { icon: Archive, label: "归档", action: onArchive },
-    { icon: Trash2, label: "从列表移除", action: onDelete, danger: true },
+    { icon: Pencil, label: t("rename"), action: onRename },
+    { icon: Palette, label: t("changeColor"), action: () => setShowColors(!showColors) },
+    { icon: project.pinned ? PinOff : Pin, label: project.pinned ? t("pinned") : t("unpinned"), action: onTogglePin },
+    { icon: Archive, label: t("archive"), action: onArchive },
+    { icon: Trash2, label: t("removeFromList"), action: onDelete, danger: true },
   ];
 
   return createPortal(
@@ -164,7 +167,7 @@ function ProjectContextMenu({
         return (
           <button
             key={item.label}
-            onClick={() => { item.action(); if (item.label !== "更改颜色") onClose(); }}
+            onClick={() => { item.action(); if (item.label !== t("changeColor")) onClose(); }}
             className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-medium transition-colors duration-100 hover:bg-[var(--bg-hover)]"
             style={{ color: item.danger ? "var(--red)" : "var(--fill-secondary)" }}
           >
@@ -234,6 +237,7 @@ function SessionItem({
   onRenameCancel: () => void;
   indent?: boolean;
 }) {
+  const { t } = useTranslation("sidebar");
   const timeLabel = formatTimeAgo(chat.createdAt);
   return (
     <div
@@ -290,7 +294,7 @@ function SessionItem({
             }}
           />
         ) : (
-          chat.title || "新会话"
+          chat.title || t("newChat")
         )}
       </span>
       {!isRenaming && timeLabel && (
@@ -324,6 +328,7 @@ function ProjectGroup({
   onRenameSubmit: () => void;
   onRenameCancel: () => void;
 }) {
+  const { t } = useTranslation("sidebar");
   const [hovered, setHovered] = useState(false);
   const Chevron = collapsed ? ChevronRight : ChevronDown;
 
@@ -359,7 +364,7 @@ function ProjectGroup({
           color: project.reachable ? "var(--fill-secondary)" : "var(--fill-quaternary)",
           textDecoration: project.reachable ? "none" : "line-through",
         }}
-          title={!project.reachable ? `项目目录不可达：${project.rootPath}` : project.rootPath}
+          title={!project.reachable ? t("projectUnreachable", { path: project.rootPath }) : project.rootPath}
         >
           {project.name}
         </span>
@@ -370,7 +375,7 @@ function ProjectGroup({
               background: "none", border: "none", padding: 0, cursor: "pointer",
               color: "var(--fill-quaternary)", display: "flex", alignItems: "center",
             }}
-            title="在此项目下新建会话"
+            title={t("newChatInProject")}
             onClick={(e) => { e.stopPropagation(); onNewChatInProject(); }}
           >
             <Plus size={13} strokeWidth={2} />
@@ -407,9 +412,12 @@ function ProjectGroup({
 }
 
 export function AppSidebar() {
+  const { t } = useTranslation("sidebar");
   const collapsed = useUIStore((s) => s.sidebarCollapsed);
   const layoutTier = useUIStore((s) => s.layoutTier);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
+  const setMainView = useUIStore((s) => s.setMainView);
+  const openSettings = useUIStore((s) => s.openSettings);
 
   const chats = useChatMetaStore((s) => s.chats);
   const chatOrder = useChatMetaStore((s) => s.chatOrder);
@@ -452,7 +460,7 @@ export function AppSidebar() {
     if (!query.trim()) return chatList;
     return chatList
       .map((chat) => {
-        const result = fuzzyMatch(query, chat.title || "新会话");
+        const result = fuzzyMatch(query, chat.title || t("newChat"));
         return result ? { chat, score: result.score } : null;
       })
       .filter((r): r is { chat: ChatMeta; score: number } => r !== null)
@@ -501,12 +509,14 @@ export function AppSidebar() {
 
   const handleNewChat = useCallback(() => {
     newChat();
-  }, [newChat]);
+    setMainView("chat");
+  }, [newChat, setMainView]);
 
   const handleSelectChat = useCallback((chatId: string) => {
     setActiveChat(chatId);
+    setMainView("chat");
     if (layoutTier === "compact") toggleSidebar();
-  }, [setActiveChat, layoutTier, toggleSidebar]);
+  }, [setActiveChat, setMainView, layoutTier, toggleSidebar]);
 
   const handleRenameSubmit = useCallback(() => {
     if (renamingChatId && renameValue.trim()) {
@@ -537,7 +547,7 @@ export function AppSidebar() {
       const { open: tauriOpenDialog } = await import("@tauri-apps/plugin-dialog");
       selected = await tauriOpenDialog({ directory: true, multiple: false }) as string | null;
     } catch {
-      selected = prompt("输入项目路径:");
+      selected = prompt(t("enterProjectPath"));
     }
     if (typeof selected === "string" && selected.trim()) {
       await createProject(selected.trim());
@@ -602,17 +612,17 @@ export function AppSidebar() {
         <div style={{ padding: "10px 8px 6px", display: "flex", flexDirection: "column", gap: 1 }}>
           <SidebarAction
             icon={<Plus size={ICON_SIZE} strokeWidth={1.7} />}
-            label="New chat"
+            label={t("newChat")}
             onClick={handleNewChat}
             disabled={!gatewayReady}
           />
           <SidebarAction
             icon={<Search size={ICON_SIZE} strokeWidth={1.7} />}
-            label="Search"
+            label={t("search")}
             onClick={() => { setSearchOpen(!searchOpen); if (searchOpen) { setQuery(""); } }}
           />
-          <SidebarAction icon={<Puzzle size={ICON_SIZE} strokeWidth={1.7} />} label="Plugins" />
-          <SidebarAction icon={<RefreshCw size={ICON_SIZE} strokeWidth={1.7} />} label="Automations" />
+          <SidebarAction icon={<Puzzle size={ICON_SIZE} strokeWidth={1.7} />} label={t("plugins")} onClick={() => setMainView("plugins")} />
+          <SidebarAction icon={<RefreshCw size={ICON_SIZE} strokeWidth={1.7} />} label={t("automations")} onClick={() => setMainView("automations")} />
         </div>
 
         {/* Search bar */}
@@ -635,7 +645,7 @@ export function AppSidebar() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索会话..."
+                placeholder={t("searchSessions")}
                 style={{
                   flex: 1,
                   minWidth: 0,
@@ -669,10 +679,10 @@ export function AppSidebar() {
               fontSize: 11, fontWeight: 500, color: "var(--fill-quaternary)",
               display: "flex", alignItems: "center", justifyContent: "space-between",
             }}>
-              <span>Projects</span>
+              <span>{t("projects")}</span>
               <button
                 type="button"
-                title="添加项目"
+                title={t("addProject")}
                 onClick={handleAddProject}
                 style={{
                   background: "none", border: "none", padding: "2px",
@@ -702,7 +712,7 @@ export function AppSidebar() {
                 onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--separator)"; e.currentTarget.style.color = "var(--fill-quaternary)"; e.currentTarget.style.background = "transparent"; }}
               >
                 <FolderOpen size={13} strokeWidth={1.8} />
-                <span>打开文件夹作为项目...</span>
+                <span>{t("openFolderAsProject")}</span>
               </button>
             )}
             {projectGroups.map(({ project, sessions }) => (
@@ -739,11 +749,11 @@ export function AppSidebar() {
               padding: "12px 10px 4px",
               fontSize: 11, fontWeight: 500, color: "var(--fill-quaternary)",
             }}>
-              Chats
+              {t("chats")}
             </div>
             {looseChats.length === 0 && !query && (
               <div style={{ padding: "8px 10px", fontSize: 12, color: "var(--fill-quaternary)" }}>
-                还没有独立会话
+                {t("noLooseChats")}
               </div>
             )}
             {looseChats.map((chat) => (
@@ -768,14 +778,14 @@ export function AppSidebar() {
 
           {filteredChats.length === 0 && query && (
             <div style={{ padding: "16px 8px", textAlign: "center", fontSize: 12, color: "var(--fill-quaternary)" }}>
-              未找到匹配的会话
+              {t("noMatchingSessions")}
             </div>
           )}
         </div>
 
         {/* Bottom: Settings */}
         <div style={{ padding: 8, borderTop: "1px solid var(--border-shell-subtle)" }}>
-          <SidebarAction icon={<Settings size={ICON_SIZE} strokeWidth={1.7} />} label="Settings" />
+          <SidebarAction icon={<Settings size={ICON_SIZE} strokeWidth={1.7} />} label={t("settings")} onClick={openSettings} />
         </div>
 
         {/* Resize handle */}
@@ -833,7 +843,7 @@ export function AppSidebar() {
           project={projects[projectContextMenu.projectId]}
           onClose={() => setProjectContextMenu(null)}
           onRename={() => {
-            const name = prompt("项目名称:", projects[projectContextMenu.projectId]?.name);
+            const name = prompt(t("projectName"), projects[projectContextMenu.projectId]?.name);
             if (name?.trim()) updateProject(projectContextMenu.projectId, { name: name.trim() });
           }}
           onTogglePin={() => {

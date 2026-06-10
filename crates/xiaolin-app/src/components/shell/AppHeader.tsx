@@ -145,18 +145,19 @@ function WindowControls() {
 }
 
 function PanelLayoutToggle({ panelOpen, togglePanel }: { panelOpen: boolean; togglePanel: () => void }) {
+  const { t } = useTranslation("header");
   const gitStatus = useGitStore((s) => s.status);
   const changeCount = (gitStatus?.staged?.length ?? 0) + (gitStatus?.unstaged?.length ?? 0) + (gitStatus?.untracked?.length ?? 0);
   const showDot = !panelOpen && gitStatus?.isGitRepo && changeCount > 0;
 
   return (
     <div style={{ display: "flex", gap: 1, position: "relative" }}>
-      <IconButton title="单栏" onClick={() => { if (panelOpen) togglePanel(); }} active={!panelOpen}>
+      <IconButton title={t("singleColumn")} onClick={() => { if (panelOpen) togglePanel(); }} active={!panelOpen}>
         <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={1.7}>
           <rect x="3" y="3" width="18" height="18" rx="3" />
         </svg>
       </IconButton>
-      <IconButton title="分栏" onClick={() => { if (!panelOpen) togglePanel(); }} active={panelOpen}>
+      <IconButton title={t("splitColumn")} onClick={() => { if (!panelOpen) togglePanel(); }} active={panelOpen}>
         <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={1.7}>
           <rect x="3" y="3" width="18" height="18" rx="3" />
           <line x1="12" y1="3" x2="12" y2="21" />

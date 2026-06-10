@@ -4,6 +4,7 @@ import {
   MoreHorizontal, Trash2, Pencil, FolderOpen,
 } from "lucide-react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { ICON, BTN_ICON } from "../../lib/ui-tokens";
 import { useChatMetaStore, useStreamStore } from "../../lib/stores";
 import { useUIStore } from "../../lib/stores";
@@ -11,7 +12,7 @@ import { useGatewayStore } from "../../lib/store";
 import { fuzzyMatch } from "../../lib/fuzzy";
 import type { ChatMeta, StreamItem } from "../../lib/stores/types";
 
-function chatPreview(stream: StreamItem[] | undefined, meta: ChatMeta): string {
+function chatPreview(stream: StreamItem[] | undefined, meta: ChatMeta, waitingText: string): string {
   if (stream?.length) {
     for (let i = stream.length - 1; i >= 0; i--) {
       const item = stream[i];
@@ -21,7 +22,7 @@ function chatPreview(stream: StreamItem[] | undefined, meta: ChatMeta): string {
     }
   }
   if (meta.messageCount > 0) return meta.title || "";
-  return "等待输入...";
+  return waitingText;
 }
 
 function ChatContextMenu({
@@ -33,6 +34,7 @@ function ChatContextMenu({
   onSetWorkDir: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation("sidebar");
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -51,9 +53,9 @@ function ChatContextMenu({
   }, [onClose]);
 
   const items = [
-    { icon: Pencil, label: "重命名", action: onRename },
-    { icon: FolderOpen, label: "设置工作目录", action: onSetWorkDir },
-    { icon: Trash2, label: "删除", action: onDelete, danger: true },
+    { icon: Pencil, label: t("rename"), action: onRename },
+    { icon: FolderOpen, label: t("setWorkDir"), action: onSetWorkDir },
+    { icon: Trash2, label: t("delete"), action: onDelete, danger: true },
   ];
 
   return createPortal(
@@ -150,6 +152,7 @@ interface SessionListProps {
 }
 
 export function SessionList({ collapsed = false, onToggleCollapse }: SessionListProps) {
+  const { t } = useTranslation("sidebar");
   const chats = useChatMetaStore((s) => s.chats);
   const chatOrder = useChatMetaStore((s) => s.chatOrder);
   const activeChatId = useChatMetaStore((s) => s.activeChatId);
@@ -185,13 +188,13 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
     if (!query.trim()) return chatList;
     return chatList
       .map((chat) => {
-        const result = fuzzyMatch(query, chat.title || "新会话");
+        const result = fuzzyMatch(query, chat.title || t("newChat"));
         return result ? { chat, score: result.score } : null;
       })
       .filter((r): r is { chat: ChatMeta; score: number } => r !== null)
       .sort((a, b) => b.score - a.score)
       .map((r) => r.chat);
-  }, [chatList, query]);
+  }, [chatList, query, t]);
 
   const handleNewChat = useCallback(() => {
     const activeChat = chatList.find((c) => c.id === activeChatId);
@@ -225,7 +228,7 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
     for (const chat of filteredChats) {
       const label = chat.workDir
         ? extractProjectName(chat.workDir)
-        : "未关联项目";
+        : t("unlinkedProject");
       if (!groups[label]) groups[label] = { workDir: chat.workDir ?? null, chats: [] };
       groups[label].chats.push(chat);
     }
@@ -237,7 +240,7 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
       });
     }
     return groups;
-  }, [filteredChats, extractProjectName]);
+  }, [filteredChats, extractProjectName, t]);
 
   const isCompactOverlay = layoutTier === "compact" && !collapsed;
 
@@ -268,7 +271,7 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
           onClick={onToggleCollapse}
           className="absolute left-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-[var(--radius-xs)] transition-colors duration-150 hover:bg-[var(--bg-hover)]"
           style={{ color: "var(--fill-tertiary)", pointerEvents: "auto" }}
-          title="展开侧边栏"
+          title={t("expandSidebar")}
         >
           <PanelLeftClose size={16} strokeWidth={1.2} style={{ transform: "scaleX(-1)" }} />
         </button>
@@ -289,7 +292,7 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索会话"
+              placeholder={t("searchSessions")}
               className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-[var(--fill-quaternary)]"
               style={{ color: "var(--fill-primary)" }}
             />
@@ -307,7 +310,7 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
             onClick={onToggleCollapse}
             className={`${BTN_ICON.lg} shrink-0`}
             style={{ color: "var(--fill-tertiary)" }}
-            title="折叠侧边栏"
+            title={t("collapseSidebar")}
           >
             <PanelLeftClose size={20} strokeWidth={1.2} />
           </button>
@@ -322,7 +325,7 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
           }}
         >
           <Plus {...ICON.sm} />
-          新建对话
+          {t("newChatAction")}
         </button>
       </div>
 
@@ -339,7 +342,7 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
                   onClick={() => newChat(groupWorkDir ?? undefined)}
                   className="ml-auto shrink-0 rounded p-0.5 opacity-0 transition-opacity duration-100 hover:bg-[var(--bg-hover)] group-hover/grp:opacity-100"
                   style={{ color: "var(--fill-tertiary)" }}
-                  title={groupWorkDir ? `在 ${label} 新建对话` : "新建对话"}
+                  title={groupWorkDir ? t("newChatIn", { name: label }) : t("newChatAction")}
                 >
                   <Plus size={12} strokeWidth={2} />
                 </button>
@@ -347,7 +350,7 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
               {chats.map((chat) => {
                 const active = activeChatId === chat.id;
                 const isRenaming = renamingChatId === chat.id;
-                const preview = chatPreview(streams[chat.id], chat);
+                const preview = chatPreview(streams[chat.id], chat, t("waitingForInput"));
                 return (
                   <div
                     key={chat.id}
@@ -393,7 +396,7 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
                             className="block w-full cursor-pointer truncate text-left text-[12px] font-medium"
                             style={{ color: active ? "var(--tint)" : "var(--fill-secondary)" }}
                           >
-                            {chat.title || "新会话"}
+                            {chat.title || t("newChat")}
                           </button>
                           <div
                             className="mt-0.5 truncate text-[11px]"
@@ -424,7 +427,7 @@ export function SessionList({ collapsed = false, onToggleCollapse }: SessionList
           ))}
         {filteredChats.length === 0 && query && (
           <div className="px-3 py-4 text-center text-[12px]" style={{ color: "var(--fill-quaternary)" }}>
-            未找到匹配的会话
+            {t("noMatchingSessions")}
           </div>
         )}
       </div>

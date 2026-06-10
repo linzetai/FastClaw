@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { Eye, EyeOff, Zap, CheckCircle, XCircle, Loader2, Search } from "lucide-react";
 import * as api from "../../lib/api";
 import { SectionTitle } from "./SettingsShared";
@@ -309,7 +309,7 @@ export function WebSearchTab() {
               )}
             </div>
             <p className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-              前往 <a href="https://tavily.com" target="_blank" rel="noreferrer" className="underline" style={{ color: "var(--tint)" }}>tavily.com</a> {/* signup */}
+              <Trans i18nKey="tavilySignup" ns="settings" components={{ 1: <a href="https://tavily.com" target="_blank" rel="noreferrer" className="underline" style={{ color: "var(--tint)" }} /> }} />
             </p>
           </div>
         </div>

@@ -2,16 +2,14 @@ import { useTranslation } from "react-i18next";
 import { Layout, FolderOpen, Sparkles } from "lucide-react";
 import { ICON } from "../../lib/ui-tokens";
 
-const PAGE_KEYS: Record<string, { icon: typeof Sparkles; descKey: string }> = {
-  工作室: { icon: Layout, descKey: "workspaceStudioDesc" },
-  文件: { icon: FolderOpen, descKey: "workspaceFilesDesc" },
-  Studio: { icon: Layout, descKey: "workspaceStudioDesc" },
-  Files: { icon: FolderOpen, descKey: "workspaceFilesDesc" },
+const CONFIG: Record<string, { icon: typeof Sparkles; descKey: string; labelKey: string }> = {
+  studio: { icon: Layout, descKey: "workspaceStudioDesc", labelKey: "workspaceStudio" },
+  files: { icon: FolderOpen, descKey: "workspaceFilesDesc", labelKey: "workspaceFiles" },
 };
 
 export function ComingSoon({ title }: { title?: string }) {
   const { t } = useTranslation("common");
-  const meta = title ? PAGE_KEYS[title] : undefined;
+  const meta = title ? CONFIG[title] : undefined;
   const Icon = meta?.icon ?? Sparkles;
 
   return (
@@ -35,7 +33,7 @@ export function ComingSoon({ title }: { title?: string }) {
           className="relative text-[15px] font-semibold tracking-[-0.01em]"
           style={{ color: "var(--fill-primary)" }}
         >
-          {title}
+          {meta ? t(meta.labelKey) : title}
         </h3>
       )}
       <p className="relative max-w-[280px] text-center text-[13px] leading-relaxed" style={{ color: "var(--fill-tertiary)" }}>

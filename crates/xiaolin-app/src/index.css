@@ -111,6 +111,7 @@
 
   --nav-rail-w: 54px;
   --content-max-w: 720px;
+  --chat-min-w: 480px;
 
   /* Shell layout tokens (Codex-style four-region layout) */
   --bg-shell: var(--bg-secondary);
@@ -159,8 +160,8 @@
 
 /* Responsive layout tiers — driven by data-layout-tier attribute set via ResizeObserver */
 [data-layout-tier="compact"] { --content-max-w: calc(100% - 32px); }
-[data-layout-tier="standard"] { --content-max-w: 720px; }
-[data-layout-tier="wide"] { --content-max-w: 860px; }
+[data-layout-tier="standard"] { --content-max-w: 660px; }
+[data-layout-tier="wide"] { --content-max-w: 760px; }
 
 /* Non-macOS: use opaque chrome to avoid transparency-induced contrast loss.
    WebView2 (Windows) and WebKitGTK (Linux) lack native vibrancy/blur,

@@ -677,7 +677,7 @@ export function ComposerCore({
           title={workDir ? t("workDirTitle", { dir: workDir }) : t("setWorkDir")}
         >
           <Monitor size={12} strokeWidth={1.8} />
-          <span>{workDir ? workDir.replace(/^\/home\/[^/]+\//, "~/").replace(/^(.{24}).+/, "$1…") : "Work locally"}</span>
+          <span>{workDir ? workDir.replace(/^\/home\/[^/]+\//, "~/").replace(/^(.{24}).+/, "$1…") : t("workLocally", { ns: "common" })}</span>
           <span style={{ fontSize: 8, opacity: 0.4 }}>▾</span>
         </button>
         <button type="button"

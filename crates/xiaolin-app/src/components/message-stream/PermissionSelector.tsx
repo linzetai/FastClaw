@@ -18,6 +18,20 @@ const PRESET_COLORS: Record<string, string> = {
   "plan-only": "oklch(56% 0.18 310)",
 };
 
+const PRESET_NAME_KEYS: Record<string, string> = {
+  suggest: "perm_suggest",
+  "auto-edit": "perm_autoEdit",
+  "full-auto": "perm_fullAuto",
+  "plan-only": "perm_planOnly",
+};
+
+const PRESET_DESC_KEYS: Record<string, string> = {
+  suggest: "perm_suggestDesc",
+  "auto-edit": "perm_autoEditDesc",
+  "full-auto": "perm_fullAutoDesc",
+  "plan-only": "perm_planOnlyDesc",
+};
+
 interface PermissionSelectorProps {
   sessionId: string | undefined;
   disabled?: boolean;
@@ -44,7 +58,7 @@ export function PermissionSelector({ sessionId, disabled }: PermissionSelectorPr
 
   const activePresetId = sessionId ? getSessionPreset(sessionId) : "";
   const activePreset = presets.find((p) => p.id === activePresetId);
-  const displayName = activePreset?.name ?? "Suggest edits";
+  const displayName = PRESET_NAME_KEYS[activePresetId] ? t(PRESET_NAME_KEYS[activePresetId]) : activePreset?.name ?? t("perm_suggest");
   const IconComponent = PRESET_ICONS[activePresetId] ?? Shield;
   const iconColor = PRESET_COLORS[activePresetId] ?? "var(--fill-tertiary)";
 
@@ -126,13 +140,13 @@ export function PermissionSelector({ sessionId, disabled }: PermissionSelectorPr
                             : "var(--fill-secondary)",
                         }}
                       >
-                        {p.name}
+                        {PRESET_NAME_KEYS[p.id] ? t(PRESET_NAME_KEYS[p.id]) : p.name}
                       </div>
                       <div
                         className="mt-0.5 text-[10px]"
                         style={{ color: "var(--fill-quaternary)" }}
                       >
-                        {p.description}
+                        {PRESET_DESC_KEYS[p.id] ? t(PRESET_DESC_KEYS[p.id]) : p.description}
                       </div>
                     </div>
                     {active && (

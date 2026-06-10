@@ -5,6 +5,7 @@
   "newUserSetup": "New user setup",
   "importConfig": "Import existing configuration",
   "migrationDesktopOnly": "Migration is only available in the desktop app",
+  "migrationFileFilter": "XiaoLin migration file",
   "importFailed": "Import failed: {{error}}",
   "featuresTitle": "Core features",
   "featuresSubtitle": "What XiaoLin can do",

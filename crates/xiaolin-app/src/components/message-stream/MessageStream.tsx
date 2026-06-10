@@ -591,8 +591,8 @@ export function MessageStream(_props: MessageStreamProps) {
 
       {searchOpen && (
         <div
-          className="flex shrink-0 items-center gap-2 px-4 py-2"
-          style={{ background: "var(--bg-secondary)", borderBottom: `0.5px solid var(--separator)`, animation: "slide-down var(--duration-fast) var(--ease-out)" }}
+          className="flex shrink-0 items-center gap-2 py-2"
+          style={{ background: "var(--bg-secondary)", borderBottom: `0.5px solid var(--separator)`, animation: "slide-down var(--duration-fast) var(--ease-out)", padding: "8px clamp(24px, 5%, 80px)" }}
         >
           <Search {...ICON.md} style={{ color: "var(--fill-tertiary)" }} />
           <input
@@ -644,7 +644,7 @@ export function MessageStream(_props: MessageStreamProps) {
       )}
 
       {isEmpty ? (
-        <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="flex-1 overflow-y-auto" style={{ padding: "24px clamp(24px, 5%, 80px)" }}>
           <StreamEmptyState
             workDir={workDir}
             composerSlot={

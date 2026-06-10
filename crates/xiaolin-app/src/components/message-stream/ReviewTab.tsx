@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Plus, Minus, RotateCcw } from "lucide-react";
 import { useGitStore } from "../../lib/stores";
 import type { FileChange, DiffHunk, DiffLine } from "../../../../xiaolin-protocol/generated/protocol";
 
 export function ReviewTabContent() {
+  const { t } = useTranslation("chat");
   const status = useGitStore((s) => s.status);
   const selectedFile = useGitStore((s) => s.selectedFile);
   const selectedDiff = useGitStore((s) => s.selectedDiff);
@@ -14,7 +16,7 @@ export function ReviewTabContent() {
   if (!status?.isGitRepo) {
     return (
       <div className="flex h-full items-center justify-center" style={{ color: "var(--fill-quaternary)" }}>
-        <p className="text-sm">当前项目不是 Git 仓库</p>
+        <p className="text-sm">{t("review_notGitRepo")}</p>
       </div>
     );
   }
@@ -24,7 +26,7 @@ export function ReviewTabContent() {
   if (!hasChanges) {
     return (
       <div className="flex h-full items-center justify-center" style={{ color: "var(--fill-quaternary)" }}>
-        <p className="text-sm">没有文件变更</p>
+        <p className="text-sm">{t("review_noChanges")}</p>
       </div>
     );
   }
@@ -86,6 +88,7 @@ export function ReviewTabContent() {
 }
 
 export function ReviewTabFooter() {
+  const { t } = useTranslation("chat");
   const status = useGitStore((s) => s.status);
   const stageFiles = useGitStore((s) => s.stageFiles);
   const revertFiles = useGitStore((s) => s.revertFiles);
@@ -110,7 +113,7 @@ export function ReviewTabFooter() {
         <>
           {showConfirm ? (
             <div className="flex items-center gap-1">
-              <span className="text-[11px]" style={{ color: "var(--fill-warning)" }}>确认 Revert?</span>
+              <span className="text-[11px]" style={{ color: "var(--fill-warning)" }}>{t("review_confirmRevert")}</span>
               <button
                 className="rounded px-1.5 py-0.5 text-[10px] font-medium hover:bg-[var(--bg-hover)]"
                 style={{ color: "var(--fill-danger)" }}
@@ -120,14 +123,14 @@ export function ReviewTabFooter() {
                   setShowConfirm(false);
                 }}
               >
-                确认
+                {t("confirm", { ns: "common" })}
               </button>
               <button
                 className="rounded px-1.5 py-0.5 text-[10px] hover:bg-[var(--bg-hover)]"
                 style={{ color: "var(--fill-tertiary)" }}
                 onClick={() => setShowConfirm(false)}
               >
-                取消
+                {t("cancel", { ns: "common" })}
               </button>
             </div>
           ) : (

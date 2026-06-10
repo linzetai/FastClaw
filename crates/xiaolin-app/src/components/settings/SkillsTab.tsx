@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useGatewayStore } from "../../lib/store";
 import { RefreshCw, Upload, FolderOpen, FileText, Globe, User } from "lucide-react";
 import { ICON } from "../../lib/ui-tokens";
@@ -7,6 +8,7 @@ import { SectionTitle } from "./SettingsShared";
 
 
 export function SkillsTab() {
+  const { t } = useTranslation("settings");
   const [publicSkills, setPublicSkills] = useState<api.SkillInfo[]>([]);
   const [agentSkillsMap, setAgentSkillsMap] = useState<Record<string, api.SkillInfo[]>>({});
   const [tools, setTools] = useState<api.ToolInfo[]>([]);
@@ -52,7 +54,7 @@ export function SkillsTab() {
     setUploading(true);
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
-      const selected = await open({ title: "选择 Skill 文件夹（需包含 SKILL.md）", directory: true, multiple: false });
+      const selected = await open({ title: t("selectSkillFolder"), directory: true, multiple: false });
       if (selected) {
         await api.uploadSkill(selected as string);
         await api.refreshSkills();
@@ -60,13 +62,13 @@ export function SkillsTab() {
       }
     } catch { /* cancelled */ }
     setUploading(false);
-  }, [loadAllSkills]);
+  }, [loadAllSkills, t]);
 
   const handleUploadZip = useCallback(async () => {
     setUploading(true);
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
-      const selected = await open({ title: "选择 Skill ZIP 文件", directory: false, multiple: false, filters: [{ name: "ZIP", extensions: ["zip"] }] });
+      const selected = await open({ title: t("selectSkillZip"), directory: false, multiple: false, filters: [{ name: "ZIP", extensions: ["zip"] }] });
       if (selected) {
         await api.uploadSkill(selected as string);
         await api.refreshSkills();
@@ -74,7 +76,7 @@ export function SkillsTab() {
       }
     } catch { /* cancelled */ }
     setUploading(false);
-  }, [loadAllSkills]);
+  }, [loadAllSkills, t]);
 
   const totalSkills = useMemo(
     () => publicSkills.length + Object.values(agentSkillsMap).reduce((s, a) => s + a.length, 0),
@@ -84,7 +86,7 @@ export function SkillsTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <span className="text-[13px]" style={{ color: "var(--fill-tertiary)" }}>加载中...</span>
+        <span className="text-[13px]" style={{ color: "var(--fill-tertiary)" }}>{t("loading")}</span>
       </div>
     );
   }
@@ -120,7 +122,7 @@ export function SkillsTab() {
   return (
     <div className="min-w-0 space-y-4 overflow-hidden">
       <div className="flex items-center justify-between">
-        <SectionTitle>能力管理</SectionTitle>
+        <SectionTitle>{t("skillsManagement")}</SectionTitle>
         <div className="flex items-center gap-2">
           {filter === "skills" && (
             <div className="flex items-center gap-1">
@@ -128,7 +130,7 @@ export function SkillsTab() {
                 onClick={handleRefresh}
                 disabled={refreshing}
                 className="cursor-pointer rounded-[var(--radius-xs)] p-1.5 transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-40"
-                title="刷新 Skills"
+                title={t("refreshSkills")}
               >
                 <RefreshCw {...ICON.sm} className={refreshing ? "animate-spin" : ""} style={{ color: "var(--fill-tertiary)" }} />
               </button>
@@ -137,7 +139,7 @@ export function SkillsTab() {
                   onClick={() => setSkillMenuOpen((v) => !v)}
                   disabled={uploading}
                   className="cursor-pointer rounded-[var(--radius-xs)] p-1.5 transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-40"
-                  title="上传 Skill"
+                  title={t("uploadSkill")}
                 >
                   <Upload {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />
                 </button>
@@ -152,14 +154,14 @@ export function SkillsTab() {
                       className="w-full cursor-pointer px-3 py-2 text-left text-[12px] transition-colors hover:bg-[var(--bg-hover)]"
                       style={{ color: "var(--fill-primary)" }}
                     >
-                      <FolderOpen {...ICON.sm} className="mr-2 inline" />选择文件夹
+                      <FolderOpen {...ICON.sm} className="mr-2 inline" />{t("selectFolder")}
                     </button>
                     <button
                       onClick={() => { setSkillMenuOpen(false); handleUploadZip(); }}
                       className="w-full cursor-pointer px-3 py-2 text-left text-[12px] transition-colors hover:bg-[var(--bg-hover)]"
                       style={{ color: "var(--fill-primary)" }}
                     >
-                      <FileText {...ICON.sm} className="mr-2 inline" />选择 ZIP 文件
+                      <FileText {...ICON.sm} className="mr-2 inline" />{t("selectZip")}
                     </button>
                   </div>
                 )}
@@ -192,11 +194,11 @@ export function SkillsTab() {
             <div>
               <div className="mb-2 flex items-center gap-2 text-[11px] font-medium" style={{ color: "var(--fill-tertiary)" }}>
                 <Globe {...ICON.sm} />
-                公共 Skills ({publicSkills.length})
+                {t("publicSkills", { count: publicSkills.length })}
               </div>
               {publicSkills.length === 0 ? (
                 <p className="rounded-[var(--radius-sm)] px-4 py-3 text-center text-[12px]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)", color: "var(--fill-tertiary)" }}>
-                  暂无公共 Skill
+                  {t("noPublicSkill")}
                 </p>
               ) : (
                 <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
@@ -221,7 +223,7 @@ export function SkillsTab() {
           </>
         ) : (
           tools.length === 0 ? (
-            <p className="py-4 text-center text-[13px]" style={{ color: "var(--fill-tertiary)" }}>暂无已注册 Tool</p>
+            <p className="py-4 text-center text-[13px]" style={{ color: "var(--fill-tertiary)" }}>{t("noRegisteredTools")}</p>
           ) : (
             <div className="overflow-hidden rounded-[var(--radius-sm)]" style={{ background: "var(--bg-elevated)", border: "0.5px solid var(--separator-opaque)" }}>
               {tools.map((tool, idx) => (

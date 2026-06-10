@@ -140,7 +140,7 @@ export function SubAgentsTab() {
 
         {!loading && defs.length === 0 && !error && (
           <div className="py-6 text-center text-[12px]" style={{ color: "var(--fill-quaternary)" }}>
-            暂无 {t("subAgentDefs")}
+            {t("noSubAgents")}
           </div>
         )}
       </div>

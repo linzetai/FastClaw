@@ -135,7 +135,7 @@ export function StreamFooter({
   }, [stream]);
 
   return (
-    <div className="input-wrap relative shrink-0" style={{ padding: "6px 28px 12px" }}>
+    <div className="input-wrap relative shrink-0" style={{ padding: "6px clamp(24px, 5%, 80px) 12px" }}>
       {dragOver && (
         <div className="fixed inset-0 z-[9998] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
           <div

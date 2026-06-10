@@ -101,7 +101,7 @@ function ModelFormModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls} style={labelStyle}>{t("modelNameKey")}</label>
-              <input value={form.key} onChange={(e) => patch("key", e.target.value)} disabled={!isNew} placeholder="例: dashscope" className={inputCls} style={{ ...inputStyle, opacity: isNew ? 1 : 0.6 }} />
+              <input value={form.key} onChange={(e) => patch("key", e.target.value)} disabled={!isNew} placeholder={t("placeholderKey")} className={inputCls} style={{ ...inputStyle, opacity: isNew ? 1 : 0.6 }} />
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>Provider</label>
@@ -125,7 +125,7 @@ function ModelFormModal({
                   const inferred = inferContextWindow(modelId);
                   if (inferred !== 8192) patch("contextWindow", inferred);
                 }
-              }} placeholder="例: gpt-4o" className={inputCls} style={inputStyle} />
+              }} placeholder={t("placeholderModel")} className={inputCls} style={inputStyle} />
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>Base URL</label>
@@ -142,7 +142,7 @@ function ModelFormModal({
               step="1024"
               value={form.contextWindow || ""}
               onChange={(e) => patch("contextWindow", parseInt(e.target.value) || 0)}
-              placeholder="例: 128000"
+              placeholder={t("placeholderContext")}
               required
               className={inputCls}
               style={{
@@ -209,14 +209,14 @@ function ModelFormModal({
               style={{ color: "var(--fill-tertiary)" }}
             >
               <ChevronDown {...ICON.sm} style={{ transform: showAdvanced ? "rotate(180deg)" : "rotate(0)", transition: "transform var(--duration-fast)" }} />
-              高级设置
+              {t("advancedSettings")}
             </button>
             {showAdvanced && (
               <div className="mt-3 space-y-3">
                 {/* Temperature preset selector */}
                 <div>
                   <label className={labelCls} style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 4 }}>
-                    温度
+                    {t("temperature")}
                     <span style={{ color: "var(--fill-quaternary)", fontWeight: 400 }}>
                       ({form.temperature})
                     </span>
@@ -301,13 +301,13 @@ function ModelFormModal({
                 style={{ color: "var(--red)" }}
               >
                 <Trash2 {...ICON.md} />
-                删除
+                {t("delete")}
               </button>
             )}
           </div>
           <div className="flex items-center gap-2">
             <FormButton variant="ghost" onClick={onCancel} disabled={saving}>
-              取消
+              {t("cancel")}
             </FormButton>
             <FormButton
               variant="primary"
@@ -498,7 +498,7 @@ export function ModelTab() {
               className="flex cursor-pointer items-center gap-1 rounded-[var(--radius-xs)] px-2.5 py-1 text-[12px] font-medium transition-colors hover:opacity-80 disabled:opacity-40"
               style={{ color: "var(--fill-tertiary)" }}
             >
-              撤销
+              {t("undo")}
             </button>
           )}
           <button
@@ -507,7 +507,7 @@ export function ModelTab() {
             style={{ color: "var(--tint)" }}
           >
             <Plus {...ICON.md} />
-            新增模型
+            {t("modelAdd")}
           </button>
         </div>
       </div>

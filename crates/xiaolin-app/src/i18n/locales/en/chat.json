@@ -190,5 +190,16 @@
   "mention_hint_filename": "file name",
   "sticky_stop": "Stop",
   "sticky_resend": "Resend",
-  "edit": "Edit"
+  "edit": "Edit",
+  "review_notGitRepo": "Not a Git repository",
+  "review_noChanges": "No file changes",
+  "review_confirmRevert": "Confirm Revert?",
+  "perm_suggest": "Suggest edits",
+  "perm_suggestDesc": "All write operations require confirmation",
+  "perm_autoEdit": "Auto edit",
+  "perm_autoEditDesc": "File edits auto-approved, shell still requires confirmation",
+  "perm_fullAuto": "Full auto",
+  "perm_fullAutoDesc": "All operations auto-approved (YOLO mode)",
+  "perm_planOnly": "Plan only",
+  "perm_planOnlyDesc": "Read-only planning mode, all writes blocked"
 }

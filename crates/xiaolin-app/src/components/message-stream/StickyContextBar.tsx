@@ -47,10 +47,11 @@ export const StickyContextBar = memo(function StickyContextBar({
 
   return (
     <div
-      className="group/ctx flex shrink-0 items-start gap-2 px-4 py-2"
+      className="group/ctx flex shrink-0 items-start gap-2 py-2"
       style={{
         background: "var(--bg-secondary)",
         borderBottom: "0.5px solid var(--separator)",
+        padding: "8px clamp(24px, 5%, 80px)",
       }}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1">

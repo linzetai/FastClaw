@@ -5,6 +5,7 @@
   "newUserSetup": "新手配置",
   "importConfig": "导入现有配置",
   "migrationDesktopOnly": "迁移功能仅在桌面应用中可用",
+  "migrationFileFilter": "小林迁移文件",
   "importFailed": "导入失败: {{error}}",
   "featuresTitle": "核心功能一览",
   "featuresSubtitle": "小林的主要能力",

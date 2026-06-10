@@ -55,7 +55,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
       }
       const { open } = await import("@tauri-apps/plugin-dialog");
       const selected = await open({
-        filters: [{ name: "小林迁移文件", extensions: ["json", "fcdata"] }],
+        filters: [{ name: t("migrationFileFilter"), extensions: ["json", "fcdata"] }],
         multiple: false,
       });
       if (!selected) return;
@@ -73,7 +73,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
       console.error("导入失败:", error);
       alert(t("importFailed", { error: (error as Error).message }));
     }
-  }, [goTo]);
+  }, [goTo, t]);
 
   return (
     <div

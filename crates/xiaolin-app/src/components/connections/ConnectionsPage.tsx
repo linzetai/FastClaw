@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Server,
   RefreshCw,
@@ -59,6 +60,7 @@ function McpCard({
   onRemove: (id: string) => void;
   onClick: (id: string) => void;
 }) {
+  const { t } = useTranslation("common");
   const [confirming, setConfirming] = useState(false);
 
   return (
@@ -85,7 +87,7 @@ function McpCard({
               style={{ color: "var(--fill-tertiary)" }}
             >
               <Wrench size={11} strokeWidth={1.5} />
-              {server.toolCount} tools
+              {t("conn_tools", { count: server.toolCount })}
             </span>
           )}
         </div>
@@ -110,14 +112,14 @@ function McpCard({
             className="rounded-[var(--radius-xs)] px-2 py-1 text-[11px] font-medium transition-colors"
             style={{ background: "var(--red)", color: "#fff" }}
           >
-            确认
+            {t("conn_confirm")}
           </button>
           <button
             onClick={() => setConfirming(false)}
             className="rounded-[var(--radius-xs)] px-2 py-1 text-[11px] transition-colors"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            取消
+            {t("cancel")}
           </button>
         </div>
       ) : (
@@ -125,7 +127,7 @@ function McpCard({
           onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
           className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-xs)] opacity-0 transition-all duration-150 group-hover:opacity-100 hover:bg-[var(--bg-hover)]"
           style={{ color: "var(--fill-tertiary)" }}
-          title="删除"
+          title={t("delete")}
         >
           <Trash2 {...ICON.sm} />
         </button>
@@ -135,19 +137,19 @@ function McpCard({
 }
 
 const CAP_LABELS: Record<string, string> = {
-  directMessage: "私聊",
-  groupChat: "群聊",
-  media: "媒体",
-  streaming: "流式",
-  reactions: "表情",
-  threads: "话题",
+  directMessage: "conn_directMessage",
+  groupChat: "conn_groupChat",
+  media: "conn_media",
+  streaming: "conn_streaming",
+  reactions: "conn_reactions",
+  threads: "conn_threads",
 };
 
-const STATUS_CONFIG: Record<string, { label: string; bg: string; fg: string }> = {
-  connected: { label: "已连接", bg: "rgba(72,187,120,0.12)", fg: "var(--green)" },
-  disconnected: { label: "未连接", bg: "var(--bg-tertiary)", fg: "var(--fill-quaternary)" },
-  configured: { label: "已配置", bg: "rgba(237,137,54,0.12)", fg: "var(--yellow)" },
-  available: { label: "可添加", bg: "var(--bg-tertiary)", fg: "var(--fill-quaternary)" },
+const STATUS_CONFIG: Record<string, { labelKey: string; bg: string; fg: string }> = {
+  connected: { labelKey: "conn_status_connected", bg: "rgba(72,187,120,0.12)", fg: "var(--green)" },
+  disconnected: { labelKey: "conn_status_disconnected", bg: "var(--bg-tertiary)", fg: "var(--fill-quaternary)" },
+  configured: { labelKey: "conn_status_configured", bg: "rgba(237,137,54,0.12)", fg: "var(--yellow)" },
+  available: { labelKey: "conn_status_available", bg: "var(--bg-tertiary)", fg: "var(--fill-quaternary)" },
 };
 
 function ChannelCard({
@@ -161,6 +163,7 @@ function ChannelCard({
   onDisconnect: (ch: ChannelStatus) => void;
   onClick: (id: string) => void;
 }) {
+  const { t } = useTranslation("common");
   const [disconnecting, setDisconnecting] = useState(false);
   const connected = channel.status === "connected";
   const activeCaps = Object.entries(channel.capabilities ?? {})
@@ -193,7 +196,7 @@ function ChannelCard({
             className="rounded-full px-1.5 py-0.5 text-[10px]"
             style={{ background: statusCfg.bg, color: statusCfg.fg }}
           >
-            {statusCfg.label}
+            {t(statusCfg.labelKey)}
           </span>
           {channel.connectionMode && (
             <span className="text-[10px]" style={{ color: "var(--fill-quaternary)" }}>
@@ -212,7 +215,7 @@ function ChannelCard({
                 className="rounded-full px-1.5 py-0.5 text-[10px]"
                 style={{ background: "var(--bg-tertiary)", color: "var(--fill-tertiary)" }}
               >
-                {CAP_LABELS[cap] ?? cap}
+                {t(CAP_LABELS[cap] ?? cap)}
               </span>
             ))}
           </div>
@@ -225,10 +228,10 @@ function ChannelCard({
           disabled={disconnecting}
           className="flex items-center gap-1 rounded-[var(--radius-sm)] px-2 py-1 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
           style={{ color: "var(--red)" }}
-          title="断开连接"
+          title={t("conn_disconnectConn")}
         >
           <Unlink size={12} strokeWidth={1.5} />
-          断开
+          {t("conn_disconnect")}
         </button>
       ) : (
         <button
@@ -237,7 +240,7 @@ function ChannelCard({
           style={{ background: "var(--tint)", color: "#fff" }}
         >
           <Link size={12} strokeWidth={2} />
-          连接
+          {t("conn_connect")}
         </button>
       )}
     </div>
@@ -255,6 +258,7 @@ function WechatQrModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const { t } = useTranslation("common");
   const [step, setStep] = useState<QrStep>("idle");
   const [qrUrl, setQrUrl] = useState("");
   const [sessionKey, setSessionKey] = useState("");
@@ -288,7 +292,7 @@ function WechatQrModal({
       const resp = await api.channelsWechatLogin();
       if (!resp.sessionKey) {
         setStep("error");
-        setMessage("无法获取二维码");
+        setMessage(t("conn_cannotGetQr"));
         return;
       }
       setSessionKey(resp.sessionKey);
@@ -306,18 +310,18 @@ function WechatQrModal({
               break;
             case "need_verify_code":
               setStep("verify_code");
-              setMessage(poll.message ?? "请输入配对数字");
+              setMessage(poll.message ?? t("conn_enterPairCode"));
               cleanup();
               break;
             case "confirmed":
               setStep("confirmed");
-              setMessage(poll.message ?? "连接成功");
+              setMessage(poll.message ?? t("conn_connectionSuccess"));
               cleanup();
               setTimeout(() => onSuccess(), 1500);
               break;
             case "already_connected":
               setStep("confirmed");
-              setMessage(poll.message ?? "已连接");
+              setMessage(poll.message ?? t("conn_connected"));
               cleanup();
               setTimeout(() => onSuccess(), 1500);
               break;
@@ -327,18 +331,18 @@ function WechatQrModal({
               break;
             default:
               setStep("error");
-              setMessage(poll.message ?? "连接失败");
+              setMessage(poll.message ?? t("conn_connectionFailed"));
               cleanup();
           }
         } catch {
           setStep("error");
-          setMessage("轮询失败");
+          setMessage(t("conn_pollFailed"));
           cleanup();
         }
       }, 1500);
     } catch {
       setStep("error");
-      setMessage("启动连接失败");
+      setMessage(t("conn_startFailed"));
     }
   };
 
@@ -353,16 +357,16 @@ function WechatQrModal({
         const poll = await api.channelsWechatPoll(sessionKey);
         if (poll.status === "confirmed") {
           setStep("confirmed");
-          setMessage(poll.message ?? "连接成功");
+          setMessage(poll.message ?? t("conn_connectionSuccess"));
           cleanup();
           setTimeout(() => onSuccess(), 1500);
         } else if (poll.status === "verify_blocked") {
           setStep("verify_code");
-          setMessage("验证码被拒绝，请重新输入");
+          setMessage(t("conn_codeRejected"));
           cleanup();
         } else if (poll.status !== "waiting" && poll.status !== "scanned") {
           setStep("error");
-          setMessage(poll.message ?? "连接失败");
+          setMessage(poll.message ?? t("conn_connectionFailed"));
           cleanup();
         }
       } catch {
@@ -392,7 +396,7 @@ function WechatQrModal({
       >
         <div className="mb-5 flex items-center justify-between">
           <h3 className="text-[14px] font-semibold" style={{ color: "var(--fill-primary)" }}>
-            连接微信
+            {t("conn_wechatTitle")}
           </h3>
           <button onClick={onClose} style={{ color: "var(--fill-tertiary)" }}>
             <X {...ICON.md} />
@@ -408,14 +412,14 @@ function WechatQrModal({
               <QrCode size={28} style={{ color: "var(--green)" }} />
             </div>
             <p className="text-center text-[13px]" style={{ color: "var(--fill-secondary)" }}>
-              使用微信扫描二维码，将 XiaoLin 连接到微信
+              {t("conn_wechatScan")}
             </p>
             <button
               onClick={startLogin}
               className="rounded-[var(--radius-sm)] px-4 py-2 text-[13px] font-medium transition-colors"
               style={{ background: "var(--tint)", color: "#fff" }}
             >
-              获取二维码
+              {t("conn_getQr")}
             </button>
           </div>
         )}
@@ -424,7 +428,7 @@ function WechatQrModal({
           <div className="flex flex-col items-center gap-3 py-8">
             <Loader2 size={24} className="animate-spin" style={{ color: "var(--tint)" }} />
             <p className="text-[12px]" style={{ color: "var(--fill-tertiary)" }}>
-              正在获取二维码...
+              {t("conn_fetchingQr")}
             </p>
           </div>
         )}
@@ -448,14 +452,14 @@ function WechatQrModal({
                 <>
                   <Smartphone size={14} style={{ color: "var(--green)" }} />
                   <p className="text-[13px] font-medium" style={{ color: "var(--green)" }}>
-                    已扫描，请在手机上确认
+                    {t("conn_scannedConfirm")}
                   </p>
                 </>
               ) : (
                 <>
                   <QrCode size={14} style={{ color: "var(--fill-tertiary)" }} />
                   <p className="text-[13px]" style={{ color: "var(--fill-secondary)" }}>
-                    请使用微信扫描二维码
+                    {t("conn_scanQr")}
                   </p>
                 </>
               )}
@@ -477,7 +481,7 @@ function WechatQrModal({
             <input
               value={verifyCode}
               onChange={(e) => setVerifyCode(e.target.value)}
-              placeholder="输入数字"
+              placeholder={t("conn_enterCode")}
               className="w-32 rounded-[var(--radius-sm)] px-3 py-2 text-center text-[16px] font-mono tracking-wider outline-none"
               style={inputStyle}
               autoFocus
@@ -489,7 +493,7 @@ function WechatQrModal({
               className="rounded-[var(--radius-sm)] px-4 py-1.5 text-[12px] font-medium transition-colors disabled:opacity-40"
               style={{ background: "var(--tint)", color: "#fff" }}
             >
-              提交
+              {t("conn_submit")}
             </button>
           </div>
         )}
@@ -513,7 +517,7 @@ function WechatQrModal({
               className="rounded-[var(--radius-sm)] px-4 py-1.5 text-[12px] font-medium transition-colors"
               style={{ background: "var(--tint)", color: "#fff" }}
             >
-              重试
+              {t("retry")}
             </button>
           </div>
         )}
@@ -546,6 +550,7 @@ function McpDetailModal({
   onReload: () => void;
   onRemove: (id: string) => void;
 }) {
+  const { t } = useTranslation("common");
   const [data, setData] = useState<McpDetailResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [toolSearch, setToolSearch] = useState("");
@@ -610,7 +615,7 @@ function McpDetailModal({
                 className="rounded-full px-1.5 py-0.5 text-[10px]"
                 style={{ background: "rgba(99,179,237,0.12)", color: "var(--tint)" }}
               >
-                项目配置
+                {t("conn_projectConfig")}
               </span>
             )}
           </div>
@@ -636,23 +641,23 @@ function McpDetailModal({
               )}
 
               <div>
-                <SectionLabel label="配置" />
+                <SectionLabel label={t("conn_config")} />
                 <div
                   className="flex flex-col gap-1.5 rounded-[var(--radius-sm)] p-3 text-[12px] font-mono"
                   style={{ background: "var(--bg-primary)", border: "0.5px solid var(--border-subtle)" }}
                 >
                   <div className="flex gap-2">
-                    <span style={{ color: "var(--fill-quaternary)" }}>命令</span>
+                    <span style={{ color: "var(--fill-quaternary)" }}>{t("conn_command")}</span>
                     <span style={{ color: "var(--fill-primary)" }}>{data.config.command || "—"}</span>
                   </div>
                   {data.config.args.length > 0 && (
                     <div className="flex gap-2">
-                      <span style={{ color: "var(--fill-quaternary)" }}>参数</span>
+                      <span style={{ color: "var(--fill-quaternary)" }}>{t("conn_args")}</span>
                       <span style={{ color: "var(--fill-primary)" }}>{data.config.args.join(" ")}</span>
                     </div>
                   )}
                   <div className="flex gap-2">
-                    <span style={{ color: "var(--fill-quaternary)" }}>传输</span>
+                    <span style={{ color: "var(--fill-quaternary)" }}>{t("conn_transport")}</span>
                     <span style={{ color: "var(--fill-primary)" }}>{data.config.transport}</span>
                   </div>
                   {data.config.url && (
@@ -663,7 +668,7 @@ function McpDetailModal({
                   )}
                   {Object.keys(data.config.env).length > 0 && (
                     <div className="mt-1 border-t border-[var(--border-subtle)] pt-1.5">
-                      <span style={{ color: "var(--fill-quaternary)" }}>环境变量</span>
+                      <span style={{ color: "var(--fill-quaternary)" }}>{t("conn_envVars")}</span>
                       {Object.entries(data.config.env).map(([k, v]) => (
                         <div key={k} className="ml-2 flex gap-2">
                           <span style={{ color: "var(--fill-tertiary)" }}>{k}=</span>
@@ -683,7 +688,7 @@ function McpDetailModal({
                     style={{ color: "var(--fill-quaternary)" }}
                   >
                     <span className="text-[11px] font-medium uppercase tracking-wider">
-                      工具 ({data.tools.length})
+                      {t("conn_tools", { count: data.tools.length })}
                     </span>
                     {toolsExpanded ? (
                       <ChevronUp size={12} strokeWidth={1.5} />
@@ -700,7 +705,7 @@ function McpDetailModal({
                       <input
                         value={toolSearch}
                         onChange={(e) => setToolSearch(e.target.value)}
-                        placeholder="搜索..."
+                        placeholder={t("conn_searchPlaceholder")}
                         className="w-24 bg-transparent text-[11px] outline-none"
                         style={{ color: "var(--fill-primary)" }}
                       />
@@ -714,7 +719,7 @@ function McpDetailModal({
                   >
                     {filteredTools.length === 0 ? (
                       <div className="py-6 text-center text-[12px]" style={{ color: "var(--fill-quaternary)" }}>
-                        {toolSearch ? "无匹配工具" : "无可用工具"}
+                        {toolSearch ? t("conn_noMatchingTools") : t("conn_noTools")}
                       </div>
                     ) : (
                       filteredTools.map((t, i) => (
@@ -748,7 +753,7 @@ function McpDetailModal({
 
               {data.connectedAt && (
                 <div className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-                  连接时间: {new Date(data.connectedAt).toLocaleString()}
+                  {t("conn_connectedAt", { time: new Date(data.connectedAt).toLocaleString() })}
                 </div>
               )}
 
@@ -759,7 +764,7 @@ function McpDetailModal({
                   style={{ color: "var(--fill-tertiary)" }}
                 >
                   <RefreshCw size={12} strokeWidth={1.5} />
-                  重载
+                  {t("conn_reload")}
                 </button>
                 {data?.config.source !== "project" && (
                   <button
@@ -768,14 +773,14 @@ function McpDetailModal({
                     style={{ color: "var(--red)" }}
                   >
                     <Trash2 size={12} strokeWidth={1.5} />
-                    删除
+                    {t("delete")}
                   </button>
                 )}
               </div>
             </div>
           ) : (
             <div className="py-8 text-center text-[12px]" style={{ color: "var(--fill-quaternary)" }}>
-              加载失败
+              {t("conn_loadFailed")}
             </div>
           )}
         </div>
@@ -801,6 +806,7 @@ function ChannelDetailModal({
   onDisconnect: (id: string) => void;
   onUpdated: () => void;
 }) {
+  const { t } = useTranslation("common");
   const [data, setData] = useState<ChannelDetailResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -846,12 +852,12 @@ function ChannelDetailModal({
     const result = await api.channelsUpdate(channelId, config);
     setSaving(false);
     if (result.ok) {
-      setSaveMsg({ ok: true, text: "已保存并热重载" });
+      setSaveMsg({ ok: true, text: t("conn_savedReloaded") });
       setEditing(false);
       onUpdated();
       api.channelsDetail(channelId).then(setData);
     } else {
-      setSaveMsg({ ok: false, text: result.reloadError ?? "保存失败" });
+      setSaveMsg({ ok: false, text: result.reloadError ?? t("conn_saveFailed") });
     }
   };
 
@@ -861,12 +867,12 @@ function ChannelDetailModal({
     const result = await api.channelsRestore(channelId);
     setRestoring(false);
     if (result.ok) {
-      setSaveMsg({ ok: true, text: "已恢复备份并热重载" });
+      setSaveMsg({ ok: true, text: t("conn_restoredReloaded") });
       setEditing(false);
       onUpdated();
       api.channelsDetail(channelId).then(setData);
     } else {
-      setSaveMsg({ ok: false, text: result.reloadError ?? "恢复失败" });
+      setSaveMsg({ ok: false, text: result.reloadError ?? t("conn_restoreFailed") });
     }
   };
 
@@ -913,7 +919,7 @@ function ChannelDetailModal({
                 className="rounded-full px-1.5 py-0.5 text-[10px]"
                 style={{ background: statusCfg.bg, color: statusCfg.fg }}
               >
-                {statusCfg.label}
+                {t(statusCfg.labelKey)}
               </span>
             )}
             {data?.connectionMode && (
@@ -940,13 +946,13 @@ function ChannelDetailModal({
 
               {data.aliases.length > 0 && (
                 <div className="text-[11px]" style={{ color: "var(--fill-quaternary)" }}>
-                  别名: {data.aliases.join(", ")}
+                  {t("conn_aliases", { aliases: data.aliases.join(", ") })}
                 </div>
               )}
 
               {activeCaps.length > 0 && (
                 <div>
-                  <SectionLabel label="能力" />
+                  <SectionLabel label={t("conn_capabilities")} />
                   <div className="flex flex-wrap gap-1.5">
                     {activeCaps.map((cap) => (
                       <span
@@ -954,7 +960,7 @@ function ChannelDetailModal({
                         className="rounded-full px-2 py-0.5 text-[11px]"
                         style={{ background: "var(--bg-tertiary)", color: "var(--fill-tertiary)" }}
                       >
-                        {CAP_LABELS[cap] ?? cap}
+                        {t(CAP_LABELS[cap] ?? cap)}
                       </span>
                     ))}
                   </div>
@@ -963,7 +969,7 @@ function ChannelDetailModal({
 
               <div>
                 <div className="mb-2 flex items-center justify-between">
-                  <SectionLabel label="配置" />
+                  <SectionLabel label={t("conn_config")} />
                   {!editing && (
                     <button
                       onClick={startEdit}
@@ -971,7 +977,7 @@ function ChannelDetailModal({
                       style={{ color: "var(--fill-tertiary)" }}
                     >
                       <Pencil size={10} strokeWidth={1.5} />
-                      编辑
+                      {t("conn_edit")}
                     </button>
                   )}
                 </div>
@@ -1003,7 +1009,7 @@ function ChannelDetailModal({
                         style={{ background: "var(--tint)", color: "#fff" }}
                       >
                         <Save size={11} strokeWidth={2} />
-                        {saving ? "保存中..." : "保存并重载"}
+                        {saving ? t("conn_saving") : t("conn_saveReload")}
                       </button>
                       {data.hasBackup && (
                         <button
@@ -1011,10 +1017,10 @@ function ChannelDetailModal({
                           disabled={restoring}
                           className="flex items-center gap-1 rounded-[var(--radius-sm)] px-2 py-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40"
                           style={{ color: "var(--fill-tertiary)" }}
-                          title="恢复上次保存前的配置"
+                          title={t("conn_restoreBackupTitle")}
                         >
                           <RotateCcw size={11} strokeWidth={1.5} />
-                          恢复备份
+                          {t("conn_restoreBackup")}
                         </button>
                       )}
                       <button
@@ -1022,7 +1028,7 @@ function ChannelDetailModal({
                         className="ml-auto text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
                         style={{ color: "var(--fill-quaternary)" }}
                       >
-                        取消
+                        {t("cancel")}
                       </button>
                     </div>
                   </div>
@@ -1043,7 +1049,7 @@ function ChannelDetailModal({
                     className="rounded-[var(--radius-sm)] py-4 text-center text-[11px]"
                     style={{ background: "var(--bg-primary)", border: "0.5px solid var(--border-subtle)", color: "var(--fill-quaternary)" }}
                   >
-                    未配置 — 点击编辑开始配置
+                    {t("conn_notConfigured")}
                   </div>
                 )}
               </div>
@@ -1076,7 +1082,7 @@ function ChannelDetailModal({
                         style={{ color: "var(--fill-quaternary)" }}
                       >
                         <span className="text-[11px] font-medium uppercase tracking-wider">
-                          工具 ({data.tools.length})
+                          {t("conn_tools", { count: data.tools.length })}
                         </span>
                         {toolsExpanded ? (
                           <ChevronUp size={12} strokeWidth={1.5} />
@@ -1093,7 +1099,7 @@ function ChannelDetailModal({
                           <input
                             value={toolSearch}
                             onChange={(e) => setToolSearch(e.target.value)}
-                            placeholder="搜索..."
+                            placeholder={t("conn_searchPlaceholder")}
                             className="w-24 bg-transparent text-[11px] outline-none"
                             style={{ color: "var(--fill-primary)" }}
                           />
@@ -1107,7 +1113,7 @@ function ChannelDetailModal({
                       >
                         {filteredChTools.length === 0 ? (
                           <div className="py-6 text-center text-[12px]" style={{ color: "var(--fill-quaternary)" }}>
-                            {toolSearch ? "无匹配工具" : "无可用工具"}
+                            {toolSearch ? t("conn_noMatchingTools") : t("conn_noTools")}
                           </div>
                         ) : (
                           filteredChTools.map((t, i) => (
@@ -1149,7 +1155,7 @@ function ChannelDetailModal({
                     style={{ color: "var(--red)" }}
                   >
                     <Unlink size={12} strokeWidth={1.5} />
-                    断开连接
+                    {t("conn_disconnectConn")}
                   </button>
                 ) : configEntries.length > 0 ? (
                   <button
@@ -1158,7 +1164,7 @@ function ChannelDetailModal({
                     style={{ background: "var(--tint)", color: "#fff" }}
                   >
                     <Link size={12} strokeWidth={2} />
-                    连接
+                    {t("conn_connect")}
                   </button>
                 ) : (
                   <button
@@ -1167,14 +1173,14 @@ function ChannelDetailModal({
                     style={{ background: "var(--tint)", color: "#fff" }}
                   >
                     <Pencil size={12} strokeWidth={2} />
-                    配置并连接
+                    {t("conn_configAndConnect")}
                   </button>
                 )}
               </div>
             </div>
           ) : (
             <div className="py-8 text-center text-[12px]" style={{ color: "var(--fill-quaternary)" }}>
-              加载失败
+              {t("conn_loadFailed")}
             </div>
           )}
         </div>
@@ -1207,6 +1213,7 @@ function AddMcpModal({
   onClose: () => void;
   onSubmit: (id: string, command: string, args: string[]) => void;
 }) {
+  const { t } = useTranslation("common");
   const [id, setId] = useState("");
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
@@ -1248,7 +1255,7 @@ function AddMcpModal({
       >
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-[14px] font-semibold" style={{ color: "var(--fill-primary)" }}>
-            添加 MCP 服务器
+            {t("conn_addMcp")}
           </h3>
           <button onClick={onClose} style={{ color: "var(--fill-tertiary)" }}>
             <X {...ICON.md} />
@@ -1258,7 +1265,7 @@ function AddMcpModal({
         <div className="flex flex-col gap-3">
           <div>
             <label className="mb-1 block text-[11px] font-medium" style={{ color: "var(--fill-secondary)" }}>
-              标识符 (ID)
+              {t("conn_identifier")}
             </label>
             <input
               value={id}
@@ -1270,7 +1277,7 @@ function AddMcpModal({
           </div>
           <div>
             <label className="mb-1 block text-[11px] font-medium" style={{ color: "var(--fill-secondary)" }}>
-              启动命令
+              {t("conn_startCommand")}
             </label>
             <input
               value={command}
@@ -1282,7 +1289,7 @@ function AddMcpModal({
           </div>
           <div>
             <label className="mb-1 block text-[11px] font-medium" style={{ color: "var(--fill-secondary)" }}>
-              参数（逗号分隔）
+              {t("conn_argsComma")}
             </label>
             <input
               value={args}
@@ -1300,7 +1307,7 @@ function AddMcpModal({
             className="rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] transition-colors"
             style={{ color: "var(--fill-tertiary)" }}
           >
-            取消
+            {t("cancel")}
           </button>
           <button
             onClick={handleSubmit}
@@ -1308,7 +1315,7 @@ function AddMcpModal({
             className="rounded-[var(--radius-sm)] px-3 py-1.5 text-[12px] font-medium transition-colors disabled:opacity-40"
             style={{ background: "var(--tint)", color: "#fff" }}
           >
-            {submitting ? "添加中..." : "添加"}
+            {submitting ? t("conn_adding") : t("conn_add")}
           </button>
         </div>
       </div>
@@ -1317,6 +1324,7 @@ function AddMcpModal({
 }
 
 export function ConnectionsPage() {
+  const { t } = useTranslation("common");
   const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([]);
   const [channels, setChannels] = useState<ChannelStatus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1428,7 +1436,7 @@ export function ConnectionsPage() {
                 className="text-[14px] font-semibold tracking-[-0.01em]"
                 style={{ color: "var(--fill-primary)" }}
               >
-                MCP 服务器
+                {t("conn_mcpServers")}
               </h2>
               <span
                 className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
@@ -1443,14 +1451,14 @@ export function ConnectionsPage() {
                 disabled={reloading}
                 className="flex items-center gap-1 rounded-[var(--radius-sm)] px-2 py-1 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
                 style={{ color: "var(--fill-tertiary)" }}
-                title="重载所有连接"
+                title={t("conn_reloadAllTitle")}
               >
                 <RefreshCw
                   size={12}
                   strokeWidth={1.5}
                   className={reloading ? "animate-spin" : ""}
                 />
-                重载
+                {t("conn_reloadAll")}
               </button>
               <button
                 onClick={() => setShowAddModal(true)}
@@ -1458,13 +1466,13 @@ export function ConnectionsPage() {
                 style={{ background: "var(--tint)", color: "#fff" }}
               >
                 <Plus size={12} strokeWidth={2} />
-                添加
+                {t("conn_add")}
               </button>
             </div>
           </div>
 
           {mcpServers.length === 0 ? (
-            <EmptyState icon={WifiOff} text="暂无 MCP 服务器" />
+            <EmptyState icon={WifiOff} text={t("conn_noMcp")} />
           ) : (
             <div className="flex flex-col gap-2">
               {mcpServers.map((s) => (
@@ -1484,7 +1492,7 @@ export function ConnectionsPage() {
               className="text-[14px] font-semibold tracking-[-0.01em]"
               style={{ color: "var(--fill-primary)" }}
             >
-              消息通道
+              {t("conn_channels")}
             </h2>
             <span
               className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
@@ -1495,7 +1503,7 @@ export function ConnectionsPage() {
           </div>
 
           {channels.length === 0 ? (
-            <EmptyState icon={WifiOff} text="暂无可用通道" />
+            <EmptyState icon={WifiOff} text={t("conn_noChannels")} />
           ) : (
             <div className="flex flex-col gap-2">
               {channels.map((ch) => (
