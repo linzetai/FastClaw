@@ -220,7 +220,7 @@ export function AppHeader() {
         data-tauri-drag-region=""
         onMouseDown={onDragMouseDown}
         onDoubleClick={onDragDoubleClick}
-        style={{ flex: 1, minWidth: 0 }}
+        style={{ flex: 1, minWidth: 0, alignSelf: "stretch" }}
       />
 
       {/* Right: actions + window controls */}

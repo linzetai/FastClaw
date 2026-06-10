@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo, type MutableRefObject, type RefObject, type Dispatch, type SetStateAction } from "react";
+import { useTranslation } from "react-i18next";
 import { useChatMetaStore, useStreamStore, useQueueStore, useLocaleStore } from "../../lib/stores";
 import type { ChatMessage, SubAgentRunUI } from "../../lib/stores/types";
 import { type ToolCall } from "./ToolCallCard";
@@ -46,6 +47,7 @@ export function useMessageStreamChat({
   attachedFilesRef: MutableRefObject<AttachedFile[]>;
   setAttachedFiles: Dispatch<SetStateAction<AttachedFile[]>>;
 }) {
+  const { t } = useTranslation("chat");
   const newChat = useChatMetaStore((s) => s.newChat);
   const updateChatBackendId = useChatMetaStore((s) => s.updateChatBackendId);
   const setChatExecutionMode = useChatMetaStore((s) => s.setChatExecutionMode);
@@ -57,6 +59,14 @@ export function useMessageStreamChat({
   const subAgentToolDone = useStreamStore((s) => s.subAgentToolDone);
   const subAgentComplete = useStreamStore((s) => s.subAgentComplete);
   const addBriefMessage = useStreamStore((s) => s.addBriefMessage);
+
+  const decisionLabel = useCallback((decision: string) =>
+    decision === "approved" ? t("decision_approved")
+      : decision === "approved_for_session" ? t("decision_approvedSession")
+      : decision === "denied" ? t("decision_denied")
+      : decision === "abort" ? t("decision_abort")
+      : decision,
+  [t]);
 
   const addMessage = useCallback((
     msg: Omit<ChatMessage, "id" | "chatId">,
@@ -185,15 +195,11 @@ export function useMessageStreamChat({
               : (d.risk_level as string) === "safe" ? "safe" : "caution";
             setPendingQuestion({
               requestId: `approval:${approvalId}`,
-              question: `${reason}\n操作类型: ${actionType}`,
-              options: decisions.map((dec) => {
-                const label = dec.decision === "approved" ? "批准"
-                  : dec.decision === "approved_for_session" ? "本次全部批准"
-                  : dec.decision === "denied" ? "拒绝"
-                  : dec.decision === "abort" ? "中止"
-                  : dec.decision;
-                return { id: dec.decision, label };
-              }),
+              question: t("approval_actionType", { reason, actionType }),
+              options: decisions.map((dec) => ({
+                id: dec.decision,
+                label: decisionLabel(dec.decision),
+              })),
               timeoutSecs: 0,
               expiresAt: 0,
               allowMultiple: false,
@@ -237,13 +243,13 @@ export function useMessageStreamChat({
 
   const sendWithContent = async (txt: string, mentions: InlineMention[]) => {
     const mentionDesc = mentions.length > 0
-      ? `\n\n[引用: ${mentions.map((m) => `@${m.label} (${m.type})`).join(", ")}]`
+      ? t("mentionDesc", { items: mentions.map((m) => `@${m.label} (${m.type})`).join(", ") })
       : "";
     const attached = attachedFilesRef.current;
     const nonImageFiles = attached.filter((f) => !f.type.startsWith("image/"));
     const imageFiles = attached.filter((f) => f.type.startsWith("image/"));
     const fileDesc = nonImageFiles.length > 0
-      ? `\n\n[附件: ${nonImageFiles.map((f) => f.name).join(", ")}]`
+      ? t("attachmentDesc", { items: nonImageFiles.map((f) => f.name).join(", ") })
       : "";
 
     const imageDataUrls: Array<{ url: string; alt?: string }> = [];
@@ -493,7 +499,7 @@ export function useMessageStreamChat({
               }
               addMessage({
                 role: "system",
-                content: `回合已中止: ${reason}`,
+                content: t("turnAborted", { reason }),
                 timestamp: new Date(),
               }, capturedChatId);
             }
@@ -568,7 +574,7 @@ export function useMessageStreamChat({
                   expiresAt: timeoutSecs > 0 ? Date.now() + timeoutSecs * 1000 : 0,
                   allowMultiple: d.allow_multiple as boolean | undefined,
                 });
-                notifyIfBackground("需要回答", (d.question as string).slice(0, 60));
+                notifyIfBackground(t("notif_needAnswer"), (d.question as string).slice(0, 60));
               } else {
                 const ds = detachedStreams.get(capturedChatId);
                 if (ds) {
@@ -620,7 +626,9 @@ export function useMessageStreamChat({
               if (d.compressed && (d.tokens_saved as number) > 0) {
                 addMessage({
                   role: "system",
-                  content: `上下文已压缩，节省了约 ${Math.round((d.tokens_saved as number) / 1000 * 10) / 10}k tokens`,
+                  content: t("contextCompressed", {
+                    tokens: Math.round((d.tokens_saved as number) / 1000 * 10) / 10,
+                  }),
                   timestamp: new Date(),
                 }, resolvedChatId);
               }
@@ -690,7 +698,7 @@ export function useMessageStreamChat({
             break;
           }
           case "error": {
-            const e = (event.data?.message as string) ?? event.error?.message ?? "未知错误";
+            const e = (event.data?.message as string) ?? event.error?.message ?? t("unknownError");
             if (isActive()) {
               cancelAnimationFrame(rafIdRef.current);
               rafIdRef.current = 0;
@@ -701,7 +709,7 @@ export function useMessageStreamChat({
               setStreaming(false);
               setPendingQuestion(null);
             }
-            addMessage({ role: "system", content: `错误: ${e}`, timestamp: new Date() }, capturedChatId);
+            addMessage({ role: "system", content: t("error_prefix", { message: e }), timestamp: new Date() }, capturedChatId);
             const ds = detachedStreams.get(capturedChatId);
             if (ds) { ds.error = true; ds.done = true; detachedStreams.delete(capturedChatId); }
             cleanup();
@@ -741,13 +749,17 @@ export function useMessageStreamChat({
           }
           case "stream_error": {
             const d = event.data;
-            const msg = (d?.message as string) ?? "流错误";
+            const msg = (d?.message as string) ?? t("streamError");
             const code = (d?.error_code as string) ?? "";
             const retry = (d?.retry_attempt as number) ?? 0;
             if (isActive()) {
               addMessage({
                 role: "system",
-                content: `流错误${code ? ` [${code}]` : ""}: ${msg}${retry > 0 ? ` (重试 #${retry})` : ""}`,
+                content: t("streamErrorDetail", {
+                  msg,
+                  codePart: code ? ` [${code}]` : "",
+                  retryPart: retry > 0 ? t("streamErrorRetryPart", { retry }) : "",
+                }),
                 timestamp: new Date(),
               }, capturedChatId);
             }
@@ -780,15 +792,11 @@ export function useMessageStreamChat({
 
                 setPendingQuestion({
                   requestId: `approval:${approvalId}`,
-                  question: `${reason}\n操作类型: ${actionType}`,
-                  options: decisions.map((dec) => {
-                    const label = dec.decision === "approved" ? "批准"
-                      : dec.decision === "approved_for_session" ? "本次全部批准"
-                      : dec.decision === "denied" ? "拒绝"
-                      : dec.decision === "abort" ? "中止"
-                      : dec.decision;
-                    return { id: dec.decision, label };
-                  }),
+                  question: t("approval_actionType", { reason, actionType }),
+                  options: decisions.map((dec) => ({
+                    id: dec.decision,
+                    label: decisionLabel(dec.decision),
+                  })),
                   timeoutSecs: 0,
                   expiresAt: 0,
                   allowMultiple: false,
@@ -801,7 +809,7 @@ export function useMessageStreamChat({
                     riskLevel: riskLevel as "danger" | "caution" | "safe",
                   },
                 });
-                notifyIfBackground("需要审批", reason);
+                notifyIfBackground(t("notif_needApproval"), reason);
               } else {
                 const ds = detachedStreams.get(capturedChatId);
                 if (ds) {
@@ -850,8 +858,8 @@ export function useMessageStreamChat({
         currentStreamChatRef.current = null;
         setStreamSegments([]);
       }
-      const errMsg = err instanceof Error ? err.message : "连接失败";
-      addMessage({ role: "system", content: `错误: ${errMsg}`, timestamp: new Date() }, capturedChatId);
+      const errMsg = err instanceof Error ? err.message : t("connectionFailed");
+      addMessage({ role: "system", content: t("error_prefix", { message: errMsg }), timestamp: new Date() }, capturedChatId);
       cleanup();
     });
   };

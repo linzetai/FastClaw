@@ -43,7 +43,7 @@ export function ModelSelectStep({
                   {m.name}
                 </div>
                 <div className="mt-0.5 text-[11px]" style={{ color: "var(--fill-tertiary)" }}>
-                  {m.description}
+                  {t(m.description, { ns: "common" })}
                 </div>
               </div>
               <ChevronRight {...ICON.sm} style={{ color: "var(--fill-tertiary)" }} />

@@ -49,9 +49,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     apiKeyPrefix: "sk-",
     docsUrl: "https://platform.openai.com/api-keys",
     models: [
-      { id: "gpt-4.1", name: "GPT-4.1", description: "最新旗舰，最强推理", contextWindow: 1047576, capabilities: VISION_TOOL_REASON },
-      { id: "gpt-4o", name: "GPT-4o", description: "高性能多模态", contextWindow: 128000, capabilities: VISION_TOOL },
-      { id: "gpt-4o-mini", name: "GPT-4o Mini", description: "快速轻量", contextWindow: 128000, capabilities: VISION_TOOL },
+      { id: "gpt-4.1", name: "GPT-4.1", description: "model_desc_gpt41", contextWindow: 1047576, capabilities: VISION_TOOL_REASON },
+      { id: "gpt-4o", name: "GPT-4o", description: "model_desc_gpt4o", contextWindow: 128000, capabilities: VISION_TOOL },
+      { id: "gpt-4o-mini", name: "GPT-4o Mini", description: "model_desc_gpt4omini", contextWindow: 128000, capabilities: VISION_TOOL },
     ],
   },
   {
@@ -63,22 +63,22 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     apiKeyPrefix: "sk-ant-",
     docsUrl: "https://console.anthropic.com/settings/keys",
     models: [
-      { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", description: "高性能编码 & 推理", contextWindow: 200000, capabilities: VISION_TOOL_REASON },
-      { id: "claude-haiku-4-20250514", name: "Claude Haiku 4", description: "快速轻量响应", contextWindow: 200000, capabilities: VISION_TOOL },
+      { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", description: "model_desc_sonnet4", contextWindow: 200000, capabilities: VISION_TOOL_REASON },
+      { id: "claude-haiku-4-20250514", name: "Claude Haiku 4", description: "model_desc_haiku4", contextWindow: 200000, capabilities: VISION_TOOL },
     ],
   },
   {
     id: "qwen",
-    name: "通义千问",
+    name: "Qwen",
     logo: "🔵",
     provider: "openai_compatible",
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     apiKeyPrefix: "sk-",
     docsUrl: "https://help.aliyun.com/zh/model-studio/developer-reference/get-api-key",
     models: [
-      { id: "qwen-max", name: "Qwen Max", description: "最强中文推理", contextWindow: 32768, capabilities: TEXT_TOOL },
-      { id: "qwen-plus", name: "Qwen Plus", description: "均衡性能与速度", contextWindow: 131072, capabilities: TEXT_TOOL },
-      { id: "qwen-turbo", name: "Qwen Turbo", description: "极速响应", contextWindow: 131072, capabilities: TEXT_TOOL },
+      { id: "qwen-max", name: "Qwen Max", description: "model_desc_qwenmax", contextWindow: 32768, capabilities: TEXT_TOOL },
+      { id: "qwen-plus", name: "Qwen Plus", description: "model_desc_qwenplus", contextWindow: 131072, capabilities: TEXT_TOOL },
+      { id: "qwen-turbo", name: "Qwen Turbo", description: "model_desc_qwenturbo", contextWindow: 131072, capabilities: TEXT_TOOL },
     ],
   },
   {
@@ -90,10 +90,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     apiKeyPrefix: "sk-",
     docsUrl: "https://platform.deepseek.com/api_keys",
     models: [
-      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", description: "旗舰推理模型，1M 上下文", contextWindow: 1048576, capabilities: TEXT_TOOL_REASON },
-      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", description: "极速推理模型，1M 上下文", contextWindow: 1048576, capabilities: TEXT_TOOL_REASON },
-      { id: "deepseek-chat", name: "DeepSeek Chat", description: "通用对话模型", contextWindow: 65536, capabilities: TEXT_TOOL },
-      { id: "deepseek-coder", name: "DeepSeek Coder", description: "专业编程模型", contextWindow: 65536, capabilities: TEXT_TOOL },
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", description: "model_desc_dsv4pro", contextWindow: 1048576, capabilities: TEXT_TOOL_REASON },
+      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", description: "model_desc_dsv4flash", contextWindow: 1048576, capabilities: TEXT_TOOL_REASON },
+      { id: "deepseek-chat", name: "DeepSeek Chat", description: "model_desc_dschat", contextWindow: 65536, capabilities: TEXT_TOOL },
+      { id: "deepseek-coder", name: "DeepSeek Coder", description: "model_desc_dscoder", contextWindow: 65536, capabilities: TEXT_TOOL },
     ],
   },
   {
@@ -105,8 +105,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     apiKeyPrefix: "AIza-",
     docsUrl: "https://aistudio.google.com/apikey",
     models: [
-      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "多模态推理", contextWindow: 1048576, capabilities: VISION_TOOL_REASON },
-      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", description: "最强多模态", contextWindow: 1048576, capabilities: VISION_TOOL_REASON },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "model_desc_geminiflash", contextWindow: 1048576, capabilities: VISION_TOOL_REASON },
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", description: "model_desc_geminipro", contextWindow: 1048576, capabilities: VISION_TOOL_REASON },
     ],
   },
 ];

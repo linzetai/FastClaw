@@ -201,5 +201,22 @@
   "perm_fullAuto": "完全自动",
   "perm_fullAutoDesc": "所有操作自动通过 (YOLO 模式)",
   "perm_planOnly": "仅规划",
-  "perm_planOnlyDesc": "只读规划模式，阻止所有写入"
+  "perm_planOnlyDesc": "只读规划模式，阻止所有写入",
+  "approval_actionType": "{{reason}}\n操作类型: {{actionType}}",
+  "decision_approved": "批准",
+  "decision_approvedSession": "本次全部批准",
+  "decision_denied": "拒绝",
+  "decision_abort": "中止",
+  "mentionDesc": "\n\n[引用: {{items}}]",
+  "attachmentDesc": "\n\n[附件: {{items}}]",
+  "turnAborted": "回合已中止: {{reason}}",
+  "notif_needAnswer": "需要回答",
+  "contextCompressed": "上下文已压缩，节省了约 {{tokens}}k tokens",
+  "unknownError": "未知错误",
+  "error_prefix": "错误: {{message}}",
+  "streamError": "流错误",
+  "streamErrorDetail": "流错误{{codePart}}: {{msg}}{{retryPart}}",
+  "streamErrorRetryPart": " (重试 #{{retry}})",
+  "notif_needApproval": "需要审批",
+  "connectionFailed": "连接失败"
 }

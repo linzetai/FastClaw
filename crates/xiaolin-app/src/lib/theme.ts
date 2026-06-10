@@ -24,49 +24,49 @@ export interface AccentPreset {
 
 export const ACCENT_PRESETS: AccentPreset[] = [
   {
-    id: "default", label: "经典",
+    id: "default", label: "theme_default",
     preview: {
       light: { bg: "#ffffff", sidebar: "#f5f5f7", accent: "#2563EB", text: "#6e6e73" },
       dark:  { bg: "#000000", sidebar: "#1c1c1e", accent: "#60A5FA", text: "#98989d" },
     },
   },
   {
-    id: "monochrome", label: "素雅",
+    id: "monochrome", label: "theme_monochrome",
     preview: {
       light: { bg: "#ffffff", sidebar: "#f5f5f7", accent: "#1d1d1f", text: "#6e6e73" },
       dark:  { bg: "#000000", sidebar: "#1c1c1e", accent: "#e5e5ea", text: "#98989d" },
     },
   },
   {
-    id: "ocean", label: "海洋",
+    id: "ocean", label: "theme_ocean",
     preview: {
       light: { bg: "#F0F7FF", sidebar: "#E1EFFE", accent: "#2563EB", text: "#3B6B9E" },
       dark:  { bg: "#0A1628", sidebar: "#0F1F35", accent: "#3B82F6", text: "#7BA3CC" },
     },
   },
   {
-    id: "sunset", label: "日落",
+    id: "sunset", label: "theme_sunset",
     preview: {
       light: { bg: "#FFFBF5", sidebar: "#FFF3E5", accent: "#EA580C", text: "#9A3412" },
       dark:  { bg: "#1A0F05", sidebar: "#261A0E", accent: "#FB923C", text: "#FBBF24" },
     },
   },
   {
-    id: "midnight", label: "午夜",
+    id: "midnight", label: "theme_midnight",
     preview: {
       light: { bg: "#F8FAFC", sidebar: "#F1F5F9", accent: "#3B82F6", text: "#334155" },
       dark:  { bg: "#020617", sidebar: "#0F172A", accent: "#60A5FA", text: "#94A3B8" },
     },
   },
   {
-    id: "sage", label: "鼠尾草",
+    id: "sage", label: "theme_sage",
     preview: {
       light: { bg: "#F7FAF8", sidebar: "#EDF5F0", accent: "#16A34A", text: "#2D6B44" },
       dark:  { bg: "#0A1A10", sidebar: "#0F261A", accent: "#4ADE80", text: "#6ECC8E" },
     },
   },
   {
-    id: "rose", label: "玫瑰",
+    id: "rose", label: "theme_rose",
     preview: {
       light: { bg: "#FFF7F9", sidebar: "#FEEEF2", accent: "#E11D48", text: "#881337" },
       dark:  { bg: "#1A0A10", sidebar: "#2D1220", accent: "#FB7185", text: "#FB7185" },

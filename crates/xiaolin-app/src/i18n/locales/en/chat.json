@@ -201,5 +201,22 @@
   "perm_fullAuto": "Full auto",
   "perm_fullAutoDesc": "All operations auto-approved (YOLO mode)",
   "perm_planOnly": "Plan only",
-  "perm_planOnlyDesc": "Read-only planning mode, all writes blocked"
+  "perm_planOnlyDesc": "Read-only planning mode, all writes blocked",
+  "approval_actionType": "{{reason}}\nAction type: {{actionType}}",
+  "decision_approved": "Approve",
+  "decision_approvedSession": "Approve all for session",
+  "decision_denied": "Deny",
+  "decision_abort": "Abort",
+  "mentionDesc": "\n\n[Reference: {{items}}]",
+  "attachmentDesc": "\n\n[Attachment: {{items}}]",
+  "turnAborted": "Turn aborted: {{reason}}",
+  "notif_needAnswer": "Answer required",
+  "contextCompressed": "Context compressed, saved ~{{tokens}}k tokens",
+  "unknownError": "Unknown error",
+  "error_prefix": "Error: {{message}}",
+  "streamError": "Stream error",
+  "streamErrorDetail": "Stream error{{codePart}}: {{msg}}{{retryPart}}",
+  "streamErrorRetryPart": " (retry #{{retry}})",
+  "notif_needApproval": "Approval required",
+  "connectionFailed": "Connection failed"
 }
