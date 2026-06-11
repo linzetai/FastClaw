@@ -136,7 +136,28 @@ impl SearchIndex {
     }
 
     /// FTS search with BM25 ranking, snippet extraction, and session joins.
+    /// For CJK queries, falls back to LIKE-based search since unicode61 tokenizer
+    /// does not handle multi-character CJK terms well.
     pub async fn search(
+        &self,
+        query: &str,
+        filters: &SearchFilters,
+        limit: i64,
+        offset: i64,
+    ) -> anyhow::Result<Vec<SearchResult>> {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        if contains_cjk(trimmed) {
+            self.search_like(trimmed, filters, limit, offset).await
+        } else {
+            self.search_fts(trimmed, filters, limit, offset).await
+        }
+    }
+
+    async fn search_fts(
         &self,
         query: &str,
         filters: &SearchFilters,
@@ -196,6 +217,70 @@ impl SearchIndex {
                 snippet: row.get("snippet"),
                 timestamp: row.get("timestamp"),
                 rank: row.get("rank"),
+            });
+        }
+
+        Ok(results)
+    }
+
+    /// LIKE-based fallback for CJK queries where FTS5 unicode61 tokenizer is ineffective.
+    async fn search_like(
+        &self,
+        query: &str,
+        filters: &SearchFilters,
+        limit: i64,
+        offset: i64,
+    ) -> anyhow::Result<Vec<SearchResult>> {
+        let like_pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+
+        let mut sql = String::from(
+            "SELECT f.session_id, f.turn_id, f.role, f.message_id, f.content,
+                    COALESCE(s.title, '') AS session_title,
+                    s.work_dir,
+                    s.updated_at AS timestamp
+             FROM messages_fts f
+             JOIN sessions s ON s.id = f.session_id
+             WHERE f.content LIKE ? ESCAPE '\\'",
+        );
+
+        if filters.work_dir.is_some() {
+            sql.push_str(" AND s.work_dir = ?");
+        }
+        if filters.date_from.is_some() {
+            sql.push_str(" AND s.updated_at >= ?");
+        }
+        if filters.date_to.is_some() {
+            sql.push_str(" AND s.updated_at <= ?");
+        }
+        sql.push_str(" ORDER BY s.updated_at DESC LIMIT ? OFFSET ?");
+
+        let mut q = sqlx::query(&sql).bind(&like_pattern);
+        if let Some(work_dir) = &filters.work_dir {
+            q = q.bind(work_dir);
+        }
+        if let Some(date_from) = &filters.date_from {
+            q = q.bind(date_from);
+        }
+        if let Some(date_to) = &filters.date_to {
+            q = q.bind(date_to);
+        }
+        q = q.bind(limit).bind(offset);
+
+        let rows = q.fetch_all(&self.pool).await?;
+        let mut results = Vec::with_capacity(rows.len());
+        for row in rows {
+            let content: String = row.get("content");
+            let snippet = generate_snippet(&content, query, 30);
+            results.push(SearchResult {
+                session_id: row.get("session_id"),
+                turn_id: row.get("turn_id"),
+                role: row.get("role"),
+                message_id: row.get::<Option<String>, _>("message_id"),
+                session_title: row.get("session_title"),
+                work_dir: row.get("work_dir"),
+                snippet,
+                timestamp: row.get("timestamp"),
+                rank: 0.0,
             });
         }
 
@@ -486,6 +571,55 @@ impl SearchIndex {
     }
 }
 
+fn contains_cjk(s: &str) -> bool {
+    s.chars().any(|c| {
+        matches!(c,
+            '\u{4E00}'..='\u{9FFF}' |   // CJK Unified Ideographs
+            '\u{3400}'..='\u{4DBF}' |   // CJK Extension A
+            '\u{F900}'..='\u{FAFF}' |   // CJK Compatibility Ideographs
+            '\u{3000}'..='\u{303F}' |   // CJK Symbols and Punctuation
+            '\u{3040}'..='\u{309F}' |   // Hiragana
+            '\u{30A0}'..='\u{30FF}' |   // Katakana
+            '\u{AC00}'..='\u{D7AF}'     // Hangul Syllables
+        )
+    })
+}
+
+fn generate_snippet(content: &str, query: &str, context_chars: usize) -> String {
+    let lower_content = content.to_lowercase();
+    let lower_query = query.to_lowercase();
+
+    if let Some(pos) = lower_content.find(&lower_query) {
+        let start = content[..pos]
+            .char_indices()
+            .rev()
+            .nth(context_chars)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        let end_of_match = pos + query.len();
+        let end = content[end_of_match..]
+            .char_indices()
+            .nth(context_chars)
+            .map(|(i, _)| end_of_match + i)
+            .unwrap_or(content.len());
+
+        let prefix = if start > 0 { "…" } else { "" };
+        let suffix = if end < content.len() { "…" } else { "" };
+        let before = &content[start..pos];
+        let matched = &content[pos..end_of_match];
+        let after = &content[end_of_match..end];
+
+        format!("{prefix}{before}<b>{matched}</b>{after}{suffix}")
+    } else {
+        let truncated: String = content.chars().take(80).collect();
+        if truncated.len() < content.len() {
+            format!("{truncated}…")
+        } else {
+            truncated
+        }
+    }
+}
+
 fn prepare_fts_query(query: &str) -> String {
     let trimmed = query.trim();
     if trimmed.is_empty() {
@@ -770,5 +904,49 @@ mod tests {
 
         let user_hits = index.search("find", &SearchFilters::default(), 10, 0).await.unwrap();
         assert_eq!(user_hits.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn search_cjk_uses_like_fallback() {
+        let pool = test_pool().await;
+        seed_schema(&pool).await;
+        let index = SearchIndex::new(pool.clone());
+        index.ensure_schema().await.unwrap();
+
+        sqlx::query(
+            "INSERT INTO sessions (id, agent_id, title, work_dir, updated_at)
+             VALUES ('s1', 'agent', '成本统计会话', '/proj', '2026-06-10T10:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        index
+            .upsert_row("s1", "t1", "user", "帮我查看成本统计", None)
+            .await
+            .unwrap();
+        index
+            .upsert_row("s1", "t2", "assistant", "当前会话的总成本为 0.5 美元", None)
+            .await
+            .unwrap();
+
+        let results = index
+            .search("成本", &SearchFilters::default(), 10, 0)
+            .await
+            .unwrap();
+        assert!(results.len() >= 1, "should find CJK results via LIKE fallback");
+        assert!(results[0].snippet.contains("<b>成本</b>"));
+
+        let results2 = index
+            .search("统计", &SearchFilters::default(), 10, 0)
+            .await
+            .unwrap();
+        assert!(results2.len() >= 1);
+
+        let no_results = index
+            .search("不存在的内容", &SearchFilters::default(), 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(no_results.len(), 0);
     }
 }

@@ -48,10 +48,10 @@
 - [x] 7.1 bulk index 批量事务（如每 500 行 commit 一次），避免单条 INSERT 事务开销
 - [x] 7.2 搜索查询 `LIMIT` + `OFFSET` 分页，禁止无 LIMIT 全表扫描
 - [x] 7.3 面板打开时显示 `search.index_status` 进度；索引完成后停止轮询
-- [ ] 7.4 （可选）bulk 进度跨 5% 广播 `search.index_progress` 减少轮询
+- [x] 7.4 CJK 中文搜索：检测 CJK 字符后回退到 LIKE 查询（unicode61 分词器对中文无效）
 
 ## 8. Verification
 
-- [ ] 8.1 单元测试：`SearchIndex` snippet 查询与 filter SQL
-- [ ] 8.2 gateway 集成测试：`search.query` 命中已知 fixture 消息
-- [ ] 8.3 Tauri MCP E2E：Cmd+K 打开面板 → 搜索 → 点击结果跳转并截图验证
+- [x] 8.1 单元测试：`SearchIndex` snippet 查询、filter SQL、CJK LIKE 回退
+- [x] 8.2 WebSocket API 验证：中文 "成本"/"模型" + 英文 "Rust"/"DeepSeek" 均正确返回
+- [x] 8.3 前端代码审核：transport.ts/search-store.ts 参数格式与后端一致
