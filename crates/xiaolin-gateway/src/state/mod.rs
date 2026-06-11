@@ -68,6 +68,9 @@ pub struct ConfigState {
     pub config_live: Arc<ArcSwap<serde_json::Value>>,
     pub runtime_route_bindings: Arc<tokio::sync::RwLock<Vec<RuntimeRouteBinding>>>,
     pub last_good_agents: Arc<tokio::sync::RwLock<Vec<AgentConfig>>>,
+    /// Lock-free mirror of `last_good_agents` for synchronous access
+    /// (e.g. from `RuntimeTurnExecutor::effective_behavior`).
+    pub live_agents_swap: Arc<ArcSwap<Vec<AgentConfig>>>,
 }
 
 /// Agent runtime, tool registry, skill registries.
@@ -100,6 +103,7 @@ pub struct StorageState {
     pub trajectory_store: Arc<TrajectoryStore>,
     pub skill_store: Arc<SkillStore>,
     pub context_engine: Arc<xiaolin_context::ContextEngine>,
+    pub cost_store: Arc<xiaolin_session::CostStore>,
 }
 
 pub(crate) struct LlmSkillExtraction {
@@ -1524,6 +1528,7 @@ impl AppState {
             let mut router = self.rt.router.write().await;
             *router = new_router;
         }
+        self.cfg.live_agents_swap.store(Arc::from(agents.clone()));
         *self.cfg.last_good_agents.write().await = agents;
         tracing::info!(agent_count = count, "agents hot-reloaded");
         Ok(count)
@@ -1770,6 +1775,8 @@ impl AppState {
                 subagent_manager: None,
                 tool_orchestrator: None,
                 behavior_overrides: None,
+                live_agents: None,
+                cost_store: None,
             });
         let session_manager = Arc::new(xiaolin_session_actor::SessionManager::new(executor));
 
@@ -1778,7 +1785,8 @@ impl AppState {
                 config: Arc::new(config),
                 config_live: Arc::new(ArcSwap::new(Arc::new(config_live_val))),
                 runtime_route_bindings: Arc::new(tokio::sync::RwLock::new(Vec::new())),
-                last_good_agents: Arc::new(tokio::sync::RwLock::new(last_good_agents_init)),
+                last_good_agents: Arc::new(tokio::sync::RwLock::new(last_good_agents_init.clone())),
+                live_agents_swap: Arc::new(ArcSwap::from_pointee(last_good_agents_init)),
             },
             rt: RuntimeState {
                 router: Arc::new(tokio::sync::RwLock::new(router)),
@@ -1811,6 +1819,9 @@ impl AppState {
                 trajectory_store,
                 skill_store,
                 context_engine: context_engine.clone(),
+                cost_store: Arc::new(
+                    xiaolin_session::CostStore::open(session_store.pool()).await?,
+                ),
             },
             mem: MemoryState {
                 agent_episodic: Arc::new(test_ep_map),

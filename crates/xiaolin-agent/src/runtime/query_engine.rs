@@ -51,11 +51,7 @@ impl QueryEngine {
             state: Arc::new(Mutex::new(QueryEngineState {
                 session_id: None,
                 messages: Vec::new(),
-                total_usage: Usage {
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    total_tokens: 0,
-                },
+                total_usage: Usage::default(),
             })),
             llm_override: None,
             cancel_token: CancellationToken::new(),
@@ -457,10 +453,10 @@ mod tests {
         }
 
         let usage = engine.usage().await;
-        // The mock doesn't produce usage in Done, so all zeros — but the
-        // accumulation logic is still exercised (3 turns, no panics).
-        assert_eq!(usage.prompt_tokens, 0);
-        assert_eq!(usage.completion_tokens, 0);
+        // The mock doesn't produce explicit usage in stream deltas, but the
+        // fallback estimation fills in prompt/completion based on message size.
+        // We only verify accumulation doesn't panic and total is non-negative.
+        assert!(usage.prompt_tokens + usage.completion_tokens == usage.total_tokens);
     }
 
     #[tokio::test]
@@ -552,16 +548,13 @@ mod tests {
             prompt_tokens: prompt,
             completion_tokens: completion,
             total_tokens: prompt + completion,
+            ..Default::default()
         }
     }
 
     #[test]
     fn usage_accumulation_arithmetic() {
-        let mut total = Usage {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 0,
-        };
+        let mut total = Usage::default();
         for u in [make_usage(100, 50), make_usage(200, 80)] {
             total.prompt_tokens += u.prompt_tokens;
             total.completion_tokens += u.completion_tokens;

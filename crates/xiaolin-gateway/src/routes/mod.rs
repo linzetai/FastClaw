@@ -3,6 +3,7 @@ mod bus;
 mod channel;
 mod chat;
 pub mod common;
+mod cost;
 mod cron;
 mod dynamic_routes;
 mod error;
@@ -186,4 +187,9 @@ pub fn api_routes() -> Router<AppState> {
             "/api/v1/channels/wechat/reload",
             post(wechat::reload_channel),
         )
+        // Cost tracking
+        .route("/api/v1/cost/summary", get(cost::get_cost_summary))
+        .route("/api/v1/cost/daily", get(cost::get_daily_tokens))
+        .route("/api/v1/cost/tools", get(cost::get_tool_stats))
+        .route("/api/v1/cost/sessions", get(cost::get_session_costs))
 }

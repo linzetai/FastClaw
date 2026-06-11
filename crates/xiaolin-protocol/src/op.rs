@@ -329,6 +329,20 @@ pub enum ClientOp {
         limit: Option<i64>,
     },
 
+    // ── Cost ─────────────────────────────────────────────────────────
+    CostSummary,
+    CostDaily {
+        start: Option<String>,
+        end: Option<String>,
+    },
+    CostTools {
+        start: Option<String>,
+        end: Option<String>,
+    },
+    CostSessions {
+        limit: Option<i64>,
+    },
+
     // ── Automations (user-facing wrapper over cron) ──────────────────
     AutomationsList,
     AutomationsCreate {
@@ -786,6 +800,18 @@ impl ClientOp {
                 limit: params
                     .get("limit")
                     .and_then(|v| v.as_i64()),
+            }),
+            "cost.summary" => Ok(Self::CostSummary),
+            "cost.daily" => Ok(Self::CostDaily {
+                start: params.get("start").and_then(|v| v.as_str()).map(String::from),
+                end: params.get("end").and_then(|v| v.as_str()).map(String::from),
+            }),
+            "cost.tools" => Ok(Self::CostTools {
+                start: params.get("start").and_then(|v| v.as_str()).map(String::from),
+                end: params.get("end").and_then(|v| v.as_str()).map(String::from),
+            }),
+            "cost.sessions" => Ok(Self::CostSessions {
+                limit: params.get("limit").and_then(|v| v.as_i64()),
             }),
             "automations.list" => Ok(Self::AutomationsList),
             "automations.create" => Ok(Self::AutomationsCreate { params }),

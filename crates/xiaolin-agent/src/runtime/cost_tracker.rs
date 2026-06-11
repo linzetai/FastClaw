@@ -49,23 +49,126 @@ impl ModelStats {
     }
 }
 
-/// Per-model cost rates (USD per 1K tokens).
+/// Per-model cost rates (USD per 1M tokens).
 #[derive(Debug, Clone)]
 pub struct ModelCostRate {
-    pub input_per_1k: f64,
-    pub output_per_1k: f64,
-    pub cache_read_per_1k: f64,
-    pub cache_write_per_1k: f64,
+    pub input_per_1m: f64,
+    pub output_per_1m: f64,
+    pub cache_read_per_1m: f64,
+    pub cache_write_per_1m: f64,
 }
 
 impl Default for ModelCostRate {
     fn default() -> Self {
         Self {
-            input_per_1k: 0.003,
-            output_per_1k: 0.015,
-            cache_read_per_1k: 0.0015,
-            cache_write_per_1k: 0.00375,
+            input_per_1m: 0.14,
+            output_per_1m: 0.28,
+            cache_read_per_1m: 0.0028,
+            cache_write_per_1m: 0.14,
         }
+    }
+}
+
+impl ModelCostRate {
+    pub fn builtin_rates() -> HashMap<String, ModelCostRate> {
+        let mut m = HashMap::new();
+        let add = |m: &mut HashMap<String, ModelCostRate>, names: &[&str], rate: ModelCostRate| {
+            for name in names {
+                m.insert((*name).to_string(), rate.clone());
+            }
+        };
+
+        // DeepSeek V4 — cache hit reduced to 2% of input on 2026-04-26
+        add(&mut m, &["deepseek-v4-flash", "deepseek/deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"], ModelCostRate {
+            input_per_1m: 0.14, output_per_1m: 0.28, cache_read_per_1m: 0.0028, cache_write_per_1m: 0.14,
+        });
+        add(&mut m, &["deepseek-v4-pro", "deepseek/deepseek-v4-pro"], ModelCostRate {
+            input_per_1m: 0.435, output_per_1m: 0.87, cache_read_per_1m: 0.003625, cache_write_per_1m: 0.435,
+        });
+        // Anthropic Claude — cache read = 10% of input, 5-min write = 125% of input
+        add(&mut m, &["claude-sonnet-4-6", "claude-sonnet-4-6-20250514", "claude-sonnet-4-5", "claude-sonnet-4-20250514", "anthropic/claude-sonnet-4-6"], ModelCostRate {
+            input_per_1m: 3.0, output_per_1m: 15.0, cache_read_per_1m: 0.30, cache_write_per_1m: 3.75,
+        });
+        add(&mut m, &["claude-opus-4-7", "claude-opus-4-8", "claude-opus-4-6", "anthropic/claude-opus-4-7"], ModelCostRate {
+            input_per_1m: 5.0, output_per_1m: 25.0, cache_read_per_1m: 0.50, cache_write_per_1m: 6.25,
+        });
+        add(&mut m, &["claude-haiku-4-5", "claude-haiku-4-5-20251001", "claude-3-5-haiku-20241022"], ModelCostRate {
+            input_per_1m: 1.0, output_per_1m: 5.0, cache_read_per_1m: 0.10, cache_write_per_1m: 1.25,
+        });
+        // OpenAI — cache read = 50% of input (GPT-4o/mini), 75-90% off (newer models)
+        add(&mut m, &["gpt-4o", "openai/gpt-4o"], ModelCostRate {
+            input_per_1m: 2.50, output_per_1m: 10.0, cache_read_per_1m: 1.25, cache_write_per_1m: 2.50,
+        });
+        add(&mut m, &["gpt-4o-mini", "openai/gpt-4o-mini"], ModelCostRate {
+            input_per_1m: 0.15, output_per_1m: 0.60, cache_read_per_1m: 0.075, cache_write_per_1m: 0.15,
+        });
+        add(&mut m, &["gpt-4.1", "openai/gpt-4.1"], ModelCostRate {
+            input_per_1m: 2.0, output_per_1m: 8.0, cache_read_per_1m: 0.50, cache_write_per_1m: 2.0,
+        });
+        add(&mut m, &["gpt-4.1-mini", "openai/gpt-4.1-mini"], ModelCostRate {
+            input_per_1m: 0.40, output_per_1m: 1.60, cache_read_per_1m: 0.10, cache_write_per_1m: 0.40,
+        });
+        add(&mut m, &["gpt-4.1-nano", "openai/gpt-4.1-nano"], ModelCostRate {
+            input_per_1m: 0.10, output_per_1m: 0.40, cache_read_per_1m: 0.025, cache_write_per_1m: 0.10,
+        });
+        add(&mut m, &["gpt-5", "openai/gpt-5"], ModelCostRate {
+            input_per_1m: 1.25, output_per_1m: 10.0, cache_read_per_1m: 0.125, cache_write_per_1m: 1.25,
+        });
+        add(&mut m, &["gpt-5-mini", "openai/gpt-5-mini"], ModelCostRate {
+            input_per_1m: 0.25, output_per_1m: 2.0, cache_read_per_1m: 0.025, cache_write_per_1m: 0.25,
+        });
+        add(&mut m, &["gpt-5.5", "openai/gpt-5.5"], ModelCostRate {
+            input_per_1m: 5.0, output_per_1m: 30.0, cache_read_per_1m: 0.50, cache_write_per_1m: 5.0,
+        });
+        add(&mut m, &["gpt-5.4", "openai/gpt-5.4"], ModelCostRate {
+            input_per_1m: 2.50, output_per_1m: 15.0, cache_read_per_1m: 0.25, cache_write_per_1m: 2.50,
+        });
+        // Alibaba Qwen — cache hit = 10% of input (prices in USD converted from CNY at ~7.2)
+        add(&mut m, &["qwen3-max", "qwen3.7-max", "ali/qwen3-max", "alibaba/qwen3-max", "ali/qwen3.7-max"], ModelCostRate {
+            input_per_1m: 0.35, output_per_1m: 1.39, cache_read_per_1m: 0.035, cache_write_per_1m: 0.44,
+        });
+        add(&mut m, &["qwen3.5-plus", "ali/qwen3.5-plus", "alibaba/qwen3.5-plus"], ModelCostRate {
+            input_per_1m: 0.11, output_per_1m: 0.67, cache_read_per_1m: 0.011, cache_write_per_1m: 0.14,
+        });
+        // Zhipu GLM — cache read ~20% of input, storage free (limited time)
+        add(&mut m, &["glm-5.1", "zhipu/glm-5.1"], ModelCostRate {
+            input_per_1m: 1.40, output_per_1m: 4.40, cache_read_per_1m: 0.26, cache_write_per_1m: 1.40,
+        });
+        add(&mut m, &["glm-5", "zhipu/glm-5"], ModelCostRate {
+            input_per_1m: 1.00, output_per_1m: 3.20, cache_read_per_1m: 0.20, cache_write_per_1m: 1.00,
+        });
+        add(&mut m, &["glm-4.7", "zhipu/glm-4.7"], ModelCostRate {
+            input_per_1m: 0.60, output_per_1m: 2.20, cache_read_per_1m: 0.11, cache_write_per_1m: 0.60,
+        });
+        add(&mut m, &["glm-4.7-flash", "zhipu/glm-4.7-flash"], ModelCostRate {
+            input_per_1m: 0.0, output_per_1m: 0.0, cache_read_per_1m: 0.0, cache_write_per_1m: 0.0,
+        });
+        // ByteDance Doubao/Seed — cache hit = 20% of input (via Volcano Ark, CNY/7.1)
+        add(&mut m, &["doubao-seed-2.0-pro", "bytedance/doubao-seed-2.0-pro"], ModelCostRate {
+            input_per_1m: 0.45, output_per_1m: 2.25, cache_read_per_1m: 0.09, cache_write_per_1m: 0.45,
+        });
+        add(&mut m, &["doubao-seed-2.0-lite", "bytedance/doubao-seed-2.0-lite"], ModelCostRate {
+            input_per_1m: 0.085, output_per_1m: 0.51, cache_read_per_1m: 0.017, cache_write_per_1m: 0.085,
+        });
+        add(&mut m, &["doubao-seed-1.6", "bytedance/doubao-seed-1.6"], ModelCostRate {
+            input_per_1m: 0.113, output_per_1m: 1.13, cache_read_per_1m: 0.023, cache_write_per_1m: 0.113,
+        });
+        add(&mut m, &["doubao-seed-1.6-flash", "bytedance/doubao-seed-1.6-flash"], ModelCostRate {
+            input_per_1m: 0.022, output_per_1m: 0.22, cache_read_per_1m: 0.004, cache_write_per_1m: 0.022,
+        });
+        // Moonshot Kimi
+        add(&mut m, &["kimi-k2", "moonshot/kimi-k2"], ModelCostRate {
+            input_per_1m: 0.60, output_per_1m: 2.40, cache_read_per_1m: 0.12, cache_write_per_1m: 0.60,
+        });
+        // Google Gemini
+        add(&mut m, &["gemini-2.5-pro", "google/gemini-2.5-pro"], ModelCostRate {
+            input_per_1m: 1.25, output_per_1m: 10.0, cache_read_per_1m: 0.315, cache_write_per_1m: 1.25,
+        });
+        add(&mut m, &["gemini-2.5-flash", "google/gemini-2.5-flash"], ModelCostRate {
+            input_per_1m: 0.15, output_per_1m: 0.60, cache_read_per_1m: 0.03, cache_write_per_1m: 0.15,
+        });
+
+        m
     }
 }
 
@@ -182,11 +285,16 @@ impl CostTracker {
             .get(&usage.model)
             .unwrap_or(&self.config.default_cost_rate);
 
-        let input_cost = (usage.prompt_tokens as f64 / 1000.0) * rate.input_per_1k;
-        let output_cost = (usage.completion_tokens as f64 / 1000.0) * rate.output_per_1k;
-        let cache_read_cost = (usage.cache_read_tokens as f64 / 1000.0) * rate.cache_read_per_1k;
+        // Cache hit tokens are charged at the lower cache_read rate, not the full input rate.
+        // DeepSeek: prompt_tokens = cache_hit + cache_miss; only cache_miss pays full price.
+        // Anthropic: prompt_tokens excludes cache_read (counted separately).
+        let non_cached_input = usage.prompt_tokens.saturating_sub(usage.cache_read_tokens);
+        let input_cost = (non_cached_input as f64 / 1_000_000.0) * rate.input_per_1m;
+        let output_cost = (usage.completion_tokens as f64 / 1_000_000.0) * rate.output_per_1m;
+        let cache_read_cost =
+            (usage.cache_read_tokens as f64 / 1_000_000.0) * rate.cache_read_per_1m;
         let cache_write_cost =
-            (usage.cache_creation_tokens as f64 / 1000.0) * rate.cache_write_per_1k;
+            (usage.cache_creation_tokens as f64 / 1_000_000.0) * rate.cache_write_per_1m;
 
         input_cost + output_cost + cache_read_cost + cache_write_cost
     }
@@ -404,51 +512,44 @@ mod tests {
     #[test]
     fn budget_warning_at_threshold() {
         let config = CostTrackerConfig {
-            budget_limit_usd: Some(1.0),
+            budget_limit_usd: Some(0.01),
             budget_warn_threshold: 0.8,
             ..Default::default()
         };
         let mut tracker = CostTracker::new(config);
 
-        // Each call ~0.003 * 100 + 0.015 * 50 = 0.3 + 0.75 = 1.05
-        // With default rates: input=0.003/1k, output=0.015/1k
-        // 100_000 prompt tokens = 0.3, 50_000 completion = 0.75 => 1.05 per call
-        // But our usage helper uses smaller numbers. Let's be explicit:
+        // Default rate: input=$0.14/1M, output=$0.28/1M
+        // 100_000 prompt: (100_000/1_000_000)*0.14 = 0.014
+        // 50_000 completion: (50_000/1_000_000)*0.28 = 0.014
+        // total = 0.028 => exceeds limit of 0.01
         let big_usage = CallUsage {
-            model: "claude-3".into(),
+            model: "unknown-model".into(),
             prompt_tokens: 100_000,
             completion_tokens: 50_000,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
         };
-        // cost = (100_000/1000)*0.003 + (50_000/1000)*0.015 = 300*0.003 + 50*0.015 = 0.9 + 0.75 = nope
-        // Actually: (100_000/1000)*0.003 = 100*0.003 = 0.3; (50_000/1000)*0.015 = 50*0.015 = 0.75 => 1.05
-        // Wait let me recalculate: 100_000 / 1000 = 100. 100 * 0.003 = 0.3
-        // 50_000 / 1000 = 50. 50 * 0.015 = 0.75
-        // total = 1.05 => exceeds limit of 1.0
 
         let alert = tracker.record(&big_usage);
-        // 1.05 > 1.0 = exceeded
         assert_eq!(alert, Some(BudgetAlert::Exceeded));
     }
 
     #[test]
     fn budget_warning_fires_before_exceeded() {
         let config = CostTrackerConfig {
-            budget_limit_usd: Some(10.0),
+            budget_limit_usd: Some(1.0),
             budget_warn_threshold: 0.5,
             ..Default::default()
         };
         let mut tracker = CostTracker::new(config);
 
-        // Small call: 10_000 prompt + 5_000 completion
-        // cost = (10/1000)*0.003*1000 ... wait, (10_000/1000)*0.003 = 10*0.003 = 0.03;
-        //   (5_000/1000)*0.015 = 5*0.015 = 0.075 => total per call = 0.105
-        // 50 calls => 5.25 => exceeds 50% of 10.0 = 5.0
+        // Default rate: input=$0.14/1M, output=$0.28/1M
+        // 100_000 prompt: 0.014, 50_000 completion: 0.014 => 0.028/call
+        // Need >= 0.5 (50% of 1.0) => ~18 calls
         let small_usage = CallUsage {
-            model: "gpt-4".into(),
-            prompt_tokens: 10_000,
-            completion_tokens: 5_000,
+            model: "unknown-model".into(),
+            prompt_tokens: 100_000,
+            completion_tokens: 50_000,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
         };
@@ -463,7 +564,7 @@ mod tests {
             }
         }
         assert!(saw_warning, "expected budget warning");
-        assert!(tracker.accumulated_cost_usd() >= 5.0);
+        assert!(tracker.accumulated_cost_usd() >= 0.5);
     }
 
     #[test]
@@ -476,12 +577,13 @@ mod tests {
     #[test]
     fn cost_accumulates_correctly() {
         let mut tracker = CostTracker::default();
-        // 1000 prompt / 1000 = 1.0 * 0.003 = 0.003
-        // 500 completion / 1000 = 0.5 * 0.015 = 0.0075
-        // total = 0.0105
-        tracker.record(&usage("claude-3", 1000, 500, 0));
-        let expected = 0.003 + 0.0075;
-        assert!((tracker.accumulated_cost_usd() - expected).abs() < 0.0001);
+        // Default rate: input=$0.14/1M, output=$0.28/1M
+        // 1000 prompt: (1000/1_000_000)*0.14 = 0.00014
+        // 500 completion: (500/1_000_000)*0.28 = 0.00014
+        // total = 0.00028
+        tracker.record(&usage("unknown-model", 1000, 500, 0));
+        let expected = 0.00014 + 0.00014;
+        assert!((tracker.accumulated_cost_usd() - expected).abs() < 0.00001);
     }
 
     #[test]
@@ -490,10 +592,10 @@ mod tests {
         rates.insert(
             "custom-model".into(),
             ModelCostRate {
-                input_per_1k: 0.01,
-                output_per_1k: 0.03,
-                cache_read_per_1k: 0.005,
-                cache_write_per_1k: 0.0075,
+                input_per_1m: 10.0,
+                output_per_1m: 30.0,
+                cache_read_per_1m: 5.0,
+                cache_write_per_1m: 7.5,
             },
         );
         let config = CostTrackerConfig {
@@ -502,15 +604,16 @@ mod tests {
         };
         let mut tracker = CostTracker::new(config);
 
-        // 2000 prompt: 2 * 0.01 = 0.02; 1000 completion: 1 * 0.03 = 0.03
+        // 2_000_000 prompt: (2_000_000/1_000_000)*10.0 = 20.0
+        // 1_000_000 completion: (1_000_000/1_000_000)*30.0 = 30.0
         tracker.record(&CallUsage {
             model: "custom-model".into(),
-            prompt_tokens: 2000,
-            completion_tokens: 1000,
+            prompt_tokens: 2_000_000,
+            completion_tokens: 1_000_000,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
         });
-        let expected = 0.02 + 0.03;
-        assert!((tracker.accumulated_cost_usd() - expected).abs() < 0.0001);
+        let expected = 20.0 + 30.0;
+        assert!((tracker.accumulated_cost_usd() - expected).abs() < 0.01);
     }
 }

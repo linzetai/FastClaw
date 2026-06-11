@@ -564,6 +564,7 @@ impl LlmProvider for OpenAiProvider {
                             prompt_tokens: u.prompt_tokens,
                             completion_tokens: u.completion_tokens,
                             total_tokens: u.total_tokens,
+                            ..Default::default()
                         }),
                     });
                 }
@@ -873,6 +874,10 @@ enum AnthropicContentBlock {
 struct AnthropicUsage {
     input_tokens: u32,
     output_tokens: u32,
+    #[serde(default)]
+    cache_read_input_tokens: u32,
+    #[serde(default)]
+    cache_creation_input_tokens: u32,
 }
 
 impl AnthropicProvider {
@@ -1054,6 +1059,9 @@ impl AnthropicProvider {
                 prompt_tokens: resp.usage.input_tokens,
                 completion_tokens: resp.usage.output_tokens,
                 total_tokens: resp.usage.input_tokens + resp.usage.output_tokens,
+                cache_read_tokens: resp.usage.cache_read_input_tokens,
+                cache_creation_tokens: resp.usage.cache_creation_input_tokens,
+                ..Default::default()
             }),
         }
     }
@@ -1364,6 +1372,7 @@ impl LlmProvider for AnthropicProvider {
                                         prompt_tokens: input_tokens,
                                         completion_tokens: output_tokens,
                                         total_tokens: total,
+                                        ..Default::default()
                                     })
                                 } else {
                                     None

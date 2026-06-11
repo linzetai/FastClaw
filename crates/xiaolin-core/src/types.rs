@@ -263,11 +263,42 @@ pub struct ChatChoice {
     pub finish_reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Usage {
+    #[serde(default)]
     pub prompt_tokens: u32,
+    #[serde(default)]
     pub completion_tokens: u32,
+    #[serde(default)]
     pub total_tokens: u32,
+    /// Anthropic: cache_read_input_tokens
+    #[serde(default, alias = "cache_read_input_tokens")]
+    pub cache_read_tokens: u32,
+    /// Anthropic: cache_creation_input_tokens
+    #[serde(default, alias = "cache_creation_input_tokens")]
+    pub cache_creation_tokens: u32,
+    /// DeepSeek: prompt_cache_hit_tokens
+    #[serde(default)]
+    pub prompt_cache_hit_tokens: u32,
+    /// DeepSeek: prompt_cache_miss_tokens
+    #[serde(default)]
+    pub prompt_cache_miss_tokens: u32,
+}
+
+impl Usage {
+    /// Unified cache read tokens across providers.
+    pub fn effective_cache_read_tokens(&self) -> u32 {
+        if self.cache_read_tokens > 0 {
+            self.cache_read_tokens
+        } else {
+            self.prompt_cache_hit_tokens
+        }
+    }
+
+    /// Unified cache creation tokens across providers.
+    pub fn effective_cache_creation_tokens(&self) -> u32 {
+        self.cache_creation_tokens
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

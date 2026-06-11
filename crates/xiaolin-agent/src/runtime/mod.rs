@@ -312,6 +312,8 @@ pub struct ExecutionParams<'a> {
     pub todo_store: Option<crate::builtin_tools::TodoStore>,
     /// Shared goal store so stop-hooks can check for active goals and trigger continuation.
     pub goal_store: Option<Arc<crate::builtin_tools::GoalStore>>,
+    /// Persistent cost store for SQLite-backed analytics.
+    pub cost_store: Option<Arc<xiaolin_session::CostStore>>,
 }
 
 /// Additional parameters specific to the streaming execution path.
@@ -720,6 +722,7 @@ impl AgentRuntime {
                 prompt_tokens: u.prompt_tokens,
                 completion_tokens: u.completion_tokens,
                 total_tokens: u.total_tokens,
+                ..Default::default()
             }
         });
         let response = ChatResponse {
@@ -775,6 +778,7 @@ impl AgentRuntime {
             session_store: None,
             todo_store: None,
             goal_store: None,
+            cost_store: None,
         };
         let stream = StreamParams {
             tx,
@@ -810,6 +814,31 @@ impl AgentRuntime {
         todo_store: Option<crate::builtin_tools::TodoStore>,
         goal_store: Option<Arc<crate::builtin_tools::GoalStore>>,
     ) -> anyhow::Result<TurnSummary> {
+        self.execute_unified_with_cost_store(
+            config, request, tool_registry, tx, approval_strategy,
+            llm_override, orchestrator, interaction_handle, subagent_prompt,
+            mode_state, session_store, todo_store, goal_store, None,
+        ).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_unified_with_cost_store(
+        &self,
+        config: &AgentConfig,
+        request: &ChatRequest,
+        tool_registry: &Arc<ToolRegistry>,
+        tx: tokio::sync::mpsc::Sender<AgentEvent>,
+        approval_strategy: xiaolin_core::tool_runtime::ApprovalStrategy,
+        llm_override: Option<Arc<dyn LlmProvider>>,
+        orchestrator: Arc<crate::runtime::orchestrator::ToolOrchestrator>,
+        interaction_handle: Option<xiaolin_session_actor::InteractionHandle>,
+        subagent_prompt: Option<String>,
+        mode_state: Option<crate::builtin_tools::ExecutionModeState>,
+        session_store: Option<Arc<xiaolin_session::SessionStore>>,
+        todo_store: Option<crate::builtin_tools::TodoStore>,
+        goal_store: Option<Arc<crate::builtin_tools::GoalStore>>,
+        cost_store: Option<Arc<xiaolin_session::CostStore>>,
+    ) -> anyhow::Result<TurnSummary> {
         let exec = ExecutionParams {
             config,
             request,
@@ -820,6 +849,7 @@ impl AgentRuntime {
             session_store,
             todo_store,
             goal_store,
+            cost_store,
         };
         let runtime_registry = self.cached_runtime_registry.clone();
         let stream = StreamParams {
@@ -847,6 +877,7 @@ impl AgentRuntime {
             ref session_store,
             ref todo_store,
             ref goal_store,
+            cost_store: _,
         } = *params;
         let StreamParams {
             ref tx,
@@ -1031,10 +1062,12 @@ impl AgentRuntime {
         let abort_token = tokio_util::sync::CancellationToken::new();
         let workspace_dir = request.work_dir.as_ref().map(std::path::Path::new);
         let budget_limit = config.behavior.budget_limit_usd;
-        let services = runtime_services::RuntimeServices::from_config(
+        let services = runtime_services::RuntimeServices::from_config_with_store(
             workspace_dir,
             budget_limit,
             abort_token,
+            params.cost_store.clone(),
+            request.session_id.as_ref().map(|s| s.to_string()),
         );
 
         // ── ValidationPipeline: post-tool output validation ─────────────
@@ -1659,8 +1692,8 @@ impl AgentRuntime {
                                 model: model.clone(),
                                 prompt_tokens: u.prompt_tokens,
                                 completion_tokens: u.completion_tokens,
-                                cache_read_tokens: 0,
-                                cache_creation_tokens: 0,
+                                cache_read_tokens: u.effective_cache_read_tokens(),
+                                cache_creation_tokens: u.effective_cache_creation_tokens(),
                             };
                             if let Some(alert) = services.record_llm_usage(call_usage).await {
                                 match alert {
@@ -1712,8 +1745,8 @@ impl AgentRuntime {
                             let cache_usage = cache_break_detection::CacheAwareUsage {
                                 prompt_tokens: u.prompt_tokens,
                                 completion_tokens: u.completion_tokens,
-                                cache_read_tokens: 0,
-                                cache_creation_tokens: 0,
+                                cache_read_tokens: u.effective_cache_read_tokens(),
+                                cache_creation_tokens: u.effective_cache_creation_tokens(),
                             };
                             let cache_snapshot =
                                 cache_detector.pre_call_snapshot("", "", &model, false, false);
@@ -2442,14 +2475,16 @@ impl AgentRuntime {
                     .await;
 
                 // ── Observer: record tool call observation ──
+                let tool_duration = tool_start_time.elapsed();
                 runtime_observer
                     .record_tool_call(
                         &tool_name,
                         result.success,
-                        tool_start_time.elapsed(),
+                        tool_duration,
                         &result.output.chars().take(200).collect::<String>(),
                     )
                     .await;
+                services.record_tool_call_stat(&tool_name, result.success, tool_duration.as_millis() as u64).await;
 
                 trajectory_steps.push(TrajectoryStep {
                     role: "assistant".into(),

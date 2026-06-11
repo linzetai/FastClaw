@@ -314,6 +314,7 @@ impl QueryLoopState {
                 prompt_tokens: self.acc_prompt_tokens,
                 completion_tokens: self.acc_completion_tokens,
                 total_tokens: total,
+                ..Default::default()
             })
         } else {
             None

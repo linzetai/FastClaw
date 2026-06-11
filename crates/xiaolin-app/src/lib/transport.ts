@@ -1245,6 +1245,73 @@ export async function testModelConnection(
   return tauriInvoke("test_model_connection", { url, apiKey, model });
 }
 
+// ─── Cost ───
+
+export interface CostSummaryData {
+  total_cost_usd: number;
+  today_cost_usd: number;
+  budget_limit: number | null;
+  budget_used_pct: number | null;
+}
+
+export interface TokenUsageDailyData {
+  date: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  cost_usd: number;
+  call_count: number;
+}
+
+export interface ToolCallDailyData {
+  date: string;
+  tool_name: string;
+  success_count: number;
+  failure_count: number;
+  total_duration_ms: number;
+}
+
+export async function costSummary(): Promise<CostSummaryData> {
+  const resp = (await wsClient.send("cost.summary")) as { data?: CostSummaryData };
+  return resp?.data ?? { total_cost_usd: 0, today_cost_usd: 0, budget_limit: null, budget_used_pct: null };
+}
+
+export async function costDaily(start?: string, end?: string): Promise<TokenUsageDailyData[]> {
+  const params: Record<string, unknown> = {};
+  if (start) params.start = start;
+  if (end) params.end = end;
+  const resp = (await wsClient.send("cost.daily", params)) as { data?: { items?: TokenUsageDailyData[] } };
+  return resp?.data?.items ?? [];
+}
+
+export async function costTools(start?: string, end?: string): Promise<ToolCallDailyData[]> {
+  const params: Record<string, unknown> = {};
+  if (start) params.start = start;
+  if (end) params.end = end;
+  const resp = (await wsClient.send("cost.tools", params)) as { data?: { items?: ToolCallDailyData[] } };
+  return resp?.data?.items ?? [];
+}
+
+export interface SessionCostData {
+  session_id: string;
+  started_at: string;
+  ended_at: string | null;
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  turn_count: number;
+  model_breakdown: string | null;
+}
+
+export async function costSessions(limit?: number): Promise<SessionCostData[]> {
+  const params: Record<string, unknown> = {};
+  if (limit) params.limit = limit;
+  const resp = (await wsClient.send("cost.sessions", params)) as { data?: { items?: SessionCostData[] } };
+  return resp?.data?.items ?? [];
+}
+
 // ─── Backward Compatibility Aliases ───
 // These are kept for gradual migration of the frontend code.
 

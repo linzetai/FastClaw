@@ -3,6 +3,7 @@ mod automations;
 mod channels;
 mod chat;
 mod config;
+mod cost_ws;
 mod cron;
 mod execution;
 mod git;
@@ -707,6 +708,18 @@ async fn dispatch(
         }
         ClientOp::CronListRuns { job_id, limit } => {
             cron::handle_cron_list_runs(sender, state, id, &job_id, limit).await;
+        }
+        ClientOp::CostSummary => {
+            cost_ws::handle_cost_summary(sender, state, id).await;
+        }
+        ClientOp::CostDaily { start, end } => {
+            cost_ws::handle_cost_daily(sender, state, id, start, end).await;
+        }
+        ClientOp::CostTools { start, end } => {
+            cost_ws::handle_cost_tools(sender, state, id, start, end).await;
+        }
+        ClientOp::CostSessions { limit } => {
+            cost_ws::handle_cost_sessions(sender, state, id, limit).await;
         }
         ClientOp::AutomationsList => {
             automations::handle_automations_list(sender, state, id).await;

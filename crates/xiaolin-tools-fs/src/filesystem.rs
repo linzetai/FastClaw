@@ -92,10 +92,20 @@ fn state_dir_root() -> Option<PathBuf> {
         .ok()
 }
 
-fn current_file_access_mode() -> FileAccessMode {
+pub fn current_file_access_mode() -> FileAccessMode {
     FILE_ACCESS_MODE
         .try_with(|m| *m)
         .unwrap_or(FileAccessMode::Workspace)
+}
+
+pub fn current_effective_work_dir() -> Option<PathBuf> {
+    EFFECTIVE_WORK_DIR.try_with(|d| d.clone()).unwrap_or(None)
+}
+
+pub fn current_additional_allowed_paths() -> Vec<PathBuf> {
+    ADDITIONAL_ALLOWED_PATHS
+        .try_with(|p| p.clone())
+        .unwrap_or_default()
 }
 
 fn well_known_allowed_prefixes() -> Vec<PathBuf> {

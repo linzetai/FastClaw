@@ -839,6 +839,10 @@ impl StateBuilder {
         let inbound_rx = p5.phase2.phase4.inbound_rx;
         let trajectory_store = Arc::new(p5.phase2.trajectory_store);
         let skill_store = Arc::new(p5.phase2.skill_store);
+        let cost_store = Arc::new(
+            xiaolin_session::CostStore::open(p5.phase2.phase4.phase3.phase1.pool.clone())
+                .await?,
+        );
         p5.phase2
             .phase4
             .phase3
@@ -885,6 +889,9 @@ impl StateBuilder {
         let permission_preset_registry =
             Arc::new(xiaolin_core::agent_config::PermissionPresetRegistry::default());
 
+        let live_agents_swap: Arc<ArcSwap<Vec<AgentConfig>>> =
+            Arc::new(ArcSwap::from_pointee(initial_agents.clone()));
+
         let session_manager = Arc::new(xiaolin_session_actor::SessionManager::new(
             Arc::new(xiaolin_agent::RuntimeTurnExecutor {
                 runtime: runtime_for_session.clone(),
@@ -900,6 +907,8 @@ impl StateBuilder {
                 subagent_manager: None,
                 tool_orchestrator: Some(tool_orchestrator_for_executor),
                 behavior_overrides: Some(session_behavior_overrides.clone()),
+                live_agents: Some(live_agents_swap.clone()),
+                cost_store: Some(cost_store.clone()),
             }),
         ));
         let state = AppState {
@@ -908,6 +917,7 @@ impl StateBuilder {
                 config_live: Arc::new(ArcSwap::new(Arc::new(config_live_val))),
                 runtime_route_bindings: Arc::new(tokio::sync::RwLock::new(Vec::new())),
                 last_good_agents: Arc::new(tokio::sync::RwLock::new(initial_agents.clone())),
+                live_agents_swap: live_agents_swap.clone(),
             },
             rt: super::RuntimeState {
                 router: Arc::new(tokio::sync::RwLock::new(p5.phase2.phase4.phase3.router)),
@@ -936,6 +946,7 @@ impl StateBuilder {
                 trajectory_store,
                 skill_store,
                 context_engine: Arc::new(p5.phase2.context_engine),
+                cost_store: cost_store.clone(),
             },
             mem: super::MemoryState {
                 agent_episodic: Arc::new(p5.phase2.agent_episodic_map),

@@ -331,6 +331,16 @@ impl Tool for SubAgentTool {
             }
         };
 
+        let inherited_ctx = Some(crate::SubAgentInheritedContext {
+            work_dir: xiaolin_tools_fs::filesystem::current_effective_work_dir()
+                .map(|p| p.to_string_lossy().to_string()),
+            file_access: xiaolin_tools_fs::filesystem::current_file_access_mode(),
+            additional_allowed_paths: xiaolin_tools_fs::filesystem::current_additional_allowed_paths()
+                .into_iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect(),
+        });
+
         if use_background {
             let run_id = match self
                 .manager
@@ -347,6 +357,7 @@ impl Tool for SubAgentTool {
                     parent_tx,
                     None,
                     concurrency_safe,
+                    inherited_ctx,
                 )
                 .await
             {
@@ -377,6 +388,7 @@ impl Tool for SubAgentTool {
                     parent_tx,
                     None,
                     concurrency_safe,
+                    inherited_ctx,
                 )
                 .await
             {

@@ -10,6 +10,7 @@
   "subAgents": "Sub-Agents",
   "notification": "通知",
   "gateway": "网关",
+  "cost": "成本",
   "migration": "迁移",
   "cron": "定时任务",
   "mcp": "MCP 服务",

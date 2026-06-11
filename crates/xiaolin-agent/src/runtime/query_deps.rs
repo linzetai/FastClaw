@@ -253,6 +253,7 @@ mod tests {
                 prompt_tokens: 100,
                 completion_tokens: 50,
                 total_tokens: 150,
+                ..Default::default()
             }),
         }
     }

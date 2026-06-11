@@ -45,4 +45,4 @@ pub use spawn_controller::{
     SpawnController, SpawnControllerError,
 };
 pub use subagent::{SubAgentGetTool, SubAgentListTool, SubAgentTool, WaitAgentTool};
-pub use subagent_manager::SubAgentManager;
+pub use subagent_manager::{SubAgentInheritedContext, SubAgentManager};

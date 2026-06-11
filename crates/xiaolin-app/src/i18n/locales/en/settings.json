@@ -10,6 +10,7 @@
   "subAgents": "Sub-Agents",
   "notification": "Notification",
   "gateway": "Gateway",
+  "cost": "Cost",
   "migration": "Migration",
   "cron": "Cron Jobs",
   "mcp": "MCP Servers",

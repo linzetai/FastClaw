@@ -5,10 +5,19 @@ use dashmap::DashMap;
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use xiaolin_core::agent_config::{AgentConfig, SubAgentDef, SubAgentPolicy};
+use xiaolin_core::agent_config::{AgentConfig, FileAccessMode, SubAgentDef, SubAgentPolicy};
 use xiaolin_core::tool::ToolRegistry;
 use xiaolin_core::types::{SubAgentRun, SubAgentStatus, SubAgentType, Usage};
 use xiaolin_protocol::{AgentEvent, CompletionSummary, TokenUsage, TurnId};
+
+/// Context inherited from the parent session to ensure subagents run
+/// with the same file access permissions and work directory.
+#[derive(Clone, Debug)]
+pub struct SubAgentInheritedContext {
+    pub work_dir: Option<String>,
+    pub file_access: FileAccessMode,
+    pub additional_allowed_paths: Vec<String>,
+}
 
 use crate::llm::LlmProvider;
 use crate::runtime::AgentRuntime;
@@ -223,6 +232,7 @@ impl SubAgentManager {
         parent_tx: mpsc::Sender<AgentEvent>,
         llm_override: Option<Arc<dyn LlmProvider>>,
         concurrency_safe: bool,
+        inherited_context: Option<SubAgentInheritedContext>,
     ) -> anyhow::Result<String> {
         if !policy.enabled {
             anyhow::bail!("sub-agent delegation is disabled for this agent");
@@ -336,6 +346,7 @@ impl SubAgentManager {
                     forward_turn_id,
                     llm_override,
                     orchestrator.clone(),
+                    inherited_context.as_ref(),
                 ) => {
                     res
                 }
@@ -357,7 +368,7 @@ impl SubAgentManager {
                                 prompt_tokens: u.prompt_tokens,
                                 completion_tokens: u.completion_tokens,
                                 total_tokens: u.total_tokens,
-                                cached_input_tokens: 0,
+                                cached_input_tokens: u.effective_cache_read_tokens(),
                             }),
                             elapsed_ms,
                         })
@@ -484,6 +495,7 @@ impl SubAgentManager {
         parent_tx: mpsc::Sender<AgentEvent>,
         llm_override: Option<Arc<dyn LlmProvider>>,
         concurrency_safe: bool,
+        inherited_context: Option<SubAgentInheritedContext>,
     ) -> anyhow::Result<(String, String)> {
         let session_pool = self
             .controller
@@ -504,6 +516,7 @@ impl SubAgentManager {
                 parent_tx,
                 llm_override,
                 concurrency_safe,
+                inherited_context,
             )
             .await?;
 
@@ -568,6 +581,7 @@ impl SubAgentManager {
         parent_tx: mpsc::Sender<AgentEvent>,
         llm_override: Option<Arc<dyn LlmProvider>>,
         concurrency_safe: bool,
+        inherited_context: Option<SubAgentInheritedContext>,
     ) -> anyhow::Result<(String, String)> {
         self.spawn_and_wait(
             agent_config,
@@ -582,6 +596,7 @@ impl SubAgentManager {
             parent_tx,
             llm_override,
             concurrency_safe,
+            inherited_context,
         )
         .await
     }
@@ -601,6 +616,7 @@ impl SubAgentManager {
         turn_id: TurnId,
         llm_override: Option<Arc<dyn LlmProvider>>,
         orchestrator: Arc<ToolOrchestrator>,
+        inherited_context: Option<&SubAgentInheritedContext>,
     ) -> anyhow::Result<(String, u32, u32, Option<Usage>)> {
         use xiaolin_core::types::{ChatMessage, ChatRequest, Role};
 
@@ -620,6 +636,8 @@ impl SubAgentManager {
         ..Default::default()
         });
 
+        let work_dir = inherited_context.and_then(|ic| ic.work_dir.clone());
+
         let request = ChatRequest {
             messages,
             stream: true,
@@ -630,7 +648,7 @@ impl SubAgentManager {
             session_id: None,
             tools: None,
             slash_intent: None,
-            work_dir: None,
+            work_dir,
             response_language: None,
         };
 
@@ -706,6 +724,7 @@ impl SubAgentManager {
                                 prompt_tokens: u.prompt_tokens,
                                 completion_tokens: u.completion_tokens,
                                 total_tokens: u.total_tokens,
+                                ..Default::default()
                             });
                         }
                     }
@@ -716,9 +735,22 @@ impl SubAgentManager {
             (accumulated_text, final_usage)
         });
 
+        let effective_config;
+        let config_ref = if let Some(ic) = inherited_context {
+            let mut cfg = config.clone();
+            cfg.behavior.file_access = ic.file_access;
+            if !ic.additional_allowed_paths.is_empty() {
+                cfg.behavior.additional_allowed_paths = ic.additional_allowed_paths.clone();
+            }
+            effective_config = cfg;
+            &effective_config
+        } else {
+            config
+        };
+
         let stream_result = runtime
             .execute_unified(
-                config,
+                config_ref,
                 &request,
                 tool_registry,
                 child_tx,
@@ -906,6 +938,7 @@ mod tests {
                 tx,
                 None,
                 false,
+                None,
             )
             .await;
         assert!(err.is_err());
@@ -936,6 +969,7 @@ mod tests {
                 tx,
                 None,
                 false,
+                None,
             )
             .await;
         assert!(err.is_err());

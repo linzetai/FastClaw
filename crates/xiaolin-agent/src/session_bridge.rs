@@ -8,6 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use xiaolin_core::agent_config::AgentConfig;
 use xiaolin_core::tool::ToolRegistry;
@@ -58,15 +59,26 @@ pub struct RuntimeTurnExecutor {
     /// Key is session_id, value is the resolved BehaviorConfig for that session.
     pub behavior_overrides:
         Option<Arc<DashMap<String, xiaolin_core::agent_config::BehaviorConfig>>>,
+    /// Lock-free access to the latest hot-reloaded agent configs.
+    /// Falls back to `self.config` if None or empty.
+    pub live_agents: Option<Arc<ArcSwap<Vec<AgentConfig>>>>,
+    /// Persistent cost store for SQLite-backed analytics.
+    pub cost_store: Option<Arc<xiaolin_session::CostStore>>,
 }
 
 impl RuntimeTurnExecutor {
     /// Resolve the effective BehaviorConfig for a session.
-    /// Uses per-session override if set, otherwise falls back to the global config.
+    /// Priority: per-session override > live hot-reloaded config > startup snapshot.
     fn effective_behavior(&self, session_id: &str) -> xiaolin_core::agent_config::BehaviorConfig {
         if let Some(ref overrides) = self.behavior_overrides {
             if let Some(entry) = overrides.get(session_id) {
                 return entry.value().clone();
+            }
+        }
+        if let Some(ref live) = self.live_agents {
+            let agents = live.load();
+            if let Some(agent) = agents.first() {
+                return agent.behavior.clone();
             }
         }
         self.config.behavior.clone()
@@ -410,7 +422,7 @@ impl RuntimeTurnExecutor {
             let mode_state_c = mode_state.clone();
             let plan_ctx_c = plan_ctx.clone();
 
-            let runtime_fut: std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<xiaolin_protocol::TurnSummary>> + Send>> = Box::pin(runtime.execute_unified(
+            let runtime_fut: std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<xiaolin_protocol::TurnSummary>> + Send>> = Box::pin(runtime.execute_unified_with_cost_store(
                 config,
                 &reprompt_request,
                 &tool_registry,
@@ -424,6 +436,7 @@ impl RuntimeTurnExecutor {
                 session_store.clone(),
                 todo_store.clone(),
                 None,
+                self.cost_store.clone(),
             ));
 
             let reprompt_result = {
@@ -558,6 +571,18 @@ impl TurnExecutor for RuntimeTurnExecutor {
         );
         config.behavior = effective_behavior;
 
+        // Fallback: if the request has no work_dir, try to load from session store.
+        let mut request = request;
+        if request.work_dir.is_none() {
+            if let Some(ref store) = self.session_store {
+                if let Ok(Some(session)) = store.get_session(&sid).await {
+                    if session.work_dir.is_some() {
+                        request.work_dir = session.work_dir;
+                    }
+                }
+            }
+        }
+
         let orchestrator = self.tool_orchestrator.clone().unwrap_or_else(|| {
             Arc::new(crate::runtime::orchestrator::ToolOrchestrator::new())
         });
@@ -653,7 +678,8 @@ impl TurnExecutor for RuntimeTurnExecutor {
             let mode_state_for_loop = mode_state.clone();
             let plan_ctx_for_loop = plan_ctx.clone();
 
-            let runtime_fut: std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<xiaolin_protocol::TurnSummary>> + Send>> = Box::pin(runtime.execute_unified(
+            let cost_store_for_runtime = self.cost_store.clone();
+            let runtime_fut: std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<xiaolin_protocol::TurnSummary>> + Send>> = Box::pin(runtime.execute_unified_with_cost_store(
                 &config,
                 &request,
                 &tool_registry,
@@ -667,6 +693,7 @@ impl TurnExecutor for RuntimeTurnExecutor {
                 session_store.clone(),
                 todo_store.clone(),
                 goal_store,
+                cost_store_for_runtime,
             ));
 
             let steer_inbox_inner = steer_inbox.clone();

@@ -6,6 +6,7 @@
 //! so that the caller can opt-in via configuration.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::Mutex;
@@ -24,18 +25,18 @@ pub(crate) struct RuntimeServices {
     pub cost_tracker: Option<Mutex<CostTracker>>,
     pub magic_docs: Option<DocIndex>,
     pub permissions: Option<PermissionRuleEngine>,
+    pub cost_store: Option<Arc<xiaolin_session::CostStore>>,
     abort_token: CancellationToken,
+    session_id: Option<String>,
 }
 
 impl RuntimeServices {
-    /// Create a new `RuntimeServices` from configuration paths.
-    ///
-    /// Each subsystem is independently optional; a missing config file or
-    /// disabled feature simply results in `None` for that field.
-    pub fn from_config(
+    pub fn from_config_with_store(
         workspace_dir: Option<&Path>,
         budget_limit_usd: Option<f64>,
         abort_token: CancellationToken,
+        cost_store: Option<Arc<xiaolin_session::CostStore>>,
+        session_id: Option<String>,
     ) -> Self {
         let hooks = Self::load_hooks(workspace_dir);
         let cost_tracker = Self::build_cost_tracker(budget_limit_usd);
@@ -57,7 +58,9 @@ impl RuntimeServices {
             cost_tracker,
             magic_docs,
             permissions,
+            cost_store,
             abort_token,
+            session_id,
         }
     }
 
@@ -125,11 +128,53 @@ impl RuntimeServices {
     // ── Cost tracking ─────────────────────────────────────────────────────
 
     /// Record an LLM call's token usage. Returns a budget alert if a
-    /// threshold was crossed.
+    /// threshold was crossed. Also persists to CostStore if available.
     pub async fn record_llm_usage(&self, usage: CallUsage) -> Option<BudgetAlert> {
         let tracker = self.cost_tracker.as_ref()?;
         let mut guard = tracker.lock().await;
-        guard.record(&usage)
+        let alert = guard.record(&usage);
+
+        if let Some(ref store) = self.cost_store {
+            let store = store.clone();
+            let model = usage.model.clone();
+            let prompt = usage.prompt_tokens as i64;
+            let completion = usage.completion_tokens as i64;
+            let cached = usage.cache_read_tokens as i64;
+            let cache_creation = usage.cache_creation_tokens as i64;
+            let session_id = self.session_id.clone().unwrap_or_default();
+            let cost_usd = guard.compute_call_cost(&usage);
+            let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+            tokio::spawn(async move {
+                if let Err(e) = store
+                    .record_token_usage(&date, &model, prompt, completion, cached, cache_creation, cost_usd)
+                    .await
+                {
+                    tracing::warn!(error = %e, "failed to persist token usage");
+                }
+                if let Err(e) = store
+                    .upsert_session_cost(&session_id, cost_usd, prompt, completion, Some(&model))
+                    .await
+                {
+                    tracing::warn!(error = %e, "failed to persist session cost");
+                }
+            });
+        }
+
+        alert
+    }
+
+    /// Record a tool call outcome for cost analytics.
+    pub async fn record_tool_call_stat(&self, tool_name: &str, success: bool, duration_ms: u64) {
+        if let Some(ref store) = self.cost_store {
+            let store = store.clone();
+            let tool = tool_name.to_string();
+            let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+            tokio::spawn(async move {
+                if let Err(e) = store.record_tool_call(&date, &tool, success, duration_ms as i64).await {
+                    tracing::warn!(error = %e, "failed to persist tool call stat");
+                }
+            });
+        }
     }
 
     /// Current accumulated cost in USD.
@@ -204,8 +249,10 @@ impl RuntimeServices {
     }
 
     fn build_cost_tracker(budget_limit_usd: Option<f64>) -> Option<Mutex<CostTracker>> {
+        use super::cost_tracker::ModelCostRate;
         let config = CostTrackerConfig {
             budget_limit_usd,
+            model_cost_rates: ModelCostRate::builtin_rates(),
             ..Default::default()
         };
         Some(Mutex::new(CostTracker::new(config)))
@@ -307,7 +354,9 @@ impl RuntimeServices {
             cost_tracker: None,
             magic_docs: None,
             permissions: None,
+            cost_store: None,
             abort_token,
+            session_id: None,
         }
     }
 }
@@ -333,6 +382,8 @@ mod tests {
             magic_docs: None,
             permissions: None,
             abort_token: CancellationToken::new(),
+            cost_store: None,
+            session_id: None,
         };
         let alert = svc
             .record_llm_usage(CallUsage {

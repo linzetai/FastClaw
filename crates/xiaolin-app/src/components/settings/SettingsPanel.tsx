@@ -1,6 +1,6 @@
 import { useState, useEffect, lazy, Suspense, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Settings2, Box, Wrench, Server, Info, Search, Shield, X, RotateCcw, Bot } from "lucide-react";
+import { Settings2, Box, Wrench, Server, Info, Search, Shield, X, RotateCcw, Bot, DollarSign } from "lucide-react";
 import { ICON, BTN_ICON } from "../../lib/ui-tokens";
 
 const GeneralTab = lazy(() => import("./GeneralTab").then((m) => ({ default: m.GeneralTab })));
@@ -12,13 +12,14 @@ const SecurityTab = lazy(() => import("./SecurityTab").then((m) => ({ default: m
 const GatewayTab = lazy(() => import("./GatewayTab").then((m) => ({ default: m.GatewayTab })));
 const AboutTab = lazy(() => import("./AboutTab").then((m) => ({ default: m.AboutTab })));
 const MigrationTab = lazy(() => import("./MigrationTab").then((m) => ({ default: m.MigrationTab })));
+const CostTab = lazy(() => import("../cost/CostDashboard").then((m) => ({ default: m.CostDashboard })));
 
 interface SettingsPanelProps {
   open: boolean;
   onClose: () => void;
 }
 
-type SettingsTab = "general" | "models" | "web-search" | "skills" | "sub-agents" | "security" | "gateway" | "about" | "migration";
+type SettingsTab = "general" | "models" | "web-search" | "skills" | "sub-agents" | "security" | "gateway" | "cost" | "about" | "migration";
 
 export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const { t } = useTranslation("settings");
@@ -32,6 +33,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     { id: "sub-agents", label: t("subAgents"), icon: <Bot {...ICON.md} /> },
     { id: "security", label: t("security"), icon: <Shield {...ICON.md} /> },
     { id: "gateway", label: t("gateway"), icon: <Server {...ICON.md} /> },
+    { id: "cost", label: t("cost"), icon: <DollarSign {...ICON.md} /> },
     { id: "migration", label: t("migration"), icon: <RotateCcw {...ICON.md} /> },
     { id: "about", label: t("about"), icon: <Info {...ICON.md} /> },
   ], [t]);
@@ -105,6 +107,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 {tab === "sub-agents" && <SubAgentsTab />}
                 {tab === "security" && <SecurityTab />}
                 {tab === "gateway" && <GatewayTab />}
+                {tab === "cost" && <CostTab />}
                 {tab === "migration" && <MigrationTab />}
                 {tab === "about" && <AboutTab />}
               </div>

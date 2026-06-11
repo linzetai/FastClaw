@@ -503,6 +503,7 @@ impl MiddlewareLlmProvider {
                 prompt_tokens: u.prompt_tokens,
                 completion_tokens: u.completion_tokens,
                 total_tokens: u.total_tokens,
+                ..Default::default()
             }),
         })
     }
@@ -901,6 +902,7 @@ impl MiddlewareLlmProvider {
                                         prompt_tokens: input_tokens,
                                         completion_tokens: output_tokens,
                                         total_tokens: total,
+                                        ..Default::default()
                                     })
                                 } else {
                                     None
@@ -1048,6 +1050,7 @@ fn anthropic_value_to_chat_response(v: serde_json::Value) -> anyhow::Result<Chat
             prompt_tokens: input_tokens,
             completion_tokens: output_tokens,
             total_tokens: input_tokens + output_tokens,
+            ..Default::default()
         }),
     })
 }
@@ -2021,6 +2024,7 @@ mod tests {
                 prompt_tokens: 10,
                 completion_tokens: 5,
                 total_tokens: 15,
+                ..Default::default()
             }),
         };
 
