@@ -722,7 +722,8 @@ export function MessageStream(_props: MessageStreamProps) {
                     top: 0,
                     left: 0,
                     width: "100%",
-                    transform: `translateY(${virtualItem.start}px)`,
+                    transform: `translate3d(0, ${Math.round(virtualItem.start)}px, 0)`,
+                    willChange: "transform",
                   }}
                 >
                   <MessageRendererRow

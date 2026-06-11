@@ -126,6 +126,7 @@ const AiReactionBar = memo(function AiReactionBar({ content, sessionId, turnId }
   return (
     <div
       className="mt-1 flex items-center gap-0.5 -ml-1.5 opacity-0 group-hover/message:opacity-100 transition-opacity duration-150"
+      style={{ willChange: "opacity", backfaceVisibility: "hidden" }}
     >
       <button onClick={handleCopy} className={btnCls} style={{ color: copied ? "var(--green)" : defaultColor }} title={t("copy", { ns: "common" })}>
         {copied ? <Check {...iconProps} strokeWidth={ICON_ACTIVE_STROKE} style={{ animation: "scale-spring var(--duration-normal) var(--ease-spring)" }} /> : <Copy {...iconProps} />}
