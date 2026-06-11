@@ -598,8 +598,7 @@ export function AppSidebar() {
           flexDirection: "column",
           background: "var(--bg-shell)",
           minHeight: 0,
-          overflowX: "visible",
-          overflowY: "hidden",
+          overflow: "hidden",
           transition: dragging ? "none" : "width 0.2s ease",
           position: "relative",
           pointerEvents: collapsed ? "none" : "auto",
@@ -740,15 +739,15 @@ export function AppSidebar() {
           <SidebarAction icon={<Settings size={ICON_SIZE} strokeWidth={1.7} />} label={t("settings")} onClick={openSettings} />
         </div>
 
-        {/* Resize handle — mostly in content area to avoid blocking sidebar scrollbar */}
+        {/* Resize handle */}
         {!collapsed && (
           <div
             style={{
               position: "absolute",
-              right: -14,
+              right: 0,
               top: 0,
               bottom: 0,
-              width: 16,
+              width: 6,
               cursor: "col-resize",
               zIndex: 10,
             }}
@@ -760,7 +759,7 @@ export function AppSidebar() {
             <div
               style={{
                 position: "absolute",
-                left: 2,
+                right: 0,
                 top: 0,
                 bottom: 0,
                 width: 2,

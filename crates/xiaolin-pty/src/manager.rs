@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
+use tokio::sync::broadcast;
 use tokio::time;
 
 use crate::session::{PtySession, PtySessionConfig};
@@ -39,6 +40,28 @@ impl PtySessionManager {
         Ok(id)
     }
 
+    pub fn create_session_with_subscriber(
+        &self,
+        config: PtySessionConfig,
+    ) -> Result<(String, broadcast::Receiver<Vec<u8>>), String> {
+        let mut sessions = self.sessions.lock();
+        if sessions.len() >= self.max_sessions {
+            return Err("max sessions reached".into());
+        }
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let session = PtySession::spawn(id.clone(), config)?;
+        let rx = session.subscribe();
+        tracing::info!(session_id = %id, "PTY session created with subscriber");
+        sessions.insert(id.clone(), session);
+        Ok((id, rx))
+    }
+
+    pub fn subscribe(&self, id: &str) -> Option<broadcast::Receiver<Vec<u8>>> {
+        let sessions = self.sessions.lock();
+        sessions.get(id).map(|s| s.subscribe())
+    }
+
     pub fn get_session<F, R>(&self, id: &str, f: F) -> Option<R>
     where
         F: FnOnce(&PtySession) -> R,
@@ -72,12 +95,18 @@ impl PtySessionManager {
             .values()
             .map(|s| SessionInfo {
                 id: s.id.clone(),
+                source: s.source.clone(),
                 alive: s.is_alive(),
                 cols: s.cols(),
                 rows: s.rows(),
                 idle_secs: s.last_activity.lock().elapsed().as_secs(),
             })
             .collect()
+    }
+
+    pub fn count_by_source(&self, source: &str) -> usize {
+        let sessions = self.sessions.lock();
+        sessions.values().filter(|s| s.source == source).count()
     }
 
     pub fn session_count(&self) -> usize {
@@ -124,6 +153,7 @@ impl Default for PtySessionManager {
 
 pub struct SessionInfo {
     pub id: String,
+    pub source: String,
     pub alive: bool,
     pub cols: u16,
     pub rows: u16,

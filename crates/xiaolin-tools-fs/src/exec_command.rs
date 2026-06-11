@@ -36,7 +36,8 @@ impl Tool for ExecCommandTool {
     }
 
     fn description(&self) -> &str {
-        "Start a command in an interactive PTY session. Returns the initial output and a \
+        "[DEPRECATED: use terminal_open + terminal_input instead] \
+         Start a command in an interactive PTY session. Returns the initial output and a \
          session_id for follow-up interaction via write_stdin. Use for REPLs, interactive \
          processes, or long-running commands where you need to send additional input."
     }
@@ -167,7 +168,8 @@ impl Tool for WriteStdinTool {
     }
 
     fn description(&self) -> &str {
-        "Write text to an existing PTY session's stdin and return new output. \
+        "[DEPRECATED: use terminal_input instead] \
+         Write text to an existing PTY session's stdin and return new output. \
          Use to interact with REPLs, respond to prompts, or send commands to \
          a running interactive process started with exec_command."
     }

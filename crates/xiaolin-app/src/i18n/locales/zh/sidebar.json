@@ -48,5 +48,15 @@
   "filterClear": "清除",
   "loadMore": "加载更多",
   "loadingMore": "加载中...",
-  "navFailed": "无法定位到该消息"
+  "navFailed": "无法定位到该消息",
+  "terminal": "终端",
+  "output": "输出",
+  "shell": "Shell",
+  "newTerminal": "新建终端",
+  "noOutputYet": "暂无终端输出",
+  "outputHint": "执行命令时输出将在此显示",
+  "connecting": "连接中...",
+  "reconnecting": "重连中...",
+  "disconnected": "已断开",
+  "clear": "清除"
 }

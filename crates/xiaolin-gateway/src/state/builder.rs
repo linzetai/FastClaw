@@ -530,13 +530,13 @@ impl StateBuilder {
         );
         tracing::info!("registered plan mode tools (enter/exit_plan_mode)");
 
-        // PTY interactive terminal tools
-        let pty_manager = Arc::new(
+        // Legacy PTY interactive terminal tools (deprecated)
+        let legacy_pty_manager = Arc::new(
             xiaolin_agent::builtin_tools::exec_command::PtySessionManager::with_default_timeout(),
         );
         xiaolin_agent::builtin_tools::register_exec_command_tools(
             &p3.tool_registry,
-            pty_manager,
+            legacy_pty_manager,
         );
 
         // Goal management tools (backed by session SQLite)
@@ -1019,6 +1019,13 @@ impl StateBuilder {
                 session_manager,
             },
         };
+
+        // Agent terminal tools (terminal_open, terminal_input, terminal_close)
+        xiaolin_agent::builtin_tools::register_terminal_tools(
+            &state.rt.tool_registry,
+            state.strm.pty_manager.clone(),
+        );
+        tracing::info!("registered agent terminal tools (terminal_open/input/close)");
 
         state
             .rt

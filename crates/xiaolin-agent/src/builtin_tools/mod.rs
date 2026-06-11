@@ -16,6 +16,7 @@ mod skill;
 mod snip;
 mod task;
 pub mod team;
+pub mod terminal;
 mod todo;
 mod tool_search;
 mod utility;
@@ -84,6 +85,7 @@ pub use tool_search::ToolSearchTool;
 pub use utility::{CurrentTimeTool, SleepTool};
 pub use workflow::{WorkflowDefinition, WorkflowRun, WorkflowStatus, WorkflowStore, WorkflowTool};
 pub use xiaolin_tools_fs::worktree::{EnterWorktreeTool, ExitWorktreeTool, WorktreeState};
+pub use terminal::{register_terminal_tools, TerminalCloseTool, TerminalInputTool, TerminalOpenTool};
 
 pub use xiaolin_tools_fs::exec_command;
 pub use xiaolin_tools_fs::file_state_cache;

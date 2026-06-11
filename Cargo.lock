@@ -10379,6 +10379,7 @@ dependencies = [
  "xiaolin-network-proxy",
  "xiaolin-observe",
  "xiaolin-protocol",
+ "xiaolin-pty",
  "xiaolin-sandbox",
  "xiaolin-security",
  "xiaolin-self-iter",

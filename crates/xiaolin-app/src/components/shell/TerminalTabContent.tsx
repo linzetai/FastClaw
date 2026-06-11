@@ -1,8 +1,9 @@
 import { useState, useCallback, useRef, useEffect, type CSSProperties } from "react";
-import { Plus, X, TerminalSquare } from "lucide-react";
+import { Plus, X, TerminalSquare, Bot } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { TerminalPanel } from "./TerminalPanel";
 import { InteractiveTerminal } from "./InteractiveTerminal";
-import { usePtyStore } from "../../lib/stores";
+import { usePtyStore, useChatMetaStore } from "../../lib/stores";
 
 function shortenPath(cwd: string | undefined): string {
   if (!cwd) return "";
@@ -50,10 +51,13 @@ const sessionTabStyle: CSSProperties = {
 };
 
 export function TerminalTabContent() {
+  const { t } = useTranslation("sidebar");
   const [subView, setSubView] = useState<SubView>("output");
   const [editingId, setEditingId] = useState<string | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
-  const sessions = usePtyStore((s) => s.sessions);
+  const activeChatId = useChatMetaStore((s) => s.activeChatId);
+  const allSessions = usePtyStore((s) => s.sessions);
+  const sessions = allSessions.filter((s) => !s.chatId || s.chatId === activeChatId);
   const activeSessionId = usePtyStore((s) => s.activeSessionId);
   const addSession = usePtyStore((s) => s.addSession);
   const removeSession = usePtyStore((s) => s.removeSession);
@@ -62,9 +66,9 @@ export function TerminalTabContent() {
 
   const createNewSession = useCallback(() => {
     const tempId = `pty-${Date.now()}`;
-    addSession({ id: tempId, status: "connecting" });
+    addSession({ id: tempId, status: "connecting", chatId: activeChatId });
     setSubView("shell");
-  }, [addSession]);
+  }, [addSession, activeChatId]);
 
   const handleRename = useCallback((id: string, newName: string) => {
     const trimmed = newName.trim();
@@ -108,7 +112,7 @@ export function TerminalTabContent() {
           }}
           onClick={() => setSubView("output")}
         >
-          Output
+          {t("output")}
         </button>
         <button
           type="button"
@@ -124,7 +128,7 @@ export function TerminalTabContent() {
             }
           }}
         >
-          Shell
+          {t("shell")}
         </button>
 
         {subView === "shell" && (
@@ -146,7 +150,11 @@ export function TerminalTabContent() {
                   setTimeout(() => editInputRef.current?.select(), 0);
                 }}
               >
-                <TerminalSquare size={10} strokeWidth={1.5} />
+                {sess.source === "agent" ? (
+                  <Bot size={10} strokeWidth={1.5} style={{ color: "var(--fill-accent)" }} />
+                ) : (
+                  <TerminalSquare size={10} strokeWidth={1.5} />
+                )}
                 {editingId === sess.id ? (
                   <input
                     ref={editInputRef}
@@ -201,7 +209,7 @@ export function TerminalTabContent() {
                 background: "transparent",
               }}
               onClick={createNewSession}
-              title="New terminal"
+              title={t("newTerminal")}
             >
               <Plus size={10} strokeWidth={2} />
             </button>

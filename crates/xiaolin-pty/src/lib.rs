@@ -2,4 +2,4 @@ mod session;
 mod manager;
 
 pub use session::{PtySession, PtySessionConfig};
-pub use manager::PtySessionManager;
+pub use manager::{PtySessionManager, SessionInfo};

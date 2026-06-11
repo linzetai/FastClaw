@@ -130,6 +130,12 @@
   --red-text: #d70015;
   --red-line: rgba(255, 59, 48, 0.12);
 
+  /* ANSI terminal colors (light) */
+  --ansi-red: #d73a49;
+  --ansi-green: #22863a;
+  --ansi-yellow: #b08800;
+  --ansi-blue: #0366d6;
+
   /* Tool category colors (semantic) */
   --tc-shell-bg: #EDE5F4;   --tc-shell-fg: #6D44A0;
   --tc-read-bg: #E0EDF3;    --tc-read-fg: #2D6A86;
@@ -264,6 +270,12 @@
   --green-line: rgba(48, 209, 88, 0.12);
   --red-text: #FF453A;
   --red-line: rgba(255, 69, 58, 0.12);
+
+  /* ANSI terminal colors (dark) */
+  --ansi-red: #ff7b72;
+  --ansi-green: #3fb950;
+  --ansi-yellow: #d29922;
+  --ansi-blue: #58a6ff;
 
   --gradient-hero: radial-gradient(ellipse 600px 400px at 50% 40%, color-mix(in srgb, var(--tint) 12%, transparent), transparent);
   /* DEPRECATED */ --bubble-user-gradient: linear-gradient(135deg, var(--bubble-user), color-mix(in srgb, var(--bubble-user) 70%, #000));
@@ -1463,3 +1475,9 @@ mark[data-search-highlight="current"] {
 .voice-spinner {
   animation: voice-spin 0.8s linear infinite;
 }
+
+/* ANSI terminal output colors */
+.ansi-red { color: var(--ansi-red); }
+.ansi-green { color: var(--ansi-green); }
+.ansi-yellow { color: var(--ansi-yellow); }
+.ansi-blue { color: var(--ansi-blue); }

@@ -48,5 +48,15 @@
   "filterClear": "Clear",
   "loadMore": "Load more",
   "loadingMore": "Loading...",
-  "navFailed": "Could not locate the message"
+  "navFailed": "Could not locate the message",
+  "terminal": "Terminal",
+  "output": "Output",
+  "shell": "Shell",
+  "newTerminal": "New terminal",
+  "noOutputYet": "No terminal output yet",
+  "outputHint": "Output will appear when shell commands execute",
+  "connecting": "Connecting...",
+  "reconnecting": "Reconnecting...",
+  "disconnected": "Disconnected",
+  "clear": "Clear"
 }

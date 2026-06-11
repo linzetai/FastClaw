@@ -1,4 +1,3 @@
-use std::io::Read;
 use std::thread;
 use std::time::Duration;
 
@@ -18,13 +17,15 @@ fn spawn_session_and_echo() {
 
     assert!(session.is_alive());
 
-    session.write_input(b"echo HELLO_PTY\n").unwrap();
-    thread::sleep(Duration::from_millis(200));
+    let mut rx = session.subscribe();
 
-    let mut reader = session.get_reader().unwrap();
-    let mut buf = [0u8; 4096];
-    let n = reader.read(&mut buf).unwrap();
-    let output = String::from_utf8_lossy(&buf[..n]);
+    session.write_input(b"echo HELLO_PTY\n").unwrap();
+    thread::sleep(Duration::from_millis(500));
+
+    let mut output = String::new();
+    while let Ok(data) = rx.try_recv() {
+        output.push_str(&String::from_utf8_lossy(&data));
+    }
     assert!(
         output.contains("HELLO_PTY"),
         "expected HELLO_PTY in output, got: {output}"
@@ -48,6 +49,7 @@ fn session_manager_create_and_close() {
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, id);
     assert!(sessions[0].alive);
+    assert_eq!(sessions[0].source, "user");
 
     mgr.close_session(&id);
     assert_eq!(mgr.session_count(), 0);
@@ -89,4 +91,57 @@ fn session_resize() {
     assert_eq!(session.rows(), 40);
 
     session.kill();
+}
+
+#[test]
+fn create_session_with_subscriber() {
+    let mgr = PtySessionManager::new();
+    let (id, mut rx) = mgr
+        .create_session_with_subscriber(PtySessionConfig::default())
+        .expect("create with subscriber failed");
+
+    mgr.get_session(&id, |s| s.write_input(b"echo SUB_TEST\n"))
+        .unwrap()
+        .unwrap();
+
+    thread::sleep(Duration::from_millis(500));
+
+    let mut output = String::new();
+    while let Ok(data) = rx.try_recv() {
+        output.push_str(&String::from_utf8_lossy(&data));
+    }
+    assert!(
+        output.contains("SUB_TEST"),
+        "expected SUB_TEST in output, got: {output}"
+    );
+
+    mgr.close_session(&id);
+}
+
+#[test]
+fn count_by_source() {
+    let mgr = PtySessionManager::new();
+
+    let _id1 = mgr
+        .create_session(PtySessionConfig {
+            source: "agent".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+    let _id2 = mgr
+        .create_session(PtySessionConfig {
+            source: "agent".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+    let _id3 = mgr
+        .create_session(PtySessionConfig::default())
+        .unwrap();
+
+    assert_eq!(mgr.count_by_source("agent"), 2);
+    assert_eq!(mgr.count_by_source("user"), 1);
+
+    mgr.close_session(&_id1);
+    mgr.close_session(&_id2);
+    mgr.close_session(&_id3);
 }

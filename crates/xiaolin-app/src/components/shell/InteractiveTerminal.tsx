@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { useTranslation } from "react-i18next";
 import "@xterm/xterm/css/xterm.css";
 
 import { useGatewayStore } from "../../lib/store";
-import { usePtyStore } from "../../lib/stores";
+import { usePtyStore, useChatMetaStore } from "../../lib/stores";
 
 interface InteractiveTerminalProps {
   sessionId: string;
@@ -16,36 +17,84 @@ const BASE_DELAY_MS = 1000;
 
 type ConnState = "connecting" | "connected" | "reconnecting" | "closed";
 
+function getTerminalTheme() {
+  const style = getComputedStyle(document.documentElement);
+  const getCssVar = (name: string, fallback: string) =>
+    style.getPropertyValue(name).trim() || fallback;
+
+  const bgPrimary = getCssVar("--bg-primary", "#1a1a1a");
+  const fgPrimary = getCssVar("--fill-primary", "#e6edf3");
+  const accent = getCssVar("--fill-accent", getCssVar("--tint", "#58a6ff"));
+
+  const hex = bgPrimary.replace("#", "");
+  let isDark = true;
+  if (hex.length >= 6) {
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    isDark = (r * 299 + g * 587 + b * 114) / 1000 < 128;
+  }
+
+  return {
+    background: bgPrimary,
+    foreground: fgPrimary,
+    cursor: accent,
+    selectionBackground: isDark ? "#264f78" : "#b4d5fe",
+    black: isDark ? "#484f58" : "#24292e",
+    red: isDark ? "#ff7b72" : "#d73a49",
+    green: isDark ? "#3fb950" : "#22863a",
+    yellow: isDark ? "#d29922" : "#b08800",
+    blue: isDark ? "#58a6ff" : "#0366d6",
+    magenta: isDark ? "#bc8cff" : "#6f42c1",
+    cyan: isDark ? "#39c5cf" : "#1b7c83",
+    white: isDark ? "#b1bac4" : "#6a737d",
+  };
+}
+
 export function InteractiveTerminal({ sessionId }: InteractiveTerminalProps) {
+  const { t } = useTranslation("sidebar");
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const [connState, setConnState] = useState<ConnState>("connecting");
+  const [bgColor, setBgColor] = useState(() => getTerminalTheme().background);
 
   const info = useGatewayStore((s) => s.info);
 
+  const applyTheme = useCallback(() => {
+    const theme = getTerminalTheme();
+    setBgColor(theme.background);
+    if (termRef.current) {
+      termRef.current.options.theme = theme;
+      const viewport = containerRef.current?.querySelector<HTMLElement>(".xterm-viewport");
+      if (viewport) viewport.style.backgroundColor = theme.background;
+    }
+  }, []);
+
+  // React to theme changes via attribute/class mutations on <html>
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      requestAnimationFrame(applyTheme);
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme", "style"],
+    });
+    return () => observer.disconnect();
+  }, [applyTheme]);
+
   useEffect(() => {
     if (!containerRef.current || !info) return;
+
+    const theme = getTerminalTheme();
+    setBgColor(theme.background);
 
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-      theme: {
-        background: "#0d1117",
-        foreground: "#e6edf3",
-        cursor: "#58a6ff",
-        selectionBackground: "#264f78",
-        black: "#484f58",
-        red: "#ff7b72",
-        green: "#3fb950",
-        yellow: "#d29922",
-        blue: "#58a6ff",
-        magenta: "#bc8cff",
-        cyan: "#39c5cf",
-        white: "#b1bac4",
-      },
+      theme,
       scrollback: 5000,
       allowProposedApi: true,
     });
@@ -63,6 +112,10 @@ export function InteractiveTerminal({ sessionId }: InteractiveTerminalProps) {
       // WebGL not available, fall back to canvas
     }
 
+    // Override xterm.css hardcoded viewport background
+    const viewport = containerRef.current.querySelector<HTMLElement>(".xterm-viewport");
+    if (viewport) viewport.style.backgroundColor = theme.background;
+
     fit.fit();
     termRef.current = term;
 
@@ -74,7 +127,12 @@ export function InteractiveTerminal({ sessionId }: InteractiveTerminalProps) {
       const httpUrl = info!.httpUrl;
       const wsProtocol = httpUrl.startsWith("https") ? "wss" : "ws";
       const host = httpUrl.replace(/^https?:\/\//, "");
-      return `${wsProtocol}://${host}/api/v1/pty?cols=${term.cols}&rows=${term.rows}`;
+      const activeChatId = useChatMetaStore.getState().activeChatId;
+      const chatMeta = useChatMetaStore.getState().chats[activeChatId];
+      const cwd = chatMeta?.workDir || "";
+      const params = new URLSearchParams({ cols: String(term.cols), rows: String(term.rows) });
+      if (cwd) params.set("cwd", cwd);
+      return `${wsProtocol}://${host}/api/v1/pty?${params.toString()}`;
     }
 
     function connect() {
@@ -144,7 +202,6 @@ export function InteractiveTerminal({ sessionId }: InteractiveTerminalProps) {
     }
 
     // OSC 7: shell reports current working directory
-    // Format: file://hostname/path or just /path
     term.parser.registerOscHandler(7, (data) => {
       if (disposed) return true;
       let path = data;
@@ -219,7 +276,7 @@ export function InteractiveTerminal({ sessionId }: InteractiveTerminalProps) {
         style={{
           width: "100%",
           height: "100%",
-          background: "#0d1117",
+          background: bgColor,
           padding: 4,
         }}
       />
@@ -237,9 +294,9 @@ export function InteractiveTerminal({ sessionId }: InteractiveTerminalProps) {
             pointerEvents: "none",
           }}
         >
-          {connState === "connecting" && "Connecting..."}
-          {connState === "reconnecting" && "Reconnecting..."}
-          {connState === "closed" && "Disconnected"}
+          {connState === "connecting" && t("connecting")}
+          {connState === "reconnecting" && t("reconnecting")}
+          {connState === "closed" && t("disconnected")}
         </div>
       )}
     </div>

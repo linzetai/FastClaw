@@ -15,9 +15,11 @@ const isTauri =
   typeof window !== "undefined" &&
   ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 
-const PANEL_WIDTH = 360;
+const DEFAULT_PANEL_WIDTH = 360;
+const MIN_PANEL_WIDTH = 260;
+const MAX_PANEL_WIDTH = 700;
 
-async function resizeWindowForPanel(opening: boolean, prePanelWidth: number | null): Promise<number | null> {
+async function resizeWindowForPanel(opening: boolean, prePanelWidth: number | null, panelWidth: number): Promise<number | null> {
   if (!isTauri) return null;
 
   try {
@@ -34,12 +36,12 @@ async function resizeWindowForPanel(opening: boolean, prePanelWidth: number | nu
     if (opening) {
       if (monitor) {
         const availableRight = monitor.position.x + monitor.size.width;
-        const windowRight = pos.x + size.width + PANEL_WIDTH;
+        const windowRight = pos.x + size.width + panelWidth;
         if (windowRight > availableRight) return null;
       }
       const savedWidth = size.width;
       await win.setSize(new (await import("@tauri-apps/api/dpi")).LogicalSize(
-        size.toLogical((await win.scaleFactor())).width + PANEL_WIDTH,
+        size.toLogical((await win.scaleFactor())).width + panelWidth,
         size.toLogical((await win.scaleFactor())).height,
       ));
       return savedWidth;
@@ -48,7 +50,7 @@ async function resizeWindowForPanel(opening: boolean, prePanelWidth: number | nu
         const scale = await win.scaleFactor();
         const logicalSize = size.toLogical(scale);
         await win.setSize(new (await import("@tauri-apps/api/dpi")).LogicalSize(
-          logicalSize.width - PANEL_WIDTH,
+          logicalSize.width - panelWidth,
           logicalSize.height,
         ));
       }
@@ -63,6 +65,7 @@ interface WorkspaceTabsState {
   tabs: WorkspaceTab[];
   activeTabId: string | null;
   panelOpen: boolean;
+  panelWidth: number;
   prePanelWidth: number | null;
 
   registerTab: (tab: WorkspaceTab) => void;
@@ -70,12 +73,25 @@ interface WorkspaceTabsState {
   setActiveTab: (id: string) => void;
   setPanelOpen: (open: boolean) => void;
   togglePanel: () => void;
+  setPanelWidth: (width: number) => void;
+}
+
+function loadPanelWidth(): number {
+  try {
+    const saved = localStorage.getItem("xiaolin:panel-width");
+    if (saved) {
+      const n = Number(saved);
+      if (n >= MIN_PANEL_WIDTH && n <= MAX_PANEL_WIDTH) return n;
+    }
+  } catch {}
+  return DEFAULT_PANEL_WIDTH;
 }
 
 export const useWorkspaceTabs = create<WorkspaceTabsState>((set, get) => ({
   tabs: [],
   activeTabId: null,
   panelOpen: false,
+  panelWidth: loadPanelWidth(),
   prePanelWidth: null,
 
   registerTab: (tab) => {
@@ -96,11 +112,11 @@ export const useWorkspaceTabs = create<WorkspaceTabsState>((set, get) => ({
   },
 
   setActiveTab: (id) => {
-    const { tabs, panelOpen } = get();
+    const { tabs, panelOpen, panelWidth } = get();
     if (tabs.some((t) => t.id === id)) {
       if (!panelOpen) {
         set({ activeTabId: id, panelOpen: true });
-        resizeWindowForPanel(true, null).then((saved) => {
+        resizeWindowForPanel(true, null, panelWidth).then((saved) => {
           if (saved != null) set({ prePanelWidth: saved });
         });
       } else {
@@ -110,32 +126,40 @@ export const useWorkspaceTabs = create<WorkspaceTabsState>((set, get) => ({
   },
 
   setPanelOpen: (open) => {
-    const { panelOpen, prePanelWidth } = get();
+    const { panelOpen, prePanelWidth, panelWidth } = get();
     if (open === panelOpen) return;
     set({ panelOpen: open });
     if (open) {
-      resizeWindowForPanel(true, null).then((saved) => {
+      resizeWindowForPanel(true, null, panelWidth).then((saved) => {
         if (saved != null) set({ prePanelWidth: saved });
       });
     } else {
-      resizeWindowForPanel(false, prePanelWidth).then(() => {
+      resizeWindowForPanel(false, prePanelWidth, panelWidth).then(() => {
         set({ prePanelWidth: null });
       });
     }
   },
 
   togglePanel: () => {
-    const { panelOpen, prePanelWidth } = get();
+    const { panelOpen, prePanelWidth, panelWidth } = get();
     const next = !panelOpen;
     set({ panelOpen: next });
     if (next) {
-      resizeWindowForPanel(true, null).then((saved) => {
+      resizeWindowForPanel(true, null, panelWidth).then((saved) => {
         if (saved != null) set({ prePanelWidth: saved });
       });
     } else {
-      resizeWindowForPanel(false, prePanelWidth).then(() => {
+      resizeWindowForPanel(false, prePanelWidth, panelWidth).then(() => {
         set({ prePanelWidth: null });
       });
     }
+  },
+
+  setPanelWidth: (width) => {
+    const clamped = Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, width));
+    set({ panelWidth: clamped });
+    try {
+      localStorage.setItem("xiaolin:panel-width", String(clamped));
+    } catch {}
   },
 }));

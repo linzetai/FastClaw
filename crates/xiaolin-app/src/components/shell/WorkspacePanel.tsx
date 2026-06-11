@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useRef, useCallback, type CSSProperties } from "react";
 import { PanelRightClose } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useWorkspaceTabs } from "./workspace-tabs";
@@ -28,13 +28,59 @@ const iconBtnStyle: CSSProperties = {
   transition: "background 0.12s",
 };
 
+const resizeHandleStyle: CSSProperties = {
+  position: "absolute",
+  top: 0,
+  left: 0,
+  width: 4,
+  height: "100%",
+  cursor: "col-resize",
+  zIndex: 10,
+  background: "transparent",
+  transition: "background 0.15s",
+};
+
 export function WorkspacePanel() {
   const { t } = useTranslation("sidebar");
   const tabs = useWorkspaceTabs((s) => s.tabs);
   const activeTabId = useWorkspaceTabs((s) => s.activeTabId);
   const setActiveTab = useWorkspaceTabs((s) => s.setActiveTab);
   const panelOpen = useWorkspaceTabs((s) => s.panelOpen);
+  const panelWidth = useWorkspaceTabs((s) => s.panelWidth);
+  const setPanelWidth = useWorkspaceTabs((s) => s.setPanelWidth);
   const togglePanel = useWorkspaceTabs((s) => s.togglePanel);
+
+  const resizeRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      dragging.current = true;
+      const startX = e.clientX;
+      const startWidth = panelWidth;
+
+      const onMove = (ev: MouseEvent) => {
+        if (!dragging.current) return;
+        const delta = startX - ev.clientX;
+        setPanelWidth(startWidth + delta);
+      };
+
+      const onUp = () => {
+        dragging.current = false;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [panelWidth, setPanelWidth]
+  );
 
   if (!panelOpen || tabs.length === 0) return null;
 
@@ -46,8 +92,9 @@ export function WorkspacePanel() {
     <div
       className="workspace-panel"
       style={{
-        width: "var(--panel-w)",
-        minWidth: "var(--panel-w)",
+        position: "relative",
+        width: panelWidth,
+        minWidth: panelWidth,
         flexShrink: 0,
         display: "flex",
         flexDirection: "column",
@@ -55,6 +102,15 @@ export function WorkspacePanel() {
         minHeight: 0,
       }}
     >
+      {/* Resize handle */}
+      <div
+        ref={resizeRef}
+        style={resizeHandleStyle}
+        onMouseDown={handleResizeStart}
+        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--fill-accent, var(--tint, #58a6ff))"; e.currentTarget.style.opacity = "0.4"; }}
+        onMouseLeave={(e) => { if (!dragging.current) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.opacity = "1"; } }}
+      />
+
       {/* Tab bar */}
       <div
         style={{

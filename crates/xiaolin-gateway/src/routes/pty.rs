@@ -7,13 +7,10 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::io::Read;
 use tokio::sync::mpsc;
 
 use crate::state::AppState;
 use xiaolin_pty::PtySessionConfig;
-
-const PTY_OUTPUT_BUF_SIZE: usize = 4096;
 
 #[derive(Deserialize)]
 pub struct PtyQueryParams {
@@ -46,33 +43,36 @@ pub async fn pty_ws_handler(
 }
 
 async fn handle_pty_socket(socket: WebSocket, state: AppState, params: PtyQueryParams) {
-    let initial_cwd = params.cwd.clone().or_else(|| std::env::var("HOME").ok());
+    let cwd = params.cwd.or_else(|| std::env::var("HOME").ok());
+    let initial_cwd = cwd.clone();
 
     let config = PtySessionConfig {
         shell: params.shell,
-        cwd: params.cwd,
+        cwd,
         cols: params.cols.unwrap_or(80),
         rows: params.rows.unwrap_or(24),
         env: Vec::new(),
+        source: "user".to_string(),
     };
 
-    let session_id = match state.strm.pty_manager.create_session(config) {
-        Ok(id) => id,
-        Err(e) => {
-            let (mut sender, _) = socket.split();
-            let resp = PtyControlResponse {
-                msg_type: "error".into(),
-                session_id: None,
-                error: Some(e),
-                exit_code: None,
-                cwd: None,
-            };
-            let _ = sender
-                .send(Message::Text(serde_json::to_string(&resp).unwrap()))
-                .await;
-            return;
-        }
-    };
+    let (session_id, mut broadcast_rx) =
+        match state.strm.pty_manager.create_session_with_subscriber(config) {
+            Ok(pair) => pair,
+            Err(e) => {
+                let (mut sender, _) = socket.split();
+                let resp = PtyControlResponse {
+                    msg_type: "error".into(),
+                    session_id: None,
+                    error: Some(e),
+                    exit_code: None,
+                    cwd: None,
+                };
+                let _ = sender
+                    .send(Message::Text(serde_json::to_string(&resp).unwrap()))
+                    .await;
+                return;
+            }
+        };
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
@@ -91,41 +91,6 @@ async fn handle_pty_socket(socket: WebSocket, state: AppState, params: PtyQueryP
         state.strm.pty_manager.close_session(&session_id);
         return;
     }
-
-    let reader = match state
-        .strm
-        .pty_manager
-        .get_session(&session_id, |s| s.get_reader())
-    {
-        Some(Ok(r)) => r,
-        _ => {
-            state.strm.pty_manager.close_session(&session_id);
-            return;
-        }
-    };
-
-    let (output_tx, mut output_rx) = mpsc::channel::<Vec<u8>>(64);
-    let pty_mgr = state.strm.pty_manager.clone();
-    let sid_for_reader = session_id.clone();
-
-    tokio::task::spawn_blocking(move || {
-        let mut reader = reader;
-        let mut buf = [0u8; PTY_OUTPUT_BUF_SIZE];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    if output_tx.blocking_send(buf[..n].to_vec()).is_err() {
-                        break;
-                    }
-                    pty_mgr
-                        .get_session(&sid_for_reader, |s| s.touch())
-                        .unwrap_or(());
-                }
-                Err(_) => break,
-            }
-        }
-    });
 
     // Poll /proc/PID/cwd for working directory changes (Linux)
     let (cwd_tx, mut cwd_rx) = mpsc::channel::<String>(4);
@@ -164,9 +129,20 @@ async fn handle_pty_socket(socket: WebSocket, state: AppState, params: PtyQueryP
         tokio::select! {
             biased;
 
-            Some(data) = output_rx.recv() => {
-                if ws_sender.send(Message::Binary(data)).await.is_err() {
-                    break;
+            result = broadcast_rx.recv() => {
+                match result {
+                    Ok(data) => {
+                        state.strm.pty_manager
+                            .get_session(&sid_write, |s| s.touch())
+                            .unwrap_or(());
+                        if ws_sender.send(Message::Binary(data)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(session_id = %sid_write, lagged = n, "broadcast consumer lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
 
@@ -256,6 +232,7 @@ pub async fn pty_list_handler(State(state): State<AppState>) -> impl IntoRespons
         .map(|s| {
             serde_json::json!({
                 "id": s.id,
+                "source": s.source,
                 "alive": s.alive,
                 "cols": s.cols,
                 "rows": s.rows,

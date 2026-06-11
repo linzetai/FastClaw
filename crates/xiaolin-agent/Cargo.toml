@@ -22,6 +22,7 @@ xiaolin-security = { path = "../xiaolin-security" }
 xiaolin-sandbox = { path = "../xiaolin-sandbox" }
 xiaolin-network-proxy = { path = "../xiaolin-network-proxy" }
 xiaolin-tools-fs = { path = "../xiaolin-tools-fs" }
+xiaolin-pty = { path = "../xiaolin-pty" }
 xiaolin-tools-network = { path = "../xiaolin-tools-network" }
 xiaolin-tools-code = { path = "../xiaolin-tools-code" }
 xiaolin-execpolicy = { path = "../xiaolin-execpolicy" }

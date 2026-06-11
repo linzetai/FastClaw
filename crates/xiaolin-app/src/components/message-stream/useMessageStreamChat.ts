@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo, type MutableRefObject, type RefObject, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
-import { useChatMetaStore, useStreamStore, useQueueStore, useLocaleStore, useTerminalStore } from "../../lib/stores";
+import { useChatMetaStore, useStreamStore, useQueueStore, useLocaleStore, useTerminalStore, usePtyStore } from "../../lib/stores";
 import { handleGoalClearedForChat, handleGoalUpdatedForChat } from "../../lib/stores/goal-store";
 import type { ChatMessage, SubAgentRunUI } from "../../lib/stores/types";
 import { type ToolCall } from "./ToolCallCard";
@@ -527,7 +527,7 @@ export function useMessageStreamChat({
             if (tc.name === "shell_exec") {
               let cmd: string | undefined;
               try { cmd = d.args ? JSON.parse(d.args as string)?.command : undefined; } catch { /* ignore */ }
-              useTerminalStore.getState().startSession(tc.id, tc.name, cmd);
+              useTerminalStore.getState().startSession(tc.id, tc.name, cmd, capturedChatId);
             }
             if (isActive()) {
               const existing = segmentsRef.current.find((s) => s.type === "tool" && s.toolCall?.id === tc.id);
@@ -563,6 +563,28 @@ export function useMessageStreamChat({
             const meta = (d.metadata ?? null) as Record<string, unknown> | null;
             if (d.tool_name === "shell_exec") {
               useTerminalStore.getState().endSession(callId);
+            }
+            if (d.tool_name === "terminal_open" && d.success && output) {
+              try {
+                const parsed = JSON.parse(output);
+                if (parsed.session_id) {
+                  usePtyStore.getState().addSession({
+                    id: parsed.session_id,
+                    chatId: capturedChatId,
+                    status: "connecting",
+                    name: parsed.name ?? "Agent Terminal",
+                    source: "agent",
+                  });
+                }
+              } catch { /* ignore parse errors */ }
+            }
+            if (d.tool_name === "terminal_close" && d.success && output) {
+              try {
+                const parsed = JSON.parse(output);
+                if (parsed.closed) {
+                  usePtyStore.getState().updateSession(parsed.closed, { status: "closed" });
+                }
+              } catch { /* ignore parse errors */ }
             }
             if (isActive()) {
               const seg = segmentsRef.current.find((s) => s.type === "tool" && s.toolCall?.id === callId);

@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect } from "react";
 import { GitBranch, Target, Terminal } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { AppHeader } from "./AppHeader";
 import { AppSidebar } from "./AppSidebar";
 import { ContentBlock } from "./ContentBlock";
@@ -10,6 +11,7 @@ import { TerminalTabContent } from "./TerminalTabContent";
 import { useGitStore, useTerminalStore } from "../../lib/stores";
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const { t } = useTranslation("sidebar");
   const registerTab = useWorkspaceTabs((s) => s.registerTab);
   const activeTabId = useWorkspaceTabs((s) => s.activeTabId);
   const gitStatus = useGitStore((s) => s.status);
@@ -33,12 +35,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     });
     registerTab({
       id: "terminal",
-      label: "Terminal",
+      label: t("terminal"),
       icon: Terminal,
       component: TerminalTabContent,
       order: 3,
     });
-  }, [registerTab]);
+  }, [registerTab, t]);
 
   useEffect(() => {
     if (!gitStatus?.isGitRepo) return;

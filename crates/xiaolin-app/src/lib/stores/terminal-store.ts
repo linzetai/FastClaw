@@ -11,13 +11,14 @@ export interface TerminalSession {
   lines: TerminalLine[];
   status: "running" | "done";
   command?: string;
+  chatId?: string;
 }
 
 interface TerminalState {
   sessions: Record<string, TerminalSession>;
   activeCallId: string | null;
 
-  startSession: (callId: string, toolName: string, command?: string) => void;
+  startSession: (callId: string, toolName: string, command?: string, chatId?: string) => void;
   appendOutput: (callId: string, text: string) => void;
   endSession: (callId: string) => void;
   setActive: (callId: string | null) => void;
@@ -28,11 +29,11 @@ export const useTerminalStore = create<TerminalState>((set) => ({
   sessions: {},
   activeCallId: null,
 
-  startSession: (callId, toolName, command) => {
+  startSession: (callId, toolName, command, chatId) => {
     set((s) => ({
       sessions: {
         ...s.sessions,
-        [callId]: { callId, toolName, lines: [], status: "running", command },
+        [callId]: { callId, toolName, lines: [], status: "running", command, chatId },
       },
       activeCallId: callId,
     }));

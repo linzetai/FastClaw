@@ -4,6 +4,9 @@ use std::time::Instant;
 
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use tokio::sync::broadcast;
+
+const BROADCAST_CAPACITY: usize = 256;
 
 pub struct PtySessionConfig {
     pub shell: Option<String>,
@@ -11,6 +14,7 @@ pub struct PtySessionConfig {
     pub cols: u16,
     pub rows: u16,
     pub env: Vec<(String, String)>,
+    pub source: String,
 }
 
 impl Default for PtySessionConfig {
@@ -21,15 +25,18 @@ impl Default for PtySessionConfig {
             cols: 80,
             rows: 24,
             env: Vec::new(),
+            source: "user".to_string(),
         }
     }
 }
 
 pub struct PtySession {
     pub id: String,
+    pub source: String,
     master: Box<dyn MasterPty + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
+    broadcast_tx: broadcast::Sender<Vec<u8>>,
     cols: u16,
     rows: u16,
     pub created_at: Instant,
@@ -74,17 +81,47 @@ impl PtySession {
             .take_writer()
             .map_err(|e| format!("failed to take PTY writer: {e}"))?;
 
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| format!("failed to clone PTY reader: {e}"))?;
+
+        let (broadcast_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
+
+        let tx_clone = broadcast_tx.clone();
+        std::thread::spawn(move || {
+            let mut reader = reader;
+            let mut buf = [0u8; 4096];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if tx_clone.send(buf[..n].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
         let now = Instant::now();
         Ok(Self {
             id,
+            source: config.source,
             master: pair.master,
             writer: Arc::new(Mutex::new(writer)),
             child: Arc::new(Mutex::new(child)),
+            broadcast_tx,
             cols: config.cols,
             rows: config.rows,
             created_at: now,
             last_activity: Arc::new(Mutex::new(now)),
         })
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<Vec<u8>> {
+        self.broadcast_tx.subscribe()
     }
 
     pub fn write_input(&self, data: &[u8]) -> Result<(), String> {
@@ -93,12 +130,6 @@ impl PtySession {
         writer
             .write_all(data)
             .map_err(|e| format!("PTY write error: {e}"))
-    }
-
-    pub fn get_reader(&self) -> Result<Box<dyn Read + Send>, String> {
-        self.master
-            .try_clone_reader()
-            .map_err(|e| format!("clone reader: {e}"))
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), String> {

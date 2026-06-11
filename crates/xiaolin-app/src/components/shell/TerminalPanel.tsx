@@ -1,6 +1,7 @@
 import { useEffect, useRef, useMemo, type CSSProperties } from "react";
 import { Terminal, Trash2 } from "lucide-react";
-import { useTerminalStore, type TerminalSession } from "../../lib/stores";
+import { useTranslation } from "react-i18next";
+import { useTerminalStore, useChatMetaStore, type TerminalSession } from "../../lib/stores";
 import { ICON } from "../../lib/ui-tokens";
 
 const containerStyle: CSSProperties = {
@@ -41,8 +42,8 @@ const outputStyle: CSSProperties = {
   lineHeight: 1.5,
   whiteSpace: "pre-wrap",
   wordBreak: "break-all",
-  background: "var(--bg-shell-deep, #0d1117)",
-  color: "var(--fill-terminal, #e6edf3)",
+  background: "var(--bg-primary)",
+  color: "var(--fill-primary)",
   minHeight: 0,
 };
 
@@ -90,22 +91,26 @@ function ansiToHtml(text: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\x1b\[31m(.*?)\x1b\[0m/g, '<span style="color:#f85149">$1</span>')
-    .replace(/\x1b\[32m(.*?)\x1b\[0m/g, '<span style="color:#56d364">$1</span>')
-    .replace(/\x1b\[33m(.*?)\x1b\[0m/g, '<span style="color:#e3b341">$1</span>')
-    .replace(/\x1b\[34m(.*?)\x1b\[0m/g, '<span style="color:#79c0ff">$1</span>')
+    .replace(/\x1b\[31m(.*?)\x1b\[0m/g, '<span class="ansi-red">$1</span>')
+    .replace(/\x1b\[32m(.*?)\x1b\[0m/g, '<span class="ansi-green">$1</span>')
+    .replace(/\x1b\[33m(.*?)\x1b\[0m/g, '<span class="ansi-yellow">$1</span>')
+    .replace(/\x1b\[34m(.*?)\x1b\[0m/g, '<span class="ansi-blue">$1</span>')
     .replace(/\x1b\[\d+m/g, "");
 }
 
 export function TerminalPanel() {
+  const { t } = useTranslation("sidebar");
   const sessions = useTerminalStore((s) => s.sessions);
   const activeCallId = useTerminalStore((s) => s.activeCallId);
   const setActive = useTerminalStore((s) => s.setActive);
   const clear = useTerminalStore((s) => s.clear);
+  const activeChatId = useChatMetaStore((s) => s.activeChatId);
 
   const sessionList = useMemo(
-    () => Object.values(sessions).reverse(),
-    [sessions],
+    () => Object.values(sessions)
+      .filter((s) => !s.chatId || s.chatId === activeChatId)
+      .reverse(),
+    [sessions, activeChatId],
   );
 
   const activeSession = activeCallId ? sessions[activeCallId] : sessionList[0];
@@ -114,9 +119,9 @@ export function TerminalPanel() {
     return (
       <div style={emptyStyle}>
         <Terminal size={24} strokeWidth={1.2} />
-        <span>No terminal output yet</span>
+        <span>{t("noOutputYet")}</span>
         <span style={{ fontSize: 11, opacity: 0.6 }}>
-          Output will appear when shell commands execute
+          {t("outputHint")}
         </span>
       </div>
     );
@@ -181,7 +186,7 @@ export function TerminalPanel() {
             onMouseLeave={(e) => { e.currentTarget.style.color = "var(--fill-quaternary)"; }}
           >
             <Trash2 {...ICON.sm} />
-            Clear
+            {t("clear")}
           </button>
         </div>
       )}

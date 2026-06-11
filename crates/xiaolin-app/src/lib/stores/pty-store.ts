@@ -2,10 +2,12 @@ import { create } from "zustand";
 
 export interface PtySession {
   id: string;
+  chatId?: string;
   status: "connecting" | "connected" | "closed";
   name?: string;
   cwd?: string;
   exitCode?: number;
+  source?: "user" | "agent";
 }
 
 interface PtyState {
@@ -16,11 +18,12 @@ interface PtyState {
   updateSession: (id: string, patch: Partial<PtySession>) => void;
   removeSession: (id: string) => void;
   setActiveSession: (id: string | null) => void;
+  getSessionsForChat: (chatId: string) => PtySession[];
 }
 
 let sessionCounter = 0;
 
-export const usePtyStore = create<PtyState>((set) => ({
+export const usePtyStore = create<PtyState>((set, get) => ({
   sessions: [],
   activeSessionId: null,
 
@@ -54,5 +57,9 @@ export const usePtyStore = create<PtyState>((set) => ({
 
   setActiveSession: (id) => {
     set({ activeSessionId: id });
+  },
+
+  getSessionsForChat: (chatId) => {
+    return get().sessions.filter((s) => !s.chatId || s.chatId === chatId);
   },
 }));
