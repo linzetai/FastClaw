@@ -575,6 +575,7 @@ impl AppState {
             ));
             rt
         });
+        runtime.init_self_arc();
 
         for agent in agents {
             match xiaolin_agent::create_provider_chain_with_plugins(
@@ -1643,6 +1644,7 @@ impl AppState {
             rt.with_skill_store(skill_store.clone())
                 .with_trajectory_store(trajectory_store.clone())
         });
+        runtime.init_self_arc();
 
         let tool_registry = ToolRegistry::new();
         xiaolin_agent::builtin_tools::register_builtin_tools(&tool_registry);

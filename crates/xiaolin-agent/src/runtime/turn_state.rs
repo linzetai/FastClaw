@@ -1,0 +1,101 @@
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+use xiaolin_core::agent_config::AgentConfig;
+use xiaolin_core::tool::{ToolDefinition, ToolRegistry};
+use xiaolin_core::tool_runtime::ApprovalStrategy;
+use xiaolin_core::types::ChatMessage;
+use xiaolin_evolution::TrajectoryStep;
+use xiaolin_protocol::{AgentEvent, TurnId};
+
+use super::approval_cache::ApprovalCache;
+use super::cache_break_detection::CacheBreakDetector;
+use super::dispatcher::ToolDispatcher;
+use super::file_persistence::SessionFileTracker;
+use super::observer::RuntimeObserver;
+use super::permissions::DenialTracker;
+use super::query_deps::ProductionDeps;
+use super::query_state::QueryLoopState;
+use super::runtime_services::RuntimeServices;
+use super::tool_result_storage::{ContentReplacementState, ToolResultStorage};
+use super::undo_engine::UndoEngine;
+use super::validation_pipeline::ValidationPipeline;
+use super::runtimes::RuntimeRegistry;
+use super::AgentRuntime;
+use crate::builtin_tools::{ExecutionModeState, GoalStore, TodoStore};
+
+/// Mutable state that evolves across iterations of the agent loop.
+///
+/// Created by `turn_setup` at the start of execution, then passed by
+/// `&mut` reference into each sub-phase (iteration_check, llm_call,
+/// tool_round, post_tool).
+pub(crate) struct TurnMutableState {
+    pub messages: Vec<ChatMessage>,
+    pub max_tokens: Option<u32>,
+    pub query_loop: QueryLoopState,
+    pub replacement_state: ContentReplacementState,
+    pub undo_engine: UndoEngine,
+    pub approval_cache: ApprovalCache,
+    pub denial_tracker: DenialTracker,
+    pub cache_detector: CacheBreakDetector,
+    pub file_tracker: SessionFileTracker,
+    pub last_seen_goal_id: Option<String>,
+    pub had_tool_calls_this_round: bool,
+    pub injected_skill_ids: Vec<String>,
+    pub trajectory_steps: Vec<TrajectoryStep>,
+}
+
+/// Immutable context and service dependencies for a single agent turn.
+///
+/// Created during setup; shared (by reference) across all loop iterations.
+/// Contains both configuration and long-lived service handles.
+///
+/// Stores `Arc<AgentRuntime>` so sub-functions can access runtime methods
+/// (e.g. `finalize_injected_skills`, `provider()`) without a separate parameter.
+pub(crate) struct TurnServices {
+    // --- Runtime access (Arc-wrapped, cheap to hold) ---
+    pub runtime: Arc<AgentRuntime>,
+
+    // --- Identity ---
+    pub turn_id: TurnId,
+    pub stream_start: std::time::Instant,
+
+    // --- Model/LLM config (immutable after setup) ---
+    pub model: String,
+    pub temperature: f32,
+    pub context_window: u32,
+    pub tool_defs: Vec<ToolDefinition>,
+    pub tool_defs_est_tokens: usize,
+    pub auto_compact_enabled: bool,
+
+    // --- Request context (only fields used in the loop body) ---
+    pub config: Arc<AgentConfig>,
+    pub session_id: Option<String>,
+    pub work_dir: Option<String>,
+    pub last_user_msg: String,
+    pub mode_state: Option<ExecutionModeState>,
+    pub runtime_registry: Arc<RuntimeRegistry>,
+    pub tool_registry: Arc<ToolRegistry>,
+    pub session_store: Option<Arc<xiaolin_session::SessionStore>>,
+    pub todo_store: Option<TodoStore>,
+    pub goal_store: Option<Arc<GoalStore>>,
+
+    // --- Streaming / side-path ---
+    pub tx: mpsc::Sender<AgentEvent>,
+    pub approval_strategy: ApprovalStrategy,
+    pub interaction_handle: Option<xiaolin_session_actor::InteractionHandle>,
+
+    // --- Service handles (interior mutability where needed) ---
+    pub deps: ProductionDeps,
+    pub services: RuntimeServices,
+    pub dispatcher: ToolDispatcher,
+    pub tool_storage: ToolResultStorage,
+    pub skip_tool_names: HashSet<String>,
+    pub validation_pipeline: ValidationPipeline,
+    pub runtime_observer: RuntimeObserver,
+
+    // --- Lifecycle ---
+    pub cancel_token: Option<CancellationToken>,
+}

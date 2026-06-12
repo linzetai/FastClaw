@@ -208,6 +208,7 @@ mod tests {
         let runtime = Arc::new(crate::AgentRuntime::new(Arc::from(
             crate::OpenAiProvider::new("http://example.com", "fake"),
         )));
+        runtime.init_self_arc();
         let controller = Arc::new(crate::spawn_controller::SpawnController::new(
             crate::spawn_controller::SpawnConfig::default(),
         ));

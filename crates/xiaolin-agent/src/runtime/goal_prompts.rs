@@ -2,6 +2,14 @@
 
 use crate::builtin_tools::Goal;
 
+/// Prompt injected when the current goal is externally cancelled (deleted by user).
+pub const GOAL_CANCELLED_PROMPT: &str = "\
+<goal_context>\n\
+[GOAL CANCELLED]\n\n\
+The user has cancelled the current goal. Stop working \
+immediately and provide a brief summary of progress so far.\n\
+</goal_context>";
+
 /// Escape XML-sensitive characters in user-provided goal objectives.
 pub fn escape_xml_text(s: &str) -> String {
     s.replace('&', "&amp;")

@@ -883,6 +883,7 @@ mod tests {
         let runtime = Arc::new(crate::AgentRuntime::new(Arc::from(
             crate::OpenAiProvider::new("http://example.com", "fake"),
         )));
+        runtime.init_self_arc();
         let controller = Arc::new(SpawnController::new(SpawnConfig::default()));
         SubAgentManager::new(runtime, agents, SubAgentPolicy::default(), controller)
     }

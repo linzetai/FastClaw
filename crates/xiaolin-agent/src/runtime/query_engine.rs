@@ -368,6 +368,7 @@ mod tests {
 
     fn make_engine(provider: Arc<dyn LlmProvider>) -> QueryEngine {
         let runtime = Arc::new(AgentRuntime::new(provider));
+        runtime.init_self_arc();
         let config = test_agent_config();
         let registry = Arc::new(ToolRegistry::new());
         QueryEngine::new(runtime, config, registry)
@@ -520,10 +521,12 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Replace with fast mock for the next turn
+        let new_runtime = Arc::new(AgentRuntime::new(
+            Arc::new(MockProvider) as Arc<dyn LlmProvider>
+        ));
+        new_runtime.init_self_arc();
         engine = QueryEngine::new(
-            Arc::new(AgentRuntime::new(
-                Arc::new(MockProvider) as Arc<dyn LlmProvider>
-            )),
+            new_runtime,
             test_agent_config(),
             Arc::new(ToolRegistry::new()),
         );
