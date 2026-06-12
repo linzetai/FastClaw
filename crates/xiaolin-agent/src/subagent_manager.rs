@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use xiaolin_core::agent_config::{AgentConfig, FileAccessMode, SubAgentDef, SubAgentPolicy};
 use xiaolin_core::tool::ToolRegistry;
-use xiaolin_core::types::{SubAgentRun, SubAgentStatus, SubAgentType, Usage};
+use xiaolin_core::types::{ChatMessage, SubAgentRun, SubAgentStatus, SubAgentType, Usage};
 use xiaolin_protocol::{AgentEvent, CompletionSummary, TokenUsage, TurnId};
 
 /// Context inherited from the parent session to ensure subagents run
@@ -249,6 +249,7 @@ impl SubAgentManager {
         llm_override: Option<Arc<dyn LlmProvider>>,
         concurrency_safe: bool,
         inherited_context: Option<SubAgentInheritedContext>,
+        initial_messages: Option<Vec<ChatMessage>>,
     ) -> anyhow::Result<String> {
         if !policy.enabled {
             anyhow::bail!("sub-agent delegation is disabled for this agent");
@@ -310,6 +311,7 @@ impl SubAgentManager {
         let rid = run_id.clone();
         let forward_turn_id = turn_id.clone();
         let session_id_owned = parent_session_id.clone();
+        let initial_msgs = initial_messages;
 
         tokio::spawn(async move {
             let reservation = match controller
@@ -364,6 +366,7 @@ impl SubAgentManager {
                     orchestrator.clone(),
                     inherited_context.as_ref(),
                     &session_id_owned,
+                    initial_msgs.as_deref(),
                 ) => {
                     res
                 }
@@ -515,6 +518,7 @@ impl SubAgentManager {
         llm_override: Option<Arc<dyn LlmProvider>>,
         concurrency_safe: bool,
         inherited_context: Option<SubAgentInheritedContext>,
+        initial_messages: Option<Vec<ChatMessage>>,
     ) -> anyhow::Result<(String, String)> {
         let session_pool = self
             .controller
@@ -536,6 +540,7 @@ impl SubAgentManager {
                 llm_override,
                 concurrency_safe,
                 inherited_context,
+                initial_messages,
             )
             .await?;
 
@@ -601,6 +606,7 @@ impl SubAgentManager {
         llm_override: Option<Arc<dyn LlmProvider>>,
         concurrency_safe: bool,
         inherited_context: Option<SubAgentInheritedContext>,
+        initial_messages: Option<Vec<ChatMessage>>,
     ) -> anyhow::Result<(String, String)> {
         self.spawn_and_wait(
             agent_config,
@@ -616,6 +622,7 @@ impl SubAgentManager {
             llm_override,
             concurrency_safe,
             inherited_context,
+            initial_messages,
         )
         .await
     }
@@ -637,11 +644,18 @@ impl SubAgentManager {
         orchestrator: Arc<ToolOrchestrator>,
         inherited_context: Option<&SubAgentInheritedContext>,
         parent_session_id: &str,
+        initial_messages: Option<&[ChatMessage]>,
     ) -> anyhow::Result<(String, u32, u32, Option<Usage>)> {
         use crate::sidechain::{SidechainMessage, SidechainMeta, SidechainWriter};
         use xiaolin_core::types::{ChatMessage, ChatRequest, Role};
 
         let mut messages = Vec::new();
+
+        // Prepend inherited parent context messages (Fork Agent)
+        if let Some(inherited) = initial_messages {
+            messages.extend_from_slice(inherited);
+        }
+
         if let Some(ctx) = context {
             messages.push(ChatMessage {
                 role: Role::System,
@@ -1073,6 +1087,7 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
             )
             .await;
         assert!(err.is_err());
@@ -1103,6 +1118,7 @@ mod tests {
                 tx,
                 None,
                 false,
+                None,
                 None,
             )
             .await;

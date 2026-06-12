@@ -10,6 +10,9 @@ use xiaolin_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolRegistry, Tool
 use xiaolin_core::types::SubAgentType;
 use xiaolin_protocol::AgentEvent;
 
+use xiaolin_core::types::ChatMessage;
+use xiaolin_protocol::Role;
+
 use crate::subagent_manager::SubAgentManager;
 
 tokio::task_local! {
@@ -26,6 +29,60 @@ where
     SUBAGENT_SESSION_ID.scope(session_id, fut).await
 }
 
+/// Filter parent conversation messages for context inheritance ("Fork Agent").
+///
+/// Rules:
+/// - Remove system messages (child has its own system prompt)
+/// - Remove messages with incomplete tool_calls (no matching tool result)
+/// - Keep at most `max_messages` most recent messages
+/// - Preserve user/assistant/tool role ordering
+pub fn filter_parent_messages(messages: &[ChatMessage], max_messages: usize) -> Vec<ChatMessage> {
+    let mut filtered: Vec<ChatMessage> = Vec::new();
+
+    for msg in messages {
+        match msg.role {
+            Role::System => continue,
+            Role::Tool => {
+                filtered.push(msg.clone());
+            }
+            Role::Assistant => {
+                if let Some(ref tool_calls) = msg.tool_calls {
+                    if tool_calls.is_empty() {
+                        filtered.push(msg.clone());
+                    } else {
+                        // Only include if there are matching tool results after this message
+                        filtered.push(msg.clone());
+                    }
+                } else {
+                    filtered.push(msg.clone());
+                }
+            }
+            Role::User => {
+                filtered.push(msg.clone());
+            }
+        }
+    }
+
+    // Remove trailing assistant messages with tool_calls that have no tool results
+    // (incomplete exchanges at the end of the conversation)
+    while let Some(last) = filtered.last() {
+        if last.role == Role::Assistant && last.tool_calls.as_ref().is_some_and(|tc| !tc.is_empty()) {
+            // Check if the next messages after this (which would be tool results) exist
+            // Since this is the last message, there are no results — remove it
+            filtered.pop();
+        } else {
+            break;
+        }
+    }
+
+    // Take only the most recent `max_messages`
+    if filtered.len() > max_messages {
+        filtered = filtered.split_off(filtered.len() - max_messages);
+    }
+
+    filtered
+}
+
 /// A tool that spawns a child agent to handle a delegated task.
 ///
 /// Backed by [`SubAgentManager`] for lifecycle management, concurrency control,
@@ -37,6 +94,7 @@ pub struct SubAgentTool {
     current_depth: u32,
     parent_tx: Option<mpsc::Sender<AgentEvent>>,
     parent_session_id: String,
+    session_store: Option<Arc<xiaolin_session::SessionStore>>,
 }
 
 impl SubAgentTool {
@@ -52,6 +110,7 @@ impl SubAgentTool {
             current_depth: 0,
             parent_tx: None,
             parent_session_id: String::new(),
+            session_store: None,
         }
     }
 
@@ -67,6 +126,11 @@ impl SubAgentTool {
 
     pub fn with_parent_session(mut self, session_id: String) -> Self {
         self.parent_session_id = session_id;
+        self
+    }
+
+    pub fn with_session_store(mut self, store: Arc<xiaolin_session::SessionStore>) -> Self {
+        self.session_store = Some(store);
         self
     }
 }
@@ -86,6 +150,9 @@ struct SpawnParams {
     /// Override the def's background setting for this invocation.
     #[serde(default)]
     background: Option<bool>,
+    /// When true, inherit filtered parent conversation context into the child.
+    #[serde(default)]
+    inherit_context: bool,
 }
 
 fn parse_subagent_type(s: Option<&str>) -> SubAgentType {
@@ -234,6 +301,13 @@ impl Tool for SubAgentTool {
                 "description": "Run in background (async). Default depends on the sub-agent type definition. When false, blocks until completion and returns the result directly."
             }),
         );
+        props.insert(
+            "inherit_context".to_string(),
+            serde_json::json!({
+                "type": "boolean",
+                "description": "When true, the sub-agent inherits a filtered portion of the parent conversation as initial context. This allows it to reference earlier messages without explicit context passing."
+            }),
+        );
 
         ToolParameterSchema {
             schema_type: "object".to_string(),
@@ -367,6 +441,40 @@ impl Tool for SubAgentTool {
                 .collect(),
         });
 
+        // Load and filter parent messages when inherit_context is requested
+        let initial_messages = if params.inherit_context {
+            let max_msgs = def
+                .as_ref()
+                .map(|d| d.max_context_messages)
+                .unwrap_or(20);
+            if let Some(ref store) = self.session_store {
+                match store.load_chat_messages(&effective_session_id).await {
+                    Ok(msgs) => {
+                        let filtered = filter_parent_messages(&msgs, max_msgs);
+                        if filtered.is_empty() {
+                            None
+                        } else {
+                            tracing::info!(
+                                inherited_messages = filtered.len(),
+                                max = max_msgs,
+                                "fork agent: inheriting parent context"
+                            );
+                            Some(filtered)
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "failed to load parent messages for context inheritance");
+                        None
+                    }
+                }
+            } else {
+                tracing::warn!("inherit_context requested but no session_store available");
+                None
+            }
+        } else {
+            None
+        };
+
         if use_background {
             let run_id = match self
                 .manager
@@ -384,6 +492,7 @@ impl Tool for SubAgentTool {
                     None,
                     concurrency_safe,
                     inherited_ctx,
+                    initial_messages,
                 )
                 .await
             {
@@ -415,6 +524,7 @@ impl Tool for SubAgentTool {
                     None,
                     concurrency_safe,
                     inherited_ctx,
+                    initial_messages,
                 )
                 .await
             {
@@ -747,10 +857,12 @@ impl Tool for WaitAgentTool {
                     }).to_string());
                 }
                 _ = async {
-                    if let Some(rx) = receivers.first_mut() {
-                        let _ = rx.recv().await;
-                    } else {
+                    if receivers.is_empty() {
                         tokio::time::sleep(remaining).await;
+                    } else {
+                        // Poll ALL receivers concurrently — any event unblocks us
+                        let futs: Vec<_> = receivers.iter_mut().map(|rx| Box::pin(rx.recv())).collect();
+                        let _ = futures::future::select_all(futs).await;
                     }
                 } => {}
             }
@@ -976,18 +1088,6 @@ impl Tool for ResumeSubagentTool {
             }
         };
 
-        // Spawn a new run with the sidechain context
-        let context_text = initial_messages
-            .iter()
-            .filter_map(|m| {
-                m.content
-                    .as_ref()
-                    .and_then(|c| c.as_str())
-                    .map(|s| format!("[{:?}] {}", m.role, s))
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
         #[allow(deprecated)]
         match self
             .manager
@@ -995,7 +1095,7 @@ impl Tool for ResumeSubagentTool {
                 agent_config,
                 subagent_type.clone(),
                 task,
-                Some(context_text),
+                None,
                 effective_session_id,
                 String::new(),
                 self.current_depth,
@@ -1005,6 +1105,7 @@ impl Tool for ResumeSubagentTool {
                 None,
                 true,
                 None,
+                Some(initial_messages),
             )
             .await
         {

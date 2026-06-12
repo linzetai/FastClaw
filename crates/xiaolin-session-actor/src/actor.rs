@@ -520,7 +520,13 @@ impl SessionActor {
             f.subscriber_senders()
         };
         for tx in &senders {
-            let _ = tx.try_send(event.clone());
+            if let Err(e) = tx.try_send(event.clone()) {
+                warn!(
+                    session_id = %self.session_id,
+                    error = %e,
+                    "emit_sync: subscriber channel full or closed, event dropped"
+                );
+            }
         }
     }
 
@@ -733,6 +739,57 @@ mod tests {
             event_types.contains(&"TurnEnd"),
             "expected TurnEnd in {event_types:?}",
         );
+
+        handle.submit(SessionOp::Shutdown).await.unwrap();
+        handle.wait_until_stopped().await;
+    }
+
+    // ─── RISK 7: emit_sync drops events when channel is full ─────────
+
+    /// Demonstrates that emit_sync uses try_send which silently drops
+    /// events when the subscriber channel is full. Critical lifecycle
+    /// events like TurnAborted may be lost.
+    #[tokio::test]
+    async fn risk7_emit_sync_drops_events_on_full_channel() {
+        let (handle, _exec) = spawn_test_actor();
+
+        // Subscribe with a tiny channel capacity of 1
+        let (_sub_id, mut rx) = handle
+            .submit_and_subscribe(
+                SessionOp::UserTurn {
+                    messages: serde_json::json!([{"role": "user", "content": "hi"}]),
+                    agent_id: None,
+                    model: None,
+                    work_dir: None,
+                    extra: Default::default(),
+                    typed_data: None,
+                },
+                1, // capacity = 1 — will fill up quickly
+            )
+            .await
+            .unwrap();
+
+        // Wait for events to be emitted
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Drain what we can — some events may have been dropped
+        let mut received = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            received.push(ev);
+        }
+
+        // With capacity=1, the channel fills after TurnStart, and
+        // subsequent events (ContentDelta, TurnEnd) may be silently dropped.
+        // The relay task (handle_user_turn) uses async send with timeout,
+        // but emit_sync (used for TurnStart, TurnAborted) uses try_send.
+        eprintln!(
+            "risk7: received {} events with capacity=1 channel (some may have been dropped)",
+            received.len()
+        );
+
+        // In a well-behaved system, we should always receive TurnStart + TurnEnd.
+        // But emit_sync's try_send may drop TurnStart if the channel was full
+        // from a prior subscription's unread events.
 
         handle.submit(SessionOp::Shutdown).await.unwrap();
         handle.wait_until_stopped().await;

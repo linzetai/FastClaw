@@ -346,25 +346,39 @@ pub struct DenialTracker {
     denials: Vec<DenialRecord>,
 }
 
+/// Normalize a JSON-formatted string so that key ordering is deterministic.
+/// If the input is valid JSON, it is parsed and re-serialized (serde_json
+/// sorts object keys when using `to_string` on `Value`). Non-JSON strings
+/// are returned as-is.
+fn normalize_denial_key(input: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(input) {
+        Ok(v) => v.to_string(),
+        Err(_) => input.to_string(),
+    }
+}
+
 impl DenialTracker {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Record a user denial.
+    /// Record a user denial. The input pattern is normalized so that
+    /// semantically identical JSON with different key orderings produces
+    /// the same key.
     pub fn record_denial(&mut self, tool_name: &str, input_pattern: &str) {
         self.denials.push(DenialRecord {
             tool_name: tool_name.to_string(),
-            input_pattern: input_pattern.to_string(),
+            input_pattern: normalize_denial_key(input_pattern),
             timestamp: std::time::Instant::now(),
         });
     }
 
     /// Check if a similar request was previously denied.
     pub fn is_denied(&self, tool_name: &str, input_pattern: &str) -> bool {
+        let normalized = normalize_denial_key(input_pattern);
         self.denials
             .iter()
-            .any(|d| d.tool_name == tool_name && d.input_pattern == input_pattern)
+            .any(|d| d.tool_name == tool_name && d.input_pattern == normalized)
     }
 
     /// Check if any request for this tool was denied (broader match).

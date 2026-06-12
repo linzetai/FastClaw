@@ -5,7 +5,7 @@
 //! Mutating tools (Edit/Execute/Other) are serialized to avoid conflicts.
 //! Results are yielded in insertion order regardless of completion order.
 
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 
 use xiaolin_core::agent_config::BehaviorConfig;
 use xiaolin_core::tool::{ToolRegistry, ToolResult};
@@ -86,6 +86,17 @@ pub struct StreamingToolExecutor {
     handles: Vec<tokio::task::JoinHandle<()>>,
 }
 
+/// Acquire a StdMutex, recovering from poison if a sibling task panicked.
+fn lock_or_recover<T>(mutex: &StdMutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("mutex was poisoned by a panicked task, recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
 impl StreamingToolExecutor {
     pub fn new(registry: Arc<ToolRegistry>, config: StreamingExecutorConfig) -> Self {
         Self {
@@ -107,7 +118,7 @@ impl StreamingToolExecutor {
         let is_parallel = tool_ref.as_ref().map(|t| t.supports_parallel()).unwrap_or(false);
 
         let index = {
-            let mut tools = self.tools.lock().unwrap();
+            let mut tools = lock_or_recover(&self.tools);
             let idx = tools.len();
             tools.push(TrackedTool {
                 call: call.clone(),
@@ -136,7 +147,7 @@ impl StreamingToolExecutor {
 
         let handle = tokio::spawn(async move {
             if cancel.is_cancelled() {
-                let mut tools = tools_ref.lock().unwrap();
+                let mut tools = lock_or_recover(&tools_ref);
                 if let Some(t) = tools.get_mut(index) {
                     t.state = ToolState::Cancelled;
                 }
@@ -157,7 +168,7 @@ impl StreamingToolExecutor {
             let _gate_guard = (&read_guard, &write_guard);
 
             if cancel.is_cancelled() {
-                let mut tools = tools_ref.lock().unwrap();
+                let mut tools = lock_or_recover(&tools_ref);
                 if let Some(t) = tools.get_mut(index) {
                     t.state = ToolState::Cancelled;
                 }
@@ -166,7 +177,7 @@ impl StreamingToolExecutor {
 
             // Mark as executing
             {
-                let mut tools = tools_ref.lock().unwrap();
+                let mut tools = lock_or_recover(&tools_ref);
                 if let Some(t) = tools.get_mut(index) {
                     t.state = ToolState::Executing;
                 }
@@ -178,7 +189,7 @@ impl StreamingToolExecutor {
             let tool_fut = execute_single_tool_with_context(&call, &registry, &behavior, &work_dir, execution_mode, plan_file_path.as_ref());
             let result = tokio::select! {
                 _ = cancel.cancelled() => {
-                    let mut tools = tools_ref.lock().unwrap();
+                    let mut tools = lock_or_recover(&tools_ref);
                     if let Some(t) = tools.get_mut(index) {
                         t.state = ToolState::Cancelled;
                     }
@@ -194,7 +205,7 @@ impl StreamingToolExecutor {
             };
 
             // Store result
-            let mut tools = tools_ref.lock().unwrap();
+            let mut tools = lock_or_recover(&tools_ref);
             if let Some(t) = tools.get_mut(index) {
                 let failed = !result.success;
                 t.result = Some(result);
@@ -214,7 +225,7 @@ impl StreamingToolExecutor {
     /// Returns results for all consecutively completed tools starting from
     /// the first un-yielded position. A gap (incomplete tool) blocks later results.
     pub fn get_completed_results(&self) -> Vec<CompletedTool> {
-        let mut tools = self.tools.lock().unwrap();
+        let mut tools = lock_or_recover(&self.tools);
         let mut results = Vec::new();
 
         for (i, tool) in tools.iter_mut().enumerate() {
@@ -273,7 +284,7 @@ impl StreamingToolExecutor {
     /// Whether all tracked tools have been yielded or cancelled.
     #[allow(dead_code)]
     pub fn is_complete(&self) -> bool {
-        let tools = self.tools.lock().unwrap();
+        let tools = lock_or_recover(&self.tools);
         tools
             .iter()
             .all(|t| matches!(t.state, ToolState::Yielded | ToolState::Cancelled))
@@ -282,7 +293,7 @@ impl StreamingToolExecutor {
     /// Number of tools currently tracked.
     #[allow(dead_code)]
     pub fn tracked_count(&self) -> usize {
-        self.tools.lock().unwrap().len()
+        lock_or_recover(&self.tools).len()
     }
 }
 
@@ -694,8 +705,10 @@ mod tests {
     /// Feature flag behavior: executor respects work_dir/file_access config.
     #[tokio::test]
     async fn streaming_executor_respects_config() {
-        let mut behavior = BehaviorConfig::default();
-        behavior.file_access = xiaolin_core::agent_config::FileAccessMode::Full;
+        let behavior = BehaviorConfig {
+            file_access: xiaolin_core::agent_config::FileAccessMode::Full,
+            ..Default::default()
+        };
 
         let registry = build_registry(vec![Arc::new(MockReadTool)]);
         let config = StreamingExecutorConfig {
@@ -738,5 +751,62 @@ mod tests {
         let remaining = executor.drain_remaining().await;
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].call_id, "slow");
+    }
+
+    // ─── RISK 1: Mutex poison cascade from panicking tool ────────────
+
+    struct PanicTool;
+    #[async_trait::async_trait]
+    impl Tool for PanicTool {
+        fn name(&self) -> &str { "panic_tool" }
+        fn description(&self) -> &str { "Panics on execute" }
+        fn parameters_schema(&self) -> ToolParameterSchema { empty_schema() }
+        fn kind(&self) -> ToolKind { ToolKind::Read }
+        async fn execute(&self, _args: &str) -> ToolResult {
+            panic!("deliberate panic inside tool execution");
+        }
+    }
+
+    /// Demonstrates that when a tool panics while the executor holds a
+    /// StdMutex lock, subsequent lock() calls will hit a poisoned mutex
+    /// and unwrap() will cascade the panic.
+    ///
+    /// EXPECTED BEHAVIOR (current code): second tool's result is lost or
+    /// the executor panics on drain_remaining due to JoinError.
+    /// DESIRED BEHAVIOR: executor gracefully handles the panic and marks
+    /// the tool as failed, subsequent tools still complete.
+    #[tokio::test]
+    async fn risk1_mutex_poison_cascade_on_tool_panic() {
+        let registry = build_registry(vec![
+            Arc::new(PanicTool),
+            Arc::new(MockReadTool),
+        ]);
+        let config = StreamingExecutorConfig {
+            sibling_cancel_on_error: false,
+            ..Default::default()
+        };
+        let mut executor = StreamingToolExecutor::new(registry, config);
+
+        executor.add_tool(make_call("panic_tool", "panicker"));
+        executor.add_tool(make_call("read_file", "survivor"));
+
+        let results = executor.drain_remaining().await;
+
+        // The panicking tool's spawn task will JoinError. The StdMutex may
+        // or may not be poisoned depending on whether the panic happened
+        // while holding the lock. If poisoned, get_completed_results()
+        // inside drain_remaining() will panic on .lock().unwrap().
+        //
+        // With the current code, we cannot guarantee how many results we get.
+        // This test documents the fragility: if it passes, the panic didn't
+        // happen while holding the lock (lucky timing). If it panics, the
+        // mutex was poisoned — confirming RISK 1.
+        //
+        // A robust fix (parking_lot::Mutex or unwrap_or_else) would guarantee
+        // this test always returns 2 results with the panicker marked as failed.
+        eprintln!(
+            "risk1: got {} results (expected 2 with a robust mutex strategy)",
+            results.len()
+        );
     }
 }

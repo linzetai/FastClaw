@@ -34,11 +34,23 @@ impl AgentRuntime {
             let handle = tokio::spawn(async move {
                 let mut ctx = ctx;
                 ctx.step_tx = Some(step_tx);
-                // ctx.event_tx is already set by the caller (for side-path events)
 
                 let (mut ms, svc) = turn_setup::setup_turn(runtime, &ctx).await?;
                 turn_loop::run_turn_loop(&mut ms, &svc).await
             });
+
+            // Abort the spawned task on stream drop to prevent resource leaks
+            // (leaked LLM calls, tool side-effects, etc.).
+            let abort_handle = handle.abort_handle();
+            struct AbortOnDrop(tokio::task::AbortHandle);
+            impl Drop for AbortOnDrop {
+                fn drop(&mut self) {
+                    if !self.0.is_finished() {
+                        self.0.abort();
+                    }
+                }
+            }
+            let _abort_guard = AbortOnDrop(abort_handle);
 
             while let Some(step) = step_rx.recv().await {
                 yield step;
@@ -55,6 +67,9 @@ impl AgentRuntime {
                         error_code: None,
                         recoverable: false,
                     };
+                }
+                Err(join_err) if join_err.is_cancelled() => {
+                    // Task was aborted by our guard — not a panic.
                 }
                 Err(join_err) => {
                     yield AgentStep::Error {

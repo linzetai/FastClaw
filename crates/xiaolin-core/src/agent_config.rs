@@ -730,9 +730,17 @@ pub struct SubAgentDef {
     /// Read-only agents (e.g. "explore") should set this to `true`.
     #[serde(default)]
     pub concurrency_safe: bool,
+    /// Maximum number of parent messages to inherit when `inherit_context` is used.
+    /// Defaults to 20.
+    #[serde(default = "default_max_context_messages")]
+    pub max_context_messages: usize,
     /// Where this definition was loaded from.
     #[serde(skip)]
     pub source: SubAgentDefSource,
+}
+
+fn default_max_context_messages() -> usize {
+    20
 }
 
 /// Tool allow/deny filter for a sub-agent definition.
@@ -911,6 +919,7 @@ pub fn builtin_subagent_defs() -> Vec<SubAgentDef> {
             ),
             background: false,
             concurrency_safe: true,
+            max_context_messages: default_max_context_messages(),
             source: SubAgentDefSource::Builtin,
         },
         SubAgentDef {
@@ -930,6 +939,7 @@ pub fn builtin_subagent_defs() -> Vec<SubAgentDef> {
             ),
             background: false,
             concurrency_safe: false,
+            max_context_messages: default_max_context_messages(),
             source: SubAgentDefSource::Builtin,
         },
         SubAgentDef {
@@ -958,6 +968,7 @@ pub fn builtin_subagent_defs() -> Vec<SubAgentDef> {
             ),
             background: false,
             concurrency_safe: false,
+            max_context_messages: default_max_context_messages(),
             source: SubAgentDefSource::Builtin,
         },
         SubAgentDef {
@@ -992,6 +1003,7 @@ pub fn builtin_subagent_defs() -> Vec<SubAgentDef> {
             ),
             background: false,
             concurrency_safe: true,
+            max_context_messages: default_max_context_messages(),
             source: SubAgentDefSource::Builtin,
         },
     ]

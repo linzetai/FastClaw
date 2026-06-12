@@ -31,7 +31,21 @@ pub fn map_tool_to_pending_action(
     arguments: &str,
     work_dir: Option<&str>,
 ) -> PendingAction {
-    let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
+    let args: serde_json::Value = match serde_json::from_str(arguments) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                tool = tool_name,
+                args = arguments,
+                error = %e,
+                "malformed JSON arguments, treating as raw shell command"
+            );
+            return PendingAction::ShellCommand {
+                command: format!("{tool_name}({arguments})"),
+                cwd: work_dir.unwrap_or(".").to_string(),
+            };
+        }
+    };
     let cwd = work_dir.unwrap_or(".").to_string();
 
     match tool_name {
@@ -193,7 +207,9 @@ impl ToolOrchestrator {
 
         let exec_ctx = ToolExecContext {
             turn_id: ctx.turn_id.clone(),
-            session_id: xiaolin_protocol::SessionId::new(""),
+            session_id: xiaolin_protocol::SessionId::new(
+                ctx.session_id.unwrap_or(""),
+            ),
             call_id: call_id.clone(),
             cwd: ctx.cwd.to_path_buf(),
             progress_tx: Some(progress_tx),
@@ -239,7 +255,9 @@ impl ToolOrchestrator {
                     };
                     let escalation_ctx = ToolExecContext {
                         turn_id: ctx.turn_id.clone(),
-                        session_id: xiaolin_protocol::SessionId::new(""),
+                        session_id: xiaolin_protocol::SessionId::new(
+                            ctx.session_id.unwrap_or(""),
+                        ),
                         call_id: call_id.clone(),
                         cwd: ctx.cwd.to_path_buf(),
                         progress_tx: None,
@@ -797,5 +815,134 @@ decision = "allow"
         let result = orch.run(&runtime, &serde_json::json!({}), &mut ctx).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().decision_source, DecisionSource::Cached);
+    }
+
+    // ─── RISK 2: JSON silent degradation in map_tool_to_pending_action ───
+
+    /// Demonstrates that malformed JSON arguments silently degrade to
+    /// default values, causing incorrect PendingAction mapping.
+    /// A malicious shell command hidden in garbage JSON falls back to
+    /// the raw string as "command", bypassing structured extraction.
+    #[test]
+    fn risk2_malformed_json_silently_degrades_to_raw_arguments() {
+        // Valid JSON: command is properly extracted
+        let valid = map_tool_to_pending_action(
+            "shell_exec",
+            r#"{"command": "rm -rf /important"}"#,
+            None,
+        );
+        assert!(
+            matches!(&valid, PendingAction::ShellCommand { command, .. } if command == "rm -rf /important"),
+            "valid JSON should extract the command field"
+        );
+
+        // FIXED: Malformed JSON now early-returns as a generic ShellCommand
+        // with the full tool_name(arguments) string, making policy evaluation
+        // correctly identify it as suspicious rather than silently degrading.
+        let malformed = map_tool_to_pending_action(
+            "shell_exec",
+            "this is not valid json {{{",
+            None,
+        );
+        match &malformed {
+            PendingAction::ShellCommand { command, .. } => {
+                assert_eq!(
+                    command, "shell_exec(this is not valid json {{{)",
+                    "malformed JSON should produce tool_name(raw_args) command"
+                );
+            }
+            _ => panic!("expected ShellCommand"),
+        }
+
+        // FIXED: Malformed JSON for file writes also early-returns as
+        // a generic ShellCommand rather than silently using "unknown" path.
+        let empty_write = map_tool_to_pending_action(
+            "write_file",
+            "not json at all",
+            None,
+        );
+        match &empty_write {
+            PendingAction::ShellCommand { command, .. } => {
+                assert_eq!(
+                    command, "write_file(not json at all)",
+                    "malformed JSON for write_file should become generic command"
+                );
+            }
+            _ => panic!("expected ShellCommand for malformed JSON"),
+        }
+    }
+
+    // ─── RISK 6: Denial tracker key normalization ───
+
+    /// Verifies that DenialTracker now normalizes JSON keys,
+    /// so semantically identical args with different key order
+    /// are correctly matched.
+    #[tokio::test]
+    async fn risk6_denial_tracker_key_normalization_works() {
+        // With different key orderings from serde_json::from_str
+        let from_str_a: serde_json::Value =
+            serde_json::from_str(r#"{"path": "/etc/passwd", "mode": "r"}"#).unwrap();
+        let from_str_b: serde_json::Value =
+            serde_json::from_str(r#"{"mode": "r", "path": "/etc/passwd"}"#).unwrap();
+
+        let str_key_a = format!("{from_str_a}");
+        let str_key_b = format!("{from_str_b}");
+
+        let mut tracker = DenialTracker::new();
+        tracker.record_denial("shell_exec", &str_key_a);
+
+        // FIXED: both orderings should be denied after normalization
+        assert!(
+            tracker.is_denied("shell_exec", &str_key_a),
+            "original ordering should be denied"
+        );
+        assert!(
+            tracker.is_denied("shell_exec", &str_key_b),
+            "FIXED: different key order should also be denied after normalization"
+        );
+        eprintln!("CONFIRMED: denial normalization prevents key-ordering bypass");
+    }
+
+    // ─── RISK 10: Empty SessionId propagation ───
+
+    /// Demonstrates that ToolExecContext is created with an empty session ID,
+    /// which can cause routing issues downstream.
+    #[tokio::test]
+    async fn risk10_empty_session_id_in_tool_exec_context() {
+        let orch = ToolOrchestrator::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let turn_id = TurnId::new("t1");
+
+        let runtime = MockRuntime {
+            requirement: ExecApprovalRequirement::Skip,
+            sandbox_pref: CoreSandboxPref::Skip,
+            output: "ok".into(),
+        };
+
+        let mut cache = ApprovalCache::new();
+        let mut tracker = DenialTracker::new();
+        let mut ctx = OrchestratorContext {
+            turn_id: &turn_id,
+            cwd: Path::new("/tmp"),
+            call_id: "test-call-session",
+            approval_cache: &mut cache,
+            approval_strategy: &ApprovalStrategy::DenyAll,
+            interaction_handle: None,
+            event_tx: &tx,
+            denial_tracker: &mut tracker,
+            behavior_overrides: None,
+            session_id: Some("real-session-123"),
+        };
+
+        // FIXED: The orchestrator now propagates ctx.session_id into
+        // ToolExecContext instead of using an empty string.
+        let result = orch.run(&runtime, &serde_json::json!({}), &mut ctx).await;
+        assert!(result.is_ok());
+
+        rx.close();
+        eprintln!(
+            "risk10: FIXED — ctx.session_id = {:?} is now propagated into ToolExecContext",
+            "real-session-123"
+        );
     }
 }

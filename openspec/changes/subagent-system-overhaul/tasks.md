@@ -57,16 +57,22 @@
 - 主循环直接 yield 类型安全的 AgentStep
 - 侧路径（ToolProgress, Approval, SubAgent*）通过 event_tx 直连 caller
 
-## 2. Sidechain Transcript
+## 2. Sidechain Transcript — COMPLETED
 
-- [ ] 2.1 创建 `crates/xiaolin-agent/src/sidechain.rs` 模块：`SidechainWriter` struct（path, BufWriter）
-- [ ] 2.2 实现 `SidechainWriter::new(session_dir, run_id)` — 创建目录 + 写入 metadata header
-- [ ] 2.3 实现 `SidechainWriter::append(message)` — 序列化为 JSON line 并 flush
-- [ ] 2.4 实现 `SidechainReader::load(session_dir, run_id)` — 读取 JSONL 还原消息列表
-- [ ] 2.5 在 `SubAgentManager::run_subagent()` 中创建 SidechainWriter，child event 持久化前 forward
-- [ ] 2.6 实现 result extraction：子 agent 完成时取最后 assistant 消息（截断 4096 chars）
-- [ ] 2.7 新增 `resume_subagent` 工具：读取 sidechain → 构建 initial messages → 继续执行
-- [ ] 2.8 在 session 删除逻辑中添加 sidechains 目录清理
+- [x] 2.1 创建 `crates/xiaolin-agent/src/sidechain.rs` 模块：`SidechainWriter` struct（path, BufWriter）
+- [x] 2.2 实现 `SidechainWriter::new(session_dir, run_id)` — 创建目录 + 写入 metadata header
+- [x] 2.3 实现 `SidechainWriter::append(message)` — 序列化为 JSON line 并 flush
+- [x] 2.4 实现 `SidechainReader::load(session_dir, run_id)` — 读取 JSONL 还原消息列表
+- [x] 2.5 在 `SubAgentManager::run_subagent()` 中创建 SidechainWriter，child event 持久化前 forward
+- [x] 2.6 实现 result extraction：子 agent 完成时取最后 assistant 消息（截断 4096 chars）
+- [x] 2.7 新增 `resume_subagent` 工具：读取 sidechain → 构建 initial messages → 继续执行
+- [x] 2.8 在 session 删除逻辑中添加 sidechains 目录清理
+
+**关键成果**:
+- Sidechain 文件持久化到 `~/.xiaolin/sessions/{session_id}/sidechains/{run_id}.jsonl`
+- 修复 `SUBAGENT_SESSION_ID` task-local 无法穿越 tokio::spawn 边界的 bug
+- `resume_subagent` 工具可恢复上下文并续跑（BANANA 记忆测试通过）
+- Session 删除时自动清理 sidechain 文件
 
 ## 3. Fork Agent
 

@@ -1115,14 +1115,14 @@ impl StateBuilder {
             tracing::info!(count = def_count, "loaded sub-agent definitions (builtin + custom + user)");
         }
 
-        state
-            .rt
-            .tool_registry
-            .register(Arc::new(xiaolin_agent::SubAgentTool::new(
+        state.rt.tool_registry.register(Arc::new(
+            xiaolin_agent::SubAgentTool::new(
                 state.strm.subagent_manager.clone(),
                 state.rt.tool_registry.clone(),
                 xiaolin_core::agent_config::SubAgentPolicy::default(),
-            )));
+            )
+            .with_session_store(Arc::clone(&state.store.session_store)),
+        ));
         state
             .rt
             .tool_registry

@@ -645,6 +645,7 @@ pub async fn spawn_chat(
         // On Done: persist assistant message BEFORE forwarding to client.
         let mut assistant_content = String::new();
         let mut stream_ended = false;
+        let mut after_chat_called = false;
         let mut current_turn_id: Option<xiaolin_protocol::TurnId> = None;
 
         // Track tool calls during the stream so we can persist enriched data
@@ -703,7 +704,7 @@ pub async fn spawn_chat(
                     let _ = state.obs.budget_tracker.release_reservation(reserved);
                     reserved = 0.0;
                 }
-                if !assistant_content.is_empty() {
+                if !after_chat_called && !assistant_content.is_empty() {
                     let assistant_msg = ChatMessage {
                         role: xiaolin_core::types::Role::Assistant,
                         content: Some(serde_json::Value::String(assistant_content.clone())),
@@ -711,6 +712,7 @@ pub async fn spawn_chat(
                         ..Default::default()
                     };
                     let _ = after_chat(&state, &setup, &assistant_msg, false).await;
+                    after_chat_called = true;
                 }
                 break;
             }
@@ -776,7 +778,7 @@ pub async fn spawn_chat(
                     let _ = state.obs.budget_tracker.release_reservation(reserved);
                     reserved = 0.0;
                 }
-                if !assistant_content.is_empty() {
+                if !after_chat_called && !assistant_content.is_empty() {
                     let assistant_msg = ChatMessage {
                         role: xiaolin_core::types::Role::Assistant,
                         content: Some(serde_json::Value::String(assistant_content.clone())),
@@ -784,6 +786,7 @@ pub async fn spawn_chat(
                         ..Default::default()
                     };
                     let _ = after_chat(&state, &setup, &assistant_msg, false).await;
+                    after_chat_called = true;
                 }
                 break;
             }
@@ -819,7 +822,7 @@ pub async fn spawn_chat(
                     assistant_content.len(),
                 );
             }
-            if is_done && !assistant_content.is_empty() {
+            if is_done && !after_chat_called && !assistant_content.is_empty() {
                 let assistant_msg = ChatMessage {
                     role: xiaolin_core::types::Role::Assistant,
                     content: Some(serde_json::Value::String(assistant_content.clone())),
@@ -827,6 +830,7 @@ pub async fn spawn_chat(
                     ..Default::default()
                 };
                 let _ = after_chat(&state, &setup, &assistant_msg, false).await;
+                after_chat_called = true;
             }
             // Persist per-message and session-level usage on Done
             if let AgentEvent::TurnEnd {
@@ -923,7 +927,7 @@ pub async fn spawn_chat(
         // Release budget reservation if not consumed.
         if !stream_ended && reserved > 0.0 {
             let _ = state.obs.budget_tracker.release_reservation(reserved);
-            if !assistant_content.is_empty() {
+            if !after_chat_called && !assistant_content.is_empty() {
                 if turn_cancel.is_cancelled() {
                     assistant_content.push_str("\n\n[此回复因超时被截断]");
                 }
@@ -934,6 +938,7 @@ pub async fn spawn_chat(
                     ..Default::default()
                 };
                 let _ = after_chat(&state, &setup, &assistant_msg, false).await;
+                let _ = after_chat_called; // last call site; suppress unused_assignments
             }
             if !turn_cancel.is_cancelled() {
                 let _ = bg_tx

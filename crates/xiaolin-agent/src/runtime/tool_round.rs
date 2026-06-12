@@ -194,11 +194,11 @@ pub(crate) async fn execute_tool_round(
                 "edit_file" | "write_file" | "create_file" | "str_replace_editor"
             ) {
                 if let Some(fp) = extract_file_path_from_args(&tc.function.arguments) {
-                    snaps.entry(fp.clone()).or_insert_with(|| {
+                    if !snaps.contains_key(&fp) {
                         let exists = fp.exists();
-                        let content = std::fs::read_to_string(&fp).ok();
-                        (content, exists)
-                    });
+                        let content = tokio::fs::read_to_string(&fp).await.ok();
+                        snaps.insert(fp, (content, exists));
+                    }
                 }
             }
         }
@@ -331,7 +331,7 @@ pub(crate) async fn execute_tool_round(
                 {
                     (*snap_exists, snap_content.clone())
                 } else {
-                    (file_path.exists(), std::fs::read_to_string(&file_path).ok())
+                    (file_path.exists(), tokio::fs::read_to_string(&file_path).await.ok())
                 };
                 if let Some(ref c) = content {
                     ms.undo_engine.capture_before_edit(&file_path, c);

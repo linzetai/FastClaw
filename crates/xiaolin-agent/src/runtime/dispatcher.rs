@@ -190,6 +190,8 @@ impl ToolDispatcher {
         // them without the mutable context by using a temporary context per call.
         if !concurrent_indices.is_empty() {
             let session_id_for_concurrent = ctx.session_id.map(|s| s.to_owned());
+            let hooks = &self.hooks;
+            let agent_id = ctx.agent_id.to_string();
             let concurrent_futures: Vec<_> = concurrent_indices
                 .iter()
                 .map(|&i| {
@@ -201,9 +203,55 @@ impl ToolDispatcher {
                         ctx.mode_state.map(|ms| ms.current_mode());
                     let plan_fp = ctx.plan_file_path.clone();
                     let sid = session_id_for_concurrent.clone();
+                    let hooks = hooks.clone();
+                    let agent_id = agent_id.clone();
                     async move {
+                        let tool_name = tc.function.name.clone();
+                        let call_id = tc.id.clone();
+                        let arguments = tc.function.arguments.clone();
+
+                        // Run pre-hooks (same pipeline as dispatch_one)
+                        let effective_tc = if hooks.is_empty() {
+                            tc.clone()
+                        } else {
+                            let tool_kind = tool_registry.get(&tool_name)
+                                .map(|t| t.kind())
+                                .unwrap_or(ToolKind::Read);
+                            let hook_ctx = ToolHookContext {
+                                tool_name: tool_name.clone(),
+                                tool_kind,
+                                call_id: call_id.clone(),
+                                arguments: arguments.clone(),
+                                agent_id: agent_id.clone(),
+                            };
+                            let mut outcome = PreHookOutcome::Allow;
+                            for hook in &hooks {
+                                let action: PreToolAction = hook.pre_tool_use(&hook_ctx).await;
+                                if let Some(reason) = action.block_reason {
+                                    outcome = PreHookOutcome::Block(reason);
+                                    break;
+                                }
+                                if let Some(new_args) = action.modified_arguments {
+                                    outcome = PreHookOutcome::Rewrite(new_args);
+                                    break;
+                                }
+                            }
+                            match outcome {
+                                PreHookOutcome::Allow => tc.clone(),
+                                PreHookOutcome::Rewrite(new_args) => {
+                                    let mut rewritten = tc.clone();
+                                    rewritten.function.arguments = new_args;
+                                    rewritten
+                                }
+                                PreHookOutcome::Block(reason) => {
+                                    return (tool_name, call_id, arguments, ToolResult::err(reason));
+                                }
+                            }
+                        };
+
+                        let start = std::time::Instant::now();
                         let tool_fut = Self::execute_unguarded_standalone(
-                            &tc,
+                            &effective_tc,
                             &tool_registry,
                             &behavior,
                             &work_dir,
@@ -215,13 +263,32 @@ impl ToolDispatcher {
                         } else {
                             tool_fut.await
                         };
-                        let result = Self::truncate_result_static(&tc.function.name, result);
-                        (
-                            tc.function.name.clone(),
-                            tc.id.clone(),
-                            tc.function.arguments.clone(),
-                            result,
-                        )
+                        let latency_ms = start.elapsed().as_millis() as u64;
+
+                        // Run post-hooks
+                        if !hooks.is_empty() {
+                            let tool_kind = tool_registry.get(&tool_name)
+                                .map(|t| t.kind())
+                                .unwrap_or(ToolKind::Read);
+                            let hook_ctx = ToolHookContext {
+                                tool_name: tool_name.clone(),
+                                tool_kind,
+                                call_id: call_id.clone(),
+                                arguments: effective_tc.function.arguments.clone(),
+                                agent_id: agent_id.clone(),
+                            };
+                            let info = PostToolInfo {
+                                success: result.success,
+                                output_len: result.output.len(),
+                                latency_ms,
+                            };
+                            for hook in &hooks {
+                                hook.post_tool_use(&hook_ctx, &info).await;
+                            }
+                        }
+
+                        let result = Self::truncate_result_static(&tool_name, result);
+                        (tool_name, call_id, arguments, result)
                     }
                 })
                 .collect();
