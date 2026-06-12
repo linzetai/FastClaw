@@ -1,20 +1,93 @@
-## 0. Bug Fixes（前置）
+## 0. Bug Fixes（前置）— COMPLETED
 
-- [ ] 0.1 在 `useMessageStreamChat.ts` 中添加 `sub_agent_notification` case handler，将数据推入 stream-store
-- [ ] 0.2 审计 `subagent_prompt` 参数：追踪调用链确认是否有实际使用方，若无则从 `execute_unified` 签名中移除
-- [ ] 0.3 移除 `SubAgentManager.default_policy` 的 `#[allow(dead_code)]`，接入实际使用或删除字段
-- [ ] 0.4 修复 `SubAgentTool` 中 `parent_tx` 为 None 时创建 dummy channel 导致事件丢失的问题
+- [x] 0.1 在 `useMessageStreamChat.ts` 中添加 `sub_agent_notification` case handler，将数据推入 stream-store
+- [x] 0.2 审计 `subagent_prompt` 参数：确认有实际使用方（`build_subagent_prompt_block`），移除 `append_subagent_prompt_to_system` 死代码
+- [x] 0.3 移除 `SubAgentManager.default_policy` 的 `#[allow(dead_code)]`，删除该未使用字段
+- [x] 0.4 修复 `SubAgentTool` 中 `parent_tx` 为 None 时事件丢失：实现 session_event_senders + task-local 路由
+- [x] 0.5 修复 `RuntimeTurnExecutor.subagent_manager` 初始化为 None（builder.rs 创建顺序问题）
+- [x] 0.6 修复 `SUBAGENT_SESSION_ID` task-local 无法穿越 `tokio::spawn()` 边界
 
 ## 1. Stream-based Agent Loop
 
-- [ ] 1.1 定义 `AgentStep` 枚举（TurnStart, Delta, ToolExecuting, ToolResult, ToolRoundBoundary, SteeringInjected, TurnEnd, Error）
-- [ ] 1.2 定义 `AgentContext` struct，合并 `ExecutionParams` + `StreamParams` 的 13+ 参数
-- [ ] 1.3 添加 `async-stream` 依赖到 `xiaolin-agent/Cargo.toml`
-- [ ] 1.4 实现 `AgentRuntime::execute_as_stream(ctx: AgentContext) -> impl Stream<Item=AgentStep>`
-- [ ] 1.5 在 stream 内部实现 tool-round boundary detection（yield ToolRoundBoundary after all tool results）
-- [ ] 1.6 实现兼容层：`execute_unified` 内部调用 `execute_as_stream` + collect into TurnSummary + forward to tx
-- [ ] 1.7 验证所有现有调用方（gateway, session_bridge, subagent_manager）行为不变
-- [ ] 1.8 移除 clippy `too_many_arguments` allow 注解，确认不再触发
+### Phase 1a: 定义类型（AgentStep + AgentContext）
+
+- [ ] 1a.1 新建 `crates/xiaolin-agent/src/runtime/agent_step.rs`，定义 `AgentStep` 枚举
+  - 变体：TurnStart, Delta, ToolExecuting, ToolResult, ToolRoundBoundary, SteeringInjected, ContextUsage, ContextWarning, ModeChange, GoalUpdated, PlanFileUpdate, TurnEnd, Error
+  - Delta 字段: `delta: serde_json::Value`（与 AgentEvent::ContentDelta 一致，非 String）
+  - ToolExecuting/ToolResult 字段: `tool_name`（非 `name`，与 AgentEvent 对齐）
+  - ContextUsage 字段: `used_tokens, limit_tokens, compressed, tokens_saved`（与 AgentEvent::ContextUsageUpdate 一致）
+  - TurnEndReason: Completed, MaxTurns, Cancelled, ContextLimit, BudgetExceeded, ConsecutiveErrors, DiminishingReturns, PlanApprovalPending, Error（与 TerminalReason 对齐）
+  - 实现 `AgentStep::into_agent_events(turn_id) -> Vec<AgentEvent>`（部分 step 不产生 event，如 ToolRoundBoundary）
+  - 实现 `AgentStep::is_lossy() -> bool`
+- [ ] 1a.2 新建 `crates/xiaolin-agent/src/runtime/agent_context.rs`，定义 `AgentContext` struct
+  - Required: config, request, tool_registry
+  - Streaming: tx (Option, 侧路径 clone 给 orchestrator/tools)
+  - Optional: llm_override, subagent_prompt, mode_state, orchestrator, interaction_handle, runtime_registry, session_store, todo_store, goal_store, cost_store, cancel_token
+  - Non-optional with default: approval_strategy (default AutoApprove)
+  - 提供 `AgentContext::from_params(exec: ExecutionParams, stream: StreamParams)` 构造方法
+  - 提供 `AgentContext::minimal(config, request, tool_registry)` 精简构造
+- [ ] 1a.3 在 `crates/xiaolin-agent/src/runtime/mod.rs` 中声明新模块并导出
+- [ ] 1a.4 `cargo clippy -- -D warnings` 零警告
+
+### Phase 1b: 抽取阶段函数（重构，行为不变）
+
+- [ ] 1b.1 新建 `crates/xiaolin-agent/src/runtime/turn_setup.rs`
+  - 抽取 lines 865-1153 为 `pub(crate) fn setup_turn(ctx: &AgentContext, runtime: &AgentRuntime) -> TurnSetup`
+  - `TurnSetup` struct 包含：messages, tool_defs, state, deps, services, dispatcher, streaming_executor_config
+- [ ] 1b.2 新建 `crates/xiaolin-agent/src/runtime/iteration_check.rs`
+  - 抽取 lines 1155-1370 为 `pub(crate) fn pre_iteration_check(state, deps, tx) -> PreCheckResult`
+  - `PreCheckResult` 枚举：Continue, FatalError, BlockingLimit
+- [ ] 1b.3 新建 `crates/xiaolin-agent/src/runtime/llm_call.rs`
+  - 抽取 lines 1385-1483 为 `pub(crate) fn prepare_llm_params(...) -> CompletionParams`
+  - 抽取 lines 1484-1865 为 `pub(crate) async fn consume_llm_stream(...) -> StreamConsumeResult`
+  - `StreamConsumeResult` 包含：accumulated_content, accumulated_reasoning, tool_call_accum, usage, errored, force_stop, finish_reason, withheld_ptl
+- [ ] 1b.4 新建 `crates/xiaolin-agent/src/runtime/tool_round.rs`
+  - 抽取 lines 2327-2483 (dispatch) + 2485-2794 (per-tool) 为 `pub(crate) async fn execute_tool_round(...) -> ToolRoundResult`
+  - `ToolRoundResult` 包含：tool_messages, events_to_emit, post_actions (micro-compact, mode-change, goal-update)
+- [ ] 1b.5 新建 `crates/xiaolin-agent/src/runtime/post_tool.rs`
+  - 抽取 lines 2796-3019 为 `pub(crate) fn post_tool_process(...) -> PostToolAction`
+  - `PostToolAction` 枚举：Continue, PlanApprovalPending, ForceStopLoop, GoalCancelled
+- [ ] 1b.6 重写 `execute_stream_inner` 使其调用以上函数，验证行为不变
+- [ ] 1b.7 `cargo test` 全部通过 + `cargo clippy -- -D warnings` 零警告
+
+### Phase 1c: 实现 execute_as_stream（核心变更）
+
+- [ ] 1c.1 添加 `async-stream = "0.3"` 依赖到 `crates/xiaolin-agent/Cargo.toml`
+- [ ] 1c.2 实现 `AgentRuntime::execute_as_stream(ctx: AgentContext) -> impl Stream<Item=AgentStep>`
+  - 使用 `async_stream::stream!` 宏
+  - Stream 内部结构：setup -> loop { pre_check -> llm_stream -> transition -> tool_round -> boundary }
+  - 内部持有 `CancellationToken`，stream drop 时触发 cancel
+- [ ] 1c.3 实现 tool-round boundary 顺序：
+  1. 检查 abort/cancel
+  2. drain MessageQueue (priority <= Next)
+  3. 注入 drained messages 到对话历史
+  4. yield `AgentStep::SteeringInjected`（如有）
+  5. yield `AgentStep::ToolRoundBoundary`
+  6. 继续下一轮 LLM 调用
+- [ ] 1c.4 实现 Stream 取消语义：drop stream -> cancel internal token -> abort LLM call -> release SpawnReservation
+- [ ] 1c.5 单元测试：mock LLM provider，验证 stream yield 顺序正确
+
+### Phase 1d: 兼容层桥接（外部 API 不变）
+
+- [ ] 1d.1 重写 `execute_unified` 内部实现：构建 AgentContext → pin stream → poll → 转发 AgentEvent
+- [ ] 1d.2 重写 `execute_stream` 同理
+- [ ] 1d.3 验证所有调用方（gateway state, session_bridge, subagent_manager）零修改
+- [ ] 1d.4 保留 `execute_stream_inner` 为 `#[deprecated]` 备用，待 1e 验证后删除
+
+### Phase 1e: 全量回归验证 + 清理
+
+- [ ] 1e.1 `cargo test --workspace` 全部通过
+- [ ] 1e.2 `cargo clippy -- -D warnings` 零警告
+- [ ] 1e.3 移除 `#[allow(clippy::too_many_arguments)]` 注解
+- [ ] 1e.4 删除旧 `execute_stream_inner` 函数
+- [ ] 1e.5 E2E 测试矩阵：
+  - 普通对话（纯文本回复，TurnStart → Delta* → TurnEnd）
+  - 单轮工具调用（ToolExecuting → ToolResult → Delta → TurnEnd）
+  - 多轮工具调用（多次 ToolRoundBoundary）
+  - SubAgent 触发 + 事件流传递
+  - Context compact 触发（大量消息后自动 compact）
+  - Stream 取消（发送后立即 stop，验证无泄露）
+- [ ] 1e.6 提交最终 commit
 
 ## 2. Sidechain Transcript
 
