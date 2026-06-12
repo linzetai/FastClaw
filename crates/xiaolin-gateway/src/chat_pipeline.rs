@@ -213,7 +213,7 @@ pub async fn setup_chat(
         tools: request.tools.clone(),
         slash_intent: request.slash_intent.clone(),
         work_dir: request.work_dir.clone(),
-        response_language: None,
+        response_language: request.response_language.clone(),
     };
     let t0 = std::time::Instant::now();
     state
@@ -654,7 +654,7 @@ fn inject_mcp_tools_prompt(state: &AppState, messages: &mut Vec<ChatMessage>) {
         std::collections::BTreeMap::new();
     for td in &mcp_tools {
         let name = &td.function.name;
-        let after_prefix = &name[4..]; // strip "mcp_"
+        let after_prefix = name.strip_prefix("mcp_").unwrap_or(name);
         let server_id = if let Some(idx) = after_prefix.find('_') {
             &after_prefix[..idx]
         } else {

@@ -113,7 +113,7 @@ async fn check_active_goal(store: &GoalStore, had_tool_calls: bool) -> Option<St
                         .to_string(),
                 ));
             }
-            if store.record_continuation_activity(had_tool_calls) {
+            if store.record_continuation_activity(had_tool_calls).await {
                 tracing::warn!(goal_id = %goal.id, "goal idle for too many rounds, pausing");
                 let _ = store
                     .update_status(&goal.id, GoalStatus::Paused, Some("idle_rounds"))
@@ -130,7 +130,7 @@ async fn check_active_goal(store: &GoalStore, had_tool_calls: bool) -> Option<St
                         .to_string(),
                 ));
             }
-            let prompt = if store.take_objective_updated() {
+            let prompt = if store.take_objective_updated().await {
                 crate::runtime::goal_prompts::render_objective_updated_prompt(&goal)
             } else {
                 crate::runtime::goal_prompts::render_continuation_prompt(&goal)

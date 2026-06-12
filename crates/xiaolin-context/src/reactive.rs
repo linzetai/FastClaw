@@ -106,10 +106,14 @@ impl ReactiveCompactor {
             .iter()
             .filter(|m| m.role == Role::System)
             .collect();
-        if existing_sys.len() >= original_system.len() {
+        let all_present = original_system.iter().all(|orig| {
+            existing_sys
+                .iter()
+                .any(|ex| ex.content == orig.content)
+        });
+        if all_present {
             return compacted.to_vec();
         }
-        // Re-insert missing system messages at the front.
         let non_sys: Vec<ChatMessage> = compacted
             .iter()
             .filter(|m| m.role != Role::System)

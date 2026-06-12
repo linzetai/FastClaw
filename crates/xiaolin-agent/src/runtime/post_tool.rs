@@ -233,7 +233,7 @@ pub(crate) async fn post_tool_processing(
 
         if let Some(ref g) = goal_after {
             if g.status == crate::builtin_tools::GoalStatus::Active
-                && gs.check_budget_warning(g)
+                && gs.check_budget_warning(g).await
             {
                 tracing::info!(
                     goal_id = %g.id,

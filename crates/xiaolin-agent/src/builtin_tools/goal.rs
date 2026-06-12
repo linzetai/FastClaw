@@ -116,15 +116,32 @@ fn validate_goal_description(desc: &str) -> Result<String, String> {
 
 const MAX_IDLE_CONTINUATION_ROUNDS: u32 = 3;
 
-pub struct GoalStore {
-    session_store: Arc<SessionStore>,
-    session_id: tokio::sync::Mutex<Option<String>>,
+struct SessionGoalState {
     continuation_rounds: std::sync::atomic::AtomicU32,
     idle_rounds: std::sync::atomic::AtomicU32,
     objective_updated: std::sync::atomic::AtomicBool,
     last_accounted_tokens: std::sync::atomic::AtomicU64,
     last_accounted_time_secs: std::sync::atomic::AtomicU64,
     budget_warning_sent: std::sync::atomic::AtomicBool,
+}
+
+impl Default for SessionGoalState {
+    fn default() -> Self {
+        Self {
+            continuation_rounds: std::sync::atomic::AtomicU32::new(0),
+            idle_rounds: std::sync::atomic::AtomicU32::new(0),
+            objective_updated: std::sync::atomic::AtomicBool::new(false),
+            last_accounted_tokens: std::sync::atomic::AtomicU64::new(0),
+            last_accounted_time_secs: std::sync::atomic::AtomicU64::new(0),
+            budget_warning_sent: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+
+pub struct GoalStore {
+    session_store: Arc<SessionStore>,
+    session_id: tokio::sync::Mutex<Option<String>>,
+    states: dashmap::DashMap<String, Arc<SessionGoalState>>,
 }
 
 impl GoalStore {
@@ -136,32 +153,48 @@ impl GoalStore {
         Self {
             session_store,
             session_id: tokio::sync::Mutex::new(None),
-            continuation_rounds: std::sync::atomic::AtomicU32::new(0),
-            idle_rounds: std::sync::atomic::AtomicU32::new(0),
-            objective_updated: std::sync::atomic::AtomicBool::new(false),
-            last_accounted_tokens: std::sync::atomic::AtomicU64::new(0),
-            last_accounted_time_secs: std::sync::atomic::AtomicU64::new(0),
-            budget_warning_sent: std::sync::atomic::AtomicBool::new(false),
+            states: dashmap::DashMap::new(),
         }
     }
 
+    fn get_state(&self, session_id: &str) -> Arc<SessionGoalState> {
+        self.states
+            .entry(session_id.to_string())
+            .or_insert_with(|| Arc::new(SessionGoalState::default()))
+            .value()
+            .clone()
+    }
+
+    async fn current_state(&self) -> Option<Arc<SessionGoalState>> {
+        let sid = self.sid().await?;
+        Some(self.get_state(&sid))
+    }
+
     /// Mark that the objective was updated; next continuation will inject updated prompt.
-    pub fn mark_objective_updated(&self) {
-        self.objective_updated
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+    pub async fn mark_objective_updated(&self) {
+        if let Some(st) = self.current_state().await {
+            st.objective_updated
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     /// Check and clear the objective-updated flag.
-    pub fn take_objective_updated(&self) -> bool {
-        self.objective_updated
-            .swap(false, std::sync::atomic::Ordering::Relaxed)
+    pub async fn take_objective_updated(&self) -> bool {
+        match self.current_state().await {
+            Some(st) => st.objective_updated.swap(false, std::sync::atomic::Ordering::Relaxed),
+            None => false,
+        }
     }
 
     pub async fn set_session_id(&self, session_id: String) {
         *self.session_id.lock().await = Some(session_id.clone());
-        self.reset_accounting();
+        let st = self.get_state(&session_id);
+        st.last_accounted_tokens.store(0, std::sync::atomic::Ordering::Relaxed);
+        st.last_accounted_time_secs.store(0, std::sync::atomic::Ordering::Relaxed);
+        st.budget_warning_sent.store(false, std::sync::atomic::Ordering::Relaxed);
+        st.idle_rounds.store(0, std::sync::atomic::Ordering::Relaxed);
         if let Ok(Some(goal)) = self.session_store.get_actionable_goal(&session_id).await {
-            self.continuation_rounds
+            st.continuation_rounds
                 .store(goal.continuation_rounds as u32, std::sync::atomic::Ordering::Relaxed);
         }
     }
@@ -219,10 +252,12 @@ impl GoalStore {
                 existing.id, existing.status
             ));
         }
-        self.continuation_rounds
-            .store(0, std::sync::atomic::Ordering::Relaxed);
-        self.reset_idle_rounds();
-        self.reset_accounting();
+        let st = self.get_state(&sid);
+        st.continuation_rounds.store(0, std::sync::atomic::Ordering::Relaxed);
+        st.idle_rounds.store(0, std::sync::atomic::Ordering::Relaxed);
+        st.last_accounted_tokens.store(0, std::sync::atomic::Ordering::Relaxed);
+        st.last_accounted_time_secs.store(0, std::sync::atomic::Ordering::Relaxed);
+        st.budget_warning_sent.store(false, std::sync::atomic::Ordering::Relaxed);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -271,7 +306,7 @@ impl GoalStore {
             .update_goal_description(goal_id, &description)
             .await
             .map_err(|e| format!("failed to update description: {e}"))?;
-        self.mark_objective_updated();
+        self.mark_objective_updated().await;
         self.session_store
             .get_goal(goal_id)
             .await
@@ -314,7 +349,8 @@ impl GoalStore {
     /// Incremental token accounting: only adds the delta since the last call.
     /// Returns (delta_added, over_budget) where over_budget is true if budget exceeded.
     pub async fn account_tokens(&self, goal_id: &str, cumulative_tokens: u64) -> Option<(u64, bool)> {
-        let prev = self.last_accounted_tokens.swap(cumulative_tokens, std::sync::atomic::Ordering::Relaxed);
+        let st = self.current_state().await?;
+        let prev = st.last_accounted_tokens.swap(cumulative_tokens, std::sync::atomic::Ordering::Relaxed);
         let delta = cumulative_tokens.saturating_sub(prev);
         if delta == 0 {
             return Some((0, false));
@@ -324,30 +360,31 @@ impl GoalStore {
 
     /// Incremental time accounting: only adds the delta since the last call.
     pub async fn account_time(&self, goal_id: &str, cumulative_secs: u64) {
-        let prev = self.last_accounted_time_secs.swap(cumulative_secs, std::sync::atomic::Ordering::Relaxed);
+        let st = match self.current_state().await {
+            Some(s) => s,
+            None => return,
+        };
+        let prev = st.last_accounted_time_secs.swap(cumulative_secs, std::sync::atomic::Ordering::Relaxed);
         let delta = cumulative_secs.saturating_sub(prev);
         if delta > 0 {
             self.add_time(goal_id, delta).await;
         }
     }
 
-    /// Reset accounting baselines (called on new goal creation or session switch).
-    pub fn reset_accounting(&self) {
-        self.last_accounted_tokens.store(0, std::sync::atomic::Ordering::Relaxed);
-        self.last_accounted_time_secs.store(0, std::sync::atomic::Ordering::Relaxed);
-        self.budget_warning_sent.store(false, std::sync::atomic::Ordering::Relaxed);
-    }
-
     /// Check if the goal's budget usage has crossed the 80% threshold.
     /// Returns `true` exactly once per goal (the first time usage exceeds 80%).
-    pub fn check_budget_warning(&self, goal: &Goal) -> bool {
+    pub async fn check_budget_warning(&self, goal: &Goal) -> bool {
         let budget = match goal.token_budget {
             Some(b) if b > 0 => b,
             _ => return false,
         };
+        let st = match self.current_state().await {
+            Some(s) => s,
+            None => return false,
+        };
         let threshold = budget * 80 / 100;
         if goal.tokens_used >= threshold
-            && !self.budget_warning_sent.swap(true, std::sync::atomic::Ordering::Relaxed)
+            && !st.budget_warning_sent.swap(true, std::sync::atomic::Ordering::Relaxed)
         {
             return true;
         }
@@ -364,7 +401,11 @@ impl GoalStore {
     /// Increment the continuation round counter and return whether the max has been reached.
     /// Also persists the count to DB.
     pub async fn increment_rounds(&self, goal_id: &str) -> bool {
-        let prev = self
+        let st = match self.current_state().await {
+            Some(s) => s,
+            None => return false,
+        };
+        let prev = st
             .continuation_rounds
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let new_val = prev + 1;
@@ -377,39 +418,42 @@ impl GoalStore {
 
     /// Reset the continuation round counter (called when a new goal is created or resumed).
     pub async fn reset_rounds(&self, goal_id: &str) {
-        self.continuation_rounds
-            .store(0, std::sync::atomic::Ordering::Relaxed);
-        self.reset_idle_rounds();
+        if let Some(st) = self.current_state().await {
+            st.continuation_rounds
+                .store(0, std::sync::atomic::Ordering::Relaxed);
+            st.idle_rounds
+                .store(0, std::sync::atomic::Ordering::Relaxed);
+        }
         let _ = self
             .session_store
             .update_continuation_rounds(goal_id, 0)
             .await;
     }
 
-    pub fn current_rounds(&self) -> u32 {
-        self.continuation_rounds
-            .load(std::sync::atomic::Ordering::Relaxed)
+    pub async fn current_rounds(&self) -> u32 {
+        match self.current_state().await {
+            Some(st) => st.continuation_rounds.load(std::sync::atomic::Ordering::Relaxed),
+            None => 0,
+        }
     }
 
     /// Track whether a continuation round was idle (no tool calls).
     /// Returns true if the idle limit has been reached.
-    pub fn record_continuation_activity(&self, had_tool_calls: bool) -> bool {
+    pub async fn record_continuation_activity(&self, had_tool_calls: bool) -> bool {
+        let st = match self.current_state().await {
+            Some(s) => s,
+            None => return false,
+        };
         if had_tool_calls {
-            self.idle_rounds
+            st.idle_rounds
                 .store(0, std::sync::atomic::Ordering::Relaxed);
             false
         } else {
-            let prev = self
+            let prev = st
                 .idle_rounds
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             prev + 1 >= MAX_IDLE_CONTINUATION_ROUNDS
         }
-    }
-
-    /// Reset the idle counter (called on new goal or resume).
-    pub fn reset_idle_rounds(&self) {
-        self.idle_rounds
-            .store(0, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

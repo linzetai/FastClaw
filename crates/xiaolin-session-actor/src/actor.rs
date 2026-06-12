@@ -300,7 +300,21 @@ impl SessionActor {
                     f.subscriber_senders()
                 };
                 for tx in &senders {
-                    let _ = tx.try_send(session_event.clone());
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        tx.send(session_event.clone()),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(_closed)) => {}
+                        Err(_timeout) => {
+                            tracing::warn!(
+                                session_id = %relay_session_id,
+                                "relay send timed out after 5s, dropping event for slow subscriber"
+                            );
+                        }
+                    }
                 }
             }
         });

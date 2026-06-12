@@ -130,7 +130,16 @@ export function StreamFooter({
   const handleRecallLastMessage = useCallback((): string | null => {
     for (let i = stream.length - 1; i >= 0; i--) {
       const item = stream[i];
-      if (item.type === "message" && item.data.role === "user") return item.data.content;
+      if (item.type === "message" && item.data.role === "user") {
+        const content = item.data.content;
+        if (Array.isArray(content)) {
+          const textPart = content.find(
+            (p: { type?: string }) => p.type === "text",
+          );
+          return textPart?.text ?? null;
+        }
+        return content;
+      }
     }
     return null;
   }, [stream]);

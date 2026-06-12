@@ -670,6 +670,14 @@ pub async fn spawn_chat(
                         content_len = assistant_content.len(),
                         "turn exceeded 10-minute deadline, forcing cancellation"
                     );
+                    let _ = bg_tx
+                        .send(WsResponse {
+                            id: rid.clone(),
+                            msg_type: "error".into(),
+                            data: Some(json!({"type": "error", "message": "turn 运行超过 10 分钟，已被强制取消"})),
+                            error: Some(json!({"code": 408, "message": "turn 运行超过 10 分钟，已被强制取消"})),
+                        })
+                        .await;
                     turn_cancel.cancel();
                     break;
                 }
@@ -777,6 +785,7 @@ pub async fn spawn_chat(
                     };
                     let _ = after_chat(&state, &setup, &assistant_msg, false).await;
                 }
+                break;
             }
             if let AgentEvent::ContentDelta { ref delta, .. } = event {
                 if let Some(text) = delta
@@ -915,6 +924,9 @@ pub async fn spawn_chat(
         if !stream_ended && reserved > 0.0 {
             let _ = state.obs.budget_tracker.release_reservation(reserved);
             if !assistant_content.is_empty() {
+                if turn_cancel.is_cancelled() {
+                    assistant_content.push_str("\n\n[此回复因超时被截断]");
+                }
                 let assistant_msg = ChatMessage {
                     role: xiaolin_core::types::Role::Assistant,
                     content: Some(serde_json::Value::String(assistant_content.clone())),

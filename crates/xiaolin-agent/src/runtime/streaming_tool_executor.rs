@@ -704,6 +704,7 @@ mod tests {
             behavior,
             execution_mode: None,
             plan_file_path: None,
+            session_id: None,
         };
         let mut executor = StreamingToolExecutor::new(registry, config);
 
