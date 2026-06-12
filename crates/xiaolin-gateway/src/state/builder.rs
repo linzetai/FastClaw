@@ -1161,7 +1161,13 @@ impl StateBuilder {
                 state.rt.tool_registry.clone(),
                 xiaolin_core::agent_config::SubAgentPolicy::default(),
             )));
-        tracing::info!("registered sub-agent tools (spawn_subagent, subagent_get, subagent_list, list_agents, get_agent_info, resume_subagent)");
+        state
+            .rt
+            .tool_registry
+            .register(Arc::new(xiaolin_agent::SendMessageTool::new(
+                state.strm.subagent_manager.clone(),
+            )));
+        tracing::info!("registered sub-agent tools (spawn_subagent, subagent_get, subagent_list, list_agents, get_agent_info, resume_subagent, send_message)");
 
         state.spawn_skill_evolution_tasks();
 

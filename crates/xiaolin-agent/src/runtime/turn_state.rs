@@ -27,6 +27,7 @@ use super::validation_pipeline::ValidationPipeline;
 use super::runtimes::RuntimeRegistry;
 use super::AgentRuntime;
 use crate::builtin_tools::{ExecutionModeState, GoalStore, TodoStore};
+use crate::message_queue::MessageQueue;
 
 /// Mutable state that evolves across iterations of the agent loop.
 ///
@@ -103,6 +104,9 @@ pub(crate) struct TurnServices {
     pub skip_tool_names: HashSet<String>,
     pub validation_pipeline: ValidationPipeline,
     pub runtime_observer: RuntimeObserver,
+
+    // --- Message Queue ---
+    pub message_queue: Option<Arc<MessageQueue>>,
 
     // --- Lifecycle ---
     pub cancel_token: Option<CancellationToken>,

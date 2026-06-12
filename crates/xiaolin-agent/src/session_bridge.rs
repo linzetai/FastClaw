@@ -438,6 +438,7 @@ impl RuntimeTurnExecutor {
                 self.goal_store.clone(),
                 self.cost_store.clone(),
                 self.behavior_overrides.clone(),
+                None,
             ));
 
             let reprompt_result = {
@@ -706,6 +707,7 @@ impl TurnExecutor for RuntimeTurnExecutor {
                 goal_store,
                 cost_store_for_runtime,
                 behavior_overrides_for_runtime,
+                None,
             ));
 
             let steer_inbox_inner = steer_inbox.clone();

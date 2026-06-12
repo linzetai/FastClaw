@@ -5,6 +5,7 @@ pub mod code_graph;
 pub mod guardian;
 pub mod llm;
 pub mod llm_plugin;
+pub mod message_queue;
 pub mod process_channel;
 pub mod reactive_loop;
 pub mod rpc;
@@ -46,7 +47,7 @@ pub use spawn_controller::{
     SpawnController, SpawnControllerError,
 };
 pub use subagent::{
-    with_subagent_session_id, ResumeSubagentTool, SubAgentGetTool, SubAgentListTool,
-    SubAgentTool, WaitAgentTool,
+    with_subagent_session_id, ResumeSubagentTool, SendMessageTool, SubAgentGetTool,
+    SubAgentListTool, SubAgentTool, WaitAgentTool,
 };
 pub use subagent_manager::{SubAgentInheritedContext, SubAgentManager};

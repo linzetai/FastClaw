@@ -10,6 +10,8 @@ use xiaolin_core::tool::ToolRegistry;
 use xiaolin_core::types::{ChatMessage, SubAgentRun, SubAgentStatus, SubAgentType, Usage};
 use xiaolin_protocol::{AgentEvent, CompletionSummary, TokenUsage, TurnId};
 
+use crate::message_queue::MessageQueue;
+
 /// Context inherited from the parent session to ensure subagents run
 /// with the same file access permissions and work directory.
 #[derive(Clone, Debug)]
@@ -39,6 +41,8 @@ pub struct SubAgentManager {
     /// Per-session event senders for streaming SubAgent events to the frontend.
     /// Registered by session_bridge at turn start, unregistered at turn end.
     session_event_senders: Arc<DashMap<String, mpsc::Sender<AgentEvent>>>,
+    /// Per-run message queues for steering running sub-agents.
+    run_queues: Arc<DashMap<String, Arc<MessageQueue>>>,
 }
 
 impl SubAgentManager {
@@ -58,6 +62,7 @@ impl SubAgentManager {
             orchestrator: Arc::new(ToolOrchestrator::new()),
             completion_channels: Arc::new(DashMap::new()),
             session_event_senders: Arc::new(DashMap::new()),
+            run_queues: Arc::new(DashMap::new()),
         }
     }
 
@@ -78,6 +83,23 @@ impl SubAgentManager {
     /// Get the event sender for a session (used by SubAgentTool).
     pub fn get_session_tx(&self, session_id: &str) -> Option<mpsc::Sender<AgentEvent>> {
         self.session_event_senders.get(session_id).map(|r| r.value().clone())
+    }
+
+    /// Create a message queue for a run and return it.
+    pub fn create_run_queue(&self, run_id: &str) -> Arc<MessageQueue> {
+        let q = Arc::new(MessageQueue::new());
+        self.run_queues.insert(run_id.to_string(), Arc::clone(&q));
+        q
+    }
+
+    /// Get the message queue for a running sub-agent.
+    pub fn get_run_queue(&self, run_id: &str) -> Option<Arc<MessageQueue>> {
+        self.run_queues.get(run_id).map(|r| Arc::clone(r.value()))
+    }
+
+    /// Remove the message queue when a run completes.
+    pub fn remove_run_queue(&self, run_id: &str) {
+        self.run_queues.remove(run_id);
     }
 
     /// Update the available agents list (e.g. after config reload).
@@ -299,6 +321,9 @@ impl SubAgentManager {
             })
             .await;
 
+        let mq = self.create_run_queue(&run_id);
+        let run_queues_ref = self.run_queues.clone();
+
         let runs = self.runs.clone();
         let cancel_tokens = self.cancel_tokens.clone();
         let runtime = self.runtime.clone();
@@ -367,6 +392,7 @@ impl SubAgentManager {
                     inherited_context.as_ref(),
                     &session_id_owned,
                     initial_msgs.as_deref(),
+                    Some(mq.clone()),
                 ) => {
                     res
                 }
@@ -484,6 +510,7 @@ impl SubAgentManager {
 
             drop(reservation);
             cancel_tokens.remove(&rid);
+            run_queues_ref.remove(&rid);
 
             // Auto-GC: remove the run from the map after a short retention period.
             // This prevents unbounded growth of the `runs` DashMap.
@@ -645,6 +672,7 @@ impl SubAgentManager {
         inherited_context: Option<&SubAgentInheritedContext>,
         parent_session_id: &str,
         initial_messages: Option<&[ChatMessage]>,
+        message_queue: Option<Arc<MessageQueue>>,
     ) -> anyhow::Result<(String, u32, u32, Option<Usage>)> {
         use crate::sidechain::{SidechainMessage, SidechainMeta, SidechainWriter};
         use xiaolin_core::types::{ChatMessage, ChatRequest, Role};
@@ -896,7 +924,7 @@ impl SubAgentManager {
         };
 
         let stream_result = runtime
-            .execute_unified(
+            .execute_unified_with_cost_store(
                 config_ref,
                 &request,
                 tool_registry,
@@ -910,6 +938,9 @@ impl SubAgentManager {
                 None,
                 None,
                 None,
+                None,
+                None,
+                message_queue,
             )
             .await;
 

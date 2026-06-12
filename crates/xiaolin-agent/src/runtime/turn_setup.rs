@@ -329,6 +329,7 @@ pub(crate) async fn setup_turn(
         skip_tool_names,
         validation_pipeline,
         runtime_observer,
+        message_queue: ctx.message_queue.clone(),
         cancel_token,
     };
 

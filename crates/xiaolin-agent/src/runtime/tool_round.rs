@@ -194,10 +194,10 @@ pub(crate) async fn execute_tool_round(
                 "edit_file" | "write_file" | "create_file" | "str_replace_editor"
             ) {
                 if let Some(fp) = extract_file_path_from_args(&tc.function.arguments) {
-                    if !snaps.contains_key(&fp) {
-                        let exists = fp.exists();
-                        let content = tokio::fs::read_to_string(&fp).await.ok();
-                        snaps.insert(fp, (content, exists));
+                    if let std::collections::hash_map::Entry::Vacant(e) = snaps.entry(fp) {
+                        let exists = e.key().exists();
+                        let content = tokio::fs::read_to_string(e.key()).await.ok();
+                        e.insert((content, exists));
                     }
                 }
             }

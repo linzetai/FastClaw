@@ -267,6 +267,50 @@ pub async fn handle_chat_steer(
     .await;
 }
 
+/// Pushes a steering message into a running sub-agent's message queue.
+pub async fn handle_subagent_steer(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    state: &AppState,
+    req_id: Option<String>,
+    run_id: &str,
+    message: &str,
+    priority: Option<&str>,
+) {
+    use xiaolin_agent::message_queue::Priority;
+
+    let p = match priority {
+        Some("high") => Priority::High,
+        Some("low") => Priority::Low,
+        _ => Priority::Normal,
+    };
+
+    let ok = if let Some(queue) = state.strm.subagent_manager.get_run_queue(run_id) {
+        queue.push(p, "ws_client", message);
+        true
+    } else {
+        false
+    };
+
+    let error_msg: Option<serde_json::Value> = if ok {
+        None
+    } else {
+        Some(serde_json::Value::String(format!(
+            "no active run with id '{run_id}'"
+        )))
+    };
+
+    send_resp(
+        sender,
+        &WsResponse {
+            id: req_id,
+            msg_type: "subagent_steer.ok".into(),
+            data: Some(json!({"runId": run_id, "ok": ok})),
+            error: error_msg,
+        },
+    )
+    .await;
+}
+
 /// Switches execution mode between agent and plan for a given session.
 pub async fn handle_chat_set_mode(
     sender: &mut futures::stream::SplitSink<WebSocket, Message>,
@@ -663,7 +707,13 @@ pub async fn spawn_chat(
 
         loop {
             let event = match tokio::time::timeout_at(turn_deadline, event_rx.recv()).await {
-                Ok(Some(se)) => se.msg,
+                Ok(Some(se)) => {
+                    eprintln!(
+                        "  [ws_chat_event_loop] event_type={:?}",
+                        std::mem::discriminant(&se.msg)
+                    );
+                    se.msg
+                }
                 Ok(None) => break,
                 Err(_elapsed) => {
                     tracing::error!(

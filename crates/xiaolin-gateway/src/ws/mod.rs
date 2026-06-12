@@ -511,6 +511,14 @@ async fn dispatch(
         } => {
             chat::handle_chat_steer(sender, state, id, &session_id, messages).await;
         }
+        ClientOp::SubAgentSteer {
+            run_id,
+            message,
+            priority,
+        } => {
+            chat::handle_subagent_steer(sender, state, id, &run_id, &message, priority.as_deref())
+                .await;
+        }
         ClientOp::ResolveApproval {
             approval_id,
             decision,

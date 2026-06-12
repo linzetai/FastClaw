@@ -278,5 +278,38 @@ pub(crate) async fn post_tool_processing(
         }
     }
 
+    // 7. Message queue drain: inject steering messages from external sources
+    //    (SendMessageTool, gateway WS, completion hooks) as user-role messages.
+    if let Some(ref mq) = svc.message_queue {
+        let queued = mq.drain_all();
+        if !queued.is_empty() {
+            let sources: Vec<String> = queued.iter().map(|m| m.source.clone()).collect();
+            let count = queued.len();
+            tracing::info!(
+                agent_id = %svc.config.agent_id,
+                count,
+                sources = ?sources,
+                "injecting steering messages from message queue"
+            );
+            for msg in &queued {
+                let steering_content = format!(
+                    "[Steering from {}]: {}",
+                    msg.source, msg.content
+                );
+                ms.messages.push(ChatMessage {
+                    role: Role::User,
+                    content: Some(serde_json::Value::String(steering_content)),
+                    ..Default::default()
+                });
+            }
+            let _ = send_step(
+                &svc.step_tx,
+                AgentStep::SteeringInjected { count, sources },
+                false,
+            )
+            .await;
+        }
+    }
+
     PostToolOutcome::Continue
 }

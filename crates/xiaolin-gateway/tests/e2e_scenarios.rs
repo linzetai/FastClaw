@@ -195,24 +195,24 @@ fn simple_provider() -> Box<dyn LlmProvider> {
 }
 
 // ===================================================================
-// Scenario 1: Multi-step tool chain (LLM → calculator → final answer)
+// Scenario 1: Multi-step tool chain (LLM → get_current_time → final answer)
 // ===================================================================
 
 #[tokio::test]
 async fn e2e_multi_step_tool_chain() {
     let provider = ScriptedProvider::new(vec![
-        // Round 1: LLM requests calculator tool
+        // Round 1: LLM requests get_current_time tool
         ScriptedResponse {
             content: None,
             tool_calls: Some(vec![make_tool_call(
-                "tc_calc_1",
-                "calculator",
-                r#"{"expression": "2 + 3 * 4"}"#,
+                "tc_time_1",
+                "get_current_time",
+                r#"{}"#,
             )]),
         },
         // Round 2: After receiving tool result, LLM provides final answer
         ScriptedResponse {
-            content: Some("The result of 2 + 3 * 4 is 14.".into()),
+            content: Some("The current time has been retrieved successfully.".into()),
             tool_calls: None,
         },
     ]);
@@ -223,7 +223,7 @@ async fn e2e_multi_step_tool_chain() {
     let resp: Value = client
         .post(srv.url("/api/v1/chat"))
         .json(&json!({
-            "messages": [{"role": "user", "content": "What is 2 + 3 * 4?"}],
+            "messages": [{"role": "user", "content": "What time is it?"}],
             "stream": false
         }))
         .send()
@@ -237,8 +237,8 @@ async fn e2e_multi_step_tool_chain() {
         .as_str()
         .expect("response should have content");
     assert!(
-        content.contains("14"),
-        "final answer should contain the computed result: {content}"
+        content.contains("retrieved"),
+        "final answer should confirm tool result: {content}"
     );
 
     let session_id = resp["_meta"]["sessionId"].as_str().unwrap();
@@ -251,10 +251,6 @@ async fn e2e_multi_step_tool_chain() {
         .await
         .unwrap();
     let messages = msgs["messages"].as_array().unwrap();
-    // The runtime persists at least the user message and the final assistant message.
-    // Intermediate tool_call / tool_result messages may or may not be saved depending
-    // on session persistence granularity; the key assertion is that we got a correct
-    // final answer that required the tool chain.
     assert!(
         messages.len() >= 2,
         "should have at least user + final assistant: got {}",
@@ -622,6 +618,7 @@ async fn ws_chat_to_completion(
     loop {
         let msg = ws_recv_json(rx).await;
         let ty = msg["type"].as_str().unwrap_or("unknown").to_string();
+        eprintln!("  WS event: type={ty} data_keys={:?}", msg["data"].as_object().map(|o| o.keys().collect::<Vec<_>>()));
         event_types.push(ty.clone());
         if ty == "turn_start" {
             sid = msg["data"]["session_id"]
@@ -684,6 +681,10 @@ async fn e2e_ws_multi_turn_streaming() {
     let resp = ws_recv_json(&mut rx).await;
     assert_eq!(resp["type"], "sessions.messages");
     let messages = resp["data"]["messages"].as_array().unwrap();
+    eprintln!("=== DEBUG messages ({}) ===", messages.len());
+    for (i, m) in messages.iter().enumerate() {
+        eprintln!("  [{}] role={} content={}", i, m["role"], m["content"]);
+    }
     assert!(
         messages.len() >= 4,
         "2 turns = 2 user + 2 assistant = 4 messages minimum, got {}",
@@ -869,18 +870,18 @@ async fn e2e_agent_tools_registry() {
         .collect();
 
     assert!(
-        tool_names.contains(&"calculator"),
-        "calculator should be registered: {:?}",
-        tool_names
-    );
-    assert!(
-        tool_names.contains(&"get_current_time"),
-        "get_current_time should be registered: {:?}",
-        tool_names
-    );
-    assert!(
         tool_names.contains(&"read_file"),
         "read_file should be registered: {:?}",
+        tool_names
+    );
+    assert!(
+        tool_names.contains(&"shell_exec"),
+        "shell_exec should be registered: {:?}",
+        tool_names
+    );
+    assert!(
+        tool_names.contains(&"web_search"),
+        "web_search should be registered: {:?}",
         tool_names
     );
 }

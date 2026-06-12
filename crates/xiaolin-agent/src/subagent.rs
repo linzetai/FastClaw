@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 
 use xiaolin_core::agent_config::SubAgentPolicy;
 use xiaolin_core::tool::{Tool, ToolKind, ToolParameterSchema, ToolRegistry, ToolResult};
-use xiaolin_core::types::SubAgentType;
+use xiaolin_core::types::{SubAgentStatus, SubAgentType};
 use xiaolin_protocol::AgentEvent;
 
 use xiaolin_core::types::ChatMessage;
@@ -1119,6 +1119,120 @@ impl Tool for ResumeSubagentTool {
                 .to_string(),
             ),
             Err(e) => ToolResult::err(format!("resumed sub-agent failed: {e}")),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SendMessageTool — send a steering message to a running sub-agent
+// ---------------------------------------------------------------------------
+
+pub struct SendMessageTool {
+    manager: Arc<SubAgentManager>,
+}
+
+impl SendMessageTool {
+    pub fn new(manager: Arc<SubAgentManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl Tool for SendMessageTool {
+    fn name(&self) -> &str {
+        "send_message"
+    }
+
+    fn description(&self) -> &str {
+        "Send a steering message to a running sub-agent. The message will be injected \
+         into the sub-agent's context at its next tool-round boundary, allowing you to \
+         guide or redirect its execution mid-flight."
+    }
+
+    fn kind(&self) -> ToolKind {
+        ToolKind::Execute
+    }
+
+    fn parameters_schema(&self) -> ToolParameterSchema {
+        let mut props = HashMap::new();
+        props.insert(
+            "run_id".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "The run_id of the target sub-agent (from spawn_subagent)."
+            }),
+        );
+        props.insert(
+            "message".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "The steering message content to inject."
+            }),
+        );
+        props.insert(
+            "priority".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "enum": ["low", "normal", "high"],
+                "description": "Message priority. Default: normal."
+            }),
+        );
+        ToolParameterSchema {
+            schema_type: "object".to_string(),
+            properties: props,
+            required: vec!["run_id".to_string(), "message".to_string()],
+        }
+    }
+
+    async fn execute(&self, arguments: &str) -> ToolResult {
+        #[derive(Deserialize)]
+        struct Params {
+            run_id: String,
+            message: String,
+            #[serde(default)]
+            priority: Option<String>,
+        }
+        let params: Params = match serde_json::from_str(arguments) {
+            Ok(p) => p,
+            Err(e) => return ToolResult::err(format!("invalid arguments: {e}")),
+        };
+
+        let priority = match params.priority.as_deref() {
+            Some("high") => crate::message_queue::Priority::High,
+            Some("low") => crate::message_queue::Priority::Low,
+            _ => crate::message_queue::Priority::Normal,
+        };
+
+        let run = self.manager.get_run(&params.run_id);
+        match run {
+            Some(r) if r.status == SubAgentStatus::Running => {}
+            Some(_) => {
+                return ToolResult::err(format!(
+                    "sub-agent '{}' is not running (cannot receive messages)",
+                    params.run_id
+                ));
+            }
+            None => {
+                return ToolResult::err(format!(
+                    "no sub-agent run found with id '{}'",
+                    params.run_id
+                ));
+            }
+        }
+
+        match self.manager.get_run_queue(&params.run_id) {
+            Some(queue) => {
+                queue.push(priority, "parent_agent", &params.message);
+                ToolResult::ok(serde_json::json!({
+                    "status": "delivered",
+                    "run_id": params.run_id,
+                    "queue_size": queue.len(),
+                }).to_string())
+            }
+            None => ToolResult::err(format!(
+                "sub-agent '{}' does not have a message queue (may be running in sync mode)",
+                params.run_id
+            )),
         }
     }
 }

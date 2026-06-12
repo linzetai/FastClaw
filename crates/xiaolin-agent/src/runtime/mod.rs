@@ -726,6 +726,7 @@ impl AgentRuntime {
             todo_store: None,
             goal_store: None,
             cost_store: None,
+            message_queue: None,
             cancel_token: None,
         };
         Self::run_stream_to_completion(self.arc_self(), ctx, tx).await
@@ -758,7 +759,7 @@ impl AgentRuntime {
         self.execute_unified_with_cost_store(
             config, request, tool_registry, tx, approval_strategy,
             llm_override, orchestrator, interaction_handle, subagent_prompt,
-            mode_state, session_store, todo_store, goal_store, None, None,
+            mode_state, session_store, todo_store, goal_store, None, None, None,
         ).await
     }
 
@@ -780,6 +781,7 @@ impl AgentRuntime {
         goal_store: Option<Arc<crate::builtin_tools::GoalStore>>,
         cost_store: Option<Arc<xiaolin_session::CostStore>>,
         behavior_overrides: Option<std::sync::Arc<dashmap::DashMap<String, xiaolin_core::agent_config::BehaviorConfig>>>,
+        message_queue: Option<Arc<crate::message_queue::MessageQueue>>,
     ) -> anyhow::Result<TurnSummary> {
         let ctx = agent_context::AgentContext {
             config: config.clone(),
@@ -799,6 +801,7 @@ impl AgentRuntime {
             todo_store,
             goal_store,
             cost_store,
+            message_queue,
             cancel_token: None,
         };
         Self::run_stream_to_completion(self.arc_self(), ctx, tx).await

@@ -74,24 +74,32 @@
 - `resume_subagent` 工具可恢复上下文并续跑（BANANA 记忆测试通过）
 - Session 删除时自动清理 sidechain 文件
 
-## 3. Fork Agent
+## 3. Fork Agent — COMPLETED
 
-- [ ] 3.1 在 `SubAgentTool::execute()` 中解析 `inherit_context` 参数
-- [ ] 3.2 实现 `filter_parent_messages(session_store, max_messages, max_tokens)` 函数
-- [ ] 3.3 过滤逻辑：移除 system messages、incomplete tool_calls，限制条数和 token 数
-- [ ] 3.4 将 filtered messages 作为 child agent 的 initial context prefix
-- [ ] 3.5 在 SubAgentDef 中添加 `max_context_messages` 可选字段（默认 20）
+- [x] 3.1 在 `SubAgentTool::execute()` 中解析 `inherit_context` 参数
+- [x] 3.2 实现 `filter_parent_messages(messages, max_messages)` 函数
+- [x] 3.3 过滤逻辑：移除 system messages、incomplete tool_calls，限制条数
+- [x] 3.4 将 filtered messages 作为 child agent 的 initial context prefix
+- [x] 3.5 在 SubAgentDef 中添加 `max_context_messages` 可选字段（默认 20）
+- [x] 3.6 在 `parameters_schema()` 中暴露 `inherit_context` 参数给 LLM
 
-## 4. Message Queue + SendMessage
+**关键成果**:
+- 子代理通过 `inherit_context: true` 继承父会话的过滤后上下文
+- `filter_parent_messages` 移除 system 消息和不完整的 tool_calls，限制条数
+- E2E 验证：子代理 msg_count 从 3（无继承）提升到 5（有继承），成功获取父会话信息
 
-- [ ] 4.1 创建 `crates/xiaolin-agent/src/message_queue.rs`：定义 `Priority` enum 和 `MessageQueue` struct
-- [ ] 4.2 实现 `MessageQueue::push(priority, source, message)` 和 `drain(max_priority) -> Vec<QueuedMessage>`
-- [ ] 4.3 在 `AgentContext` 中添加 `message_queue: Option<Arc<MessageQueue>>` 字段
-- [ ] 4.4 在 `execute_as_stream` 的 ToolRoundBoundary 处添加 drain + inject 逻辑
-- [ ] 4.5 创建 `SendMessageTool` struct，实现 Tool trait（查找目标 run 的 queue → push）
-- [ ] 4.6 在 SubAgentManager 中维护 `run_queues: DashMap<String, Arc<MessageQueue>>`
-- [ ] 4.7 定义 `AgentStep::SteeringInjected` 变体 + 对应的 `AgentEvent::SteeringMessage`
-- [ ] 4.8 在 gateway WebSocket handler 中支持前端 `steering_message` 命令 → push 到 queue
+## 4. Message Queue + SendMessage — COMPLETED
+
+- [x] 4.1 创建 `crates/xiaolin-agent/src/message_queue.rs`：定义 `Priority` enum 和 `MessageQueue` struct
+- [x] 4.2 实现 `MessageQueue::push(priority, source, message)` 和 `drain(max_priority) -> Vec<QueuedMessage>`
+- [x] 4.3 在 `AgentContext` 中添加 `message_queue: Option<Arc<MessageQueue>>` 字段
+- [x] 4.4 在 `post_tool_processing` 的 ToolRoundBoundary 处添加 drain + inject 逻辑
+- [x] 4.5 创建 `SendMessageTool` struct，实现 Tool trait（查找目标 run 的 queue → push）
+- [x] 4.6 在 SubAgentManager 中维护 `run_queues: DashMap<String, Arc<MessageQueue>>`
+- [x] 4.7 利用已有的 `AgentStep::SteeringInjected` 变体标记注入
+- [x] 4.8 在 gateway WebSocket handler 中支持 `subagent.steer` / `steering_message` 命令
+- [x] 4.9 在 `spawn()` 中创建 queue 并通过 `execute_unified_with_cost_store` 传递到 AgentContext
+- [x] 4.10 E2E 验证：spawn sub-agent → steer ok=true → sub-agent completed
 
 ## 5. Permission Bubble
 

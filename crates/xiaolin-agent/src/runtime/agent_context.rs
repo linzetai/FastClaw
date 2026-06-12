@@ -10,6 +10,7 @@ use xiaolin_protocol::AgentEvent;
 use super::agent_step::AgentStep;
 use crate::builtin_tools::{ExecutionModeState, GoalStore, TodoStore};
 use crate::llm::LlmProvider;
+use crate::message_queue::MessageQueue;
 use crate::runtime::orchestrator::ToolOrchestrator;
 use crate::runtime::runtimes::RuntimeRegistry;
 
@@ -54,6 +55,9 @@ pub struct AgentContext {
     pub goal_store: Option<Arc<GoalStore>>,
     pub cost_store: Option<Arc<xiaolin_session::CostStore>>,
 
+    // === Optional - Message Queue (for steering injection) ===
+    pub message_queue: Option<Arc<MessageQueue>>,
+
     // === Optional - Lifecycle ===
     pub cancel_token: Option<CancellationToken>,
 }
@@ -79,6 +83,7 @@ impl AgentContext {
             todo_store: None,
             goal_store: None,
             cost_store: None,
+            message_queue: None,
             cancel_token: None,
         }
     }

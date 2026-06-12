@@ -303,6 +303,13 @@ pub enum ClientOp {
         messages: Vec<ChatSteerMessage>,
     },
 
+    SubAgentSteer {
+        run_id: String,
+        message: String,
+        #[serde(default)]
+        priority: Option<String>,
+    },
+
     // ── Approval ──────────────────────────────────────────────────
     ResolveApproval {
         approval_id: String,
@@ -739,6 +746,20 @@ impl ClientOp {
                 Ok(Self::ChatSteer {
                     session_id,
                     messages,
+                })
+            }
+            "subagent.steer" | "steering_message" => {
+                let run_id = extract_string(&params, "runId")
+                    .or_else(|_| extract_string(&params, "run_id"))?;
+                let message = extract_string(&params, "message")?;
+                let priority = params
+                    .get("priority")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                Ok(Self::SubAgentSteer {
+                    run_id,
+                    message,
+                    priority,
                 })
             }
             "resolve_approval" | "approval.resolve" => {
