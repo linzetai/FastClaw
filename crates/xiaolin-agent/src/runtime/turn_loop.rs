@@ -22,6 +22,8 @@ pub(crate) async fn run_turn_loop(
     svc: &TurnServices,
 ) -> anyhow::Result<TurnSummary> {
     loop {
+        ms.had_tool_calls_this_round = false;
+
         // ═══════════════════════════════════════════════════════════════════
         // Phase 0: Cancellation check
         // ═══════════════════════════════════════════════════════════════════

@@ -183,6 +183,30 @@ pub(crate) async fn execute_tool_round(
     // When no streaming executor, dispatch_batch handles everything.
     let tool_dispatch_t0 = std::time::Instant::now();
     let tool_count = assembled_calls.len();
+    let file_pre_snapshots: std::collections::HashMap<
+        std::path::PathBuf,
+        (Option<String>, bool),
+    > = if streaming_executor.is_some() {
+        let mut snaps = std::collections::HashMap::new();
+        for tc in &assembled_calls {
+            if matches!(
+                tc.function.name.as_str(),
+                "edit_file" | "write_file" | "create_file" | "str_replace_editor"
+            ) {
+                if let Some(fp) = extract_file_path_from_args(&tc.function.arguments) {
+                    snaps.entry(fp.clone()).or_insert_with(|| {
+                        let exists = fp.exists();
+                        let content = std::fs::read_to_string(&fp).ok();
+                        (content, exists)
+                    });
+                }
+            }
+        }
+        snaps
+    } else {
+        std::collections::HashMap::new()
+    };
+
     let stream_results = if let Some(mut executor) = streaming_executor {
         // Streaming path: some tools were already submitted during streaming.
         let submit_start = last_submitted_tool_idx.map(|i| i + 1).unwrap_or(0);
@@ -196,14 +220,27 @@ pub(crate) async fn execute_tool_round(
             Option<(String, String, String, xiaolin_core::tool::ToolResult)>,
         > = vec![None; assembled_calls.len()];
 
-        // Place streaming results
-        let mut completed_iter = completed
-            .into_iter()
-            .map(|ct| (ct.tool_name, ct.call_id, ct.result));
+        // Place streaming results by call_id lookup
+        let completed_map: std::collections::HashMap<String, (String, xiaolin_core::tool::ToolResult)> =
+            completed
+                .into_iter()
+                .map(|ct| (ct.call_id, (ct.tool_name, ct.result)))
+                .collect();
         for (i, tc) in assembled_calls.iter().enumerate() {
             if !svc.dispatcher.is_guarded(&tc.function.name) {
-                if let Some((name, id, result)) = completed_iter.next() {
-                    all_results[i] = Some((name, id, tc.function.arguments.clone(), result));
+                if let Some((name, result)) = completed_map.get(&tc.id) {
+                    all_results[i] = Some((
+                        name.clone(),
+                        tc.id.clone(),
+                        tc.function.arguments.clone(),
+                        result.clone(),
+                    ));
+                } else {
+                    tracing::warn!(
+                        call_id = %tc.id,
+                        tool_name = %tc.function.name,
+                        "streaming result not found for call_id, tool execution may have been skipped"
+                    );
                 }
             }
         }
@@ -226,6 +263,7 @@ pub(crate) async fn execute_tool_round(
                     denial_tracker: &mut ms.denial_tracker,
                     agent_id: &svc.config.agent_id,
                     session_id: svc.session_id.as_deref(),
+                    behavior_overrides: svc.behavior_overrides.as_ref(),
                 };
                 let result = svc.dispatcher.dispatch_one(tc, &mut dispatch_ctx).await;
                 all_results[i] = Some(result);
@@ -250,6 +288,7 @@ pub(crate) async fn execute_tool_round(
             denial_tracker: &mut ms.denial_tracker,
             agent_id: &svc.config.agent_id,
             session_id: svc.session_id.as_deref(),
+            behavior_overrides: svc.behavior_overrides.as_ref(),
         };
         svc.dispatcher
             .dispatch_batch(&assembled_calls, &mut dispatch_ctx)
@@ -287,9 +326,15 @@ pub(crate) async fn execute_tool_round(
             "edit_file" | "write_file" | "create_file" | "str_replace_editor"
         ) {
             if let Some(file_path) = extract_file_path_from_args(&arguments) {
-                let file_exists = file_path.exists();
-                if let Ok(content) = std::fs::read_to_string(&file_path) {
-                    ms.undo_engine.capture_before_edit(&file_path, &content);
+                let (file_exists, content) = if let Some((snap_content, snap_exists)) =
+                    file_pre_snapshots.get(&file_path)
+                {
+                    (*snap_exists, snap_content.clone())
+                } else {
+                    (file_path.exists(), std::fs::read_to_string(&file_path).ok())
+                };
+                if let Some(ref c) = content {
+                    ms.undo_engine.capture_before_edit(&file_path, c);
                 }
                 let op = if file_exists {
                     FileOp::Modified

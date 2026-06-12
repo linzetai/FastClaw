@@ -435,8 +435,9 @@ impl RuntimeTurnExecutor {
                 mode_state.clone(),
                 session_store.clone(),
                 todo_store.clone(),
-                None,
+                self.goal_store.clone(),
                 self.cost_store.clone(),
+                self.behavior_overrides.clone(),
             ));
 
             let reprompt_result = {
@@ -688,6 +689,7 @@ impl TurnExecutor for RuntimeTurnExecutor {
             let plan_ctx_for_loop = plan_ctx.clone();
 
             let cost_store_for_runtime = self.cost_store.clone();
+            let behavior_overrides_for_runtime = self.behavior_overrides.clone();
             let runtime_fut: std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<xiaolin_protocol::TurnSummary>> + Send>> = Box::pin(runtime.execute_unified_with_cost_store(
                 &config,
                 &request,
@@ -703,6 +705,7 @@ impl TurnExecutor for RuntimeTurnExecutor {
                 todo_store.clone(),
                 goal_store,
                 cost_store_for_runtime,
+                behavior_overrides_for_runtime,
             ));
 
             let steer_inbox_inner = steer_inbox.clone();
@@ -804,7 +807,7 @@ impl TurnExecutor for RuntimeTurnExecutor {
                                 )
                                 .await
                             {
-                                let _ = inner_tx.send(AgentEvent::GoalUpdated {
+                                let _ = tx.send(AgentEvent::GoalUpdated {
                                     turn_id: Default::default(),
                                     goal: updated.to_goal_data(),
                                 }).await;

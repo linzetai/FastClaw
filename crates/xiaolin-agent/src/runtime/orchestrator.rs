@@ -98,6 +98,11 @@ pub struct OrchestratorContext<'a> {
     pub interaction_handle: Option<&'a InteractionHandle>,
     pub event_tx: &'a tokio::sync::mpsc::Sender<AgentEvent>,
     pub denial_tracker: &'a mut DenialTracker,
+    /// Live behavior overrides from gateway — checked before `approval_strategy`
+    /// to support mid-turn permission changes (e.g., switching to "full-auto").
+    pub behavior_overrides:
+        Option<&'a std::sync::Arc<dashmap::DashMap<String, xiaolin_core::agent_config::BehaviorConfig>>>,
+    pub session_id: Option<&'a str>,
 }
 
 /// Centralized tool approval + sandbox + execution pipeline.
@@ -357,7 +362,22 @@ impl ToolOrchestrator {
             }
         }
 
-        // 2d: Strategy-based resolution
+        // 2d: Check live behavior overrides for mid-turn permission changes
+        if let (Some(overrides), Some(sid)) = (&ctx.behavior_overrides, ctx.session_id) {
+            if let Some(entry) = overrides.get(sid) {
+                if let Some(ref strat) = entry.approval_strategy {
+                    if strat.eq_ignore_ascii_case("auto_approve")
+                        || strat.eq_ignore_ascii_case("autoapprove")
+                    {
+                        ctx.approval_cache
+                            .store(&keys, ApprovalDecision::ApprovedAllForSession);
+                        return Ok(DecisionSource::AutoApproved);
+                    }
+                }
+            }
+        }
+
+        // 2e: Strategy-based resolution
         match ctx.approval_strategy {
             ApprovalStrategy::AutoApprove => {
                 ctx.approval_cache
@@ -624,6 +644,8 @@ decision = "allow"
             interaction_handle: None,
             event_tx: &tx,
             denial_tracker: &mut tracker,
+            behavior_overrides: None,
+            session_id: None,
         };
 
         let result = orch.run(&runtime, &serde_json::json!({}), &mut ctx).await;
@@ -658,6 +680,8 @@ decision = "allow"
             interaction_handle: None,
             event_tx: &tx,
             denial_tracker: &mut tracker,
+            behavior_overrides: None,
+            session_id: None,
         };
 
         let result = orch.run(&runtime, &serde_json::json!({}), &mut ctx).await;
@@ -693,6 +717,8 @@ decision = "allow"
             interaction_handle: None,
             event_tx: &tx,
             denial_tracker: &mut tracker,
+            behavior_overrides: None,
+            session_id: None,
         };
 
         let result = orch.run(&runtime, &serde_json::json!({}), &mut ctx).await;
@@ -725,6 +751,8 @@ decision = "allow"
             interaction_handle: None,
             event_tx: &tx,
             denial_tracker: &mut tracker,
+            behavior_overrides: None,
+            session_id: None,
         };
 
         let result = orch.run(&runtime, &serde_json::json!({}), &mut ctx).await;
@@ -762,6 +790,8 @@ decision = "allow"
             interaction_handle: None,
             event_tx: &tx,
             denial_tracker: &mut tracker,
+            behavior_overrides: None,
+            session_id: None,
         };
 
         let result = orch.run(&runtime, &serde_json::json!({}), &mut ctx).await;

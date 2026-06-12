@@ -721,6 +721,7 @@ impl AgentRuntime {
             interaction_handle: None,
             approval_strategy: xiaolin_core::tool_runtime::ApprovalStrategy::AutoApprove,
             runtime_registry: None,
+            behavior_overrides: None,
             session_store: None,
             todo_store: None,
             goal_store: None,
@@ -757,7 +758,7 @@ impl AgentRuntime {
         self.execute_unified_with_cost_store(
             config, request, tool_registry, tx, approval_strategy,
             llm_override, orchestrator, interaction_handle, subagent_prompt,
-            mode_state, session_store, todo_store, goal_store, None,
+            mode_state, session_store, todo_store, goal_store, None, None,
         ).await
     }
 
@@ -778,6 +779,7 @@ impl AgentRuntime {
         todo_store: Option<crate::builtin_tools::TodoStore>,
         goal_store: Option<Arc<crate::builtin_tools::GoalStore>>,
         cost_store: Option<Arc<xiaolin_session::CostStore>>,
+        behavior_overrides: Option<std::sync::Arc<dashmap::DashMap<String, xiaolin_core::agent_config::BehaviorConfig>>>,
     ) -> anyhow::Result<TurnSummary> {
         let ctx = agent_context::AgentContext {
             config: config.clone(),
@@ -792,6 +794,7 @@ impl AgentRuntime {
             interaction_handle,
             approval_strategy,
             runtime_registry: Some(self.cached_runtime_registry.clone()),
+            behavior_overrides,
             session_store,
             todo_store,
             goal_store,
@@ -1055,7 +1058,7 @@ impl AgentRuntime {
                             req_model
                         );
                         messages.insert(
-                            last_user_idx,
+                            last_user_idx + 1,
                             ChatMessage {
                                 role: Role::System,
                                 content: Some(serde_json::Value::String(reminder)),

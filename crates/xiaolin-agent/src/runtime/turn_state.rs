@@ -91,6 +91,9 @@ pub(crate) struct TurnServices {
     pub event_tx: mpsc::Sender<AgentEvent>,
     pub approval_strategy: ApprovalStrategy,
     pub interaction_handle: Option<xiaolin_session_actor::InteractionHandle>,
+    /// Live behavior overrides — enables mid-turn permission changes to take effect immediately.
+    pub behavior_overrides:
+        Option<Arc<dashmap::DashMap<String, xiaolin_core::agent_config::BehaviorConfig>>>,
 
     // --- Service handles (interior mutability where needed) ---
     pub deps: ProductionDeps,

@@ -331,6 +331,13 @@ pub(crate) async fn perform_llm_call(
                             let rc = std::mem::take(&mut accumulated_reasoning);
                             let partial = std::mem::take(&mut accumulated_content);
                             if !partial.is_empty() || !rc.is_empty() {
+                                if let Some(last) = ms.messages.last() {
+                                    if last.role == Role::Assistant
+                                        && last.tool_calls.is_none()
+                                    {
+                                        ms.messages.pop();
+                                    }
+                                }
                                 ms.messages.push(ChatMessage {
                                     role: Role::Assistant,
                                     content: if partial.is_empty() {
@@ -361,6 +368,13 @@ pub(crate) async fn perform_llm_call(
                         let rc = std::mem::take(&mut accumulated_reasoning);
                         let partial = std::mem::take(&mut accumulated_content);
                         if !partial.is_empty() || !rc.is_empty() {
+                            if let Some(last) = ms.messages.last() {
+                                if last.role == Role::Assistant
+                                    && last.tool_calls.is_none()
+                                {
+                                    ms.messages.pop();
+                                }
+                            }
                             ms.messages.push(ChatMessage {
                                 role: Role::Assistant,
                                 content: if partial.is_empty() {

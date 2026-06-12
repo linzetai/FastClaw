@@ -44,6 +44,9 @@ pub struct AgentContext {
     pub interaction_handle: Option<xiaolin_session_actor::InteractionHandle>,
     pub approval_strategy: ApprovalStrategy,
     pub runtime_registry: Option<Arc<RuntimeRegistry>>,
+    /// Live behavior overrides — enables mid-turn permission changes.
+    pub behavior_overrides:
+        Option<Arc<dashmap::DashMap<String, xiaolin_core::agent_config::BehaviorConfig>>>,
 
     // === Optional - Persistence ===
     pub session_store: Option<Arc<xiaolin_session::SessionStore>>,
@@ -71,6 +74,7 @@ impl AgentContext {
             interaction_handle: None,
             approval_strategy: ApprovalStrategy::AutoApprove,
             runtime_registry: None,
+            behavior_overrides: None,
             session_store: None,
             todo_store: None,
             goal_store: None,

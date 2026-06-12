@@ -192,7 +192,7 @@ pub(crate) async fn setup_turn(
     };
     let pipeline_config = xiaolin_context::PipelineConfig {
         snip_max_tokens: context_window as usize,
-        reactive_target_tokens: context_window as usize,
+        reactive_target_tokens: (context_window as f64 * 0.8) as usize,
         ..Default::default()
     };
     let auto_compact_enabled = pipeline_config.enable_auto_compact;
@@ -321,6 +321,7 @@ pub(crate) async fn setup_turn(
         event_tx: ctx.event_tx.clone().expect("AgentContext.event_tx must be set for streaming execution"),
         approval_strategy: ctx.approval_strategy.clone(),
         interaction_handle: ctx.interaction_handle.clone(),
+        behavior_overrides: ctx.behavior_overrides.clone(),
         deps,
         services,
         dispatcher,

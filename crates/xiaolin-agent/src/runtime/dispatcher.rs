@@ -50,6 +50,8 @@ pub struct DispatchContext<'a> {
     pub denial_tracker: &'a mut DenialTracker,
     pub agent_id: &'a str,
     pub session_id: Option<&'a str>,
+    pub behavior_overrides:
+        Option<&'a std::sync::Arc<dashmap::DashMap<String, xiaolin_core::agent_config::BehaviorConfig>>>,
 }
 
 /// Unified tool dispatcher that routes all tool calls through a consistent
@@ -431,6 +433,8 @@ impl ToolDispatcher {
                 interaction_handle: ctx.interaction_handle,
                 event_tx: ctx.event_tx,
                 denial_tracker: ctx.denial_tracker,
+                behavior_overrides: ctx.behavior_overrides,
+                session_id: ctx.session_id,
             };
 
             if let Err(e) = self.orchestrator.authorize(rt.as_ref(), &args, &mut orch_ctx).await {
@@ -460,6 +464,8 @@ impl ToolDispatcher {
             interaction_handle: ctx.interaction_handle,
             event_tx: ctx.event_tx,
             denial_tracker: ctx.denial_tracker,
+            behavior_overrides: ctx.behavior_overrides,
+            session_id: ctx.session_id,
         };
 
         match self.orchestrator.run(rt.as_ref(), &args, &mut orch_ctx).await {
