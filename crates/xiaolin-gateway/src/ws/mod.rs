@@ -525,6 +525,8 @@ async fn dispatch(
             session_id,
         } => {
             let mut resolved = false;
+
+            // Try session-based approval first
             if let Some(sid) = &session_id {
                 if let Some(handle) = state
                     .svc
@@ -541,6 +543,16 @@ async fn dispatch(
                         .is_ok();
                 }
             }
+
+            // Try bubble approval port (sub-agent permission bubble)
+            if !resolved {
+                resolved = state
+                    .strm
+                    .subagent_manager
+                    .bubble_port()
+                    .resolve(&approval_id, decision.clone());
+            }
+
             send_resp(
                 sender,
                 &WsResponse {

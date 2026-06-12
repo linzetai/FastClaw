@@ -703,6 +703,19 @@ impl BehaviorConfig {
 ///
 /// Sub-agents inherit the main agent's model unless `model` is explicitly set.
 /// Tool access is controlled by `tools.allowed` / `tools.denied` patterns.
+/// How tool approvals are handled for a sub-agent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionMode {
+    /// Automatically approve all tool calls (default for sub-agents).
+    #[default]
+    AutoApprove,
+    /// Bubble approval requests up to the parent/frontend for confirmation.
+    Bubble,
+    /// Deny all tool calls that would normally require approval.
+    Deny,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubAgentDef {
@@ -734,6 +747,9 @@ pub struct SubAgentDef {
     /// Defaults to 20.
     #[serde(default = "default_max_context_messages")]
     pub max_context_messages: usize,
+    /// How tool approvals are handled for this sub-agent type.
+    #[serde(default)]
+    pub permission_mode: PermissionMode,
     /// Where this definition was loaded from.
     #[serde(skip)]
     pub source: SubAgentDefSource,
@@ -920,6 +936,7 @@ pub fn builtin_subagent_defs() -> Vec<SubAgentDef> {
             background: false,
             concurrency_safe: true,
             max_context_messages: default_max_context_messages(),
+            permission_mode: PermissionMode::AutoApprove,
             source: SubAgentDefSource::Builtin,
         },
         SubAgentDef {
@@ -940,6 +957,7 @@ pub fn builtin_subagent_defs() -> Vec<SubAgentDef> {
             background: false,
             concurrency_safe: false,
             max_context_messages: default_max_context_messages(),
+            permission_mode: PermissionMode::AutoApprove,
             source: SubAgentDefSource::Builtin,
         },
         SubAgentDef {
@@ -969,6 +987,7 @@ pub fn builtin_subagent_defs() -> Vec<SubAgentDef> {
             background: false,
             concurrency_safe: false,
             max_context_messages: default_max_context_messages(),
+            permission_mode: PermissionMode::AutoApprove,
             source: SubAgentDefSource::Builtin,
         },
         SubAgentDef {
@@ -1004,6 +1023,7 @@ pub fn builtin_subagent_defs() -> Vec<SubAgentDef> {
             background: false,
             concurrency_safe: true,
             max_context_messages: default_max_context_messages(),
+            permission_mode: PermissionMode::AutoApprove,
             source: SubAgentDefSource::Builtin,
         },
     ]

@@ -43,6 +43,8 @@ pub struct SubAgentManager {
     session_event_senders: Arc<DashMap<String, mpsc::Sender<AgentEvent>>>,
     /// Per-run message queues for steering running sub-agents.
     run_queues: Arc<DashMap<String, Arc<MessageQueue>>>,
+    /// Shared port for bubble approval requests from sub-agents.
+    bubble_port: Arc<xiaolin_core::tool_runtime::BubbleApprovalPort>,
 }
 
 impl SubAgentManager {
@@ -63,6 +65,7 @@ impl SubAgentManager {
             completion_channels: Arc::new(DashMap::new()),
             session_event_senders: Arc::new(DashMap::new()),
             run_queues: Arc::new(DashMap::new()),
+            bubble_port: Arc::new(xiaolin_core::tool_runtime::BubbleApprovalPort::new()),
         }
     }
 
@@ -100,6 +103,11 @@ impl SubAgentManager {
     /// Remove the message queue when a run completes.
     pub fn remove_run_queue(&self, run_id: &str) {
         self.run_queues.remove(run_id);
+    }
+
+    /// Get the shared bubble approval port for resolving sub-agent approval requests.
+    pub fn bubble_port(&self) -> &Arc<xiaolin_core::tool_runtime::BubbleApprovalPort> {
+        &self.bubble_port
     }
 
     /// Update the available agents list (e.g. after config reload).
@@ -272,6 +280,7 @@ impl SubAgentManager {
         concurrency_safe: bool,
         inherited_context: Option<SubAgentInheritedContext>,
         initial_messages: Option<Vec<ChatMessage>>,
+        permission_mode: xiaolin_core::agent_config::PermissionMode,
     ) -> anyhow::Result<String> {
         if !policy.enabled {
             anyhow::bail!("sub-agent delegation is disabled for this agent");
@@ -323,6 +332,18 @@ impl SubAgentManager {
 
         let mq = self.create_run_queue(&run_id);
         let run_queues_ref = self.run_queues.clone();
+
+        let approval_strat = match permission_mode {
+            xiaolin_core::agent_config::PermissionMode::AutoApprove => {
+                xiaolin_core::tool_runtime::ApprovalStrategy::AutoApprove
+            }
+            xiaolin_core::agent_config::PermissionMode::Bubble => {
+                xiaolin_core::tool_runtime::ApprovalStrategy::Bubble(self.bubble_port.clone())
+            }
+            xiaolin_core::agent_config::PermissionMode::Deny => {
+                xiaolin_core::tool_runtime::ApprovalStrategy::DenyAll
+            }
+        };
 
         let runs = self.runs.clone();
         let cancel_tokens = self.cancel_tokens.clone();
@@ -393,6 +414,7 @@ impl SubAgentManager {
                     &session_id_owned,
                     initial_msgs.as_deref(),
                     Some(mq.clone()),
+                    approval_strat,
                 ) => {
                     res
                 }
@@ -546,6 +568,7 @@ impl SubAgentManager {
         concurrency_safe: bool,
         inherited_context: Option<SubAgentInheritedContext>,
         initial_messages: Option<Vec<ChatMessage>>,
+        permission_mode: xiaolin_core::agent_config::PermissionMode,
     ) -> anyhow::Result<(String, String)> {
         let session_pool = self
             .controller
@@ -568,6 +591,7 @@ impl SubAgentManager {
                 concurrency_safe,
                 inherited_context,
                 initial_messages,
+                permission_mode,
             )
             .await?;
 
@@ -634,6 +658,7 @@ impl SubAgentManager {
         concurrency_safe: bool,
         inherited_context: Option<SubAgentInheritedContext>,
         initial_messages: Option<Vec<ChatMessage>>,
+        permission_mode: xiaolin_core::agent_config::PermissionMode,
     ) -> anyhow::Result<(String, String)> {
         self.spawn_and_wait(
             agent_config,
@@ -650,6 +675,7 @@ impl SubAgentManager {
             concurrency_safe,
             inherited_context,
             initial_messages,
+            permission_mode,
         )
         .await
     }
@@ -673,6 +699,7 @@ impl SubAgentManager {
         parent_session_id: &str,
         initial_messages: Option<&[ChatMessage]>,
         message_queue: Option<Arc<MessageQueue>>,
+        approval_strategy: xiaolin_core::tool_runtime::ApprovalStrategy,
     ) -> anyhow::Result<(String, u32, u32, Option<Usage>)> {
         use crate::sidechain::{SidechainMessage, SidechainMeta, SidechainWriter};
         use xiaolin_core::types::{ChatMessage, ChatRequest, Role};
@@ -929,7 +956,7 @@ impl SubAgentManager {
                 &request,
                 tool_registry,
                 child_tx,
-                xiaolin_core::tool_runtime::ApprovalStrategy::AutoApprove,
+                approval_strategy,
                 llm_override,
                 orchestrator,
                 None,

@@ -401,12 +401,17 @@ impl Tool for SubAgentTool {
         };
 
         let concurrency_safe = def.as_ref().is_some_and(|d| d.concurrency_safe);
+        let permission_mode = def
+            .as_ref()
+            .map(|d| d.permission_mode)
+            .unwrap_or_default();
 
         tracing::info!(
             parent_depth = self.current_depth,
             def_type = %type_id,
             background = use_background,
             concurrency_safe,
+            ?permission_mode,
             task_len = params.task.len(),
             "spawning sub-agent"
         );
@@ -493,6 +498,7 @@ impl Tool for SubAgentTool {
                     concurrency_safe,
                     inherited_ctx,
                     initial_messages,
+                    permission_mode,
                 )
                 .await
             {
@@ -525,6 +531,7 @@ impl Tool for SubAgentTool {
                     concurrency_safe,
                     inherited_ctx,
                     initial_messages,
+                    permission_mode,
                 )
                 .await
             {
@@ -1106,6 +1113,7 @@ impl Tool for ResumeSubagentTool {
                 true,
                 None,
                 Some(initial_messages),
+                xiaolin_core::agent_config::PermissionMode::AutoApprove,
             )
             .await
         {

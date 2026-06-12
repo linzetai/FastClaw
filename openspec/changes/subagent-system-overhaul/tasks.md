@@ -101,17 +101,24 @@
 - [x] 4.9 在 `spawn()` 中创建 queue 并通过 `execute_unified_with_cost_store` 传递到 AgentContext
 - [x] 4.10 E2E 验证：spawn sub-agent → steer ok=true → sub-agent completed
 
-## 5. Permission Bubble
+## 5. Permission Bubble — COMPLETED
 
-- [ ] 5.1 在 `xiaolin-core` 中定义 `PermissionMode` enum（AutoApprove, Bubble, Deny）
-- [ ] 5.2 在 `SubAgentDef` 中添加 `permission_mode` 字段（默认 AutoApprove）
-- [ ] 5.3 定义 `ApprovalStrategy::ParentApproval(oneshot::Sender<ApprovalResult>)` 变体
-- [ ] 5.4 在 `SubAgentManager::run_subagent()` 中根据 permission_mode 构建对应的 ApprovalStrategy
-- [ ] 5.5 定义 `AgentEvent::ApprovalBubble { run_id, tool_name, args_preview, respond_tx }` 变体
-- [ ] 5.6 实现 30s timeout logic：tokio::select! approval_rx vs sleep(30s)
-- [ ] 5.7 在 gateway WebSocket handler 中转发 approval_bubble → 前端
-- [ ] 5.8 在 gateway 中实现 `approval_respond` 命令 → 通过 saved respond_tx 回复
-- [ ] 5.9 管理 pending approvals map：`DashMap<request_id, oneshot::Sender<ApprovalResult>>`
+- [x] 5.1 在 `xiaolin-core` 中定义 `PermissionMode` enum（AutoApprove, Bubble, Deny）
+- [x] 5.2 在 `SubAgentDef` 中添加 `permission_mode` 字段（默认 AutoApprove）
+- [x] 5.3 定义 `ApprovalStrategy::Bubble(Arc<BubbleApprovalPort>)` 变体 + `BubbleApprovalPort` struct
+- [x] 5.4 在 `SubAgentManager::spawn()` 中根据 permission_mode 构建对应的 ApprovalStrategy
+- [x] 5.5 复用 `AgentEvent::ApprovalRequired` — Bubble 时自动发送到 event stream
+- [x] 5.6 实现 30s timeout logic：tokio::select! approval_rx vs sleep(30s)，超时自动 Denied
+- [x] 5.7 在 gateway WS handler 中转发 approval_required → 前端（forward_event 自动处理）
+- [x] 5.8 在 `resolve_approval` handler 中整合 BubbleApprovalPort 回退路径
+- [x] 5.9 管理 pending approvals map：`BubbleApprovalPort { pending: DashMap<String, oneshot::Sender<ApprovalDecision>> }`
+
+**关键成果**:
+- `PermissionMode` 三态枚举控制子 agent 工具审批策略
+- `BubbleApprovalPort` 通过 DashMap + oneshot channel 管理异步审批
+- 30s 超时自动拒绝，防止 sub-agent 无限等待
+- `resolve_approval` WS 命令同时支持 session 审批和 bubble 审批
+- E2E 验证：resolve_approval 协议正常工作，approval.resolve 别名兼容
 
 ## 6. Coordinator Mode
 

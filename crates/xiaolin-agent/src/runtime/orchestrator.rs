@@ -489,6 +489,78 @@ impl ToolOrchestrator {
                     }),
                 }
             }
+            ApprovalStrategy::Bubble(port) => {
+                let approval_id = uuid::Uuid::new_v4().to_string();
+                let available_decisions = vec![
+                    ApprovalDecision::Approved,
+                    ApprovalDecision::ApprovedForSession,
+                    ApprovalDecision::Denied,
+                ];
+
+                let rx = port.register(approval_id.clone());
+
+                let _ = ctx
+                    .event_tx
+                    .send(AgentEvent::ApprovalRequired {
+                        turn_id: ctx.turn_id.clone(),
+                        approval_id: approval_id.clone(),
+                        action: action.clone(),
+                        reason: reason.to_string(),
+                        available_decisions,
+                        session_id: None,
+                    })
+                    .await;
+
+                let decision = match tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    rx,
+                )
+                .await
+                {
+                    Ok(Ok(d)) => d,
+                    Ok(Err(_)) => ApprovalDecision::TimedOut,
+                    Err(_) => ApprovalDecision::TimedOut,
+                };
+
+                match &decision {
+                    ApprovalDecision::ApprovedAllForSession => {
+                        ctx.approval_cache
+                            .store(&keys, ApprovalDecision::ApprovedAllForSession);
+                    }
+                    ApprovalDecision::ApprovedForSession => {
+                        ctx.approval_cache
+                            .store(&keys, ApprovalDecision::ApprovedForSession);
+                    }
+                    _ => {}
+                }
+
+                let _ = ctx
+                    .event_tx
+                    .send(AgentEvent::ApprovalResolved {
+                        turn_id: ctx.turn_id.clone(),
+                        approval_id,
+                        decision: decision.clone(),
+                        source: "bubble".to_string(),
+                    })
+                    .await;
+
+                match decision {
+                    ApprovalDecision::Approved
+                    | ApprovalDecision::ApprovedForSession
+                    | ApprovalDecision::ApprovedAllForSession => {
+                        Ok(DecisionSource::UserApproved)
+                    }
+                    ApprovalDecision::Denied => Err(ToolRuntimeError::Rejected {
+                        reason: "parent denied".into(),
+                    }),
+                    ApprovalDecision::TimedOut => Err(ToolRuntimeError::Rejected {
+                        reason: "bubble approval timed out (30s)".into(),
+                    }),
+                    _ => Err(ToolRuntimeError::Rejected {
+                        reason: "unexpected bubble approval decision".into(),
+                    }),
+                }
+            }
         }
     }
 

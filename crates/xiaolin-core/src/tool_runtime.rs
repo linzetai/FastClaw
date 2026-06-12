@@ -1,7 +1,10 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use xiaolin_protocol::approval::PendingAction;
+use dashmap::DashMap;
+use tokio::sync::oneshot;
+use xiaolin_protocol::approval::{ApprovalDecision, PendingAction};
 use xiaolin_protocol::id::{SessionId, TurnId};
 use serde::{Deserialize, Serialize};
 
@@ -112,6 +115,48 @@ pub enum ApprovalStrategy {
     /// Rely solely on ExecPolicy rules: Allow → pass, Prompt/Forbid → reject.
     /// Used for non-interactive entry points (Feishu, HTTP API).
     PolicyBased,
+    /// Bubble approval requests to the parent agent/frontend via event_tx.
+    /// The port stores pending oneshot senders keyed by approval_id.
+    Bubble(Arc<BubbleApprovalPort>),
+}
+
+/// Shared port for bubble approvals: sub-agent creates entries, parent resolves them.
+#[derive(Debug, Default)]
+pub struct BubbleApprovalPort {
+    pending: DashMap<String, oneshot::Sender<ApprovalDecision>>,
+}
+
+impl BubbleApprovalPort {
+    pub fn new() -> Self {
+        Self {
+            pending: DashMap::new(),
+        }
+    }
+
+    /// Register a pending approval and return the receiver.
+    pub fn register(&self, approval_id: String) -> oneshot::Receiver<ApprovalDecision> {
+        let (tx, rx) = oneshot::channel();
+        self.pending.insert(approval_id, tx);
+        rx
+    }
+
+    /// Resolve a pending approval. Returns false if the id was not found.
+    pub fn resolve(&self, approval_id: &str, decision: ApprovalDecision) -> bool {
+        if let Some((_, tx)) = self.pending.remove(approval_id) {
+            tx.send(decision).is_ok()
+        } else {
+            false
+        }
+    }
+
+    /// Cancel all pending approvals (e.g. when the sub-agent is cancelled).
+    pub fn cancel_all(&self) {
+        self.pending.clear();
+    }
+
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
 }
 
 /// Where the approval decision came from (for audit/diagnostics).
