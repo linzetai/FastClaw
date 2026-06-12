@@ -1,19 +1,20 @@
 use xiaolin_core::types::{
-    ChatMessage, DeltaContent, Role, StreamChoice, StreamDelta, ToolCall,
+    ChatMessage, DeltaContent, Role, StreamChoice, StreamDelta,
 };
 use xiaolin_evolution::TrajectoryOutcome;
 use xiaolin_protocol::{
-    AgentEvent, ExecutionMode, TokenUsage, ToolCallData, ToolCallFunction, TurnSummary,
+    ExecutionMode, TokenUsage, TurnSummary,
 };
 
 use crate::builtin_tools::GoalStatus;
 use crate::llm::CompletionParams;
 
+use super::agent_step::{AgentStep, TurnEndReason};
 use super::llm_call::LlmStreamOutput;
-use super::{make_turn_end_event, make_turn_summary};
+use super::make_turn_summary;
 use super::query_state::TerminalReason;
 use super::stop_hooks;
-use super::stream_engine::send_stream_event;
+use super::stream_engine::send_step;
 use super::turn_state::{TurnMutableState, TurnServices};
 
 /// Outcome of the EndTurn finalization phase.
@@ -96,9 +97,9 @@ pub(crate) async fn handle_end_turn(
                     gs.account_time(&goal_id, elapsed_secs).await;
                 }
                 if let Some(updated) = gs.get_current().await {
-                    let _ = send_stream_event(
-                        &svc.tx,
-                        AgentEvent::GoalUpdated {
+                    let _ = send_step(
+                        &svc.step_tx,
+                        AgentStep::GoalUpdated {
                             turn_id: svc.turn_id.clone(),
                             goal: updated.to_goal_data(),
                         },
@@ -165,23 +166,6 @@ pub(crate) async fn handle_end_turn(
         }
     }
 
-    let final_tc: Option<Vec<ToolCall>> =
-        if matches!(terminal_reason, TerminalReason::MaxIterations) {
-            let tc: Vec<ToolCall> = llm_output
-                .tool_call_accum
-                .iter()
-                .filter(|a| !a.name.is_empty())
-                .flat_map(|a| a.to_tool_calls())
-                .collect();
-            if tc.is_empty() {
-                None
-            } else {
-                Some(tc)
-            }
-        } else {
-            None
-        };
-
     if matches!(terminal_reason, TerminalReason::MaxIterations) {
         let max_iterations = ms.query_loop.max_iterations;
         tracing::warn!(
@@ -234,9 +218,9 @@ pub(crate) async fn handle_end_turn(
                     usage: None,
                     raw_sse_json: None,
                 };
-                let _ = send_stream_event(
-                    &svc.tx,
-                    AgentEvent::ContentDelta {
+                let _ = send_step(
+                    &svc.step_tx,
+                    AgentStep::Delta {
                         turn_id: svc.turn_id.clone(),
                         delta: serde_json::to_value(&summary_delta).unwrap_or_default(),
                         raw_bytes: None,
@@ -274,17 +258,20 @@ pub(crate) async fn handle_end_turn(
         "streaming execution complete — sending Done"
     );
 
-    let final_tool_calls = final_tc.map(tool_calls_to_data);
-    let _ = send_stream_event(
-        &svc.tx,
-        make_turn_end_event(
-            &svc.turn_id,
-            svc.session_id.clone(),
-            &ms.query_loop,
-            svc.stream_start,
-            svc.context_window,
-            final_tool_calls,
-        ),
+    let summary = make_turn_summary(
+        &svc.turn_id,
+        &ms.query_loop,
+        svc.stream_start,
+        svc.context_window,
+    );
+    let _ = send_step(
+        &svc.step_tx,
+        AgentStep::TurnEnd {
+            turn_id: svc.turn_id.clone(),
+            reason: TurnEndReason::from(terminal_reason.clone()),
+            summary: summary.clone(),
+            session_id: svc.session_id.clone(),
+        },
         false,
     )
     .await;
@@ -305,27 +292,6 @@ pub(crate) async fn handle_end_turn(
         })
         .await;
 
-    EndTurnOutcome::Done(make_turn_summary(
-        &svc.turn_id,
-        &ms.query_loop,
-        svc.stream_start,
-        svc.context_window,
-    ))
+    EndTurnOutcome::Done(summary)
 }
 
-fn tool_calls_to_data(calls: Vec<ToolCall>) -> Vec<ToolCallData> {
-    calls
-        .into_iter()
-        .map(|tc| ToolCallData {
-            id: tc.id,
-            call_type: tc.call_type,
-            function: ToolCallFunction {
-                name: tc.function.name,
-                arguments: tc.function.arguments,
-            },
-            output: tc.output,
-            success: tc.success,
-            duration_ms: tc.duration_ms,
-        })
-        .collect()
-}

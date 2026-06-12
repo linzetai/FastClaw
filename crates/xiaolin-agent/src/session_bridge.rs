@@ -2,7 +2,7 @@
 //! `AgentRuntime`'s `execute_unified`.
 //!
 //! With Phase A, the relay tasks have been removed. `InteractionHandle` is
-//! passed directly to `ToolOrchestrator` (via `StreamParams`) and to builtin
+//! passed directly to `ToolOrchestrator` (via `AgentContext`) and to builtin
 //! tools (via task-local), so approvals and answers resolve without polling.
 
 use std::sync::Arc;
@@ -37,7 +37,7 @@ fn derive_approval_strategy(
 /// Adapter implementing `TurnExecutor` by delegating to `AgentRuntime`.
 ///
 /// `InteractionHandle` is threaded into two places:
-/// 1. `StreamParams.interaction_handle` — used by `ToolOrchestrator` for
+/// 1. `AgentContext.interaction_handle` — used by `ToolOrchestrator` for
 ///    approval resolution.
 /// 2. Task-local `TASK_INTERACTION_HANDLE` — used by builtin tools
 ///    (`ask_question`, `confirm`) for answer resolution.

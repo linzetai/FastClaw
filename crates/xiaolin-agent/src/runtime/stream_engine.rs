@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use xiaolin_protocol::AgentEvent;
 
+use super::agent_step::AgentStep;
+
 /// Trace of a single tool call (used by query_state.rs and self-iter).
 /// When the `self-iter` feature is enabled, this re-exports from xiaolin_self_iter.
 #[cfg(feature = "self-iter")]
@@ -38,6 +40,31 @@ pub(crate) async fn send_stream_event(
                 tracing::warn!("stream sink slow: dropped a token delta (backpressure)");
             } else {
                 tracing::warn!("stream sink slow: timed out sending control event");
+            }
+            false
+        }
+    }
+}
+
+/// Send an `AgentStep` to the step channel (yielded directly from the stream).
+pub(crate) async fn send_step(
+    tx: &tokio::sync::mpsc::Sender<AgentStep>,
+    step: AgentStep,
+    lossy: bool,
+) -> bool {
+    let dur = if lossy {
+        Duration::from_millis(200)
+    } else {
+        Duration::from_secs(30)
+    };
+    match tokio::time::timeout(dur, tx.send(step)).await {
+        Ok(Ok(())) => true,
+        Ok(Err(_)) => false,
+        Err(_) => {
+            if lossy {
+                tracing::warn!("step sink slow: dropped event (backpressure)");
+            } else {
+                tracing::warn!("step sink slow: timed out sending control step");
             }
             false
         }

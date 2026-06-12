@@ -1,10 +1,11 @@
 use xiaolin_core::types::{ChatMessage, Role};
-use xiaolin_protocol::{AgentEvent, ContextWarningLevel, TurnSummary};
+use xiaolin_protocol::{ContextWarningLevel, TurnSummary};
 
+use super::agent_step::AgentStep;
 use super::query_deps::QueryDeps;
 use super::query_state;
 use super::session_memory;
-use super::stream_engine::send_stream_event;
+use super::stream_engine::send_step;
 use super::turn_state::{TurnMutableState, TurnServices};
 use super::make_turn_summary;
 
@@ -55,12 +56,13 @@ pub(crate) async fn iteration_pre_check(
                 failure_detail
             )
         };
-        let _ = send_stream_event(
-            &svc.tx,
-            AgentEvent::Error {
+        let _ = send_step(
+            &svc.step_tx,
+            AgentStep::Error {
                 turn_id: svc.turn_id.clone(),
                 message: user_msg,
                 error_code: None,
+                recoverable: false,
             },
             false,
         )
@@ -142,9 +144,9 @@ pub(crate) async fn iteration_pre_check(
     }
 
     // ── 8. Emit live context usage update ──────────────────────────────
-    let _ = send_stream_event(
-        &svc.tx,
-        AgentEvent::ContextUsageUpdate {
+    let _ = send_step(
+        &svc.step_tx,
+        AgentStep::ContextUsage {
             turn_id: svc.turn_id.clone(),
             used_tokens: estimated_tokens as u32,
             limit_tokens: svc.context_window,
@@ -160,9 +162,9 @@ pub(crate) async fn iteration_pre_check(
 
     if usage_ratio > 0.85 && !ms.query_loop.compact_warning_sent {
         ms.query_loop.compact_warning_sent = true;
-        let _ = send_stream_event(
-            &svc.tx,
-            AgentEvent::ContextWarning {
+        let _ = send_step(
+            &svc.step_tx,
+            AgentStep::ContextWarning {
                 turn_id: svc.turn_id.clone(),
                 level: ContextWarningLevel::Soft,
                 used_tokens: estimated_tokens as u32,
@@ -181,9 +183,9 @@ pub(crate) async fn iteration_pre_check(
     }
 
     if usage_ratio > 0.90 {
-        let _ = send_stream_event(
-            &svc.tx,
-            AgentEvent::ContextWarning {
+        let _ = send_step(
+            &svc.step_tx,
+            AgentStep::ContextWarning {
                 turn_id: svc.turn_id.clone(),
                 level: ContextWarningLevel::Hard,
                 used_tokens: estimated_tokens as u32,
@@ -232,9 +234,9 @@ pub(crate) async fn iteration_pre_check(
             context_window = svc.context_window,
             "blocking limit reached (>= 95% context window) — stopping"
         );
-        let _ = send_stream_event(
-            &svc.tx,
-            AgentEvent::Error {
+        let _ = send_step(
+            &svc.step_tx,
+            AgentStep::Error {
                 turn_id: svc.turn_id.clone(),
                 message: format!(
                     "Context window is nearly full ({}/{} tokens, {:.0}%). \
@@ -244,6 +246,7 @@ pub(crate) async fn iteration_pre_check(
                     usage_ratio * 100.0,
                 ),
                 error_code: Some(xiaolin_protocol::ErrorCode::ContextWindowExceeded),
+                recoverable: false,
             },
             false,
         )

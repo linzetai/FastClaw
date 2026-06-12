@@ -1,21 +1,22 @@
 use xiaolin_core::types::{ChatMessage, ChatRequest, Role, SessionId, ToolCall};
 use xiaolin_evolution::TrajectoryStep;
-use xiaolin_protocol::{AgentEvent, ExecutionMode, TurnSummary};
+use xiaolin_protocol::{ExecutionMode, TurnSummary};
 
 use crate::builtin_tools::GoalStatus;
 
+use super::agent_step::{AgentStep, TurnEndReason};
 use super::dispatcher::DispatchContext;
 use super::file_persistence::FileOp;
 use super::llm_call::LlmStreamOutput;
 use super::permissions;
 use super::query_state;
-use super::stream_engine::send_stream_event;
+use super::stream_engine::send_step;
 use super::tool_executor::semantic_header;
 use super::trajectory::truncate_for_trajectory;
 use super::turn_state::{TurnMutableState, TurnServices};
 use super::validation_pipeline::ValidationContext;
 use super::{
-    extract_file_path_from_args, inject_tool_recovery_guidance, make_turn_end_event,
+    extract_file_path_from_args, inject_tool_recovery_guidance,
     make_turn_summary, process_tool_output, tool_result_content, track_restoration_state,
 };
 
@@ -104,16 +105,20 @@ pub(crate) async fn execute_tool_round(
 
     if assembled_calls.is_empty() {
         tracing::warn!("stream tool call deltas produced no valid tool calls, stopping");
-        let _ = send_stream_event(
-            &svc.tx,
-            make_turn_end_event(
-                &svc.turn_id,
-                svc.session_id.clone(),
-                &ms.query_loop,
-                svc.stream_start,
-                svc.context_window,
-                None,
-            ),
+        let summary = make_turn_summary(
+            &svc.turn_id,
+            &ms.query_loop,
+            svc.stream_start,
+            svc.context_window,
+        );
+        let _ = send_step(
+            &svc.step_tx,
+            AgentStep::TurnEnd {
+                turn_id: svc.turn_id.clone(),
+                reason: TurnEndReason::Completed,
+                summary: summary.clone(),
+                session_id: svc.session_id.clone(),
+            },
             false,
         )
         .await;
@@ -123,14 +128,7 @@ pub(crate) async fn execute_tool_round(
         svc.runtime
             .finalize_injected_skills(&ms.injected_skill_ids, true)
             .await;
-        // TODO: record_completed_trajectory — needs a session_id-based variant on AgentRuntime.
-        // Original: self.record_completed_trajectory(request, config, &trajectory_steps, true)
-        return ToolRoundOutcome::EarlyFinish(make_turn_summary(
-            &svc.turn_id,
-            &ms.query_loop,
-            svc.stream_start,
-            svc.context_window,
-        ));
+        return ToolRoundOutcome::EarlyFinish(summary);
     }
 
     ms.messages.push(ChatMessage {
@@ -158,9 +156,9 @@ pub(crate) async fn execute_tool_round(
         } else {
             Some(tc.function.arguments.clone())
         };
-        let _ = send_stream_event(
-            &svc.tx,
-            AgentEvent::ToolExecuting {
+        let _ = send_step(
+            &svc.step_tx,
+            AgentStep::ToolExecuting {
                 turn_id: svc.turn_id.clone(),
                 tool_name: tc.function.name.clone(),
                 call_id: tc.id.clone(),
@@ -221,7 +219,7 @@ pub(crate) async fn execute_tool_round(
                     work_dir: &svc.work_dir,
                     mode_state: svc.mode_state.as_ref(),
                     plan_file_path: plan_file_path_for_ctx.clone(),
-                    event_tx: &svc.tx,
+                    event_tx: &svc.event_tx,
                     approval_strategy: &svc.approval_strategy,
                     interaction_handle: svc.interaction_handle.as_ref(),
                     approval_cache: &mut ms.approval_cache,
@@ -244,7 +242,7 @@ pub(crate) async fn execute_tool_round(
             work_dir: &svc.work_dir,
             mode_state: svc.mode_state.as_ref(),
             plan_file_path: plan_file_path_batch,
-            event_tx: &svc.tx,
+            event_tx: &svc.event_tx,
             approval_strategy: &svc.approval_strategy,
             interaction_handle: svc.interaction_handle.as_ref(),
             approval_cache: &mut ms.approval_cache,
@@ -451,9 +449,9 @@ pub(crate) async fn execute_tool_round(
             result.success,
         );
         let llm_out = format!("{header}\n{processed}");
-        let _ = send_stream_event(
-            &svc.tx,
-            AgentEvent::ToolResult {
+        let _ = send_step(
+            &svc.step_tx,
+            AgentStep::ToolResult {
                 turn_id: svc.turn_id.clone(),
                 tool_name: tool_name.clone(),
                 call_id: call_id.clone(),

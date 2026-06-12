@@ -6,6 +6,7 @@ use xiaolin_protocol::{AgentEvent, ExecutionMode, TurnSummary, WarningCategory};
 
 use crate::llm::CompletionParams;
 
+use super::agent_step::AgentStep;
 use super::accumulator::{accumulate_tool_call, ToolCallAccumulator};
 use super::query_deps::QueryDeps;
 use super::cache_break_detection;
@@ -13,7 +14,7 @@ use super::cost_tracker;
 use super::mode_attachments;
 use super::model_critic;
 use super::query_state::{self, ESCALATED_MAX_TOKENS};
-use super::stream_engine::send_stream_event;
+use super::stream_engine::{send_step, send_stream_event};
 use super::streaming_tool_executor::{StreamingExecutorConfig, StreamingToolExecutor};
 use super::task_decomposer;
 use super::turn_state::{TurnMutableState, TurnServices};
@@ -37,7 +38,7 @@ pub(crate) struct LlmStreamOutput {
 pub(crate) enum LlmCallOutcome {
     /// Stream completed successfully; includes accumulated output and
     /// the determined loop transition (EndTurn or Continue with tool calls).
-    Completed(LlmStreamOutput),
+    Completed(Box<LlmStreamOutput>),
     /// Turn ended early due to an unrecoverable error (stream failure,
     /// prompt_too_long without recovery, etc.).
     FatalError(anyhow::Error),
@@ -71,7 +72,7 @@ pub(crate) enum LlmCallOutcome {
 /// - Modifies `ms.messages` (message budget replacement, mode attachments, partial resume messages)
 /// - Modifies `ms.max_tokens` (max_output_tokens escalation)
 /// - Modifies `ms.query_loop` state (token accounting, recovery counts)
-/// - Sends events via `svc.tx` (ContentDelta, StreamError, Warning, Error)
+/// - Sends steps via `svc.step_tx` (Delta, Error) and warnings via `svc.event_tx`
 /// - Calls `svc.runtime.finalize_injected_skills()` on fatal paths
 pub(crate) async fn perform_llm_call(
     ms: &mut TurnMutableState,
@@ -385,16 +386,16 @@ pub(crate) async fn perform_llm_call(
                         attempts = stream_resume_attempts,
                         "stream recovery exhausted — giving up"
                     );
-                    let _ = send_stream_event(
-                        &svc.tx,
-                        AgentEvent::StreamError {
+                    let _ = send_step(
+                        &svc.step_tx,
+                        AgentStep::Error {
                             turn_id: svc.turn_id.clone(),
                             message: format!(
                                 "流式响应超时（已重试{}次）: {}",
                                 stream_resume_attempts, err_msg
                             ),
                             error_code: classify_stream_error_code(&err_msg),
-                            retry_attempt: stream_resume_attempts,
+                            recoverable: true,
                         },
                         false,
                     )
@@ -497,7 +498,7 @@ pub(crate) async fn perform_llm_call(
                             cost_tracker::BudgetAlert::Warning => {
                                 let cost = svc.services.accumulated_cost_usd().await;
                                 let _ = send_stream_event(
-                                    &svc.tx,
+                                    &svc.event_tx,
                                     AgentEvent::Warning {
                                         turn_id: svc.turn_id.clone(),
                                         message: format!(
@@ -512,9 +513,9 @@ pub(crate) async fn perform_llm_call(
                             }
                             cost_tracker::BudgetAlert::Exceeded => {
                                 let cost = svc.services.accumulated_cost_usd().await;
-                                let _ = send_stream_event(
-                                    &svc.tx,
-                                    AgentEvent::Error {
+                                let _ = send_step(
+                                    &svc.step_tx,
+                                    AgentStep::Error {
                                         turn_id: svc.turn_id.clone(),
                                         message: format!(
                                             "Budget exceeded: accumulated cost ${:.4}. Stopping execution.",
@@ -523,6 +524,7 @@ pub(crate) async fn perform_llm_call(
                                         error_code: Some(
                                             xiaolin_protocol::ErrorCode::UsageLimitExceeded,
                                         ),
+                                        recoverable: false,
                                     },
                                     false,
                                 )
@@ -568,9 +570,9 @@ pub(crate) async fn perform_llm_call(
             }
 
             if tool_call_accum.is_empty() {
-                let _ = send_stream_event(
-                    &svc.tx,
-                    AgentEvent::ContentDelta {
+                let _ = send_step(
+                    &svc.step_tx,
+                    AgentStep::Delta {
                         turn_id: svc.turn_id.clone(),
                         delta: serde_json::to_value(&delta).unwrap_or_default(),
                         raw_bytes: delta.raw_sse_json.clone(),
@@ -642,12 +644,13 @@ pub(crate) async fn perform_llm_call(
             error = %withheld_err,
             "withheld prompt_too_long: reactive compact failed — yielding error to client"
         );
-        let _ = send_stream_event(
-            &svc.tx,
-            AgentEvent::Error {
+        let _ = send_step(
+            &svc.step_tx,
+            AgentStep::Error {
                 turn_id: svc.turn_id.clone(),
                 message: withheld_err.clone(),
                 error_code: None,
+                recoverable: false,
             },
             false,
         )
@@ -795,7 +798,7 @@ pub(crate) async fn perform_llm_call(
         }
     }
 
-    LlmCallOutcome::Completed(LlmStreamOutput {
+    LlmCallOutcome::Completed(Box::new(LlmStreamOutput {
         accumulated_content,
         accumulated_reasoning,
         tool_call_accum,
@@ -803,5 +806,5 @@ pub(crate) async fn perform_llm_call(
         streaming_executor,
         last_submitted_tool_idx,
         transition,
-    })
+    }))
 }

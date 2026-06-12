@@ -7,26 +7,30 @@ use xiaolin_core::tool_runtime::ApprovalStrategy;
 use xiaolin_core::types::ChatRequest;
 use xiaolin_protocol::AgentEvent;
 
+use super::agent_step::AgentStep;
 use crate::builtin_tools::{ExecutionModeState, GoalStore, TodoStore};
 use crate::llm::LlmProvider;
 use crate::runtime::orchestrator::ToolOrchestrator;
 use crate::runtime::runtimes::RuntimeRegistry;
 
-use super::{ExecutionParams, StreamParams};
-
-/// Unified execution context consolidating `ExecutionParams` + `StreamParams`.
+/// Unified execution context for an agent turn.
 ///
 /// This struct replaces the 13+ parameter signatures of `execute_unified`.
-/// The `tx` field is optional: when present, the compatibility layer and
-/// side-path emitters (orchestrator, tools) clone it to emit `AgentEvent`s directly.
+///
+/// Two channels carry events out of the execution loop:
+/// - `step_tx`: main-loop events (Delta, ToolResult, TurnEnd, etc.) yielded as `AgentStep`
+/// - `event_tx`: side-path events (ToolProgress, ApprovalRequired, SubAgent*) forwarded to caller
 pub struct AgentContext {
     // === Required ===
     pub config: AgentConfig,
     pub request: ChatRequest,
     pub tool_registry: Arc<ToolRegistry>,
 
-    // === Streaming (side-path emitters clone this) ===
-    pub tx: Option<tokio::sync::mpsc::Sender<AgentEvent>>,
+    // === Streaming channels ===
+    /// Main-loop events yielded as `AgentStep` from the stream.
+    pub step_tx: Option<tokio::sync::mpsc::Sender<AgentStep>>,
+    /// Side-path events forwarded directly to the caller's channel.
+    pub event_tx: Option<tokio::sync::mpsc::Sender<AgentEvent>>,
 
     // === Optional - LLM ===
     pub llm_override: Option<Arc<dyn LlmProvider>>,
@@ -52,35 +56,14 @@ pub struct AgentContext {
 }
 
 impl AgentContext {
-    /// Construct from legacy `ExecutionParams` + `StreamParams` (used by the compatibility layer).
-    pub fn from_params(exec: &ExecutionParams<'_>, stream: StreamParams) -> Self {
-        Self {
-            config: exec.config.clone(),
-            request: exec.request.clone(),
-            tool_registry: exec.tool_registry.clone(),
-            tx: Some(stream.tx),
-            llm_override: exec.llm_override.clone(),
-            subagent_prompt: exec.subagent_prompt.clone(),
-            mode_state: exec.mode_state.clone(),
-            orchestrator: stream.orchestrator,
-            interaction_handle: stream.interaction_handle,
-            approval_strategy: stream.approval_strategy,
-            runtime_registry: stream.runtime_registry,
-            session_store: exec.session_store.clone(),
-            todo_store: exec.todo_store.clone(),
-            goal_store: exec.goal_store.clone(),
-            cost_store: exec.cost_store.clone(),
-            cancel_token: None,
-        }
-    }
-
     /// Minimal context for SubAgent spawning or testing.
     pub fn minimal(config: AgentConfig, request: ChatRequest, tool_registry: Arc<ToolRegistry>) -> Self {
         Self {
             config,
             request,
             tool_registry,
-            tx: None,
+            step_tx: None,
+            event_tx: None,
             llm_override: None,
             subagent_prompt: None,
             mode_state: None,

@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use tokio_util::sync::CancellationToken;
 use xiaolin_core::tool::ToolProfile;
 use xiaolin_core::types::Role;
 use xiaolin_protocol::{ExecutionMode, TurnId};
 
+use super::agent_context::AgentContext;
 use super::approval_cache::ApprovalCache;
 use super::cache_break_detection::CacheBreakDetector;
 use super::context_assembly;
@@ -25,40 +25,34 @@ use super::undo_engine;
 use super::validation_pipeline;
 use super::{
     create_tool_result_storage, build_skip_tool_names, inject_system_block,
-    AgentRuntime, ExecutionParams, StreamParams,
+    AgentRuntime,
 };
 use crate::llm::LlmProvider;
 
 /// Performs the one-time setup for an agent turn.
 ///
-/// Extracts lines 868-1155 from the original `execute_stream_inner`.
 /// Returns the mutable state and immutable service dependencies needed
 /// for the iterative agent loop.
 pub(crate) async fn setup_turn(
     runtime: Arc<AgentRuntime>,
-    params: &ExecutionParams<'_>,
-    stream_params: &StreamParams,
-    cancel_token: Option<CancellationToken>,
+    ctx: &AgentContext,
 ) -> anyhow::Result<(TurnMutableState, TurnServices)> {
-    let ExecutionParams {
-        config,
-        request,
-        tool_registry,
-        ref llm_override,
-        subagent_prompt: _,
-        ref mode_state,
-        ref session_store,
-        ref todo_store,
-        ref goal_store,
-        cost_store: _,
-    } = *params;
+    let config = &ctx.config;
+    let request = &ctx.request;
+    let tool_registry = &ctx.tool_registry;
+    let llm_override = &ctx.llm_override;
+    let mode_state = &ctx.mode_state;
+    let session_store = &ctx.session_store;
+    let todo_store = &ctx.todo_store;
+    let goal_store = &ctx.goal_store;
+    let cancel_token = ctx.cancel_token.clone();
 
     let turn_id = TurnId::generate();
     let stream_start = std::time::Instant::now();
 
     // --- Message building ---
     let t0 = std::time::Instant::now();
-    let mut messages = runtime.build_messages(params);
+    let mut messages = runtime.build_messages(ctx);
     tracing::info!(
         elapsed_ms = t0.elapsed().as_millis() as u64,
         "perf: build_messages (stream)"
@@ -221,7 +215,7 @@ pub(crate) async fn setup_turn(
         workspace_dir,
         budget_limit,
         abort_token,
-        params.cost_store.clone(),
+        ctx.cost_store.clone(),
         request.session_id.as_ref().map(|s| s.to_string()),
     );
 
@@ -231,12 +225,12 @@ pub(crate) async fn setup_turn(
     let approval_cache = ApprovalCache::new();
     let denial_tracker = DenialTracker::new();
 
-    let runtime_registry = stream_params
+    let runtime_registry = ctx
         .runtime_registry
         .as_ref()
         .map(Arc::clone)
         .unwrap_or_else(|| Arc::new(runtimes::register_default_runtimes()));
-    let orch = stream_params
+    let orch = ctx
         .orchestrator
         .as_ref()
         .map(Arc::clone)
@@ -323,9 +317,10 @@ pub(crate) async fn setup_turn(
         session_store: session_store.clone(),
         todo_store: todo_store.clone(),
         goal_store: goal_store.clone(),
-        tx: stream_params.tx.clone(),
-        approval_strategy: stream_params.approval_strategy.clone(),
-        interaction_handle: stream_params.interaction_handle.clone(),
+        step_tx: ctx.step_tx.clone().expect("AgentContext.step_tx must be set for streaming execution"),
+        event_tx: ctx.event_tx.clone().expect("AgentContext.event_tx must be set for streaming execution"),
+        approval_strategy: ctx.approval_strategy.clone(),
+        interaction_handle: ctx.interaction_handle.clone(),
         deps,
         services,
         dispatcher,

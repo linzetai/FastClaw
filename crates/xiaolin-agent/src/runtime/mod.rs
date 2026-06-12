@@ -7,7 +7,7 @@ use xiaolin_core::tool::ToolRegistry;
 use xiaolin_core::types::{ChatMessage, ChatRequest, ChatResponse, Role};
 use xiaolin_protocol::{
     AgentEvent, ErrorCode, ExecutionMode,
-    TokenUsage, ToolCallData, TurnId, TurnSummary,
+    TokenUsage, TurnId, TurnSummary,
 };
 
 use xiaolin_evolution::{
@@ -297,73 +297,6 @@ pub struct ExecutionResult {
     pub iterations: u32,
 }
 
-/// Shared parameters for both streaming and non-streaming execution paths.
-pub struct ExecutionParams<'a> {
-    pub config: &'a AgentConfig,
-    pub request: &'a ChatRequest,
-    pub tool_registry: &'a Arc<ToolRegistry>,
-    pub llm_override: Option<Arc<dyn LlmProvider>>,
-    /// Pre-built sub-agent prompt block to append to the system message.
-    /// Built by the caller (gateway) using `build_subagent_prompt_block`.
-    pub subagent_prompt: Option<String>,
-    /// Shared execution mode state for plan-mode blocking.
-    /// When `Some`, tools of kind Edit/Execute are blocked in Plan mode.
-    pub mode_state: Option<crate::builtin_tools::ExecutionModeState>,
-    /// Optional session store for persisting content replacement records.
-    /// When provided with a session_id, enables byte-stable resume.
-    pub session_store: Option<Arc<xiaolin_session::SessionStore>>,
-    /// Shared todo store so stop-hooks can check for incomplete todos.
-    pub todo_store: Option<crate::builtin_tools::TodoStore>,
-    /// Shared goal store so stop-hooks can check for active goals and trigger continuation.
-    pub goal_store: Option<Arc<crate::builtin_tools::GoalStore>>,
-    /// Persistent cost store for SQLite-backed analytics.
-    pub cost_store: Option<Arc<xiaolin_session::CostStore>>,
-}
-
-/// Additional parameters specific to the streaming execution path.
-pub struct StreamParams {
-    pub tx: tokio::sync::mpsc::Sender<AgentEvent>,
-    pub orchestrator: Option<Arc<crate::runtime::orchestrator::ToolOrchestrator>>,
-    /// When running inside a Session Actor, this handle lets the orchestrator
-    /// wait for approval/answer resolution directly via the actor, bypassing
-    /// the legacy DashMap + polling relay.
-    pub interaction_handle: Option<xiaolin_session_actor::InteractionHandle>,
-    /// Approval strategy for the unified pipeline. Determines how tool
-    /// approval is resolved (auto-approve, deny-all, policy-based, interactive).
-    pub approval_strategy: xiaolin_core::tool_runtime::ApprovalStrategy,
-    /// Runtime registry for guarded tools. When present, tools registered here
-    /// go through the orchestrator's 5-phase pipeline instead of direct execution.
-    pub runtime_registry: Option<Arc<crate::runtime::runtimes::RuntimeRegistry>>,
-}
-
-fn make_turn_end_event(
-    turn_id: &TurnId,
-    session_id: Option<String>,
-    state: &QueryLoopState,
-    stream_start: std::time::Instant,
-    context_window: u32,
-    final_tool_calls: Option<Vec<ToolCallData>>,
-) -> AgentEvent {
-    AgentEvent::TurnEnd {
-        turn_id: turn_id.clone(),
-        summary: TurnSummary {
-            turn_id: turn_id.clone(),
-            tool_calls_made: state.total_tool_calls,
-            iterations: state.iteration,
-            usage: state.build_usage().map(|u| TokenUsage {
-                prompt_tokens: u.prompt_tokens,
-                completion_tokens: u.completion_tokens,
-                total_tokens: u.total_tokens,
-                cached_input_tokens: 0,
-            }),
-            elapsed_ms: stream_start.elapsed().as_millis() as u64,
-            context_tokens: Some(state.last_estimated_tokens as u32),
-            context_window: Some(context_window),
-        },
-        session_id,
-        final_tool_calls,
-    }
-}
 
 fn make_turn_summary(
     turn_id: &TurnId,
@@ -775,26 +708,26 @@ impl AgentRuntime {
         tx: tokio::sync::mpsc::Sender<AgentEvent>,
         llm_override: Option<Arc<dyn LlmProvider>>,
     ) -> anyhow::Result<TurnSummary> {
-        let exec = ExecutionParams {
-            config,
-            request,
-            tool_registry,
+        let ctx = agent_context::AgentContext {
+            config: config.clone(),
+            request: request.clone(),
+            tool_registry: tool_registry.clone(),
+            step_tx: None,
+            event_tx: Some(tx.clone()),
             llm_override,
             subagent_prompt: None,
             mode_state: None,
-            session_store: None,
-            todo_store: None,
-            goal_store: None,
-            cost_store: None,
-        };
-        let stream = StreamParams {
-            tx,
             orchestrator: None,
             interaction_handle: None,
             approval_strategy: xiaolin_core::tool_runtime::ApprovalStrategy::AutoApprove,
             runtime_registry: None,
+            session_store: None,
+            todo_store: None,
+            goal_store: None,
+            cost_store: None,
+            cancel_token: None,
         };
-        self.execute_stream_inner(&exec, stream).await
+        Self::run_stream_to_completion(self.arc_self(), ctx, tx).await
     }
 
 
@@ -846,45 +779,50 @@ impl AgentRuntime {
         goal_store: Option<Arc<crate::builtin_tools::GoalStore>>,
         cost_store: Option<Arc<xiaolin_session::CostStore>>,
     ) -> anyhow::Result<TurnSummary> {
-        let exec = ExecutionParams {
-            config,
-            request,
-            tool_registry,
+        let ctx = agent_context::AgentContext {
+            config: config.clone(),
+            request: request.clone(),
+            tool_registry: tool_registry.clone(),
+            step_tx: None,
+            event_tx: Some(tx.clone()),
             llm_override,
             subagent_prompt,
             mode_state,
+            orchestrator: Some(orchestrator),
+            interaction_handle,
+            approval_strategy,
+            runtime_registry: Some(self.cached_runtime_registry.clone()),
             session_store,
             todo_store,
             goal_store,
             cost_store,
+            cancel_token: None,
         };
-        let runtime_registry = self.cached_runtime_registry.clone();
-        let stream = StreamParams {
-            tx,
-            orchestrator: Some(orchestrator),
-            interaction_handle,
-            approval_strategy,
-            runtime_registry: Some(runtime_registry),
-        };
-        self.execute_stream_inner(&exec, stream).await
+        Self::run_stream_to_completion(self.arc_self(), ctx, tx).await
     }
 
-    async fn execute_stream_inner(
-        &self,
-        params: &ExecutionParams<'_>,
-        stream_params: StreamParams,
+    /// Internal: consume `execute_as_stream`, forward AgentStep → AgentEvent to tx,
+    /// and return the TurnSummary from the final TurnEnd step.
+    async fn run_stream_to_completion(
+        runtime: Arc<Self>,
+        ctx: agent_context::AgentContext,
+        tx: tokio::sync::mpsc::Sender<AgentEvent>,
     ) -> anyhow::Result<TurnSummary> {
-        let runtime_arc = self.arc_self();
-        let cancel_token = None; // Legacy API does not support cancellation
+        use futures::StreamExt;
 
-        let (mut ms, svc) = turn_setup::setup_turn(
-            runtime_arc,
-            params,
-            &stream_params,
-            cancel_token,
-        ).await?;
+        let mut stream = std::pin::pin!(Self::execute_as_stream(runtime, ctx));
+        let mut turn_summary: Option<TurnSummary> = None;
 
-        turn_loop::run_turn_loop(&mut ms, &svc).await
+        while let Some(step) = stream.next().await {
+            if let agent_step::AgentStep::TurnEnd { ref summary, .. } = step {
+                turn_summary = Some(summary.clone());
+            }
+            for event in step.into_agent_events() {
+                let _ = stream_engine::send_stream_event(&tx, event, false).await;
+            }
+        }
+
+        turn_summary.ok_or_else(|| anyhow::anyhow!("agent stream ended without TurnEnd"))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1063,9 +1001,9 @@ impl AgentRuntime {
         );
     }
 
-    fn build_messages(&self, params: &ExecutionParams<'_>) -> Vec<ChatMessage> {
-        let config = params.config;
-        let user_messages = &params.request.messages;
+    fn build_messages(&self, ctx: &agent_context::AgentContext) -> Vec<ChatMessage> {
+        let config = &ctx.config;
+        let user_messages = &ctx.request.messages;
 
         let mut messages = Vec::with_capacity(user_messages.len() + 1);
 
@@ -1075,13 +1013,13 @@ impl AgentRuntime {
             .map(str::trim)
             .filter(|s| !s.is_empty());
 
-        let ctx = self.build_prompt_context(params);
+        let prompt_ctx = self.build_prompt_context(ctx);
         let parts = self.prompt_engine.build_effective_prompt(
-            &ctx,
+            &prompt_ctx,
             None,
             agent_prompt,
             None,
-            params.subagent_prompt.as_deref(),
+            ctx.subagent_prompt.as_deref(),
         );
 
         let system_text = parts.join("\n\n");
@@ -1094,11 +1032,7 @@ impl AgentRuntime {
 
         messages.extend_from_slice(user_messages);
 
-        // When the user explicitly selected a model different from the agent's default,
-        // scan the conversation history for conflicting model identity claims and inject
-        // a reminder right before the last user message to prevent the LLM from parroting
-        // the old model's identity from history.
-        if let Some(ref req_model) = params.request.model {
+        if let Some(ref req_model) = ctx.request.model {
             if !req_model.is_empty() {
                 let has_conflicting_identity = messages.iter().any(|m| {
                     if m.role != Role::Assistant {
@@ -1136,33 +1070,33 @@ impl AgentRuntime {
         messages
     }
 
-    fn build_prompt_context(&self, params: &ExecutionParams<'_>) -> PromptContext {
-        let tool_names = params.tool_registry.tool_names();
-        let deferred_count = params.tool_registry.deferred_count();
+    fn build_prompt_context(&self, ctx: &agent_context::AgentContext) -> PromptContext {
+        let tool_names = ctx.tool_registry.tool_names();
+        let deferred_count = ctx.tool_registry.deferred_count();
 
-        let mode = params
+        let mode = ctx
             .mode_state
             .as_ref()
             .map(|ms| ms.current_mode())
             .unwrap_or(ExecutionMode::Agent);
 
-        let model_id = if let Some(ref req_model) = params.request.model {
+        let model_id = if let Some(ref req_model) = ctx.request.model {
             if !req_model.is_empty() {
                 req_model.clone()
             } else {
                 format!(
                     "{}/{}",
-                    params.config.model.provider, params.config.model.model
+                    ctx.config.model.provider, ctx.config.model.model
                 )
             }
         } else {
             format!(
                 "{}/{}",
-                params.config.model.provider, params.config.model.model
+                ctx.config.model.provider, ctx.config.model.model
             )
         };
 
-        let cwd = params
+        let cwd = ctx
             .request
             .work_dir
             .as_ref()
@@ -1174,7 +1108,7 @@ impl AgentRuntime {
         let date = chrono::Local::now().format("%Y-%m-%d").to_string();
 
         let pending_todo_summary = if mode == ExecutionMode::Agent {
-            params
+            ctx
                 .todo_store
                 .as_ref()
                 .and_then(|ts| ts.pending_summary())
@@ -1192,7 +1126,7 @@ impl AgentRuntime {
                 .unwrap_or((None, false));
 
         PromptContext {
-            agent_config: Arc::new(params.config.clone()),
+            agent_config: Arc::new(ctx.config.clone()),
             enabled_tools: tool_names,
             deferred_tool_count: deferred_count,
             model_id,
@@ -1202,7 +1136,7 @@ impl AgentRuntime {
             shell,
             execution_mode: mode,
             mcp_servers: vec![],
-            language_preference: params.request.response_language.clone(),
+            language_preference: ctx.request.response_language.clone(),
             token_budget: None,
             memory_prompt: None,
             session_start_date: date,

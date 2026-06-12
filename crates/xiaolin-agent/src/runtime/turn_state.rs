@@ -10,6 +10,8 @@ use xiaolin_core::types::ChatMessage;
 use xiaolin_evolution::TrajectoryStep;
 use xiaolin_protocol::{AgentEvent, TurnId};
 
+use super::agent_step::AgentStep;
+
 use super::approval_cache::ApprovalCache;
 use super::cache_break_detection::CacheBreakDetector;
 use super::dispatcher::ToolDispatcher;
@@ -82,8 +84,11 @@ pub(crate) struct TurnServices {
     pub todo_store: Option<TodoStore>,
     pub goal_store: Option<Arc<GoalStore>>,
 
-    // --- Streaming / side-path ---
-    pub tx: mpsc::Sender<AgentEvent>,
+    // --- Streaming channels ---
+    /// Main-loop events (Delta, ToolResult, TurnEnd, etc.) — yielded as AgentStep from the stream.
+    pub step_tx: mpsc::Sender<AgentStep>,
+    /// Side-path events (ToolProgress, ApprovalRequired, SubAgent*) — forwarded to caller directly.
+    pub event_tx: mpsc::Sender<AgentEvent>,
     pub approval_strategy: ApprovalStrategy,
     pub interaction_handle: Option<xiaolin_session_actor::InteractionHandle>,
 

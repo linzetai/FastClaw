@@ -1,6 +1,7 @@
 use xiaolin_core::types::{ChatMessage, Role};
-use xiaolin_protocol::{AgentEvent, TurnSummary};
+use xiaolin_protocol::TurnSummary;
 
+use super::agent_step::AgentStep;
 use super::end_turn::{self, EndTurnOutcome};
 use super::goal_prompts;
 use super::iteration_check::{self, PreCheckOutcome};
@@ -8,7 +9,7 @@ use super::llm_call::{self, LlmCallOutcome};
 use super::make_turn_summary;
 use super::post_tool::{self, PostToolOutcome};
 use super::query_state;
-use super::stream_engine::send_stream_event;
+use super::stream_engine::send_step;
 use super::tool_round::{self, ToolRoundOutcome};
 use super::turn_state::{TurnMutableState, TurnServices};
 
@@ -30,12 +31,13 @@ pub(crate) async fn run_turn_loop(
                     agent_id = %svc.config.agent_id,
                     "agent loop cancelled via CancellationToken"
                 );
-                let _ = send_stream_event(
-                    &svc.tx,
-                    AgentEvent::Error {
+                let _ = send_step(
+                    &svc.step_tx,
+                    AgentStep::Error {
                         turn_id: svc.turn_id.clone(),
                         message: "Execution cancelled".to_string(),
                         error_code: None,
+                        recoverable: false,
                     },
                     false,
                 )
@@ -65,7 +67,7 @@ pub(crate) async fn run_turn_loop(
         // Phase 2: LLM streaming call (includes recovery + model critic)
         // ═══════════════════════════════════════════════════════════════════
         let mut llm_output = match llm_call::perform_llm_call(ms, svc, estimated_tokens).await {
-            LlmCallOutcome::Completed(output) => output,
+            LlmCallOutcome::Completed(output) => *output,
             LlmCallOutcome::RetryIteration => continue,
             LlmCallOutcome::FatalError(e) => return Err(e),
             LlmCallOutcome::EarlyFinish(summary) => return Ok(summary),

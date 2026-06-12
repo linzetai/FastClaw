@@ -1,13 +1,14 @@
 use xiaolin_core::types::{ChatMessage, Role};
-use xiaolin_protocol::{AgentEvent, TurnSummary};
+use xiaolin_protocol::TurnSummary;
 
+use super::agent_step::{AgentStep, TurnEndReason};
 use super::goal_prompts;
 use super::llm_call::LlmStreamOutput;
-use super::stream_engine::send_stream_event;
+use super::stream_engine::send_step;
 use super::tool_executor;
 use super::tool_round::PreToolSnapshot;
 use super::turn_state::{TurnMutableState, TurnServices};
-use super::{make_turn_end_event, make_turn_summary};
+use super::make_turn_summary;
 
 /// Outcome of the post-tool processing phase.
 pub(crate) enum PostToolOutcome {
@@ -55,28 +56,27 @@ pub(crate) async fn post_tool_processing(
             agent_id = %svc.config.agent_id,
             "breaking execution loop — plan approval pending, waiting for user"
         );
-        let _ = send_stream_event(
-            &svc.tx,
-            make_turn_end_event(
-                &svc.turn_id,
-                svc.session_id.clone(),
-                &ms.query_loop,
-                svc.stream_start,
-                svc.context_window,
-                None,
-            ),
+        let summary = make_turn_summary(
+            &svc.turn_id,
+            &ms.query_loop,
+            svc.stream_start,
+            svc.context_window,
+        );
+        let _ = send_step(
+            &svc.step_tx,
+            AgentStep::TurnEnd {
+                turn_id: svc.turn_id.clone(),
+                reason: TurnEndReason::PlanApprovalPending,
+                summary: summary.clone(),
+                session_id: svc.session_id.clone(),
+            },
             false,
         )
         .await;
         svc.runtime
             .finalize_injected_skills(&ms.injected_skill_ids, true)
             .await;
-        return PostToolOutcome::EarlyFinish(make_turn_summary(
-            &svc.turn_id,
-            &ms.query_loop,
-            svc.stream_start,
-            svc.context_window,
-        ));
+        return PostToolOutcome::EarlyFinish(summary);
     }
 
     // 2. Force-stop (repetition hard limit) → skip remaining post-processing.
@@ -96,9 +96,9 @@ pub(crate) async fn post_tool_processing(
         tool_executor::dedup_repeated_tool_calls(&mut ms.messages);
         let post_tool_tokens = xiaolin_context::estimate_messages_tokens(&ms.messages);
         ms.query_loop.last_estimated_tokens = post_tool_tokens;
-        let _ = send_stream_event(
-            &svc.tx,
-            AgentEvent::ContextUsageUpdate {
+        let _ = send_step(
+            &svc.step_tx,
+            AgentStep::ContextUsage {
                 turn_id: svc.turn_id.clone(),
                 used_tokens: post_tool_tokens as u32,
                 limit_tokens: svc.context_window,
@@ -114,9 +114,9 @@ pub(crate) async fn post_tool_processing(
     if let (Some(before), Some(mode_state_ref)) = (pre_snapshot.mode_before, svc.mode_state.as_ref()) {
         let after = mode_state_ref.current_mode();
         if before != after {
-            let _ = send_stream_event(
-                &svc.tx,
-                AgentEvent::ModeChange {
+            let _ = send_step(
+                &svc.step_tx,
+                AgentStep::ModeChange {
                     turn_id: svc.turn_id.clone(),
                     from: before,
                     to: after,
@@ -128,9 +128,9 @@ pub(crate) async fn post_tool_processing(
             if let Some(pc) = crate::builtin_tools::plan_mode::current_plan_context() {
                 let path = pc.store.plan_path(&pc.session_id);
                 let exists = pc.store.plan_exists(&pc.session_id);
-                let _ = send_stream_event(
-                    &svc.tx,
-                    AgentEvent::PlanFileUpdate {
+                let _ = send_step(
+                    &svc.step_tx,
+                    AgentStep::PlanFileUpdate {
                         turn_id: svc.turn_id.clone(),
                         session_id: pc.session_id.clone(),
                         path: path.to_string_lossy().to_string(),
@@ -149,9 +149,9 @@ pub(crate) async fn post_tool_processing(
         match (&pre_snapshot.goal_before, &goal_after) {
             (None, Some(g)) => {
                 ms.last_seen_goal_id = Some(g.id.clone());
-                let _ = send_stream_event(
-                    &svc.tx,
-                    AgentEvent::GoalUpdated {
+                let _ = send_step(
+                    &svc.step_tx,
+                    AgentStep::GoalUpdated {
                         turn_id: svc.turn_id.clone(),
                         goal: g.to_goal_data(),
                     },
@@ -160,9 +160,9 @@ pub(crate) async fn post_tool_processing(
                 .await;
             }
             (Some((_, prev_status)), Some(g)) if *prev_status != g.status => {
-                let _ = send_stream_event(
-                    &svc.tx,
-                    AgentEvent::GoalUpdated {
+                let _ = send_step(
+                    &svc.step_tx,
+                    AgentStep::GoalUpdated {
                         turn_id: svc.turn_id.clone(),
                         goal: g.to_goal_data(),
                     },
@@ -187,9 +187,9 @@ pub(crate) async fn post_tool_processing(
             (Some((prev_id, prev_status)), None) => {
                 let row_deleted = !gs.row_exists(prev_id).await;
                 if row_deleted {
-                    let _ = send_stream_event(
-                        &svc.tx,
-                        AgentEvent::GoalCleared {
+                    let _ = send_step(
+                        &svc.step_tx,
+                        AgentStep::GoalCleared {
                             turn_id: svc.turn_id.clone(),
                             goal_id: prev_id.clone(),
                         },
@@ -216,9 +216,9 @@ pub(crate) async fn post_tool_processing(
                 } else {
                     if let Ok(Some(row)) = gs.session_store().get_goal(prev_id).await {
                         let g = crate::builtin_tools::Goal::from_row(row);
-                        let _ = send_stream_event(
-                            &svc.tx,
-                            AgentEvent::GoalUpdated {
+                        let _ = send_step(
+                            &svc.step_tx,
+                            AgentStep::GoalUpdated {
                                 turn_id: svc.turn_id.clone(),
                                 goal: g.to_goal_data(),
                             },
