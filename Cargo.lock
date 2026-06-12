@@ -10340,6 +10340,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "arc-swap",
+ "async-stream",
  "async-trait",
  "base64 0.22.1",
  "bytes",

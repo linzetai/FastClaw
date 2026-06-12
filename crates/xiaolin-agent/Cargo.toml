@@ -42,6 +42,7 @@ regex.workspace = true
 rand = "0.8"
 arc-swap.workspace = true
 dashmap.workspace = true
+async-stream = "0.3"
 tokio-util = "0.7"
 tokio-stream = "0.1"
 url = "2"

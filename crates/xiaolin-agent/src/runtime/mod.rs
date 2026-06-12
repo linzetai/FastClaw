@@ -28,6 +28,7 @@ mod accumulator;
 pub mod agent_context;
 pub mod agent_step;
 pub mod api_errors;
+mod stream_loop;
 pub mod approval_cache;
 pub mod runtimes;
 pub mod cache_break_detection;
